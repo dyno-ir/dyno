@@ -9,14 +9,17 @@ public:
     return o.getKind() == FUNC_MEMORY_ACCESS;
   }
 
-  MemoryAccessDef(size_t size, Alignment align)
-      : ExternSSADef(FUNC_MEMORY_ACCESS), size(size), align(align) {}
+  MemoryAccessDef(unsigned id, size_t size, Alignment align)
+      : ExternSSADef(FUNC_MEMORY_ACCESS), id(id), size(size), align(align) {}
 
   size_t getSize() { return size; }
 
   Alignment getAlign() { return align; }
 
+  unsigned getID() { return id; }
+
 private:
+  unsigned id;
   size_t size;
   Alignment align;
 };

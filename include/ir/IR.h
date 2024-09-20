@@ -5,6 +5,7 @@
 #include "ir/Operand.h"
 #include "ir/RegInfo.h"
 #include "support/IntrusiveList.h"
+#include "support/ObjectPool.h"
 #include <cassert>
 #include <cstddef>
 #include <memory>
@@ -15,6 +16,9 @@
 using SymbolId = unsigned;
 
 class Function;
+class ControlFlowGraph;
+class CFGBlock;
+class CFGNode;
 
 class GlobalDef : public ExternSSADef {
 public:
@@ -47,16 +51,13 @@ public:
 };
 
 class Program {
+  template <typename Invariants> friend class IRManipulator;
+
 public:
   Program() {}
 
   Function *getFunction(std::string_view name);
   Function *createFunction(std::string name);
-
-  template <typename... Args> StaticMemory &createStaticMemory(Args... args) {
-    return *staticMemoryStorage.emplace_back(
-        std::make_unique<StaticMemory>(args...));
-  }
 
   auto staticMemories() {
     return staticMemoryStorage |
@@ -73,57 +74,64 @@ private:
   std::vector<std::unique_ptr<StaticMemory>> staticMemoryStorage;
 };
 
-class Function : public IntrusiveList<Block, Function>, public GlobalDef {
-
+template <> class IntrusiveListTraits<ControlFlowGraph> {
 public:
-  Function(std::string name)
-      : GlobalDef(GLOBAL_FUNCTION, std::move(name),
-                  GlobalDef::Linkage::EXTERNAL) {}
-
-  Block &getEntry() {
-    assert(!empty());
-    return getFirst();
-  }
-
-  Instr *createInstr(unsigned kind);
-  Instr *createInstr(unsigned kind, unsigned cap);
-
-  std::vector<SSAType *> paramTypes;
-  std::vector<SSAType *> returnTypes;
-
-  FrameLayout &getFrameLayout() { return frameLayout; }
-  RegInfo &getRegInfo() { return regInfo; }
-
-  template <typename... Args>
-  MemoryAccessDef &createMemoryAccess(Args... args) {
-    return *memoryAccess.emplace_back(
-        std::make_unique<MemoryAccessDef>(args...));
-  }
-
-private:
-  FrameLayout frameLayout;
-  RegInfo regInfo;
-  std::vector<std::unique_ptr<MemoryAccessDef>> memoryAccess;
+  using DerivedINode = CFGBlock;
+  static constexpr bool OwnsNodes = false;
 };
 
-class Block : public IntrusiveList<Instr, Block>,
-              public IntrusiveListNode<Block, Function>,
-              public ExternSSADef {
+template <> class IntrusiveListTraits<CFGBlock> {
+public:
+  using DerivedINode = CFGNode;
+  static constexpr bool OwnsNodes = false;
+};
+
+class CFGNode : public IntrusiveListNode<CFGBlock> {
+public:
+  const Instr &instr() const { return reinterpret_cast<const Instr &>(*this); }
+  Instr &instr() { return reinterpret_cast<Instr &>(*this); }
+};
+
+class CFGBlock : public IntrusiveList<CFGBlock>,
+                 public IntrusiveListNode<ControlFlowGraph>,
+                 public ExternSSADef {
 public:
   static bool is_impl(const ExternSSADef &o) {
     return o.getKind() == FUNC_BLOCK;
   }
 
-  Block() : ExternSSADef(FUNC_BLOCK) {}
+  unsigned getID() { return id; }
+
+  CFGBlock() : ExternSSADef(FUNC_BLOCK) {}
 
   unsigned getNumPredecessors() { return operand().ssaDef().getNumUses(); }
 
-  IntrusiveListNode<Instr, Block> &getFirstNonPhiSentry();
+  IntrusiveListNode<CFGBlock> &getFirstNonPhiSentry();
 
-  void *userData = nullptr;
+  auto instrs() {
+    return *this |
+           std::views::transform([](auto &e) -> Instr & { return e.instr(); });
+  }
+
+private:
+  unsigned id;
+
+  struct {
+  } flags;
 };
 
-class Instr : public IntrusiveListNode<Instr, Block> {
+class ControlFlowGraph : public IntrusiveList<ControlFlowGraph> {
+public:
+  CFGBlock &getEntry() {
+    assert(!empty());
+    return getFirst();
+  }
+};
+
+class Instr {
+  template <typename Invariants> friend class IRManipulator;
+  friend class InstrContext;
+
 public:
   enum Kind {
     EMPTY,
@@ -211,10 +219,13 @@ public:
   auto defs() { return Range{def_begin(), def_end()}; }
   auto others() { return Range{other_begin(), other_end()}; }
 
-  Instr(unsigned kind) : kind(kind) {}
+  Instr(unsigned id, unsigned kind) : id(id), kind(kind) {}
   Instr(const Instr &o) = delete;
   Instr &operator=(const Instr &o) = delete;
   ~Instr() { deleteOperands(); }
+
+  unsigned getID() { return id; }
+
   unsigned getKind() { return kind; }
 
   unsigned getNumOperands() { return numDefs + numOther; }
@@ -297,21 +308,101 @@ public:
     return *this;
   }
 
+  CFGNode &cfg() { return cfgNode; }
+
   bool isPhi() { return kind == PHI; }
   bool isArtifact() { return kindIsArtifact(kind); }
   bool isTarget() { return kindIsTarget(kind); }
   bool isCopy() { return kind == COPY; }
 
 private:
+  // This needs to be the first member, so that OperandData*
+  // Operand and pointers to OperandData members are pointer-interconvertible
+  CFGNode cfgNode;
+  unsigned id;
   unsigned kind;
   unsigned numDefs = 0, numOther = 0;
   unsigned capacity = 0;
+  struct {
+    unsigned isDeleted : 1 = 0;
+  } flags;
+
   Operand *operands = nullptr;
 };
+static_assert(std::is_standard_layout_v<Instr>);
 
-inline Instr *Function::createInstr(unsigned kind) { return new Instr(kind); }
-inline Instr *Function::createInstr(unsigned kind, unsigned cap) {
-  Instr *i = createInstr(kind);
-  i->allocateOperands(cap);
-  return i;
-}
+class Function : public GlobalDef {
+  template <typename Invariants> friend class IRManipulator;
+
+public:
+  Function(Program &prog, std::string name)
+      : GlobalDef(GLOBAL_FUNCTION, std::move(name),
+                  GlobalDef::Linkage::EXTERNAL),
+        prog(prog) {}
+
+  std::vector<SSAType *> paramTypes;
+  std::vector<SSAType *> returnTypes;
+
+  FrameLayout &getFrameLayout() { return frameLayout; }
+  RegInfo &getRegInfo() { return regInfo; }
+
+  ControlFlowGraph &cfg() { return controlFlow; }
+
+private:
+  Program &prog;
+  ControlFlowGraph controlFlow;
+  FrameLayout frameLayout;
+  RegInfo regInfo;
+  ObjectPool<Instr> instrPool;
+  ObjectPool<CFGBlock> blockPool;
+  ObjectPool<MemoryAccessDef> memoryAccessPool;
+};
+
+class IRInvariants {};
+
+template <typename Invariants> class IRManipulator {
+public:
+  IRManipulator() = default;
+  IRManipulator(Function &func) : funcPtr(&func) {}
+
+  Instr &createInstr(unsigned kind) { func().instrPool.new_object(kind); }
+  Instr &createInstr(unsigned kind, unsigned cap) {
+    Instr &i = createInstr(kind);
+    i.allocateOperands(cap);
+    return i;
+  }
+  void deleteInstr(Instr &instr) {
+    // No delete mode:
+    // instr.cfg().unlink();
+    // instr.flags.isDeleted = true;
+    func().instrPool.delete_object(instr);
+  }
+
+  auto instrs() { return Range{func().instrPool}; }
+
+  auto blocks() { return Range{func().blockPool}; }
+
+  CFGBlock &createBlock() { func().blockPool.new_object(); }
+  void deleteBlock(CFGBlock &block) { func().blockPool.delete_object(block); }
+
+  template <typename... Args> StaticMemory &createStaticMemory(Args... args) {
+    return prog().staticMemoryStorage.emplace_back(
+        std::make_unique<StaticMemory>(args...));
+  }
+
+  template <typename... Args>
+  MemoryAccessDef &createMemoryAccess(Args... args) {
+    return func().memoryAccessPool.new_object(args...);
+  }
+
+  explicit operator bool() { return funcPtr; }
+
+  Program &prog() { return func().prog; }
+  Function &func() {
+    assert(funcPtr);
+    return *funcPtr;
+  }
+
+private:
+  Function *funcPtr = nullptr;
+};

@@ -1,7 +1,7 @@
 #pragma once
 
 #include "ir/IR.h"
-#include "ir/SSAInstrBuilder.h"
+#include "ir/SSAIRBuilder.h"
 #include <cassert>
 #include <unordered_map>
 
@@ -26,37 +26,15 @@ public:
     set(id, *def);
   }
 
-  static void init(Block &block) {
-    assert(!block.userData);
-    block.userData = new SSARenumberTable();
-  }
-  static void destroy(Block &block) {
-    delete static_cast<SSARenumberTable *>(block.userData);
-    block.userData = nullptr;
-  }
-
-  static void destroy(Function &func) {
-    for (auto &b : func) {
-      destroy(b);
-    }
-  }
-
-  static SSARenumberTable &getTable(Block &b) {
-    if (!b.userData) {
-      init(b);
-    }
-    return *static_cast<SSARenumberTable *>(b.userData);
-  }
-
   std::unordered_map<SymbolId, Operand *> symbols;
   std::vector<std::pair<Instr *, SymbolId>> incompletePhis;
   bool marked = false;
   bool sealed = false;
 };
 
-class SSABuilder {
+class LazySSABuilder {
 public:
-  static Operand *load(SymbolId id, SSAType &type, Block &block) {
+  static Operand *load(SymbolId id, SSAType &type, CFGBlock &block) {
     auto &renum = SSARenumberTable::getTable(block);
     Operand *def = renum.get(id);
     if (def) {
@@ -64,7 +42,7 @@ public:
       return def;
     }
     if (!renum.sealed) {
-      auto phi = SSAInstrBuilder(block.getFirstSentry()).emitPhi(type);
+      auto phi = SSAIRBuilder(block.getFirstSentry()).emitPhi(type);
       def = &phi->getDef();
       renum.set(id, def);
       renum.incompletePhis.emplace_back(phi.get(), id);
@@ -84,7 +62,7 @@ public:
     }
     if (renum.marked) {
       /*
-      auto phi = InstrBuilder().emitPhi();
+      auto phi = IRBuilder().emitPhi();
       phi.setupOperands(numPreds);
       def = &phi->getOperandUnchecked(0);
       insert
@@ -95,7 +73,7 @@ public:
       return nullptr;
     }
     renum.marked = true;
-    auto phi = SSAInstrBuilder(block.getFirstSentry()).emitPhi(type);
+    auto phi = SSAIRBuilder(block.getFirstSentry()).emitPhi(type);
     def = &phi->getDef();
     renum.set(id, def);
     populatePhi(phi, id);
@@ -105,12 +83,12 @@ public:
     return def;
   }
 
-  static void store(SymbolId id, Operand &def, Block &block) {
+  static void store(SymbolId id, Operand &def, CFGBlock &block) {
     auto &renum = SSARenumberTable::getTable(block);
     renum.set(id, def);
   }
 
-  static void sealBlock(Block &block) {
+  static void sealBlock(CFGBlock &block) {
     auto &renum = SSARenumberTable::getTable(block);
     assert(!renum.sealed);
     renum.sealed = true;
@@ -156,10 +134,10 @@ private:
     phi.setupPredecessors(phi->getParent().getNumPredecessors());
     unsigned predNum = 0;
     for (auto &use : phi->getParent().operand().ssaDef()) {
-      Block &predBlock = use.getParentBlock();
+      CFGBlock &predBlock = use.getParentBlock();
       Operand *predDef = load(id, type, predBlock);
       if (!predDef) {
-        predDef = &SSAInstrBuilder(predBlock.getLast()).emitUndefined(type);
+        predDef = &SSAIRBuilder(predBlock.getLast()).emitUndefined(type);
       }
       phi.setPredecessor(predNum, *predDef, predBlock);
       ++predNum;

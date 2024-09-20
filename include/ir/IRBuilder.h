@@ -1,75 +1,126 @@
 #pragma once
 
 #include "ir/IR.h"
-#include "ir/SSAInstrBuilder.h"
 #include <cassert>
 
-class IRBuilder {
+class InstrPtr {
 public:
-  Program &startProgram() {
-    assert(!program);
-    program = std::make_unique<Program>();
-    return *program;
+  InstrPtr(Instr *instr) : instr(instr) { assert(instr); }
+
+  Instr &operator*() { return *instr; }
+  Instr *operator->() { return instr; }
+  Instr *get() { return instr; }
+
+protected:
+  Instr *instr;
+};
+
+class PhiInstrPtr : public InstrPtr {
+public:
+  PhiInstrPtr(Instr &instr) : InstrPtr(&instr) {}
+  PhiInstrPtr(Instr *instr) : InstrPtr(instr) {
+    assert(instr && instr->getKind() == Instr::PHI);
   }
 
-  Function &createAndSetFunction(std::string name) {
-    currFunc = program->createFunction(std::move(name));
-    assert(currFunc);
-    return *currFunc;
+  void setupPredecessors(unsigned numPreds) {
+    instr->getChainOperand().opChain().allocate(2 * numPreds);
   }
 
-  void setBlock(Block &block) { setBlock(&block); }
-
-  void setBlock(Block *block) {
-    if (block) {
-      assert(&block->getParent() == currFunc);
-      instr.setInsertionPoint(*block);
-    } else {
-      instr.setInsertionPoint(nullptr);
-    }
-    currBlock = block;
+  unsigned getNumPredecessors() {
+    return instr->getChainOperand().opChain().getCapacity() / 2;
   }
 
-  Block &createBlock() {
-    assert(currFunc);
-    Block *b = new Block();
-    currFunc->insertEnd(b);
-    return *b;
+  CFGBlock &getPredecessorBlock(unsigned n) {
+    return instr->getChainOperand().opChain().getOperand(n * 2 + 1).block();
+  }
+  Operand &getPredecessorUse(unsigned n) {
+    return instr->getChainOperand().opChain().getOperand(n * 2);
+  }
+  Operand &getPredecessorDef(unsigned n) {
+    return getPredecessorUse(n).ssaUse().getDef();
   }
 
-  Block &createAndSetBlock() {
-    setBlock(createBlock());
-    return *currBlock;
+  bool isComplete() { return instr->getChainOperand().opChain().isAllocated(); }
+
+  void setPredecessor(unsigned n, Operand &def, CFGBlock &pred) {
+    OperandChain &chain = instr->getChainOperand().opChain();
+    chain.getOperand(n * 2).emplace<Operand::SSA_USE>(instr, def);
+    chain.getOperand(n * 2 + 1).emplace<Operand::BLOCK>(instr, &pred);
+  }
+};
+
+class AllocaInstrPtr : public InstrPtr {
+  AllocaInstrPtr(Instr *instr) : InstrPtr(instr) {
+    assert(instr->getKind() == Instr::ALLOCA);
+  }
+};
+
+template <typename Invariants>
+class IRBuilder : public IRManipulator<Invariants> {
+  using IRMan = IRManipulator<Invariants>;
+  using IRMan::createInstr;
+
+public:
+  IRBuilder() = default;
+  IRBuilder(Function &func,
+               IntrusiveListNode<CFGBlock> &insertionPoint)
+      : IRMan(func), insertionPoint(&insertionPoint) {}
+  IRBuilder(Function &func,
+               IntrusiveListNode<CFGBlock> *insertionPoint)
+      : IRMan(func), insertionPoint(insertionPoint) {}
+  IRBuilder(Function &func, CFGBlock &insertionPoint)
+      : IRMan(func), insertionPoint(&insertionPoint.getSentryEnd()) {}
+
+  void setInsertionPoint(IntrusiveListNode<CFGBlock> *node) {
+    insertionPoint = node;
+  }
+  void setInsertionPoint(IntrusiveListNode<CFGBlock> &node) {
+    insertionPoint = &node;
+  }
+  void setInsertionPoint(CFGBlock &block) {
+    insertionPoint = &block.getSentryEnd();
   }
 
-  Block &getBlock() {
-    assert(currBlock);
-    return *currBlock;
+  Instr *getLastInstr() { return lastInstr; }
+
+  CFGBlock &getBlock() {
+    assert(insertionPoint);
+    return insertionPoint->getParent();
   }
 
-  Function &getFunc() {
-    assert(currFunc);
-    return *currFunc;
+  Operand &getDef(unsigned n = 0) {
+    assert(lastInstr);
+    return lastInstr->getDef(n);
   }
 
-  Operand &getDef() {
-    assert(instr.getLastInstr());
-    return instr.getLastInstr()->getDef();
+  Instr &emit(Instr &instr) {
+    assert(insertionPoint);
+    insertionPoint->insertPrev(instr.cfg());
+    lastInstr = &instr;
+    return instr;
   }
 
-  Program &getProgram() {
-    assert(program);
-    return *program;
+  Instr &emitInstr(unsigned kind) { return emit(createInstr(kind)); }
+
+  Instr &emitInstr(unsigned kind, unsigned cap) {
+    return emit(createInstr(kind, cap));
   }
 
-  std::unique_ptr<Program> endProgram() { return std::move(program); }
+  Instr &emitExternRef(Reg dst, ExternSSADef &def) {
+    Instr &i = emitInstr(Instr::REF_EXTERN, 2);
+    i.emplaceOperand<Operand::REG_DEF>(dst);
+    i.emplaceOperand<Operand::SSA_USE>(def.operand());
+    return i;
+  }
 
-  SSAInstrBuilder &operator*() { return instr; }
-  SSAInstrBuilder *operator->() { return &instr; }
+  Instr &emitCopy(Reg dst, Reg src) {
+    Instr &i = emitInstr(Instr::COPY, 2);
+    i.emplaceOperand<Operand::REG_DEF>(dst);
+    i.emplaceOperand<Operand::REG_USE>(src);
+    return i;
+  }
 
-private:
-  std::unique_ptr<Program> program;
-  Function *currFunc;
-  Block *currBlock;
-  SSAInstrBuilder instr;
+protected:
+  IntrusiveListNode<CFGBlock> *insertionPoint = nullptr;
+  Instr *lastInstr = nullptr;
 };

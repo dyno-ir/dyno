@@ -1,11 +1,11 @@
 #pragma once
 
-#include "ir/InstrBuilder.h"
+#include "ir/IRBuilder.h"
 
-class ArchInstrBuilder {
+class ArchIRBuilder {
 public:
-  virtual void frameStoreReg(InstrBuilder &b, Reg reg,
+  virtual void frameStoreReg(IRBuilder &b, Reg reg,
                              FrameDef &frameDef) const = 0;
-  virtual void frameLoadReg(InstrBuilder &b, Reg reg,
+  virtual void frameLoadReg(IRBuilder &b, Reg reg,
                             FrameDef &frameDef) const = 0;
 };

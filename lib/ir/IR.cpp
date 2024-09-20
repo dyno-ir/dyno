@@ -2,7 +2,7 @@
 #include <cassert>
 #include <utility>
 
-Block &Operand::getParentBlock() const { return getParent().getParent(); }
+CFGBlock &Operand::getParentBlock() const { return getParent().cfg().getParent(); }
 
 void OperandChain::allocate(unsigned cap) {
   assert(!operands);
@@ -24,10 +24,10 @@ OperandChain::iterator OperandChain::begin() { return operands; }
 
 OperandChain::iterator OperandChain::end() { return operands + capacity; }
 
-IntrusiveListNode<Instr, Block> &Block::getFirstNonPhiSentry() {
-  for (auto &instr : *this) {
+IntrusiveListNode<CFGBlock> &CFGBlock::getFirstNonPhiSentry() {
+  for (auto &instr : instrs()) {
     if (!instr.isPhi()) {
-      return instr;
+      return instr.cfg();
     }
   }
   return getSentryEnd();
@@ -42,7 +42,7 @@ Function *Program::getFunction(std::string_view name) {
 }
 
 Function *Program::createFunction(std::string name) {
-  auto func = std::make_unique<Function>(std::move(name));
+  auto func = std::make_unique<Function>(*this, std::move(name));
   auto [it, succ] = functionIndex.try_emplace(func->getName(), func.get());
   if (!succ) {
     return nullptr;

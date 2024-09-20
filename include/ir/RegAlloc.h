@@ -1,6 +1,6 @@
 #pragma once
 
-#include "ir/ArchInstrBuilder.h"
+#include "ir/ArchIRBuilder.h"
 #include "ir/IR.h"
 #include "ir/IRPass.h"
 #include "ir/RegLiveness.h"
@@ -252,17 +252,17 @@ class ColoringRegAllocPass : public IRPass<Function> {
 
   void spillGlobal(Reg reg) {
     std::cout << "global spill " << reg.getIdx() << "\n";
-    auto &archIB = arch->getArchInstrBuilder();
+    auto &archIB = arch->getArchIRBuilder();
     // FIXME: proper size calculation
     auto &frameDef = func->getFrameLayout().createFrameEntry(4, Alignment(2));
     for (auto &op : make_earlyincr_range(regInfo->defUseRoot(reg))) {
       Reg newReg = regInfo->cloneVReg(reg);
       op.regDefUse().replace(newReg);
       if (op.isRegDef()) {
-        InstrBuilder IB(op.getParent().getNextNode());
+        IRBuilder IB(op.getParent().getNextNode());
         archIB.frameStoreReg(IB, newReg, frameDef);
       } else {
-        InstrBuilder IB(op.getParent());
+        IRBuilder IB(op.getParent());
         archIB.frameLoadReg(IB, newReg, frameDef);
       }
     }

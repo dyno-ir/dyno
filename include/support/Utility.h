@@ -12,6 +12,7 @@ template <typename...> inline constexpr bool dependent_false_v = false;
 
 template <typename It> class Range {
 public:
+  template <typename U> Range(U &o) : Range(o.begin(), o.end()) {}
   Range(It beginIt, It endIt) : beginIt(beginIt), endIt(endIt) {}
 
   It begin() const { return beginIt; }

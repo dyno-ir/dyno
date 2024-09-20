@@ -21,7 +21,7 @@ void DominatorTreePass::invalidate(IRInfo<Function> &info) {
   tree = nullptr;
 }
 
-void DominatorTreePass::dfs(Block &block, int parentId) {
+void DominatorTreePass::dfs(CFGBlock &block, int parentId) {
   int id = tree->numBlocks;
   auto [_, succ] = tree->dfsPreorderNum.try_emplace(&block, id);
   if (!succ)

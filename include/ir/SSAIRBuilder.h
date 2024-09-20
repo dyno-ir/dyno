@@ -1,10 +1,14 @@
 #pragma once
 
-#include "ir/InstrBuilder.h"
+#include "ir/IRBuilder.h"
 
-class SSAInstrBuilder : public InstrBuilder {
+template <typename Invariants>
+class SSAIRBuilder : public IRBuilder<Invariants> {
+  using IRBuilder = IRBuilder<Invariants>;
+
 public:
-  using InstrBuilder::InstrBuilder;
+  using IRBuilder::emitInstr;
+  using IRBuilder::IRBuilder;
 
   Instr &emitConstInt(MInt val) {
     Instr &i = emitInstr(Instr::CONST_INT, 2);
@@ -175,7 +179,7 @@ public:
     return i;
   }
 
-  Instr &emitBr(Block &dst) {
+  Instr &emitBr(CFGBlock &dst) {
     Instr &i = emitInstr(Instr::BR, 1);
     i.emplaceOperand<Operand::SSA_USE>(dst.operand());
     return i;
@@ -193,7 +197,7 @@ public:
     return emitSub(i.getDef(), val);
   }
 
-  Instr &emitBrCond(Operand &cond, Block &dstTrue, Block &dstFalse) {
+  Instr &emitBrCond(Operand &cond, CFGBlock &dstTrue, CFGBlock &dstFalse) {
     assert(cond.ssaDef().type() == IntSSAType::get(1));
     Instr &i = emitInstr(Instr::BR_COND, 3);
     i.emplaceOperand<Operand::SSA_USE>(cond);

@@ -2,7 +2,7 @@
 
 #include "ir/IRPass.h"
 #include "ir/IRPrinter.h"
-#include "ir/InstrBuilder.h"
+#include "ir/IRBuilder.h"
 #include "support/DynBitSet.h"
 #include "support/PackedSet.h"
 #include <cassert>
@@ -22,7 +22,7 @@ public:
 class LiveFlow {
 public:
   static const IRInfoID ID;
-  std::unordered_map<Block *, BlockLiveFlow> blockLive;
+  std::unordered_map<CFGBlock *, BlockLiveFlow> blockLive;
 };
 
 class LiveFlowPass : public IRPass<Function> {
@@ -34,7 +34,7 @@ public:
     arch = &info.getArch();
     regInfo = &func.getRegInfo();
 
-    std::vector<Block *> workList;
+    std::vector<CFGBlock *> workList;
     for (auto &block : func) {
       precomputeBlock(block);
       workList.push_back(&block);
@@ -48,7 +48,7 @@ public:
     info.preserveAll();
   }
 
-  void precomputeBlock(Block &block) {
+  void precomputeBlock(CFGBlock &block) {
     std::unordered_set<Reg> regExposed;
     auto &blockLive = data.blockLive[&block];
     for (auto &instr : block | std::views::reverse) {
@@ -83,7 +83,7 @@ public:
 
     blockLive.liveIn.insert(regExposed.begin(), regExposed.end());
     for (auto &blockUse : block.operand().ssaDef()) {
-      Block &pred = blockUse.getParentBlock();
+      CFGBlock &pred = blockUse.getParentBlock();
       auto &predBlockLive = data.blockLive[&pred];
       predBlockLive.liveOutNew.insert(predBlockLive.liveOutNew.end(),
                                       regExposed.begin(), regExposed.end());
@@ -97,7 +97,7 @@ public:
     return archReg ? archReg->noLiveness : false;
   }
 
-  void dataflowStep(Block &block, std::vector<Block *> &workList) {
+  void dataflowStep(CFGBlock &block, std::vector<CFGBlock *> &workList) {
     auto &blockLive = data.blockLive[&block];
     for (auto op : blockLive.liveOutNew) {
       if (!blockLive.liveOut.insert(op).second) {
@@ -110,7 +110,7 @@ public:
         continue;
       }
       for (auto &blockUse : block.operand().ssaDef()) {
-        Block &pred = blockUse.getParentBlock();
+        CFGBlock &pred = blockUse.getParentBlock();
         auto &predBlockLive = data.blockLive[&pred];
         predBlockLive.liveOutNew.push_back(op);
         workList.push_back(&pred);
@@ -198,14 +198,23 @@ public:
 };
 
 class LiveInterval;
-class LiveRange : public IntrusiveListNode<LiveRange, LiveInterval> {
+class LiveRange;
+
+template<>
+class IntrusiveListTraits<LiveInterval> {
+public:
+  using DerivedINode = LiveRange;
+  static constexpr bool OwnsNodes = true;
+};
+
+class LiveRange : public IntrusiveListNode<LiveInterval> {
 public:
   LiveRange(LivePos from, LivePos to) : from(from), to(to) {}
   LivePos from;
   LivePos to;
 };
 
-class LiveInterval : public IntrusiveList<LiveRange, LiveInterval> {
+class LiveInterval : public IntrusiveList<LiveInterval> {
 public:
   void addRangeCoalesceBegin(LivePos from, LivePos to) {
     assert(from < to);
@@ -216,7 +225,7 @@ public:
       }
       assert(to < getFirst().from);
     }
-    insertBegin(new LiveRange(from, to));
+    insertBegin(*new LiveRange(from, to));
   }
 
   void updateFromBegin(LivePos from) {
@@ -245,8 +254,8 @@ public:
   }
 
   size_t getNumInstr(Instr &instr) { return getNum(&instr); }
-  size_t getNumLiveIn(Block &block) { return getNum(&block.getSentryBegin()); }
-  size_t getNumLiveOut(Block &block) {
+  size_t getNumLiveIn(CFGBlock &block) { return getNum(&block.getSentryBegin()); }
+  size_t getNumLiveOut(CFGBlock &block) {
     return getNum(block.hasNext() ? &block.getNext().getSentryBegin()
                                   : &block.getSentryEnd());
   }
@@ -699,7 +708,7 @@ class LiveGraphPass : public IRPass<Function> {
     graph = nullptr;
   }
 
-  void buildGraphForBlock(Block &block, LiveSet &live) {
+  void buildGraphForBlock(CFGBlock &block, LiveSet &live) {
     auto &blockLive = flow->blockLive[&block];
     live.clear();
     live.insert(blockLive.liveOut.begin(), blockLive.liveOut.end());

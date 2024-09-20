@@ -12,8 +12,8 @@ public:
   static const IRInfoID ID;
 
   unsigned numBlocks = 0;
-  std::unordered_map<Block *, int> dfsPreorderNum;
-  std::vector<Block *> dfsPreorderBlock;
+  std::unordered_map<CFGBlock *, int> dfsPreorderNum;
+  std::vector<CFGBlock *> dfsPreorderBlock;
   std::vector<int> dfsPreorderParent;
   std::vector<int> forestParent;
   std::vector<int> forestLabel;
@@ -28,7 +28,7 @@ class DominatorTreePass : public IRPass<Function> {
   void run(Function &func, IRInfo<Function> &info);
   void invalidate(IRInfo<Function> &info);
 
-  void dfs(Block &block, int parentId);
+  void dfs(CFGBlock &block, int parentId);
   void computeSemiDominators();
   void computeImmDominators();
   void link(int w);

@@ -93,7 +93,7 @@ void PrintIRVisitor::visitFunction(Function &func) {
   }
 }
 
-void PrintIRVisitor::visitBlock(Block &block) {
+void PrintIRVisitor::visitBlock(CFGBlock &block) {
   for (auto &i : block) {
     dispatch(i);
     std::cout << "\n";

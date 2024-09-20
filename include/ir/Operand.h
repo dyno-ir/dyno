@@ -10,7 +10,7 @@
 
 class Operand;
 class Instr;
-class Block;
+class CFGBlock;
 
 class ExternSSADef;
 class GlobalDef;
@@ -461,9 +461,9 @@ public:
 
   template <typename T> T &ssaDefExtern() { return as<T>(ssaDefExtern()); }
 
-  Block &ssaDefBlock() { return ssaDefExtern<Block>(); }
+  CFGBlock &ssaDefBlock() { return ssaDefExtern<CFGBlock>(); }
 
-  Block &block() const {
+  CFGBlock &block() const {
     assert(kind == BLOCK && data.contentBlock);
     return *data.contentBlock;
   }
@@ -522,7 +522,7 @@ public:
     return *parent;
   }
 
-  Block &getParentBlock() const;
+  CFGBlock &getParentBlock() const;
 
   bool isReg() const { return kindIsReg(kind); }
   bool isRegDef() const { return kind == REG_DEF; }
@@ -547,7 +547,7 @@ private:
     RegDefUse contentReg;
     int32_t contentImm32;
     MInt contentMInt;
-    Block *contentBlock;
+    CFGBlock *contentBlock;
     SSAType *contentType;
     BrCond contentBrCond;
 
@@ -644,7 +644,7 @@ private:
       } else if constexpr (K == BRCOND) {
         new (&contentBrCond) BrCond(std::forward<ARGS>(args)...);
       } else if constexpr (K == BLOCK) {
-        new (&contentBlock) Block *(std::forward<ARGS>(args)...);
+        new (&contentBlock) CFGBlock *(std::forward<ARGS>(args)...);
       } else if constexpr (K == TYPE) {
         new (&contentType) SSAType *(std::forward<ARGS>(args)...);
       } else if constexpr (K == EMPTY) {
@@ -676,6 +676,7 @@ private:
     return reinterpret_cast<DefUseChain &>(data);
   }
 };
+static_assert(std::is_standard_layout_v<Operand>);
 
 class ExternSSADef {
 public:
@@ -718,7 +719,7 @@ public:
 
   GlobalDef &global() { return as<GlobalDef>(*this); }
 
-  Block &block() { return as<Block>(*this); }
+  CFGBlock &block() { return as<CFGBlock>(*this); }
 
 protected:
   ~ExternSSADef() = default;
@@ -728,6 +729,7 @@ private:
                  // is pointer-interconvertible with ExternSSADef*
   Kind kind;
 };
+static_assert(std::is_standard_layout_v<ExternSSADef>);
 
 inline void SSAUse::init(Operand &defOp) {
   SSADef &def = defOp.ssaDef();

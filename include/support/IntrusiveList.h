@@ -3,27 +3,35 @@
 #include <cassert>
 #include <cstddef>
 #include <iterator>
-template <typename N, typename P> class IntrusiveList;
+#include <type_traits>
 
-template <typename N, typename P> class IntrusiveListNode {
-  friend class IntrusiveList<N, P>;
+template <typename Derived> class IntrusiveList;
+
+template <typename Derived> class IntrusiveListTraits {};
+
+template <typename DerivedList> class IntrusiveListNode {
+  friend class IntrusiveList<DerivedList>;
+  using Traits = IntrusiveListTraits<DerivedList>;
+  using DerivedINode = Traits::DerivedINode;
+  using IList = IntrusiveList<DerivedList>;
 
 public:
   IntrusiveListNode() = default;
-  IntrusiveListNode(IntrusiveList<N, P> *parent, IntrusiveListNode *prev,
+  IntrusiveListNode(IList *parent, IntrusiveListNode *prev,
                     IntrusiveListNode *next)
       : parent(parent), prev(prev), next(next) {}
+  ~IntrusiveListNode() { assert(!isLinked()); }
 
-  N &getNext() {
+  auto &getNext() {
     assert(next);
     assert(next->isLinked());
-    return *static_cast<N *>(next);
+    return *static_cast<DerivedINode *>(next);
   }
 
-  N &getPrev() {
+  auto &getPrev() {
     assert(prev);
     assert(prev->isLinked());
-    return *static_cast<N *>(prev);
+    return *static_cast<DerivedINode *>(prev);
   }
 
   bool hasNext() { return next && next->next; }
@@ -39,97 +47,118 @@ public:
     return *prev;
   }
 
-  P &getParent() {
+  DerivedList &getParent() {
     assert(parent);
-    return *static_cast<P *>(parent);
+    return *static_cast<DerivedList *>(parent);
   }
 
   bool isLinked() { return parent && next && prev; }
 
   void unlink() {
-    if (prev)
-      prev->next = next;
-    if (next)
-      next->prev = prev;
+    linkNeighbors();
     parent = nullptr;
     next = nullptr;
     prev = nullptr;
   }
 
-  void deleteThis() { delete static_cast<N *>(this); }
-
-  void insertNext(N *o) {
-    assert(o && !o->isLinked() && next && parent);
-    o->parent = parent;
-    o->next = next;
-    o->prev = this;
-    next->prev = o;
-    next = o;
+  void insertNext(DerivedINode &o) {
+    assert(!o.isLinked() && next && parent);
+    o.parent = parent;
+    o.next = next;
+    o.prev = this;
+    next->prev = &o;
+    next = &o;
   }
 
-  void insertPrev(N *o) {
-    assert(o && !o->isLinked() && prev && parent);
-    o->parent = parent;
-    o->next = this;
-    o->prev = prev;
-    prev->next = o;
-    prev = o;
+  void insertPrev(DerivedINode &o) {
+    assert(!o.isLinked() && prev && parent);
+    o.parent = parent;
+    o.next = this;
+    o.prev = prev;
+    prev->next = &o;
+    prev = &o;
+  }
+
+  void deleteThis()
+    requires Traits::OwnsNodes
+  {
+    linkNeighbors();
+    delete static_cast<DerivedINode *>(this);
   }
 
 protected:
   IntrusiveListNode(const IntrusiveListNode &o) = delete;
   IntrusiveListNode &operator=(const IntrusiveListNode &o) = delete;
-  ~IntrusiveListNode() { unlink(); }
+
+  void linkNeighbors() {
+    if (prev)
+      prev->next = next;
+    if (next)
+      next->prev = prev;
+  }
 
 private:
-  IntrusiveList<N, P> *parent = nullptr;
+  IList *parent = nullptr;
   IntrusiveListNode *prev = nullptr;
   IntrusiveListNode *next = nullptr;
 };
 
-template <typename N, typename P> class IntrusiveList {
+template <typename Derived> class IntrusiveList {
 public:
+  using Traits = IntrusiveListTraits<Derived>;
+  using DerivedINode = Traits::DerivedINode;
+  using IList = IntrusiveList<Derived>;
+  using INode = IntrusiveListNode<Derived>;
+
   IntrusiveList()
       : sentryBegin(this, nullptr, &sentryEnd),
         sentryEnd(this, &sentryBegin, nullptr) {}
 
-  void insertBegin(N *o) {
-    assert(o);
-    sentryBegin.insertNext(o);
-  }
-  void insertEnd(N *o) {
-    assert(o);
-    sentryEnd.insertPrev(o);
-  }
+  void insertBegin(DerivedINode &o) { sentryBegin.insertNext(o); }
+  void insertEnd(DerivedINode &o) { sentryEnd.insertPrev(o); }
 
-  void deleteAll() {
+  void unlinkAll() {
     for (auto *node = sentryBegin.next; node != &sentryEnd;) {
       auto *tmp = node;
       node = node->next;
       tmp->parent = nullptr;
-      tmp->deleteThis();
+      tmp->next = nullptr;
+      tmp->prev = nullptr;
     }
+    sentryBegin.next = &sentryEnd;
+    sentryEnd.prev = &sentryBegin;
   }
 
-  N &getFirst() { return getSentryBegin().getNext(); }
-  N &getLast() { return getSentryEnd().getPrev(); }
-
-  IntrusiveListNode<N, P> &getSentryBegin() { return sentryBegin; }
-  IntrusiveListNode<N, P> &getSentryEnd() { return sentryEnd; }
-  IntrusiveListNode<N, P> &getFirstSentry() {
-    return getSentryBegin().getNextNode();
+  void deleteAll()
+    requires Traits::OwnsNodes
+  {
+    for (auto *node = sentryBegin.next; node != &sentryEnd;) {
+      auto *tmp = node;
+      node = node->next;
+      tmp->parent = nullptr;
+      delete static_cast<DerivedINode *>(tmp);
+    }
+    sentryBegin.next = &sentryEnd;
+    sentryEnd.prev = &sentryBegin;
   }
+
+  auto &getFirst() { return getSentryBegin().getNext(); }
+  auto &getLast() { return getSentryEnd().getPrev(); }
+
+  INode &getSentryBegin() { return sentryBegin; }
+  INode &getSentryEnd() { return sentryEnd; }
+  INode &getFirstSentry() { return getSentryBegin().getNextNode(); }
 
   class iterator {
   public:
     using iterator_category = std::bidirectional_iterator_tag;
-    using value_type = N;
+    using value_type = DerivedINode;
     using difference_type = std::ptrdiff_t;
     using pointer = value_type *;
     using reference = value_type &;
 
     iterator() = default;
-    iterator(IntrusiveListNode<N, P> &ref) : mPtr(&ref) {}
+    iterator(INode &ref) : mPtr(&ref) {}
 
     reference operator*() const { return static_cast<reference>(*mPtr); }
     pointer operator->() const { return static_cast<pointer>(mPtr); }
@@ -165,7 +194,7 @@ public:
     }
 
   private:
-    IntrusiveListNode<N, P> *mPtr = nullptr;
+    INode *mPtr = nullptr;
   };
 
   static_assert(std::bidirectional_iterator<iterator>);
@@ -173,17 +202,23 @@ public:
   iterator begin() { return iterator(*sentryBegin.next); }
   iterator end() { return iterator(sentryEnd); }
 
-  auto rbegin() { return std::make_reverse_iterator(end()); }
-  auto rend() { return std::make_reverse_iterator(begin()); }
+  // auto rbegin() { return std::make_reverse_iterator(end()); }
+  // auto rend() { return std::make_reverse_iterator(begin()); }
 
   bool empty() { return begin() == end(); }
 
 protected:
   IntrusiveList(const IntrusiveList &o) = delete;
   IntrusiveList &operator=(const IntrusiveList &o) = delete;
-  ~IntrusiveList() { deleteAll(); }
+  ~IntrusiveList() {
+    if constexpr (Traits::OwnsNodes) {
+      deleteAll();
+    } else {
+      unlinkAll();
+    }
+  }
 
 private:
-  IntrusiveListNode<N, P> sentryBegin;
-  IntrusiveListNode<N, P> sentryEnd;
+  INode sentryBegin;
+  INode sentryEnd;
 };

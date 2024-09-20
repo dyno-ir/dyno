@@ -1,7 +1,7 @@
 #pragma once
 
 #include "ir/IRPass.h"
-#include "ir/SSAInstrBuilder.h"
+#include "ir/SSAIRBuilder.h"
 
 #include <ranges>
 
@@ -17,11 +17,11 @@ class PhiIsolationPass : public IRPass<Function> {
         auto phi = PhiInstrPtr(&instr);
         for (unsigned i = 0, end = phi.getNumPredecessors(); i < end; ++i) {
           auto &pred = phi.getPredecessorBlock(i);
-          auto builder = SSAInstrBuilder(pred.getLast());
+          auto builder = SSAIRBuilder(pred.getLast());
           builder.emitCopy(phi.getPredecessorDef(i));
           phi.setPredecessor(i, builder.getDef(), pred);
         }
-        auto builder = SSAInstrBuilder(block.getFirstNonPhiSentry());
+        auto builder = SSAIRBuilder(block.getFirstNonPhiSentry());
         auto &copyInstr = builder.emitCopy(phi->getDef());
         phi->getDef().ssaDef().replaceAllUses(copyInstr.getDef());
         copyInstr.getOperand(1).ssaUse().replace(phi->getDef());

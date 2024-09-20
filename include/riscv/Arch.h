@@ -2,7 +2,7 @@
 
 #include "ir/Alignment.h"
 #include "ir/Arch.h"
-#include "ir/ArchInstrBuilder.h"
+#include "ir/ArchIRBuilder.h"
 #include "ir/FrameLayout.h"
 #include "ir/IR.h"
 #include "ir/IRPass.h"
@@ -10,7 +10,7 @@
 #include "ir/IRVisitor.h"
 #include "ir/Operand.h"
 #include "ir/RegAlloc.h"
-#include "ir/SSAInstrBuilder.h"
+#include "ir/SSAIRBuilder.h"
 #include "support/Ranges.h"
 #include "support/Utility.h"
 #include <array>
@@ -25,8 +25,8 @@ constexpr unsigned XLEN_ALIGNEXP = 2;
 
 #include "riscv/Arch.dsl.riscv.h"
 
-class ArchInstrBuilder : public ::ArchInstrBuilder {
-  void frameLoadReg(InstrBuilder &b, Reg reg,
+class ArchIRBuilder : public ::ArchIRBuilder {
+  void frameLoadReg(IRBuilder &b, Reg reg,
                     FrameDef &frameDef) const override {
     // FIXME: proper regclass handling
     assert(frameDef.getSize() == 4);
@@ -38,7 +38,7 @@ class ArchInstrBuilder : public ::ArchInstrBuilder {
     i.emplaceOperand<Operand::IMM32>(0);
   }
 
-  void frameStoreReg(InstrBuilder &b, Reg reg,
+  void frameStoreReg(IRBuilder &b, Reg reg,
                      FrameDef &frameDef) const override {
     // FIXME: proper regclass handling
     assert(frameDef.getSize() == 4);
@@ -64,11 +64,11 @@ public:
     return riscv::getArchRegClass(kind);
   }
 
-  const ArchInstrBuilder &getArchInstrBuilder() override {
-    return archInstrBuilder;
+  const ArchIRBuilder &getArchIRBuilder() override {
+    return archIRBuilder;
   }
 
-  ArchInstrBuilder archInstrBuilder;
+  ArchIRBuilder archIRBuilder;
 };
 
 class ABILoweringPass : public IRPass<Function> {
@@ -93,7 +93,7 @@ public:
     auto &abiTy = IntSSAType::get(32);
 
     auto &entryBB = func.getFirst();
-    SSAInstrBuilder ir(entryBB.getFirstSentry());
+    SSAIRBuilder ir(entryBB.getFirstSentry());
     size_t paramNum = 0;
     for (auto it = entryBB.begin(), itEnd = entryBB.end(); it != itEnd;) {
       auto &instr = *it;
@@ -121,7 +121,7 @@ public:
       for (auto it = block.begin(), itEnd = block.end(); it != itEnd;) {
         auto &instr = *it;
         ++it;
-        SSAInstrBuilder ir(instr);
+        SSAIRBuilder ir(instr);
         if (instr.getKind() == Instr::RET) {
           size_t paramNum = 0;
           Instr *i = func.createInstr(JALR, 3 + instr.getNumOperands());
@@ -250,7 +250,7 @@ public:
   }
 
   void lowerCopy(Instr &i) {
-    Instr *newI = new Instr(ADDI);
+    Instr *newI = func->createInstr(ADDI, 3);
     newI->allocateOperands(3);
     newI->emplaceOperand<Operand::REG_DEF>(i.getOperand(0).reg());
     newI->emplaceOperand<Operand::REG_USE>(i.getOperand(1).reg());
@@ -300,7 +300,7 @@ class FrameLoweringPass : public IRPass<Function> {
     calcClobberedSavedRegs();
     calcFrameOffsets(func.getFrameLayout());
 
-    InstrBuilder prologueIr(func.getEntry().getFirstSentry());
+    IRBuilder prologueIr(func.getEntry().getFirstSentry());
     insertPrologue(prologueIr);
 
     for (auto &block : func) {
@@ -312,7 +312,7 @@ class FrameLoweringPass : public IRPass<Function> {
         assert(instr.getOperand(0).reg() == X0);
         assert(instr.getOperand(2).imm32() == 0);
 
-        InstrBuilder epilogueIr(instr);
+        IRBuilder epilogueIr(instr);
         insertEpilogue(epilogueIr);
       }
     }
@@ -363,7 +363,7 @@ class FrameLoweringPass : public IRPass<Function> {
         Instr &instr = use.getParent();
         switch (instr.getKind()) {
         case Instr::REF_EXTERN: {
-          Instr &i = InstrBuilder(instr).emitInstr(ADDI, 3);
+          Instr &i = IRBuilder(instr).emitInstr(ADDI, 3);
           i.emplaceOperand<Operand::REG_DEF>(instr.getOperand(0).reg());
           i.emplaceOperand<Operand::REG_USE>(ALIAS_sp);
           i.emplaceOperand<Operand::IMM32>(getSPOffset(frameEntry));
@@ -377,7 +377,7 @@ class FrameLoweringPass : public IRPass<Function> {
     }
   }
 
-  void insertPrologue(InstrBuilder &ir) {
+  void insertPrologue(IRBuilder &ir) {
     if (frameSize == 0)
       return;
     Instr &i = ir.emitInstr(riscv::ADDI, 3);
@@ -392,7 +392,7 @@ class FrameLoweringPass : public IRPass<Function> {
     }
   }
 
-  void insertEpilogue(InstrBuilder &ir) {
+  void insertEpilogue(IRBuilder &ir) {
     if (frameSize == 0)
       return;
     for (size_t idx = 0; idx < clobberedSavedRegs.size(); ++idx) {
@@ -467,7 +467,7 @@ public:
     }
   }
 
-  void printBlock(Block &block) {
+  void printBlock(CFGBlock &block) {
     printBlockLabel(block);
     out << ":\n";
     currIndent = 1;
@@ -525,7 +525,7 @@ public:
     out << ")";
   }
 
-  void printBlockLabel(Block &block) { out << ".Lbb" << blockToNum[&block]; }
+  void printBlockLabel(CFGBlock &block) { out << ".Lbb" << blockToNum[&block]; }
 
   void printOperand(Operand &op) {
     switch (op.getKind()) {
@@ -569,7 +569,7 @@ public:
   void printExternSSADef(ExternSSADef &def) {
     if (def.isGlobal()) {
       printGlobalName(def.global());
-    } else if (is<Block>(def)) {
+    } else if (is<CFGBlock>(def)) {
       printBlockLabel(def.block());
     } else {
       assert(false && "Illegal operand");
@@ -585,7 +585,7 @@ public:
 private:
   unsigned currIndent;
   size_t currBlockNum;
-  std::unordered_map<Block *, unsigned> blockToNum;
+  std::unordered_map<CFGBlock *, unsigned> blockToNum;
   std::ostream &out;
 };
 

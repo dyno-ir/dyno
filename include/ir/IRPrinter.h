@@ -49,7 +49,7 @@ public:
 protected:
   void visitProgram(Program &prog);
   void visitFunction(Function &func);
-  void visitBlock(Block &block);
+  void visitBlock(CFGBlock &block);
   void visitInstr(Instr &instr);
   void visitOperand(Operand &op);
 

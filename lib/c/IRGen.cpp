@@ -6,7 +6,7 @@
 #include "c/Symbol.h"
 #include "c/Type.h"
 #include "ir/IR.h"
-#include "ir/IRBuilder.h"
+#include "ir/SSAIRBuilder.h"
 #include "ir/LazySSABuilder.h"
 #include <cassert>
 #include <cstdlib>
@@ -20,6 +20,8 @@
 namespace c {
 
 namespace {
+  using Invariants = IRInvariants;
+  using IRBuilder = SSAIRBuilder<Invariants>;
 
 SSAType &irType(Type::Kind kind) {
   switch (kind) {
@@ -100,7 +102,7 @@ public:
   }
 
 private:
-  IRBuilder &ir;
+   IRBuilder &ir;
   std::unordered_map<SymbolId, StorageInfo> slots;
 };
 
@@ -446,9 +448,9 @@ public:
   }
 
   void visitIfSt(IfStAST &ast) {
-    Block &trueBlock = ir.createBlock();
-    Block *falseBlock = ast.hasElseStatement() ? &ir.createBlock() : nullptr;
-    Block &exitBlock = ir.createBlock();
+    CFGBlock &trueBlock = ir.createBlock();
+    CFGBlock *falseBlock = ast.hasElseStatement() ? &ir.createBlock() : nullptr;
+    CFGBlock &exitBlock = ir.createBlock();
 
     Operand *condExpr = genBoolExpression(ast.getExpression());
     ir->emitBrCond(*condExpr, trueBlock, falseBlock ? *falseBlock : exitBlock);
@@ -470,9 +472,9 @@ public:
   }
 
   void visitWhileSt(WhileStAST &ast) {
-    Block &hdrBlock = ir.createBlock();
-    Block &loopBlock = ir.createBlock();
-    Block &exitBlock = ir.createBlock();
+    CFGBlock &hdrBlock = ir.createBlock();
+    CFGBlock &loopBlock = ir.createBlock();
+    CFGBlock &exitBlock = ir.createBlock();
     ir->emitBr(hdrBlock);
 
     ir.setBlock(hdrBlock);

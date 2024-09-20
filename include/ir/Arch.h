@@ -22,7 +22,7 @@ struct ArchRegClass {
   const std::span<const ArchReg *> regs;
 };
 
-class ArchInstrBuilder;
+class ArchIRBuilder;
 
 class Arch {
 public:
@@ -30,5 +30,5 @@ public:
   virtual const ArchReg *getArchReg(unsigned kind) = 0;
   virtual const ArchInstr *getArchInstr(unsigned kind) = 0;
   virtual const ArchRegClass *getArchRegClass(unsigned kind) = 0;
-  virtual const ArchInstrBuilder &getArchInstrBuilder() = 0;
+  virtual const ArchIRBuilder &getArchIRBuilder() = 0;
 };

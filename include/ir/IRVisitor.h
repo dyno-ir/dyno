@@ -13,7 +13,7 @@ public:
       dispatch(*func);
     }
   }
-  void dispatch(Block *block) {
+  void dispatch(CFGBlock *block) {
     if (block) {
       dispatch(*block);
     }
@@ -25,7 +25,7 @@ public:
   }
   void dispatch(Program &prog) { impl().visitProgram(prog); }
   void dispatch(Function &func) { impl().visitFunction(func); }
-  void dispatch(Block &block) { impl().visitBlock(block); }
+  void dispatch(CFGBlock &block) { impl().visitBlock(block); }
   void dispatch(Instr &instr) {
     switch (instr.getKind()) {
     default:
@@ -65,7 +65,7 @@ protected:
     }
   }
 
-  void visitBlock(Block &block) {
+  void visitBlock(CFGBlock &block) {
     for (auto it = block.begin(), itEnd = block.end(); it != itEnd;) {
       auto itTmp = it++;
       dispatch(*itTmp);

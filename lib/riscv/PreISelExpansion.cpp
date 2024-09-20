@@ -1,5 +1,5 @@
 #include "riscv/PreISelExpansion.h"
-#include "ir/SSAInstrBuilder.h"
+#include "ir/SSAIRBuilder.h"
 #include "riscv/Arch.h"
 #include <cassert>
 
@@ -10,7 +10,7 @@ namespace {
 IntSSAType &XTy = IntSSAType::get(riscv::XLEN);
 
 void legalizeSSAUse(Instr::Kind ext, Operand &op, IntSSAType &expectedTy,
-                    SSAInstrBuilder &ir) {
+                    SSAIRBuilder &ir) {
   assert(op.isSSAUse());
   Operand &def = op.ssaUse().getDef();
   if (!def.isSSARegDef() || def.ssaDef().type().getKind() != SSAType::INT) {
@@ -23,7 +23,7 @@ void legalizeSSAUse(Instr::Kind ext, Operand &op, IntSSAType &expectedTy,
   }
 }
 
-void legalizeSSADef(Operand &op, IntSSAType &expectedTy, SSAInstrBuilder &ir) {
+void legalizeSSADef(Operand &op, IntSSAType &expectedTy, SSAIRBuilder &ir) {
   assert(op.isSSADef());
   SSAType &ty = op.ssaDef().type();
   if (ty.getKind() != SSAType::INT) {
@@ -37,8 +37,8 @@ void legalizeSSADef(Operand &op, IntSSAType &expectedTy, SSAInstrBuilder &ir) {
     ir.getLastInstr()->getOperand(1).ssaUse().replace(op);
   }
 }
-void legalizeOperand(Instr::Kind ext, Operand &op, SSAInstrBuilder &preIr,
-                     SSAInstrBuilder &postIr) {
+void legalizeOperand(Instr::Kind ext, Operand &op, SSAIRBuilder &preIr,
+                     SSAIRBuilder &postIr) {
   if (op.isSSADef()) {
     legalizeSSADef(op, XTy, postIr);
   } else if (op.isSSAUse()) {
@@ -47,33 +47,33 @@ void legalizeOperand(Instr::Kind ext, Operand &op, SSAInstrBuilder &preIr,
 }
 void legalizeOperands(Instr::Kind ext, Instr &instr,
                       std::initializer_list<Operand *> ops) {
-  SSAInstrBuilder preIr(instr);
-  SSAInstrBuilder postIr(instr.getNextNode());
+  SSAIRBuilder preIr(instr);
+  SSAIRBuilder postIr(instr.getNextNode());
   for (auto *op : ops) {
     legalizeOperand(ext, *op, preIr, postIr);
   }
 }
 
 void legalizeAllOperands(Instr::Kind ext, Instr &instr) {
-  SSAInstrBuilder preIr(instr);
-  SSAInstrBuilder postIr(instr.getNextNode());
+  SSAIRBuilder preIr(instr);
+  SSAIRBuilder postIr(instr.getNextNode());
   for (auto &op : instr) {
     legalizeOperand(ext, op, preIr, postIr);
   }
 }
 
 void legalizePhi(PhiInstrPtr phi) {
-  SSAInstrBuilder postIr(phi->getNextNode());
+  SSAIRBuilder postIr(phi->getNextNode());
   legalizeSSADef(phi->getDef(), XTy, postIr);
   for (int i = 0, iEnd = phi.getNumPredecessors(); i < iEnd; ++i) {
-    SSAInstrBuilder preIr(phi.getPredecessorBlock(i).getLast());
+    SSAIRBuilder preIr(phi.getPredecessorBlock(i).getLast());
     legalizeSSAUse(Instr::EXT_A, phi.getPredecessorUse(i), XTy, preIr);
   }
 }
 
 void legalizeCmp(Instr &instr) {
-  SSAInstrBuilder preIr(instr);
-  SSAInstrBuilder postIr(instr.getNextNode());
+  SSAIRBuilder preIr(instr);
+  SSAIRBuilder postIr(instr.getNextNode());
   Instr::Kind ext =
       instr.getOperand(1).brCond().isSigned() ? Instr::EXT_S : Instr::EXT_Z;
   legalizeSSADef(instr.getOperand(0), XTy, postIr);
