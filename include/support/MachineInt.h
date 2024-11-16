@@ -5,6 +5,7 @@
 #include <climits>
 #include <cstddef>
 #include <cstdint>
+#include <type_traits>
 
 class TCInt {
 public:
@@ -21,14 +22,14 @@ public:
 // circumstances, no operation should be able to invoke undefined behaviour in
 // the host compiler. Therefore, care must be taken when using signed arithmetic
 // in this class.
-class MInt {
+template <typename T = std::uint64_t> class MInt {
 public:
   // Unsigned word type used for calculations and storage
-  using MWord = std::uint64_t;
+  using MWord = T;
   // Signed version of word type used for sign extension and sign-dependent
   // operations.
   // intXX_t is guaranteed to be two's complement (even before C++20)
-  using MWordSigned = std::int64_t;
+  using MWordSigned = std::make_signed_t<MWord>;
 
   constexpr static unsigned MWord_n = sizeof(MWord) * CHAR_BIT;
 

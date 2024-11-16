@@ -5,7 +5,7 @@
 #include "ir/Operand.h"
 #include "ir/RegInfo.h"
 #include "support/IntrusiveList.h"
-#include "support/ObjectPool.h"
+#include "support/Object.h"
 #include <cassert>
 #include <cstddef>
 #include <memory>

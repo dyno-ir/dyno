@@ -1,4 +1,7 @@
 #pragma once
+#include "c/Symbol.h"
+#include "c/Type.h"
+#include "support/MachineInt.h"
 #include <cassert>
 #include <cstddef>
 #include <memory>
@@ -6,15 +9,12 @@
 #include <type_traits>
 #include <utility>
 #include <vector>
-#include "c/Symbol.h"
-#include "c/Type.h"
-#include "support/MachineInt.h"
 
 namespace c {
 
 class ASTContext {
 public:
-  template <typename T, typename... Args> T &make_type(Args... args) {
+  template <typename T, typename... Args> T &make_type(Args &&...args) {
     static_assert(!std::is_same_v<BasicType, T>);
     auto *t = new T(std::forward<Args>(args)...);
     types.emplace_back(t);

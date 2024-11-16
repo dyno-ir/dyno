@@ -1,31 +1,22 @@
 #pragma once
 
-#include "support/Ranges.h"
-#include <cassert>
-#include <concepts>
+#include <dyno/Obj.h>
 #include <memory>
 #include <memory_resource>
-#include <vector>
 
-template <typename T> class ObjectPoolTraits {
-public:
-  using id_type = unsigned;
-  using vec_type = std::vector<T *>;
-  static constexpr size_t alloc_size = sizeof(T);
-  static constexpr size_t alloc_align = alignof(T);
-};
+namespace dyno {
 
-template <typename T> class ObjectPool {
+template <typename T> class ObjPool {
 public:
-  using Traits = ObjectPoolTraits<T>;
+  using Traits = ObjTraits<T>;
   using value_type = T;
-  using id_type = Traits::id_type;
+  using vec_type = Traits::template vec_type<T *>;
 
   struct FreeNode {
     FreeNode *next;
-    id_type id;
+    ObjID id;
 
-    FreeNode(FreeNode *next, id_type id) : next(next), id(id) {}
+    FreeNode(FreeNode *next, ObjID id) : next(next), id(id) {}
   };
   static_assert(Traits::alloc_size >= sizeof(FreeNode));
   static_assert(Traits::alloc_align >= alignof(FreeNode));
@@ -33,13 +24,13 @@ public:
 private:
   FreeNode *freeStack = nullptr;
   std::pmr::monotonic_buffer_resource mem;
-  Traits::vec_type elements;
+  vec_type elements;
 
-  std::pair<T *, id_type> allocate() {
+  std::pair<T *, ObjID> allocate() {
     if (freeStack) {
       FreeNode *node = freeStack;
       freeStack = node->next;
-      id_type id = node->id;
+      ObjID id = node->id;
       std::destroy_at(node);
       T *p = reinterpret_cast<T *>(node);
       elements[id] = p;
@@ -47,7 +38,7 @@ private:
     }
     T *p = reinterpret_cast<T *>(
         mem.allocate(Traits::alloc_size, Traits::alloc_align));
-    id_type id = elements.size();
+    ObjID id{elements.size()};
     elements.push_back(p);
     return {p, id};
   }
@@ -58,7 +49,7 @@ private:
     }
   }
 
-  void deallocate(T *p, id_type id) {
+  void deallocate(T *p, ObjID id) {
     freeStack = std::construct_at(p, freeStack, id);
     assert(elements.size() > 0);
     if (id < elements.size() - 1) {
@@ -109,9 +100,9 @@ public:
     Traits::vec_type::iterator itEnd;
   };
 
-  ObjectPool() {}
+  ObjPool() {}
 
-  ~ObjectPool() {
+  ~ObjPool() {
     for (auto *p : elements) {
       if (!p)
         continue;
@@ -119,25 +110,52 @@ public:
     }
   }
 
-  template <typename... Args> T &new_object(Args... args) {
+  template <typename... Args> T &new_object(Args &&...args) {
     auto [p, id] = allocate();
-    std::construct_at(p, id, args...);
+    std::construct_at(p, id, std::forward<Args>(args)...);
     return *p;
   }
 
-  void delete_object(T &o) {
-    static_assert(std::same_as<decltype(((T *)nullptr)->getID()), id_type>);
+  void delete_object(T &o, ObjID id) {
     T *p = &o;
-    id_type id = o.getID();
     std::destroy_at(&o);
     deallocate(p, id);
   }
 
+  T *operator[](ObjID id) { return elements[id.num]; }
+
   auto begin() { return iterator(elements.begin(), elements.end()); }
   auto end() { return iterator(elements.end(), elements.end()); }
 
-  ObjectPool(const ObjectPool &) = delete;
-  ObjectPool(ObjectPool &&) = delete;
-  ObjectPool &operator=(const ObjectPool &) = delete;
-  ObjectPool &operator=(ObjectPool &&) = delete;
+  size_t capacity() { return elements.size(); }
+
+  ObjPool(const ObjPool &) = delete;
+  ObjPool(ObjPool &&) = delete;
+  ObjPool &operator=(const ObjPool &) = delete;
+  ObjPool &operator=(ObjPool &&) = delete;
 };
+
+template <typename T, typename Derived> class ObjPoolStore {
+private:
+  ObjPool<T> pool;
+  using Traits = ObjTraits<T>;
+
+public:
+  template <typename... Args> FatDynObjRef<T> &create(Args &&...args) {
+    return pool.new_object(std::forward<Args>(args)...);
+  }
+
+  T &get(DynObjRef ref) {
+    assert(ref.dialect == Traits::dialect);
+    assert(ref.ty == Traits::ty);
+    return pool[ref.obj];
+  }
+
+  void destroy(DynObjRef ref) { pool.delete_object(get(ref), ref.obj); }
+  void destroy(FatDynObjRef<T> ref) { pool.delete_object(*ref, ref.thin().obj); }
+
+  auto begin() { return pool.begin(); }
+  auto end() { return pool.end(); }
+};
+
+} // namespace dyno

@@ -22,3 +22,11 @@ template <typename T, typename U> bool is(U *ptr) {
   return ptr && T::is_impl(*ptr);
 }
 template <typename T, typename U> bool is(U &ref) { return T::is_impl(ref); }
+
+template<typename Derived>
+class ByValueRTTIMixin 
+{
+  template<typename T> bool is() {
+    return 
+  }
+};
