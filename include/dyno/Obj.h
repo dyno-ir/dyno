@@ -46,7 +46,7 @@ public:
   ObjRef() {}
   explicit constexpr ObjRef(ObjID obj) : obj(obj) {}
 
-  explicit operator bool() const { return obj; }
+  explicit operator bool() const { return static_cast<bool>(obj); }
 
   DialectID getDialectID() { return Traits::dialect; }
   TyID getTyID() { return Traits::ty; }
@@ -54,7 +54,7 @@ public:
 };
 
 /// Note: Can be uninitialized!
-class DynObjRef {
+class alignas(uint64_t) DynObjRef {
 public:
   template <unsigned N, unsigned Pos>
   using CustomField = BitField<uint16_t, N, Pos>;
@@ -82,7 +82,7 @@ public:
 
   DynObjRef() {}
 
-  template<typename T>
+  template <typename T>
   DynObjRef(ObjRef<T> ref) : DynObjRef(ofObj<T>(ref.getObjID())) {}
 
   constexpr DynObjRef(DialectID dialect, TyID ty, ObjID obj, uint16_t custom)

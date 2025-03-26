@@ -17,7 +17,7 @@ public:
     if (inRange(ref)) [[likely]] {
       return;
     }
-    resize(ref.obj.num + 1);
+    resize(ref.getObjID().num + 1);
   }
 
   bool inRange(ObjRef<K> ref) { return ref.getObjID() < elements.size(); }

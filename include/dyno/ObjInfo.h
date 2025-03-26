@@ -25,6 +25,6 @@ template <> struct InterfaceTraits<TyInfo> {
 
 constexpr DialectInfo coreDialectInfo{"core"};
 
-constexpr TyInfo coreTyInfo[] = {{"instr"}, {"constant"}};
+constexpr TyInfo coreTyInfo[] = {{"instr"}, {"block"}, {"constant"}};
 
 } // namespace dyno

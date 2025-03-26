@@ -15,6 +15,5 @@ if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
   add_link_options($<$<CONFIG:Debug>:-fsanitize=address>)
 endif()
 
-add_subdirectory(tools/dsl)
 add_subdirectory(lib)
 add_subdirectory(tools)

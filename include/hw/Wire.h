@@ -13,6 +13,7 @@ public:
   Wire(DynObjRef) {}
 };
 
+// tobi: why is this a dyn obj ref when instr ref isn't?
 using WireRef = FatDynObjRef<Wire>;
 
 template <> struct ObjTraits<Wire> {

@@ -1,4 +1,5 @@
 #include "dyno/Constant.h"
+#include "dyno/IDs.h"
 #include "hw/IDs.h"
 #include "hw/ObjInfo.h"
 #include "hw/Wire.h"
@@ -14,6 +15,13 @@ static std::array dialectIs{&coreDialectInfo, &rtlDialectInfo};
 static std::array tyIs{coreTyInfo, rtlTyInfo};
 static std::array opcodeIs{coreOpcodeInfo, rtlOpcodeInfo};
 
+
+void basic()
+{
+
+}
+
+
 int main() {
   Interface<DialectInfo> dialectI{dialectIs.data()};
   Interface<TyInfo> tyI{tyIs.data()};
@@ -26,7 +34,7 @@ int main() {
 
   auto instr1 = instrs.create(2, DialectID{DIALECT_RTL}, OpcodeID{0});
   auto instr2 = instrs.create(2, DialectID{DIALECT_RTL}, OpcodeID{1});
-  auto instr3 = instrs.create(1, DialectID{DIALECT_RTL}, OpcodeID{2});
+  auto instr3 = instrs.create(1, DialectID{DIALECT_CORE}, OpcodeID{0});
   auto instr4 = instrs.create(1, DialectID{DIALECT_RTL}, OpcodeID{3});
   auto wire1 = wires.create();
   auto wire2 = wires.create();
@@ -42,14 +50,26 @@ int main() {
   /*std::cout << "---\n";*/
   /*for (auto instr : instrs) {*/
   /*  instrPrinter.print(InstrRef{instr});*/
- /*}*/
+  /*}*/
 
-  instrs.destroy(instr3);
+  // instrs.destroy(instr3);
 
   std::cout << "---\n";
   for (auto op : InstrRef{instr1}.def().defUse()) {
     std::cout << (op.isDef() ? "def: " : "use: ");
     refPrinter.print(FatDynObjRef<Instr>(op));
     std::cout << '\n';
+  }
+
+  for (auto op : instrs) {
+    instrPrinter.print(InstrRef{op});
+  }
+
+  std::cout << "Def use of instr1\n";
+  for (auto def : InstrRef{instr1}.defs()) {
+    for (auto use : def.defUse()) {
+      instrPrinter.print(use.instr());
+    }
+    std::cout << "----------\n";
   }
 }

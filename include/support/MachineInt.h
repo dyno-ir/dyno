@@ -22,8 +22,9 @@ public:
 // circumstances, no operation should be able to invoke undefined behaviour in
 // the host compiler. Therefore, care must be taken when using signed arithmetic
 // in this class.
-template <typename T = std::uint64_t> class MInt {
+/*template <typename T = std::uint64_t>*/ class MInt {
 public:
+  using T = std::uint64_t;
   // Unsigned word type used for calculations and storage
   using MWord = T;
   // Signed version of word type used for sign extension and sign-dependent

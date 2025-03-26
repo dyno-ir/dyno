@@ -50,7 +50,7 @@ public:
     ref = newRef;
     InlineStorageRef<T *>{custom}.emplace(newRef.getPtr());
   }
-  
+
   template <typename T> void emplace(FatObjRef<T> newRef) {
     ref = newRef;
     InlineStorageRef<T *>{custom}.emplace(newRef.getPtr());
@@ -367,6 +367,7 @@ template <> struct ObjTraits<Instr> {
   static constexpr DialectID dialect{DIALECT_CORE};
   static constexpr TyID ty{CORE_INSTR};
   using FatRefT = InstrRef;
+  using RefT = ObjRef<Instr>;
 };
 
 class InstrBuilder {
@@ -412,7 +413,12 @@ struct OpcodeInfo {
   std::string_view name;
 };
 
-constexpr OpcodeInfo coreOpcodeInfo[] = {{"a"}, {"b"}, {"c"}, {"d"}};
+constexpr OpcodeInfo coreOpcodeInfo[] = {
+    #define HEADER
+    #define FOOTER
+    #define ADD_OP(x) {#x}
+    #include "CoreOps.inc"
+};
 
 template <> struct InterfaceTraits<OpcodeInfo> {
   static const OpcodeInfo *dispatch1(InstrRef ref,

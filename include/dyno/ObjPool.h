@@ -10,7 +10,7 @@ template <typename T> class ObjPool {
 public:
   using Traits = ObjTraits<T>;
   using value_type = T;
-  using vec_type = Traits::template vec_type<T *>;
+  using vec_type = std::vector<T *>;//Traits::template vec_type<T *>;
 
   struct FreeNode {
     FreeNode *next;
@@ -146,12 +146,12 @@ public:
   }
 
   T &get(DynObjRef ref) {
-    assert(ref.dialect == Traits::dialect);
-    assert(ref.ty == Traits::ty);
-    return pool[ref.obj];
+    assert(ref.getDialectID() == Traits::dialect);
+    assert(ref.getTyID() == Traits::ty);
+    return pool[ref.getObjID()];
   }
 
-  void destroy(DynObjRef ref) { pool.delete_object(get(ref), ref.obj); }
+  void destroy(DynObjRef ref) { pool.delete_object(get(ref), ref.getObjID()); }
   void destroy(FatDynObjRef<T> ref) { pool.delete_object(*ref, ref.thin().obj); }
 
   auto begin() { return pool.begin(); }

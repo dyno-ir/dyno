@@ -32,8 +32,9 @@ class Block {
   CFG *cfg;
   ObjRef<Block> ref;
 
+public:
   Block(ObjRef<Block> ref, CFG &cfg) : cfg(&cfg), ref(ref) {
-    instrs.emplace_back(InstrRef{FatObjRef<Instr>{}}, 0, 0);
+    instrs.emplace_back(InstrRef{FatObjRef<Instr>{}}, IDImpl<uint32_t>{0}, IDImpl<uint32_t>{0});
   }
 };
 
@@ -92,10 +93,10 @@ public:
 
   void insertPrev(InstrRef ref) {
     uint32_t newID = block->instrs.size();
-    block->instrs.emplace_back(ref, pos, entry().prev);
+    block->instrs.emplace_back(ref, IDImpl<uint32_t>{pos}, IDImpl<uint32_t>{entry().prev});
     entryOrderedPrev().next = newID;
     entry().prev = newID;
-    auto &cfgMapEntry = cfg().map[ref];
+    auto &cfgMapEntry = cfg().map.get_ensure(ref);
     cfgMapEntry.block = block->ref;
     cfgMapEntry.blockPos = newID;
   }
@@ -194,7 +195,5 @@ template <> struct ObjTraits<Block> {
   static constexpr TyID ty{CORE_BLOCK};
   using RefT = BlockRef;
 };
-
-class IfInstrRef : public InstrRef {};
 
 } // namespace dyno
