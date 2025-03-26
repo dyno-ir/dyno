@@ -29,14 +29,14 @@ class HWInstrBuilder {
   HWContext &ctx;
   std::optional<InstrRef> insert;
 
+#define ADD_OP(x) core_##x
+#include "dyno/CoreOps.inc"
+
 public:
   HWInstrBuilder(HWContext &ctx, std::optional<InstrRef> insert = std::nullopt)
       : ctx(ctx), insert(insert) {}
 
-  template <typename... Ts> InstrRef buildAdd(Ts... Refs) {
-    auto instr = InstrRef{ctx.getInstrs().create(
-        1 + sizeof...(Refs), DialectID{DIALECT_CORE}, OpcodeID{0})};
-
+  void insertInstr(InstrRef instr) {
     if (insert != std::nullopt) {
       auto blockIt = BlockRef_iterator<true>{ctx.getCFG()[*insert]};
       ++blockIt;
@@ -47,15 +47,32 @@ public:
       ++blockIt;
       blockIt.insertPrev(instr);
     }
+    insert = instr;
+  }
 
+  template <typename... Ts> void addRefs(InstrRef instr, Ts... operands) {
     auto defWire = ctx.getWires().create();
-
     InstrBuilder build{instr};
     build.addRef(defWire).other();
-    ([&] { build.addRef(Refs); }(), ...);
+    ([&] { build.addRef(operands); }(), ...);
+  }
 
-    insert = instr;
+  template <typename... Ts>
+  InstrRef buildInstr(OpcodeID opcode, Ts... operands) {
+    auto instr = InstrRef{ctx.getInstrs().create(
+        1 + sizeof...(operands), DialectID{DIALECT_CORE}, opcode)};
+
+    insertInstr(instr);
+    addRefs(instr, operands...);
     return instr;
+  }
+
+  template <typename... Ts> InstrRef buildAdd(Ts... operands) {
+    return buildInstr(OpcodeID{core_add}, operands...);
+  }
+
+  template <typename LHS, typename RHS> InstrRef buildSub(LHS lhs, RHS rhs) {
+    return buildInstr(OpcodeID{core_sub}, lhs, rhs);
   }
 
   ConstantRef buildConst32(uint32_t value) { return ConstantRef{32, value}; }
@@ -79,9 +96,9 @@ public:
   void printCtx(HWContext &ctx) {
     for (auto block : ctx.getCFG().blocks) {
       auto asBlockRef = BlockRef{*block.getPtr()};
-      for (auto insn : asBlockRef)
-      {
-        if (insn.getPtr() == nullptr) break;
+      for (auto insn : asBlockRef) {
+        if (insn.getPtr() == nullptr)
+          break;
         instrPrinter.print(insn);
       }
     }

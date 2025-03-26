@@ -10,7 +10,7 @@ int main()
 
     auto add1 = build.buildAdd(build.buildConst32(20), build.buildConst32(21));
     auto add2 = build.buildAdd(add1.def()->fat<Wire>(), build.buildConst32(1));
-    auto add3 = build.buildAdd(add2.def()->fat<Wire>(), add1.def()->fat<Wire>());
+    auto sub = build.buildSub(add2.def()->fat<Wire>(), add1.def()->fat<Wire>());
 
     HWPrinter print;
 
