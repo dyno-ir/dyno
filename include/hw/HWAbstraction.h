@@ -18,6 +18,7 @@ class HWContext {
   NewDeleteObjStore<Wire> wires;
   NewDeleteObjStore<Instr> instrs;
   CFG cfg;
+  // todo: processes & modules
 
 public:
   auto &getWires() { return wires; }
@@ -29,6 +30,7 @@ class HWInstrBuilder {
   HWContext &ctx;
   std::optional<InstrRef> insert;
 
+// todo: globally accessible version of this enum & strings
 #define ADD_OP(x) core_##x
 #include "dyno/CoreOps.inc"
 
@@ -75,6 +77,7 @@ public:
     return buildInstr(OpcodeID{core_sub}, lhs, rhs);
   }
 
+  // todo: full constant support
   ConstantRef buildConst32(uint32_t value) { return ConstantRef{32, value}; }
 };
 
@@ -97,6 +100,7 @@ public:
     for (auto block : ctx.getCFG().blocks) {
       auto asBlockRef = BlockRef{*block.getPtr()};
       for (auto insn : asBlockRef) {
+        // todo: better fix for null InstrRef in block
         if (insn.getPtr() == nullptr)
           break;
         instrPrinter.print(insn);
