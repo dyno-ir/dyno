@@ -1,5 +1,6 @@
 #pragma once
 
+#include "dyno/Obj.h"
 #include <cstdint>
 #include <support/Bits.h>
 
@@ -12,8 +13,8 @@ enum CoreDialectID : uint8_t {
 
 enum CoreTyID : uint8_t {
   CORE_INSTR = 0,
-  CORE_BLOCK,
   CORE_CONSTANT,
+  CORE_BLOCK = 2 | TY_DEF_USE_START,
 };
 
 } // namespace dyno

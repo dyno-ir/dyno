@@ -7,25 +7,21 @@
 
 namespace dyno {
 
-/*
 class Process {
 public:
   InstrDefUse defUse;
+  // todo: add stuff like edge-triggered, comb, ...
   Process(DynObjRef) {}
+
+  auto blocks() { return defUse.uses(); }
 };
 
-using ProcessRef = FatDynObjRef<Process>;
+using ProcessRef = FatObjRef<Process>;
 
 template <> struct ObjTraits<Process> {
   static constexpr DialectID dialect{DIALECT_RTL};
-  static constexpr TyID ty{RTL_WIRE};
+  static constexpr TyID ty{RTL_PROCESS};
   using FatRefT = ProcessRef;
-};*/
-
-
-class ProcessInstrRef : InstrRef
-{
-
 };
 
 }; // namespace dyno

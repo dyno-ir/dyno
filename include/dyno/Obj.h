@@ -35,6 +35,8 @@ using TyID = IDImpl<uint8_t>;
 using ObjID = IDImpl<uint32_t>;
 using InterfaceID = IDImpl<uint16_t>;
 
+const inline TyID::num_t TY_DEF_USE_START = bit_mask_msb<TyID::num_t>();
+
 /// Note: Can be uninitialized!
 template <typename T> class ObjRef {
 protected:

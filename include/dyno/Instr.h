@@ -354,6 +354,7 @@ inline void Operand::destroy() {
 }
 
 inline InstrRef OperandRef::instr() const {
+  // todo: assert is instruction
   return InstrRef{
       FatObjRef<Instr>{ObjRef<Instr>{instrRef.getObjID()}, &*instrRef}};
 }
@@ -413,12 +414,7 @@ struct OpcodeInfo {
   std::string_view name;
 };
 
-constexpr OpcodeInfo coreOpcodeInfo[] = {
-    #define HEADER
-    #define FOOTER
-    #define ADD_OP(x) {#x}
-    #include "CoreOps.inc"
-};
+constexpr OpcodeInfo coreOpcodeInfo[] = {{"block_instr"}};
 
 template <> struct InterfaceTraits<OpcodeInfo> {
   static const OpcodeInfo *dispatch1(InstrRef ref,

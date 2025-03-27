@@ -2,13 +2,20 @@
 
 #include <dyno/Instr.h>
 #include <dyno/ObjInfo.h>
+#include <support/StringHandling.h>
 
 namespace dyno {
 
 constexpr DialectInfo rtlDialectInfo{"rtl"};
 
-constexpr TyInfo rtlTyInfo[] = {{"wire"}};
+constexpr TyInfo rtlTyInfo[] = {{"wire"}, {"process"}};
 
-constexpr OpcodeInfo rtlOpcodeInfo[] = {{"a"}, {"b"}, {"c"}, {"d"}};
+constexpr OpcodeInfo rtlOpcodeInfo[] = {
+#define HEADER
+#define FOOTER
+#define ADD_OP(x)                                                              \
+  { #x }
+#include "HWOps.inc"
+};
 
 }; // namespace dyno

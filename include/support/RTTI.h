@@ -32,3 +32,5 @@ class ByValueRTTIMixin
   }
 };
 */
+
+// do trait by value RTTI default false, specify true for types

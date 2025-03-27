@@ -5,7 +5,9 @@
 #include "dyno/InstrPrinter.h"
 #include "dyno/Obj.h"
 #include "dyno/ObjInfo.h"
+#include "hw/IDs.h"
 #include "hw/ObjInfo.h"
+#include "hw/Process.h"
 #include "hw/Wire.h"
 #include <dyno/NewDeleteObjStore.h>
 #include <iostream>
@@ -16,40 +18,43 @@ namespace dyno {
 class HWContext {
 
   NewDeleteObjStore<Wire> wires;
-  NewDeleteObjStore<Instr> instrs;
+  NewDeleteObjStore<Process> procs;
   CFG cfg;
+  NewDeleteObjStore<Instr> instrs;
   // todo: processes & modules
 
 public:
   auto &getWires() { return wires; }
+  auto &getProcs() { return procs; }
   auto &getInstrs() { return instrs; }
   auto &getCFG() { return cfg; }
+
+  ProcessRef createProcess() {
+    auto blockRef = cfg.blocks.create(cfg);
+    auto blockInstrRef =
+        InstrRef{instrs.create(2, DialectID{DIALECT_RTL}, OpcodeID{HW_BLOCK_INSTR})};
+    InstrBuilder blockInstrBuild{blockInstrRef};
+
+    auto procRef = procs.create();
+
+    auto procInstRef =
+        InstrRef{instrs.create(2, DialectID{DIALECT_RTL}, OpcodeID{HW_PROCESS_INSTR})};
+    InstrBuilder{procInstRef}.addRef(procRef).other().addRef(blockRef);
+    blockInstrBuild.addRef(blockRef).other().addRef(procRef);
+    return procRef;
+  }
 };
 
 class HWInstrBuilder {
   HWContext &ctx;
-  std::optional<InstrRef> insert;
-
-// todo: globally accessible version of this enum & strings
-#define ADD_OP(x) core_##x
-#include "dyno/CoreOps.inc"
+  BlockRef_iterator<true> insert;
 
 public:
-  HWInstrBuilder(HWContext &ctx, std::optional<InstrRef> insert = std::nullopt)
+  HWInstrBuilder(HWContext &ctx, BlockRef_iterator<true> insert)
       : ctx(ctx), insert(insert) {}
 
   void insertInstr(InstrRef instr) {
-    if (insert != std::nullopt) {
-      auto blockIt = BlockRef_iterator<true>{ctx.getCFG()[*insert]};
-      ++blockIt;
-      blockIt.insertPrev(instr);
-    } else {
-      auto blockIt =
-          BlockRef{*ctx.getCFG().blocks.create(ctx.getCFG()).getPtr()}.begin();
-      ++blockIt;
-      blockIt.insertPrev(instr);
-    }
-    insert = instr;
+    insert.insertPrev(instr);
   }
 
   template <typename... Ts> void addRefs(InstrRef instr, Ts... operands) {
@@ -62,7 +67,7 @@ public:
   template <typename... Ts>
   InstrRef buildInstr(OpcodeID opcode, Ts... operands) {
     auto instr = InstrRef{ctx.getInstrs().create(
-        1 + sizeof...(operands), DialectID{DIALECT_CORE}, opcode)};
+        1 + sizeof...(operands), DialectID{DIALECT_RTL}, opcode)};
 
     insertInstr(instr);
     addRefs(instr, operands...);
@@ -70,11 +75,11 @@ public:
   }
 
   template <typename... Ts> InstrRef buildAdd(Ts... operands) {
-    return buildInstr(OpcodeID{core_add}, operands...);
+    return buildInstr(OpcodeID{HW_ADD}, operands...);
   }
 
   template <typename LHS, typename RHS> InstrRef buildSub(LHS lhs, RHS rhs) {
-    return buildInstr(OpcodeID{core_sub}, lhs, rhs);
+    return buildInstr(OpcodeID{HW_SUB}, lhs, rhs);
   }
 
   // todo: full constant support
@@ -97,13 +102,22 @@ class HWPrinter {
 
 public:
   void printCtx(HWContext &ctx) {
-    for (auto block : ctx.getCFG().blocks) {
-      auto asBlockRef = BlockRef{*block.getPtr()};
-      for (auto insn : asBlockRef) {
-        // todo: better fix for null InstrRef in block
-        if (insn.getPtr() == nullptr)
-          break;
-        instrPrinter.print(insn);
+    std::cout << "raw instr dump:\n";
+    for (auto instr : ctx.getInstrs()) {
+        instrPrinter.print(InstrRef{instr});
+    }
+    std::cout << "\nstructured dump:\n";
+    for (auto proc : ctx.getProcs()) {
+      std::cout << "proc(" << proc.getObjID() << "):\n";
+      for (auto block : proc->blocks()) {
+        std::cout << "block(" << block.instr().def()->fat<Block>().getObjID() << "):\n";
+        auto asBlockRef = BlockRef{*block.instr().def()->fat<Block>()};
+        for (auto insn : asBlockRef) {
+          // todo: better fix for null InstrRef in block
+          if (insn.getPtr() == nullptr)
+            break;
+          instrPrinter.print(insn);
+        }
       }
     }
   }

@@ -25,6 +25,8 @@ template <> struct InterfaceTraits<TyInfo> {
 
 constexpr DialectInfo coreDialectInfo{"core"};
 
-constexpr TyInfo coreTyInfo[] = {{"instr"}, {"block"}, {"constant"}};
-
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wc99-designator"
+constexpr TyInfo coreTyInfo[] = {{"instr"}, {"constant"}, {"block"}};
+#pragma clang diagnostic pop
 } // namespace dyno
