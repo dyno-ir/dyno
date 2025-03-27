@@ -1,14 +1,13 @@
 #pragma once
 
 #include <bit>
-#include <cassert>
 #include <cstddef>
 #include <cstdint>
 #include <dyno/IDs.h>
 #include <functional>
 #include <string_view>
 #include <support/Bits.h>
-
+#include <support/RTTI.h>
 namespace dyno {
 
 template <typename T> struct ObjTraits;
@@ -37,6 +36,8 @@ using InterfaceID = IDImpl<uint16_t>;
 
 const inline TyID::num_t TY_DEF_USE_START = bit_mask_msb<TyID::num_t>();
 
+class DynObjRef;
+
 /// Note: Can be uninitialized!
 template <typename T> class ObjRef {
 protected:
@@ -53,6 +54,8 @@ public:
   DialectID getDialectID() { return Traits::dialect; }
   TyID getTyID() { return Traits::ty; }
   ObjID getObjID() { return obj; }
+
+  static bool is_impl(const DynObjRef &Ref);
 };
 
 /// Note: Can be uninitialized!
@@ -121,7 +124,19 @@ public:
     return a.custom == b.custom && a.dialect == b.dialect && a.ty == b.ty &&
            a.obj == b.obj;
   }
+
+  // always true, we can support arbitrary ObjRefs
+  template <typename T> static bool is_impl(ObjRef<T>) { return true; }
+
+  template <typename T> explicit operator ObjRef<T> const();
 };
+
+template <typename T> DynObjRef::operator ObjRef<T> const() {
+  // this actually can't be parsed w/o double ()
+  assert((is<ObjRef<T>, DynObjRef>(*this)));
+  return ObjRef<T>{obj};
+}
+
 static_assert(sizeof(DynObjRef) == 8);
 
 /// Note: Can be uninitialized!
@@ -197,6 +212,11 @@ concept TrailingObj = requires(T x) {
   T::getAllocSize(size_t{0});
   x.getAllocSize();
 };
+
+// todo same for fat
+template <typename T> bool ObjRef<T>::is_impl(const DynObjRef &Ref) {
+  return Ref.getDialectID() == Traits::dialect && Ref.getTyID() == Traits::ty;
+}
 
 } // namespace dyno
 
