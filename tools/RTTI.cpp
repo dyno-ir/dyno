@@ -39,21 +39,27 @@ int main() {
   FatDynObjRef<Instr> fatDyn{instrDyn, instr.getPtr()};
 
   // dyn thin to thin
-  ObjRef<Instr> dynThinToThin = as<ObjRef<Instr>>(instrDyn);
+  ObjRef<Instr> dynThinToThin = instrDyn.as<ObjRef<Instr>>();
+  ObjRef<Instr> dynFatToThin = fatDyn.as<ObjRef<Instr>>();
+  FatObjRef<Instr> dynFatToFat = fatDyn.as<FatObjRef<Instr>>();
 
-  // dyn fat to thin
-  ObjRef<Instr> dynFatToThin = as<ObjRef<Instr>>(fatDyn);
-
-  // dyn fat to fat
-  FatObjRef<Instr> dynFatToFat = as<FatObjRef<Instr>>(fatDyn);
-
-  DynObjRef thinToDynThin = as<DynObjRef>(dynFatToThin);
-  DynObjRef fatToDynFat = as<DynObjRef>(dynFatToFat);
+  DynObjRef thinToDynThin = dynFatToThin.as<DynObjRef>();
+  DynObjRef fatToDynThin = dynFatToFat.as<DynObjRef>();
+  FatDynObjRef<Instr> fatToDynFat = dynFatToFat.as<FatDynObjRef<Instr>>();
 
   if (auto asBlock = dyn_as<ObjRef<Block>>(instrDyn)) {
     assert(0 && "unreachable");
   }
   if (auto asBlock = dyn_as<ObjRef<Instr>>(instrDyn)) {
 
-  } else assert(0 && "unreachable");
+  } else
+    assert(0 && "unreachable");
+
+  if (auto asBlock = instrDyn.dyn_as<ObjRef<Block>>()) {
+    assert(0 && "unreachable");
+  }
+  if (auto asBlock = instrDyn.dyn_as<ObjRef<Instr>>()) {
+
+  } else
+    assert(0 && "unreachable");
 }

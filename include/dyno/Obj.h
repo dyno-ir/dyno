@@ -41,7 +41,7 @@ class DynObjRef;
 template <typename T = void> class FatDynObjRef;
 
 /// Note: Can be uninitialized!
-template <typename T> class ObjRef {
+template <typename T> class ObjRef : public RTTIUtilMixin<ObjRef<T>> {
 protected:
   ObjID obj;
 
@@ -62,7 +62,7 @@ public:
 };
 
 /// Note: Can be uninitialized!
-class alignas(uint64_t) DynObjRef {
+class alignas(uint64_t) DynObjRef : public RTTIUtilMixin<DynObjRef> {
 public:
   template <unsigned N, unsigned Pos>
   using CustomField = BitField<uint16_t, N, Pos>;
@@ -102,15 +102,6 @@ public:
 
   explicit operator bool() const { return isCustom() || bool(obj); }
 
-  template <typename T> bool isTy() const {
-    return dialect == ObjTraits<T>::dialect && ty == ObjTraits<T>::ty;
-  }
-
-  /*template <typename T> auto as() const {*/
-  /*  assert(isTy<T>());*/
-  /*  return ObjTraits<T>::RefT(*this);*/
-  /*}*/
-
   DialectID getDialectID() const { return dialect; }
   TyID getTyID() const { return ty; }
   ObjID getObjID() const { return obj; }
@@ -130,23 +121,24 @@ public:
   // always true, we can support arbitrary ObjRefs
   template <typename T> static bool is_impl(ObjRef<T>) { return true; }
 
-  template <typename T> explicit operator ObjRef<T> const();
+  template <typename T> explicit operator ObjRef<T>() const {
+    // this actually can't be parsed w/o double ()
+    assert((::is<ObjRef<T>, DynObjRef>(*this)));
+    return ObjRef<T>{obj};
+  }
 };
-
-template <typename T> DynObjRef::operator ObjRef<T> const() {
-  // this actually can't be parsed w/o double ()
-  assert((is<ObjRef<T>, DynObjRef>(*this)));
-  return ObjRef<T>{obj};
-}
-
 static_assert(sizeof(DynObjRef) == 8);
 
 /// Note: Can be uninitialized!
-template <typename T> class FatObjRef : public ObjRef<T> {
+template <typename T>
+class FatObjRef : public ObjRef<T>, public RTTIUtilMixin<FatObjRef<T>> {
 protected:
   T *ptr;
 
 public:
+  using RTTIUtilMixin<FatObjRef<T>>::as;
+  using RTTIUtilMixin<FatObjRef<T>>::dyn_as;
+  using RTTIUtilMixin<FatObjRef<T>>::is;
   FatObjRef() {}
   FatObjRef(nullref_t) : ObjRef<T>(nullref), ptr(nullptr) {}
   FatObjRef(ObjRef<T> ref, T *ptr = nullptr) : ObjRef<T>(ref), ptr(ptr) {}
@@ -154,26 +146,27 @@ public:
 
   static bool is_impl(const DynObjRef &Ref);
 
-  // template <typename U>
-  // static bool is_impl(const FatDynObjRef<U> &Ref);
-
-  /*template <typename TT = T> auto as() const {*/
-  /*  assert(is<TT>());*/
-  /*  using RefT = ObjTraits<TT>::FatRefT;*/
-  /*  return RefT((*this));*/
-  /*}*/
-
   T *getPtr() const { return ptr; }
-  T &operator*() const { assert(ptr && "ptr uninitialized"); return *ptr; }
-  T *operator->() const { assert(ptr && "ptr uninitialized"); return ptr; }
+  T &operator*() const {
+    assert(ptr && "ptr uninitialized");
+    return *ptr;
+  }
+  T *operator->() const {
+    assert(ptr && "ptr uninitialized");
+    return ptr;
+  }
 };
 
 /// Note: Can be uninitialized!
-template <typename T> class FatDynObjRef : public DynObjRef {
+template <typename T>
+class FatDynObjRef : public DynObjRef, public RTTIUtilMixin<FatDynObjRef<T>> {
 protected:
   T *ptr;
 
 public:
+  using RTTIUtilMixin<FatDynObjRef<T>>::as;
+  using RTTIUtilMixin<FatDynObjRef<T>>::dyn_as;
+  using RTTIUtilMixin<FatDynObjRef<T>>::is;
   FatDynObjRef() {}
   FatDynObjRef(nullref_t) : DynObjRef(nullref), ptr(nullptr) {}
   FatDynObjRef(DynObjRef ref, T *ptr = nullptr) : DynObjRef(ref), ptr(ptr) {}
@@ -182,20 +175,18 @@ public:
 
   template <typename U> static bool is_impl(ObjRef<U>) { return true; }
 
-  /*template <typename TT = T> auto as() const {*/
-  /*  assert(is<TT>());*/
-  /*  using RefT = ObjTraits<TT>::FatRefT;*/
-  /*  return RefT((*this));*/
-  /*}*/
-
-  /*explicit operator bool() { return ptr; }*/
-
   T *getPtr() const { return ptr; }
-  T &operator*() const { assert(ptr && "ptr uninitialized"); return *ptr; }
-  T *operator->() const { assert(ptr && "ptr uninitialized"); return ptr; }
+  T &operator*() const {
+    assert(ptr && "ptr uninitialized");
+    return *ptr;
+  }
+  T *operator->() const {
+    assert(ptr && "ptr uninitialized");
+    return ptr;
+  }
 
-  template <typename U> explicit operator FatObjRef<U> const() {
-    assert((is<FatObjRef<T>, FatDynObjRef>(*this)));
+  template <typename U> explicit operator FatObjRef<U>() const {
+    assert((::is<FatObjRef<T>, FatDynObjRef>(*this)));
     return FatObjRef<T>{ObjRef<T>{obj}, ptr};
   }
 };
