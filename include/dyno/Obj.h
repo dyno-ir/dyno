@@ -3,7 +3,6 @@
 #include <bit>
 #include <cstddef>
 #include <cstdint>
-#include <dyno/IDs.h>
 #include <functional>
 #include <string_view>
 #include <support/Bits.h>
@@ -126,11 +125,18 @@ public:
     assert((::is<ObjRef<T>, DynObjRef>(*this)));
     return ObjRef<T>{obj};
   }
+
+  template <typename T> explicit operator T() const {
+    // this actually can't be parsed w/o double ()
+    assert((::is<T, DynObjRef>(*this)));
+    return T{obj};
+  }
 };
 static_assert(sizeof(DynObjRef) == 8);
 
 /// Note: Can be uninitialized!
 template <typename T>
+  requires(!std::is_void_v<T>)
 class FatObjRef : public ObjRef<T>, public RTTIUtilMixin<FatObjRef<T>> {
 protected:
   T *ptr;
@@ -143,6 +149,9 @@ public:
   FatObjRef(nullref_t) : ObjRef<T>(nullref), ptr(nullptr) {}
   FatObjRef(ObjRef<T> ref, T *ptr = nullptr) : ObjRef<T>(ref), ptr(ptr) {}
   FatObjRef(ObjRef<T> ref, T &ptr) : ObjRef<T>(ref), ptr(&ptr) {}
+  FatObjRef(ObjID obj, T *ptr) : ObjRef<T>(obj), ptr(ptr) {}
+  FatObjRef(ObjID obj, T &ptr) : ObjRef<T>(obj), ptr(&ptr) {}
+  FatObjRef(ObjID obj, void *ptr) : ObjRef<T>(obj), ptr(reinterpret_cast<T*>(ptr)) {}
 
   static bool is_impl(const DynObjRef &Ref);
 
@@ -170,24 +179,32 @@ public:
   FatDynObjRef() {}
   FatDynObjRef(nullref_t) : DynObjRef(nullref), ptr(nullptr) {}
   FatDynObjRef(DynObjRef ref, T *ptr = nullptr) : DynObjRef(ref), ptr(ptr) {}
-  FatDynObjRef(DynObjRef ref, T &ptr) : DynObjRef(ref), ptr(&ptr) {}
-  FatDynObjRef(FatObjRef<T> ref) : DynObjRef(ref), ptr(ref.getPtr()) {}
+  template <typename U = T, typename = std::enable_if_t<!std::is_void_v<U>>>
+  FatDynObjRef(DynObjRef ref, U &ptr) : DynObjRef(ref), ptr(&ptr) {}
+  template <typename U = T, typename = std::enable_if_t<!std::is_void_v<U>>>
+  FatDynObjRef(FatObjRef<U> ref) : DynObjRef(ref), ptr(ref.getPtr()) {}
 
   template <typename U> static bool is_impl(ObjRef<U>) { return true; }
 
   T *getPtr() const { return ptr; }
-  T &operator*() const {
+  template <typename U = T, typename = std::enable_if_t<!std::is_void_v<U>>>
+  U &operator*() const {
     assert(ptr && "ptr uninitialized");
     return *ptr;
   }
-  T *operator->() const {
+  template <typename U = T, typename = std::enable_if_t<!std::is_void_v<U>>>
+  U *operator->() const {
     assert(ptr && "ptr uninitialized");
     return ptr;
   }
 
   template <typename U> explicit operator FatObjRef<U>() const {
-    assert((::is<FatObjRef<T>, FatDynObjRef>(*this)));
-    return FatObjRef<T>{ObjRef<T>{obj}, ptr};
+    assert((::is<FatObjRef<U>, FatDynObjRef>(*this)));
+    return FatObjRef<U>{ObjRef<U>{obj}, reinterpret_cast<U *>(ptr)};
+  }
+  template <typename U> explicit operator U() const {
+    assert((::is<U, FatDynObjRef>(*this)));
+    return U{obj, ptr};
   }
 };
 
@@ -224,19 +241,12 @@ template <typename T> bool ObjRef<T>::is_impl(const DynObjRef &Ref) {
   return Ref.getDialectID() == Traits::dialect && Ref.getTyID() == Traits::ty;
 }
 
-template <typename T> bool FatObjRef<T>::is_impl(const DynObjRef &Ref) {
+template <typename T>
+  requires(!std::is_void_v<T>)
+bool FatObjRef<T>::is_impl(const DynObjRef &Ref) {
   return Ref.getDialectID() == ObjTraits<T>::dialect &&
          Ref.getTyID() == ObjTraits<T>::ty;
 }
-
-// prob not needed, fat can be implictly converted to thin
-// template <typename T> template<typename U>
-// bool FatObjRef<T>::is_impl(const FatDynObjRef<U> &Ref)
-//{
-//    // also check that U is either void or compatible?
-//    return Ref.getDialectID() == ObjTraits<T>::dialect && Ref.getTyID() ==
-//    ObjTraits<T>::ty;
-//}
 
 } // namespace dyno
 

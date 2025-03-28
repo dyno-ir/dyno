@@ -42,8 +42,8 @@ public:
   Operand &operator=(Operand &&) = delete;
 
 public:
-  template <typename T> FatDynObjRef<T> fat() {
-    return {ref, **custom.as<T *>()};
+  template <typename T = void> FatDynObjRef<T> fat() {
+    return {ref, *custom.as<T *>()};
   }
 
   template <typename T> void emplace(FatDynObjRef<T> newRef) {
@@ -119,6 +119,7 @@ static_assert(TrailingObj<Instr>);
 class OperandRef {
   friend class InstrBuilder;
 
+  // why do we store dialect + type here if we know it's an instr?
   FatDynObjRef<Instr> instrRef;
 
 public:
@@ -232,6 +233,8 @@ public:
   static_assert(std::bidirectional_iterator<iterator>);
 
   explicit InstrRef(FatObjRef<Instr> instrRef) : FatObjRef<Instr>(instrRef) {}
+  InstrRef(ObjID obj, void *ptr) : FatObjRef<Instr>(obj, ptr) {}
+  InstrRef(nullref_t) : FatObjRef<Instr>(nullref) {}
 
   iterator begin() { return OperandRef{*this, 0}; }
   iterator end() { return OperandRef{*this, (*this)->numOperands}; }
@@ -355,8 +358,7 @@ inline void Operand::destroy() {
 
 inline InstrRef OperandRef::instr() const {
   // todo: assert is instruction
-  return InstrRef{
-      FatObjRef<Instr>{ObjRef<Instr>{instrRef.getObjID()}, &*instrRef}};
+  return instrRef.as<InstrRef>();
 }
 
 inline void OperandRef::addToDefUse() const {

@@ -14,7 +14,7 @@ public:
 };
 
 // tobi: why is this a dyn obj ref when instr ref isn't?
-using WireRef = FatDynObjRef<Wire>;
+using WireRef = FatObjRef<Wire>;
 
 template <> struct ObjTraits<Wire> {
   static constexpr DialectID dialect{DIALECT_RTL};

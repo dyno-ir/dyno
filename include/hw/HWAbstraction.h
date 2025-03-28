@@ -110,8 +110,8 @@ public:
     for (auto proc : ctx.getProcs()) {
       std::cout << "proc(" << proc.getObjID() << "):\n";
       for (auto block : proc->blocks()) {
-        std::cout << "block(" << block.instr().def()->fat<Block>().getObjID() << "):\n";
-        auto asBlockRef = BlockRef{*block.instr().def()->fat<Block>()};
+        std::cout << "block(" << block.instr().def()->fat().as<FatObjRef<Block>>().getObjID() << "):\n";
+        auto asBlockRef = BlockRef{block.instr().def()->fat().as<FatObjRef<Block>>()};
         for (auto insn : asBlockRef) {
           // todo: better fix for null InstrRef in block
           if (insn.getPtr() == nullptr)

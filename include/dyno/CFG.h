@@ -4,6 +4,7 @@
 #include "dyno/NewDeleteObjStore.h"
 #include "dyno/Obj.h"
 #include "dyno/ObjMap.h"
+#include "support/RTTI.h"
 #include <cassert>
 
 namespace dyno {
@@ -34,7 +35,8 @@ class Block {
 
 public:
   Block(ObjRef<Block> ref, CFG &cfg) : cfg(&cfg), ref(ref) {
-    instrs.emplace_back(InstrRef{FatObjRef<Instr>{}}, IDImpl<uint32_t>{0}, IDImpl<uint32_t>{0});
+    instrs.emplace_back(InstrRef{nullref}, IDImpl<uint32_t>{0},
+                        IDImpl<uint32_t>{0});
   }
 };
 
@@ -93,7 +95,8 @@ public:
 
   void insertPrev(InstrRef ref) {
     uint32_t newID = block->instrs.size();
-    block->instrs.emplace_back(ref, IDImpl<uint32_t>{pos}, IDImpl<uint32_t>{entry().prev});
+    block->instrs.emplace_back(ref, IDImpl<uint32_t>{pos},
+                               IDImpl<uint32_t>{entry().prev});
     entryOrderedPrev().next = newID;
     entry().prev = newID;
     auto &cfgMapEntry = cfg().map.get_ensure(ref);
@@ -156,28 +159,30 @@ public:
 };
 static_assert(std::bidirectional_iterator<BlockRef_iterator<true>>);
 
-class BlockRef {
+class BlockRef : public FatObjRef<Block> {
 public:
   using iterator = BlockRef_iterator<true>;
   using iterator_unordered = BlockRef_iterator<false>;
 
-private:
-  Block *block;
-
 public:
-  BlockRef(Block &block) : block(&block) {}
+  // using FatObjRef<Block>::
+  BlockRef(ObjRef<Block> obj, Block *block) : FatObjRef<Block>(obj, block) {}
+  BlockRef(ObjRef<Block> obj, Block &block) : FatObjRef<Block>(obj, block) {}
+  BlockRef(const FatObjRef<Block> &ref) : FatObjRef<Block>(ref) {}
 
-  size_t size() { return block->instrs.size() - 1; }
+  // these constructors are needed for casting impl (maybe we can somehow get rid of them...)
+  BlockRef(ObjID obj, void *ptr) : FatObjRef<Block>(obj, ptr) {}
+  BlockRef(nullref_t) : FatObjRef<Block>(nullref) {}
 
-  iterator begin() { return {*block, block->instrs[0].next}; }
+  size_t size() { return ptr->instrs.size() - 1; }
 
-  iterator end() { return {*block, 0}; }
+  iterator begin() { return {*ptr, ptr->instrs[0].next}; }
 
-  iterator_unordered begin_unordered() {
-    return {*block, block->instrs[0].next};
-  }
+  iterator end() { return {*ptr, 0}; }
 
-  iterator_unordered end_unordered() { return iterator{*block, 0}; }
+  iterator_unordered begin_unordered() { return {*ptr, ptr->instrs[0].next}; }
+
+  iterator_unordered end_unordered() { return iterator{*ptr, 0}; }
 
   Range<iterator_unordered> unordered() {
     return {begin_unordered(), end_unordered()};

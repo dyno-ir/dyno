@@ -45,8 +45,7 @@ public:
   NewDeleteObjStore &operator=(NewDeleteObjStore &&) = delete;
   ~NewDeleteObjStore() {
     for (auto *ptr : map.elements) {
-      // FIXME: This probably isn't entirely legal for custom alloc sz
-      ::delete ptr;
+      free(ptr);
     }
   }
 
@@ -55,7 +54,8 @@ public:
     requires(!TrailingObj<T>)
   {
     auto ref = createRef();
-    T *ptr = new T(ref, std::forward<Args>(args)...);
+    void* alloc = malloc(sizeof(T));
+    T *ptr = new (alloc) T(ref, std::forward<Args>(args)...);
     map[ref] = ptr;
     return {ref, *ptr};
   }
@@ -65,7 +65,7 @@ public:
     requires TrailingObj<T>
   {
     auto ref = createRef();
-    void *alloc = ::operator new(T::getAllocSize(sz));
+    void *alloc = malloc(T::getAllocSize(sz));
     T *ptr = new (alloc) T(ref, sz, std::forward<Args>(args)...);
     map[ref] = ptr;
     return {ref, *ptr};

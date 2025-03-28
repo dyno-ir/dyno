@@ -58,7 +58,7 @@ int main() {
   if (auto asBlock = instrDyn.dyn_as<ObjRef<Block>>()) {
     assert(0 && "unreachable");
   }
-  if (auto asBlock = instrDyn.dyn_as<ObjRef<Instr>>()) {
+  if (auto asInstr = fatDyn.dyn_as<InstrRef>()) {
 
   } else
     assert(0 && "unreachable");
