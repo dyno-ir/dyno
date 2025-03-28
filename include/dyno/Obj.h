@@ -49,6 +49,7 @@ public:
   using Traits = ObjTraits<T>;
 
   ObjRef() {}
+  ObjRef(nullref_t) : obj(ObjID::INVALID) {}
   explicit constexpr ObjRef(ObjID obj) : obj(obj) {}
 
   explicit operator bool() const { return static_cast<bool>(obj); }
@@ -83,11 +84,10 @@ public:
     return {ObjTraits<T>::dialect, ObjTraits<T>::ty, obj, 0};
   }
 
-  static DynObjRef invalid() {
-    return DynObjRef{DialectID{0}, TyID{0}, ObjID::INVALID, 0};
-  };
-
   DynObjRef() {}
+  DynObjRef(nullref_t) : dialect(0), ty(0), custom(0), obj(ObjID::INVALID) {}
+
+  static DynObjRef invalid() { return nullref; };
 
   template <typename T>
   DynObjRef(ObjRef<T> ref) : DynObjRef(ofObj<T>(ref.getObjID())) {}
@@ -148,13 +148,14 @@ protected:
 
 public:
   FatObjRef() {}
+  FatObjRef(nullref_t) : ObjRef<T>(nullref), ptr(nullptr) {}
   FatObjRef(ObjRef<T> ref, T *ptr = nullptr) : ObjRef<T>(ref), ptr(ptr) {}
   FatObjRef(ObjRef<T> ref, T &ptr) : ObjRef<T>(ref), ptr(&ptr) {}
 
   static bool is_impl(const DynObjRef &Ref);
 
-  //template <typename U>
-  //static bool is_impl(const FatDynObjRef<U> &Ref);
+  // template <typename U>
+  // static bool is_impl(const FatDynObjRef<U> &Ref);
 
   /*template <typename TT = T> auto as() const {*/
   /*  assert(is<TT>());*/
@@ -163,8 +164,8 @@ public:
   /*}*/
 
   T *getPtr() const { return ptr; }
-  T &operator*() const { return *ptr; }
-  T *operator->() const { return ptr; }
+  T &operator*() const { assert(ptr && "ptr uninitialized"); return *ptr; }
+  T *operator->() const { assert(ptr && "ptr uninitialized"); return ptr; }
 };
 
 /// Note: Can be uninitialized!
@@ -174,6 +175,7 @@ protected:
 
 public:
   FatDynObjRef() {}
+  FatDynObjRef(nullref_t) : DynObjRef(nullref), ptr(nullptr) {}
   FatDynObjRef(DynObjRef ref, T *ptr = nullptr) : DynObjRef(ref), ptr(ptr) {}
   FatDynObjRef(DynObjRef ref, T &ptr) : DynObjRef(ref), ptr(&ptr) {}
   FatDynObjRef(FatObjRef<T> ref) : DynObjRef(ref), ptr(ref.getPtr()) {}
@@ -189,11 +191,10 @@ public:
   /*explicit operator bool() { return ptr; }*/
 
   T *getPtr() const { return ptr; }
-  T &operator*() const { return *ptr; }
-  T *operator->() const { return ptr; }
+  T &operator*() const { assert(ptr && "ptr uninitialized"); return *ptr; }
+  T *operator->() const { assert(ptr && "ptr uninitialized"); return ptr; }
 
-  template <typename U> explicit operator FatObjRef<U> const()
-  {
+  template <typename U> explicit operator FatObjRef<U> const() {
     assert((is<FatObjRef<T>, FatDynObjRef>(*this)));
     return FatObjRef<T>{ObjRef<T>{obj}, ptr};
   }
@@ -232,18 +233,18 @@ template <typename T> bool ObjRef<T>::is_impl(const DynObjRef &Ref) {
   return Ref.getDialectID() == Traits::dialect && Ref.getTyID() == Traits::ty;
 }
 
-template <typename T>
-bool FatObjRef<T>::is_impl(const DynObjRef &Ref)
-{
-    return Ref.getDialectID() == ObjTraits<T>::dialect && Ref.getTyID() == ObjTraits<T>::ty;
+template <typename T> bool FatObjRef<T>::is_impl(const DynObjRef &Ref) {
+  return Ref.getDialectID() == ObjTraits<T>::dialect &&
+         Ref.getTyID() == ObjTraits<T>::ty;
 }
 
 // prob not needed, fat can be implictly converted to thin
-//template <typename T> template<typename U>
-//bool FatObjRef<T>::is_impl(const FatDynObjRef<U> &Ref)
+// template <typename T> template<typename U>
+// bool FatObjRef<T>::is_impl(const FatDynObjRef<U> &Ref)
 //{
 //    // also check that U is either void or compatible?
-//    return Ref.getDialectID() == ObjTraits<T>::dialect && Ref.getTyID() == ObjTraits<T>::ty;
+//    return Ref.getDialectID() == ObjTraits<T>::dialect && Ref.getTyID() ==
+//    ObjTraits<T>::ty;
 //}
 
 } // namespace dyno
@@ -254,14 +255,12 @@ template <> struct std::hash<dyno::DynObjRef> {
   }
 };
 
-template<typename T>
-struct IsByValueRTTI<dyno::ObjRef<T>> : std::true_type {};
+template <typename T> struct IsByValueRTTI<dyno::ObjRef<T>> : std::true_type {};
 
-template<typename T>
+template <typename T>
 struct IsByValueRTTI<dyno::FatObjRef<T>> : std::true_type {};
 
-template<>
-struct IsByValueRTTI<dyno::DynObjRef> : std::true_type {};
+template <> struct IsByValueRTTI<dyno::DynObjRef> : std::true_type {};
 
-template<typename T>
+template <typename T>
 struct IsByValueRTTI<dyno::FatDynObjRef<T>> : std::true_type {};

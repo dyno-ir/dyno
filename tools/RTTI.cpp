@@ -1,8 +1,8 @@
+#include "support/RTTI.h"
 #include "dyno/Instr.h"
 #include "dyno/Obj.h"
 #include "hw/HWAbstraction.h"
 #include "hw/IDs.h"
-#include "support/RTTI.h"
 
 using namespace dyno;
 
@@ -28,28 +28,32 @@ struct DerivedB : Base
     }
 };*/
 
-int main()
-{
-    HWContext ctx;
-    FatObjRef<Instr> instr = ctx.getInstrs().create(0, DialectID{DIALECT_RTL}, OpcodeID{HW_ADD});
-    DynObjRef instrDyn = instr;
+int main() {
+  HWContext ctx;
+  FatObjRef<Instr> instr =
+      ctx.getInstrs().create(0, DialectID{DIALECT_RTL}, OpcodeID{HW_ADD});
+  DynObjRef instrDyn = instr;
 
-    ObjRef<Instr>::is_impl(instrDyn);
+  ObjRef<Instr>::is_impl(instrDyn);
 
+  FatDynObjRef<Instr> fatDyn{instrDyn, instr.getPtr()};
 
-    FatDynObjRef<Instr> fatDyn{instrDyn, instr.getPtr()};
+  // dyn thin to thin
+  ObjRef<Instr> dynThinToThin = as<ObjRef<Instr>>(instrDyn);
 
+  // dyn fat to thin
+  ObjRef<Instr> dynFatToThin = as<ObjRef<Instr>>(fatDyn);
 
-    // dyn thin to thin
-    ObjRef<Instr> dynThinToThin = as<ObjRef<Instr>>(instrDyn);
+  // dyn fat to fat
+  FatObjRef<Instr> dynFatToFat = as<FatObjRef<Instr>>(fatDyn);
 
-    // dyn fat to thin
-    ObjRef<Instr> dynFatToThin = as<ObjRef<Instr>>(fatDyn);
+  DynObjRef thinToDynThin = as<DynObjRef>(dynFatToThin);
+  DynObjRef fatToDynFat = as<DynObjRef>(dynFatToFat);
 
-    // dyn fat to fat
-    FatObjRef<Instr> dynFatToFat = as<FatObjRef<Instr>>(fatDyn);
+  if (auto asBlock = dyn_as<ObjRef<Block>>(instrDyn)) {
+    assert(0 && "unreachable");
+  }
+  if (auto asBlock = dyn_as<ObjRef<Instr>>(instrDyn)) {
 
-
-    DynObjRef thinToDynThin = as<DynObjRef>(dynFatToThin);
-    DynObjRef fatToDynFat = as<DynObjRef>(dynFatToFat);
+  } else assert(0 && "unreachable");
 }

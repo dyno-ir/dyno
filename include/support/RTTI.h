@@ -22,6 +22,9 @@ template <typename T, ByValueRTTI U> T as(U &ref) {
   return static_cast<T>(ref);
 }
 
+struct nullref_t {};
+inline constexpr nullref_t nullref{};
+
 // changed these to dyn_as to avoid confusion with "as DynObj"
 template <typename T, typename U> T *dyn_as(U *ptr) {
   return ptr && T::is_impl(*ptr) ? static_cast<T *>(ptr) : nullptr;
@@ -29,8 +32,8 @@ template <typename T, typename U> T *dyn_as(U *ptr) {
 template <typename T, typename U> T *dyn_as(U &ref) {
   return T::is_impl(ref) ? static_cast<T *>(&ref) : nullptr;
 }
-template <typename T, ByValueRTTI U> T *dyn_as(U &ref) {
-  //return T::is_impl(ref) ? static_cast<T>(ref) : T;
+template <typename T, ByValueRTTI U> T dyn_as(U &ref) {
+  return T::is_impl(ref) ? static_cast<T>(ref) : nullref;
 }
 
 template <typename T, typename U> bool is(U *ptr) {
