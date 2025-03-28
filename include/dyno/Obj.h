@@ -8,6 +8,7 @@
 #include <string_view>
 #include <support/Bits.h>
 #include <support/RTTI.h>
+#include <type_traits>
 namespace dyno {
 
 template <typename T> struct ObjTraits;
@@ -37,6 +38,7 @@ using InterfaceID = IDImpl<uint16_t>;
 const inline TyID::num_t TY_DEF_USE_START = bit_mask_msb<TyID::num_t>();
 
 class DynObjRef;
+template <typename T = void> class FatDynObjRef;
 
 /// Note: Can be uninitialized!
 template <typename T> class ObjRef {
@@ -149,6 +151,11 @@ public:
   FatObjRef(ObjRef<T> ref, T *ptr = nullptr) : ObjRef<T>(ref), ptr(ptr) {}
   FatObjRef(ObjRef<T> ref, T &ptr) : ObjRef<T>(ref), ptr(&ptr) {}
 
+  static bool is_impl(const DynObjRef &Ref);
+
+  //template <typename U>
+  //static bool is_impl(const FatDynObjRef<U> &Ref);
+
   /*template <typename TT = T> auto as() const {*/
   /*  assert(is<TT>());*/
   /*  using RefT = ObjTraits<TT>::FatRefT;*/
@@ -161,7 +168,7 @@ public:
 };
 
 /// Note: Can be uninitialized!
-template <typename T = void> class FatDynObjRef : public DynObjRef {
+template <typename T> class FatDynObjRef : public DynObjRef {
 protected:
   T *ptr;
 
@@ -170,6 +177,8 @@ public:
   FatDynObjRef(DynObjRef ref, T *ptr = nullptr) : DynObjRef(ref), ptr(ptr) {}
   FatDynObjRef(DynObjRef ref, T &ptr) : DynObjRef(ref), ptr(&ptr) {}
   FatDynObjRef(FatObjRef<T> ref) : DynObjRef(ref), ptr(ref.getPtr()) {}
+
+  template <typename U> static bool is_impl(ObjRef<U>) { return true; }
 
   /*template <typename TT = T> auto as() const {*/
   /*  assert(is<TT>());*/
@@ -182,6 +191,12 @@ public:
   T *getPtr() const { return ptr; }
   T &operator*() const { return *ptr; }
   T *operator->() const { return ptr; }
+
+  template <typename U> explicit operator FatObjRef<U> const()
+  {
+    assert((is<FatObjRef<T>, FatDynObjRef>(*this)));
+    return FatObjRef<T>{ObjRef<T>{obj}, ptr};
+  }
 };
 
 template <typename T> struct ObjTraits {
@@ -213,10 +228,23 @@ concept TrailingObj = requires(T x) {
   x.getAllocSize();
 };
 
-// todo same for fat
 template <typename T> bool ObjRef<T>::is_impl(const DynObjRef &Ref) {
   return Ref.getDialectID() == Traits::dialect && Ref.getTyID() == Traits::ty;
 }
+
+template <typename T>
+bool FatObjRef<T>::is_impl(const DynObjRef &Ref)
+{
+    return Ref.getDialectID() == ObjTraits<T>::dialect && Ref.getTyID() == ObjTraits<T>::ty;
+}
+
+// prob not needed, fat can be implictly converted to thin
+//template <typename T> template<typename U>
+//bool FatObjRef<T>::is_impl(const FatDynObjRef<U> &Ref)
+//{
+//    // also check that U is either void or compatible?
+//    return Ref.getDialectID() == ObjTraits<T>::dialect && Ref.getTyID() == ObjTraits<T>::ty;
+//}
 
 } // namespace dyno
 
@@ -225,3 +253,15 @@ template <> struct std::hash<dyno::DynObjRef> {
     return std::bit_cast<size_t>(ref);
   }
 };
+
+template<typename T>
+struct IsByValueRTTI<dyno::ObjRef<T>> : std::true_type {};
+
+template<typename T>
+struct IsByValueRTTI<dyno::FatObjRef<T>> : std::true_type {};
+
+template<>
+struct IsByValueRTTI<dyno::DynObjRef> : std::true_type {};
+
+template<typename T>
+struct IsByValueRTTI<dyno::FatDynObjRef<T>> : std::true_type {};

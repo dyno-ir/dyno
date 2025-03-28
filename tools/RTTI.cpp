@@ -36,12 +36,20 @@ int main()
 
     ObjRef<Instr>::is_impl(instrDyn);
 
-    std::cout << is<ObjRef<Instr>, DynObjRef>(instrDyn) << "\n";
-    std::cout << is<DynObjRef, ObjRef<Instr>>(instr) << "\n";
+
+    FatDynObjRef<Instr> fatDyn{instrDyn, instr.getPtr()};
 
 
-    auto instr2 = static_cast<ObjRef<Instr>>(instrDyn);
-    // guess we now need to implement ByValueRTTIMixin to call static_cast like this
-    // for (Fat)(Dyn)ObjRefs while keeping normal LLVM-style RTTI for classic sitations like
-    // struct Base above.
+    // dyn thin to thin
+    ObjRef<Instr> dynThinToThin = as<ObjRef<Instr>>(instrDyn);
+
+    // dyn fat to thin
+    ObjRef<Instr> dynFatToThin = as<ObjRef<Instr>>(fatDyn);
+
+    // dyn fat to fat
+    FatObjRef<Instr> dynFatToFat = as<FatObjRef<Instr>>(fatDyn);
+
+
+    DynObjRef thinToDynThin = as<DynObjRef>(dynFatToThin);
+    DynObjRef fatToDynFat = as<DynObjRef>(dynFatToFat);
 }
