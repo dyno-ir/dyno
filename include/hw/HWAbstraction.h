@@ -112,11 +112,12 @@ public:
       for (auto block : proc->blocks()) {
         std::cout << "block(" << block.instr().def()->fat().as<FatObjRef<Block>>().getObjID() << "):\n";
         auto asBlockRef = BlockRef{block.instr().def()->fat().as<FatObjRef<Block>>()};
-        for (auto insn : asBlockRef) {
+        for (auto insn = asBlockRef.begin(); insn != asBlockRef.end(); insn++) {
           // todo: better fix for null InstrRef in block
-          if (insn.getPtr() == nullptr)
-            break;
-          instrPrinter.print(insn);
+          // assert(insn);
+          //if (insn.getPtr() == nullptr)
+          //  break;
+          instrPrinter.print(*insn);
         }
       }
     }

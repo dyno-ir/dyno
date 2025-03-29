@@ -57,12 +57,12 @@ template <typename T, typename U> bool is(const U &ref) {
 template <typename Derived> class RTTIUtilMixin {
 public:
   template <typename T> auto is() const {
-    return ::is<T, Derived>(*reinterpret_cast<const Derived *>(this));
+    return ::is<T, Derived>(*static_cast<const Derived *>(this));
   }
   template <typename T> auto as() const {
-    return ::as<T, Derived>(*reinterpret_cast<const Derived *>(this));
+    return ::as<T, Derived>(*static_cast<const Derived *>(this));
   }
   template <typename T> auto dyn_as() const {
-    return ::dyn_as<T, Derived>(*reinterpret_cast<const Derived *>(this));
+    return ::dyn_as<T, Derived>(*static_cast<const Derived *>(this));
   }
 };

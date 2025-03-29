@@ -154,7 +154,7 @@ public:
 
   friend bool operator==(const BlockRef_iterator &a,
                          const BlockRef_iterator &b) {
-    return &a.block == &b.block && a.pos == b.pos;
+    return a.block == b.block && a.pos == b.pos;
   }
 };
 static_assert(std::bidirectional_iterator<BlockRef_iterator<true>>);
@@ -165,7 +165,6 @@ public:
   using iterator_unordered = BlockRef_iterator<false>;
 
 public:
-  // using FatObjRef<Block>::
   BlockRef(ObjRef<Block> obj, Block *block) : FatObjRef<Block>(obj, block) {}
   BlockRef(ObjRef<Block> obj, Block &block) : FatObjRef<Block>(obj, block) {}
   BlockRef(const FatObjRef<Block> &ref) : FatObjRef<Block>(ref) {}
