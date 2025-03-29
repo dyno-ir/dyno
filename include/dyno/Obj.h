@@ -1,6 +1,7 @@
 #pragma once
 
 #include <bit>
+#include <concepts>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -46,6 +47,7 @@ protected:
 
 public:
   using Traits = ObjTraits<T>;
+  using value_type = T;
 
   ObjRef() {}
   ObjRef(nullref_t) : obj(ObjID::INVALID) {}
@@ -142,6 +144,7 @@ protected:
   T *ptr;
 
 public:
+  using value_type = T;
   using RTTIUtilMixin<FatObjRef<T>>::as;
   using RTTIUtilMixin<FatObjRef<T>>::dyn_as;
   using RTTIUtilMixin<FatObjRef<T>>::is;
@@ -151,7 +154,8 @@ public:
   FatObjRef(ObjRef<T> ref, T &ptr) : ObjRef<T>(ref), ptr(&ptr) {}
   FatObjRef(ObjID obj, T *ptr) : ObjRef<T>(obj), ptr(ptr) {}
   FatObjRef(ObjID obj, T &ptr) : ObjRef<T>(obj), ptr(&ptr) {}
-  FatObjRef(ObjID obj, void *ptr) : ObjRef<T>(obj), ptr(reinterpret_cast<T*>(ptr)) {}
+  FatObjRef(ObjID obj, void *ptr)
+      : ObjRef<T>(obj), ptr(reinterpret_cast<T *>(ptr)) {}
 
   static bool is_impl(const DynObjRef &Ref);
 
@@ -173,6 +177,7 @@ protected:
   T *ptr;
 
 public:
+  using value_type = T;
   using RTTIUtilMixin<FatDynObjRef<T>>::as;
   using RTTIUtilMixin<FatDynObjRef<T>>::dyn_as;
   using RTTIUtilMixin<FatDynObjRef<T>>::is;
@@ -247,6 +252,31 @@ bool FatObjRef<T>::is_impl(const DynObjRef &Ref) {
   return Ref.getDialectID() == ObjTraits<T>::dialect &&
          Ref.getTyID() == ObjTraits<T>::ty;
 }
+
+// template <typename T>
+// concept IsFatDynObjRef = (requires {
+//   typename T::value_type;
+// } && std::is_same_v<T, FatDynObjRef<typename T::value_type>>);
+
+// template <typename T>
+// concept IsDynObjRef = std::derived_from<T, DynObjRef>;
+
+// template <typename T>
+// concept IsFatObjRef = (requires { typename T::value_type; } &&
+//                        std::derived_from<T, FatObjRef<typename T::value_type>>);
+
+// template <typename T>
+// concept IsObjRef = (requires { typename T::value_type; } &&
+//                     std::derived_from<T, ObjRef<typename T::value_type>>);
+
+// template <typename T>
+// concept IsAnyDynRef = IsDynObjRef<T> || IsFatDynObjRef<T>;
+
+// template <typename T>
+// concept IsAnyFatRef = IsFatObjRef<T> || IsFatDynObjRef<T>;
+
+// template <typename T>
+// concept IsAnyObjRef = IsDynObjRef<T> || IsFatDynObjRef<T> || IsObjRef<T> || IsFatObjRef<T>;
 
 } // namespace dyno
 

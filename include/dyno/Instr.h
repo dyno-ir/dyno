@@ -2,6 +2,7 @@
 
 #include "dyno/IDs.h"
 #include "support/Bits.h"
+#include "support/RTTI.h"
 #include "support/SmallVec.h"
 #include <cassert>
 #include <cstdint>
@@ -21,7 +22,7 @@ class OperandRef;
 class InstrDefUse;
 class InsrBuilder;
 
-class Operand {
+class Operand : public RTTIUtilMixin<Operand> {
   friend class Instr;
   friend class InstrRef;
   friend class OperandRef;
@@ -42,8 +43,9 @@ public:
   Operand &operator=(Operand &&) = delete;
 
 public:
-  template <typename T = void> FatDynObjRef<T> fat() {
-    return {ref, *custom.as<T *>()};
+  template <typename T = void> FatDynObjRef<T> fat() const {
+    auto ptr = custom.as<T *>();
+    return {ref, *ptr};
   }
 
   template <typename T> void emplace(FatDynObjRef<T> newRef) {
@@ -62,6 +64,13 @@ public:
   }
 
   void destroy();
+
+  // we need this so is_impl functions can take this as an arg
+  operator FatDynObjRef<>() const { return fat(); }
+  // for as<>
+  template <typename T> explicit operator T() const {
+    return static_cast<T>(fat());
+  }
 };
 static_assert(sizeof(Operand) == 16);
 
@@ -116,6 +125,7 @@ private:
 static_assert(sizeof(Instr) == 16);
 static_assert(TrailingObj<Instr>);
 
+// could maybe make this just a ptr to the operand and find parent another way
 class OperandRef {
   friend class InstrBuilder;
 
@@ -133,8 +143,6 @@ public:
   OperandRef(FatObjRef<Instr> instrRef, unsigned opNum) : instrRef(instrRef) {
     this->instrRef.setCustom(opNum);
   }
-
-  explicit operator FatDynObjRef<Instr>() { return instrRef; }
 
   InstrRef instr() const;
 
@@ -179,6 +187,12 @@ public:
 
   Operand &operator*() const { return instrRef->operand(getNum()); }
   Operand *operator->() const { return &instrRef->operand(getNum()); }
+  explicit operator Operand &() const { return instrRef->operand(getNum()); }
+
+  // This works but a little overkill
+  // operator FatDynObjRef<>() const {
+  //  return instrRef->operand(getNum()).fat();
+  //}
 
 private:
   void addToDefUse() const;
@@ -232,6 +246,7 @@ public:
   };
   static_assert(std::bidirectional_iterator<iterator>);
 
+  InstrRef() {}
   explicit InstrRef(FatObjRef<Instr> instrRef) : FatObjRef<Instr>(instrRef) {}
   InstrRef(ObjID obj, void *ptr) : FatObjRef<Instr>(obj, ptr) {}
   InstrRef(nullref_t) : FatObjRef<Instr>(nullref) {}
@@ -356,10 +371,7 @@ inline void Operand::destroy() {
   }
 }
 
-inline InstrRef OperandRef::instr() const {
-  // todo: assert is instruction
-  return instrRef.as<InstrRef>();
-}
+inline InstrRef OperandRef::instr() const { return instrRef.as<InstrRef>(); }
 
 inline void OperandRef::addToDefUse() const {
   assert(Operand::isDefUseOperand(getRef()));
@@ -402,7 +414,18 @@ public:
     return *this;
   }
 
-  template <typename RefT> InstrBuilder &addRef(RefT ref) {
+  /*template <typename RefT>
+  InstrBuilder &addRef(RefT ref)
+    requires(IsAnyObjRef<RefT>)
+  {
+    op->emplace(ref);
+    if (op.hasDefUse()) {
+      op.addToDefUse();
+    }
+    ++op;
+    return *this;
+  }*/
+  InstrBuilder &addRef(FatDynObjRef<> ref) {
     op->emplace(ref);
     if (op.hasDefUse()) {
       op.addToDefUse();
@@ -432,3 +455,4 @@ template <> struct InterfaceTraits<OpcodeInfo> {
 class BinopInstrRef : public InstrRef {};
 
 } // namespace dyno
+template <> struct IsByValueRTTI<dyno::Operand> : std::true_type {};

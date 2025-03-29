@@ -5,15 +5,21 @@
 #include <hw/IDs.h>
 
 namespace dyno {
-
 class Wire {
 public:
   InstrDefUse defUse;
 
+  auto getSingleDef() { return defUse.getSingleDef(); }
+  auto hasSingleDef() { return defUse.hasSingleDef(); }
+  auto getSingleUse() { return defUse.getSingleUse(); }
+  auto hasSingleUse() { return defUse.hasSingleUse(); }
+
+  auto getSingleDefI() { return getSingleDef()->instr(); }
+  auto getSingleDefW();
+
   Wire(DynObjRef) {}
 };
 
-// tobi: why is this a dyn obj ref when instr ref isn't?
 using WireRef = FatObjRef<Wire>;
 
 template <> struct ObjTraits<Wire> {
@@ -21,4 +27,7 @@ template <> struct ObjTraits<Wire> {
   static constexpr TyID ty{RTL_WIRE};
   using FatRefT = WireRef;
 };
+
+inline auto Wire::getSingleDefW() { return (*getSingleDef())->as<WireRef>(); }
+
 } // namespace dyno

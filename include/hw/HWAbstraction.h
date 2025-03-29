@@ -31,19 +31,53 @@ public:
 
   ProcessRef createProcess() {
     auto blockRef = cfg.blocks.create(cfg);
-    auto blockInstrRef =
-        InstrRef{instrs.create(2, DialectID{DIALECT_RTL}, OpcodeID{HW_BLOCK_INSTR})};
+    auto blockInstrRef = InstrRef{
+        instrs.create(2, DialectID{DIALECT_RTL}, OpcodeID{HW_BLOCK_INSTR})};
     InstrBuilder blockInstrBuild{blockInstrRef};
 
     auto procRef = procs.create();
 
-    auto procInstRef =
-        InstrRef{instrs.create(2, DialectID{DIALECT_RTL}, OpcodeID{HW_PROCESS_INSTR})};
+    auto procInstRef = InstrRef{
+        instrs.create(2, DialectID{DIALECT_RTL}, OpcodeID{HW_PROCESS_INSTR})};
     InstrBuilder{procInstRef}.addRef(procRef).other().addRef(blockRef);
     blockInstrBuild.addRef(blockRef).other().addRef(procRef);
     return procRef;
   }
 };
+
+class HWInstrRef : public InstrRef {
+public:
+  HWInstrRef() {}
+  HWInstrRef(const InstrRef &ref) : InstrRef(ref) {}
+  HWInstrRef(ObjID obj, void *ptr) : InstrRef(obj, ptr) {}
+  HWInstrRef(nullref_t) : InstrRef(nullref) {}
+
+  WireRef operandW(uint n) { return operand(n)->as<WireRef>(); }
+  InstrRef operandI(uint n) { return operandW(n)->getSingleDefI(); }
+  WireRef defW(uint n = 0) {
+    assert(n < getNumDefs());
+    return operandW(n);
+  }
+  InstrRef defI(uint n = 0) {
+    assert(n < getNumDefs());
+    return operandI(n);
+  }
+  // todo: get rid of ctx params via global directory.
+  auto iter(HWContext& ctx)
+  {
+    return ctx.getCFG()[this->as<ObjRef<Instr>>()];
+  }
+  BlockRef parentBlock(HWContext& ctx)
+  {
+    return iter(ctx).blockRef();
+  }
+  ProcessRef parentProc(HWContext& ctx)
+  {
+    auto pBlock = parentBlock(ctx);
+    return pBlock.getPtr()->parentProc();
+  }
+};
+
 
 class HWInstrBuilder {
   HWContext &ctx;
@@ -53,9 +87,7 @@ public:
   HWInstrBuilder(HWContext &ctx, BlockRef_iterator<true> insert)
       : ctx(ctx), insert(insert) {}
 
-  void insertInstr(InstrRef instr) {
-    insert.insertPrev(instr);
-  }
+  void insertInstr(InstrRef instr) { insert.insertPrev(instr); }
 
   template <typename... Ts> void addRefs(InstrRef instr, Ts... operands) {
     auto defWire = ctx.getWires().create();
@@ -65,20 +97,20 @@ public:
   }
 
   template <typename... Ts>
-  InstrRef buildInstr(OpcodeID opcode, Ts... operands) {
+  HWInstrRef buildInstr(OpcodeID opcode, Ts... operands) {
     auto instr = InstrRef{ctx.getInstrs().create(
         1 + sizeof...(operands), DialectID{DIALECT_RTL}, opcode)};
 
     insertInstr(instr);
     addRefs(instr, operands...);
-    return instr;
+    return HWInstrRef{instr};
   }
 
-  template <typename... Ts> InstrRef buildAdd(Ts... operands) {
+  template <typename... Ts> HWInstrRef buildAdd(Ts... operands) {
     return buildInstr(OpcodeID{HW_ADD}, operands...);
   }
 
-  template <typename LHS, typename RHS> InstrRef buildSub(LHS lhs, RHS rhs) {
+  template <typename LHS, typename RHS> HWInstrRef buildSub(LHS lhs, RHS rhs) {
     return buildInstr(OpcodeID{HW_SUB}, lhs, rhs);
   }
 
@@ -104,19 +136,19 @@ public:
   void printCtx(HWContext &ctx) {
     std::cout << "raw instr dump:\n";
     for (auto instr : ctx.getInstrs()) {
-        instrPrinter.print(InstrRef{instr});
+      instrPrinter.print(InstrRef{instr});
     }
     std::cout << "\nstructured dump:\n";
     for (auto proc : ctx.getProcs()) {
       std::cout << "proc(" << proc.getObjID() << "):\n";
       for (auto block : proc->blocks()) {
-        std::cout << "block(" << block.instr().def()->fat().as<FatObjRef<Block>>().getObjID() << "):\n";
-        auto asBlockRef = BlockRef{block.instr().def()->fat().as<FatObjRef<Block>>()};
+        std::cout
+            << "block("
+            << block.instr().def()->fat().as<FatObjRef<Block>>().getObjID()
+            << "):\n";
+        auto asBlockRef =
+            BlockRef{block.instr().def()->fat().as<FatObjRef<Block>>()};
         for (auto insn = asBlockRef.begin(); insn != asBlockRef.end(); insn++) {
-          // todo: better fix for null InstrRef in block
-          // assert(insn);
-          //if (insn.getPtr() == nullptr)
-          //  break;
           instrPrinter.print(*insn);
         }
       }

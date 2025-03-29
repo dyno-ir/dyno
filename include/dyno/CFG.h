@@ -4,6 +4,7 @@
 #include "dyno/NewDeleteObjStore.h"
 #include "dyno/Obj.h"
 #include "dyno/ObjMap.h"
+#include "hw/Process.h"
 #include "support/RTTI.h"
 #include <cassert>
 
@@ -38,6 +39,13 @@ public:
     instrs.emplace_back(InstrRef{nullref}, IDImpl<uint32_t>{0},
                         IDImpl<uint32_t>{0});
   }
+
+  auto def() { return defUse.getSingleDef(); }
+  auto defI() { return defUse.getSingleDef()->instr(); }
+
+  auto parentProcI() { return defUse.getSingleUse()->instr(); }
+  // todo: do not ref hw stuff here, make hw wrapper
+  auto parentProc() { return defUse.getSingleUse()->instr().def()->as<ProcessRef>(); }
 };
 
 using BlockStore = NewDeleteObjStore<Block>;
@@ -68,6 +76,8 @@ public:
 class BlockRef_iterator_base {
 protected:
   Block *block;
+  ObjID obj; // free bc of alignment. still todo: implement this with custom
+             // field of FatObjRef<T>
   uint32_t pos;
 
 public:
@@ -77,8 +87,7 @@ public:
   using reference = value_type &;
 
   BlockRef_iterator_base() = default;
-  BlockRef_iterator_base(Block &block, uint32_t pos)
-      : block(&block), pos(pos) {}
+  BlockRef_iterator_base(BlockRef block, uint32_t pos);
 
   value_type &operator*() const { return entry().ref; }
   pointer operator->() const { return &entry().ref; }
@@ -104,6 +113,8 @@ public:
     cfgMapEntry.blockPos = newID;
   }
 
+  auto blockRef() const;
+
 protected:
   CFG &cfg() const { return *block->cfg; }
   Block::Node &entry() const { return block->instrs[pos]; }
@@ -118,8 +129,7 @@ public:
   using iterator_category = std::bidirectional_iterator_tag;
 
   BlockRef_iterator() = default;
-  BlockRef_iterator(Block &block, uint32_t pos)
-      : BlockRef_iterator_base(block, pos) {}
+  BlockRef_iterator(BlockRef block, uint32_t pos);
   BlockRef_iterator(BlockRef_iterator_base it) : BlockRef_iterator_base(it) {}
 
   BlockRef_iterator &operator++() {
@@ -160,6 +170,7 @@ public:
 static_assert(std::bidirectional_iterator<BlockRef_iterator<true>>);
 
 class BlockRef : public FatObjRef<Block> {
+
 public:
   using iterator = BlockRef_iterator<true>;
   using iterator_unordered = BlockRef_iterator<false>;
@@ -168,30 +179,46 @@ public:
   BlockRef(ObjRef<Block> obj, Block *block) : FatObjRef<Block>(obj, block) {}
   BlockRef(ObjRef<Block> obj, Block &block) : FatObjRef<Block>(obj, block) {}
   BlockRef(const FatObjRef<Block> &ref) : FatObjRef<Block>(ref) {}
+  // BlockRef(iterator ref) : FatObjRef<Block>(ref->getPtr()) {}
 
-  // these constructors are needed for casting impl (maybe we can somehow get rid of them...)
+  // these constructors are needed for casting impl (maybe we can somehow get
+  // rid of them...)
   BlockRef(ObjID obj, void *ptr) : FatObjRef<Block>(obj, ptr) {}
   BlockRef(nullref_t) : FatObjRef<Block>(nullref) {}
 
   size_t size() { return ptr->instrs.size() - 1; }
 
-  iterator begin() { return {*ptr, ptr->instrs[0].next}; }
+  iterator begin() { return {*this, ptr->instrs[0].next}; }
 
-  iterator end() { return {*ptr, 0}; }
+  iterator end() { return {*this, 0}; }
 
-  iterator_unordered begin_unordered() { return {*ptr, ptr->instrs[0].next}; }
+  iterator_unordered begin_unordered() { return {*this, ptr->instrs[0].next}; }
 
-  iterator_unordered end_unordered() { return iterator{*ptr, 0}; }
+  iterator_unordered end_unordered() { return iterator{*this, 0}; }
 
   Range<iterator_unordered> unordered() {
     return {begin_unordered(), end_unordered()};
   }
 };
 
+template <bool Ordered>
+inline BlockRef_iterator<Ordered>::BlockRef_iterator(BlockRef block,
+                                                     uint32_t pos)
+    : BlockRef_iterator_base(block, pos) {}
+
+inline BlockRef_iterator_base::BlockRef_iterator_base(BlockRef block,
+                                                      uint32_t pos)
+    : block(block.getPtr()), obj(block.getObjID()), pos(pos) {}
+
 inline BlockRef_iterator_base CFG::operator[](ObjRef<Instr> ref) {
   assert(contains(ref));
   auto &refEntry = map[ref];
-  return {blocks[refEntry.block], refEntry.blockPos};
+  auto blockRef = BlockRef{refEntry.block, blocks[refEntry.block]};
+  return {blockRef, refEntry.blockPos};
+}
+
+inline auto BlockRef_iterator_base::blockRef() const {
+  return BlockRef{obj, block};
 }
 
 template <> struct ObjTraits<Block> {

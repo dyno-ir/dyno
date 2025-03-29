@@ -57,7 +57,7 @@ int main() {
   std::cout << "---\n";
   for (auto op : InstrRef{instr1}.def().defUse()) {
     std::cout << (op.isDef() ? "def: " : "use: ");
-    refPrinter.print(FatDynObjRef<Instr>(op));
+    refPrinter.print(op.instr());
     std::cout << '\n';
   }
 

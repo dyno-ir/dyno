@@ -18,6 +18,10 @@ public:
   template <typename T> InlineStorageRef<T> as() {
     return InlineStorageRef<T>{*this};
   }
+
+  template <typename T> const InlineStorageRef<T> as() const {
+    return InlineStorageRef<T>{*const_cast<InlineStorage *>(this)};
+  }
 };
 
 template <typename T> class InlineStorageRef {
@@ -48,4 +52,7 @@ public:
   }
 
   T *operator*() { return std::launder(reinterpret_cast<T *>(storage)); }
+  const T *operator*() const {
+    return std::launder(reinterpret_cast<T *>(storage));
+  }
 };
