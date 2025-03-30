@@ -1,11 +1,9 @@
 #pragma once
 
 #include <bit>
-#include <concepts>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
-#include <string_view>
 #include <support/Bits.h>
 #include <support/RTTI.h>
 #include <type_traits>
@@ -123,16 +121,16 @@ public:
   template <typename T> static bool is_impl(ObjRef<T>) { return true; }
 
   template <typename T> explicit operator ObjRef<T>() const {
-    // this actually can't be parsed w/o double ()
     assert((::is<ObjRef<T>, DynObjRef>(*this)));
     return ObjRef<T>{obj};
   }
 
   template <typename T> explicit operator T() const {
-    // this actually can't be parsed w/o double ()
     assert((::is<T, DynObjRef>(*this)));
     return T{obj};
   }
+
+  //FatDynObjRef<> fat();
 };
 static_assert(sizeof(DynObjRef) == 8);
 
@@ -263,7 +261,8 @@ bool FatObjRef<T>::is_impl(const DynObjRef &Ref) {
 
 // template <typename T>
 // concept IsFatObjRef = (requires { typename T::value_type; } &&
-//                        std::derived_from<T, FatObjRef<typename T::value_type>>);
+//                        std::derived_from<T, FatObjRef<typename
+//                        T::value_type>>);
 
 // template <typename T>
 // concept IsObjRef = (requires { typename T::value_type; } &&
@@ -276,7 +275,12 @@ bool FatObjRef<T>::is_impl(const DynObjRef &Ref) {
 // concept IsAnyFatRef = IsFatObjRef<T> || IsFatDynObjRef<T>;
 
 // template <typename T>
-// concept IsAnyObjRef = IsDynObjRef<T> || IsFatDynObjRef<T> || IsObjRef<T> || IsFatObjRef<T>;
+// concept IsAnyObjRef = IsDynObjRef<T> || IsFatDynObjRef<T> || IsObjRef<T> ||
+// IsFatObjRef<T>;
+
+//FatDynObjRef<> DynObjRef::fat() {
+//  return FatDynObjRef<>{*this, GlobalResolver::resolve(dialect, ty)};
+//}
 
 } // namespace dyno
 
