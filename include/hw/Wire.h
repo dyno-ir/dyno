@@ -2,6 +2,7 @@
 
 #include <dyno/Instr.h>
 #include <dyno/Obj.h>
+#include <hw/DefUseMixin.h>
 #include <hw/IDs.h>
 
 namespace dyno {
@@ -9,26 +10,21 @@ class Wire {
 public:
   InstrDefUse defUse;
 
-  // todo: move public methods in wire Ref (ideally via mixin)
-  auto getSingleDef() { return defUse.getSingleDef(); }
-  auto hasSingleDef() { return defUse.hasSingleDef(); }
-  auto getSingleUse() { return defUse.getSingleUse(); }
-  auto hasSingleUse() { return defUse.hasSingleUse(); }
-
-  auto getSingleDefI() { return getSingleDef()->instr(); }
-  auto getSingleDefW();
-
   Wire(DynObjRef) {}
 };
 
-using WireRef = FatObjRef<Wire>;
+class WireRef : public FatObjRef<Wire>, public InstrDefUseMixin<WireRef> {
+public:
+  using FatObjRef<Wire>::FatObjRef;
+  WireRef(FatObjRef<Wire> ref) : FatObjRef<Wire>(ref) {}
+
+  auto getDefI() { return getDef().instr(); }
+};
 
 template <> struct ObjTraits<Wire> {
   static constexpr DialectID dialect{DIALECT_RTL};
   static constexpr TyID ty{RTL_WIRE};
   using FatRefT = WireRef;
 };
-
-inline auto Wire::getSingleDefW() { return (*getSingleDef())->as<WireRef>(); }
 
 } // namespace dyno

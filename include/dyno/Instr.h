@@ -294,16 +294,16 @@ class InstrDefUse {
 public:
   using iterator = const OperandRef *;
 
-  unsigned getNumDefsAndUses() { return refs.size(); }
-  unsigned getNumDefs() { return numDefs; }
-  unsigned getNumUses() { return refs.size() - numDefs; }
+  unsigned getNumDefsAndUses() const { return refs.size(); }
+  unsigned getNumDefs() const { return numDefs; }
+  unsigned getNumUses() const { return refs.size() - numDefs; }
 
   const OperandRef &getDef() {
     assert(numDefs == 1);
     return *def_begin();
   }
 
-  bool hasSingleDef() { return numDefs == 1; }
+  bool hasSingleDef() const { return numDefs == 1; }
 
   iterator getSingleDef() {
     if (!hasSingleDef())
@@ -311,7 +311,7 @@ public:
     return def_begin();
   }
 
-  bool hasSingleUse() { return getNumUses() == 1; }
+  bool hasSingleUse() const { return getNumUses() == 1; }
 
   iterator getSingleUse() {
     if (!hasSingleUse())

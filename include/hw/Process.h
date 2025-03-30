@@ -12,15 +12,14 @@ public:
   InstrDefUse defUse;
   // todo: add stuff like edge-triggered, comb, ...
   Process(DynObjRef) {}
-
-  // todo: to process ref
-  auto blocks() { return defUse.uses(); }
 };
 
 class ProcessRef : public FatObjRef<Process> {
 public:
   using FatObjRef<Process>::FatObjRef;
   ProcessRef(const FatObjRef<Process> ref) : FatObjRef<Process>(ref) {}
+
+  auto blocks() { return ptr->defUse.uses(); }
 };
 
 template <> struct ObjTraits<Process> {

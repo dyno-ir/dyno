@@ -69,7 +69,7 @@ public:
   HWInstrRef(nullref_t) : InstrRef(nullref) {}
 
   WireRef operandW(uint n) { return operand(n)->as<WireRef>(); }
-  InstrRef operandI(uint n) { return operandW(n)->getSingleDefI(); }
+  InstrRef operandI(uint n) { return operandW(n).getDefI(); }
   WireRef defW(uint n = 0) {
     assert(n < getNumDefs());
     return operandW(n);
@@ -83,7 +83,7 @@ public:
   BlockRef parentBlock(HWContext &ctx) { return iter(ctx).blockRef(); }
   ProcessRef parentProc(HWContext &ctx) {
     auto pBlock = parentBlock(ctx);
-    return pBlock.getPtr()->parent().as<ProcessRef>();
+    return pBlock.parent().as<ProcessRef>();
   }
 };
 
@@ -153,7 +153,7 @@ public:
       for (auto proc : moduleRef.procs()) {
         auto procRef = proc.instr().def()->as<ProcessRef>();
         std::cout << "proc(" << procRef.getObjID() << "):\n";
-        for (auto block : procRef->blocks()) {
+        for (auto block : procRef.blocks()) {
           auto blockRef = block.instr().def()->as<BlockRef>();
           std::cout << "block(" << blockRef.getObjID() << "):\n";
 

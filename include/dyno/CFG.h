@@ -39,13 +39,6 @@ public:
     instrs.emplace_back(InstrRef{nullref}, IDImpl<uint32_t>{0},
                         IDImpl<uint32_t>{0});
   }
-
-  auto def() { return defUse.getSingleDef(); }
-  auto defI() { return defUse.getSingleDef()->instr(); }
-
-  auto parentI() { return parent()->defUse.getSingleDef()->instr(); }
-  // todo: do not ref hw stuff here, make hw wrapper
-  ProcessRef parent() { return defI().operand(1)->as<ProcessRef>(); }
 };
 
 using BlockStore = NewDeleteObjStore<Block>;
@@ -76,8 +69,6 @@ public:
 class BlockRef_iterator_base {
 protected:
   Block *block;
-  ObjID obj; // free bc of alignment. still todo: implement this with custom
-             // field of FatObjRef<T>
   uint32_t pos;
 
 public:
@@ -199,6 +190,13 @@ public:
   Range<iterator_unordered> unordered() {
     return {begin_unordered(), end_unordered()};
   }
+
+  auto def() { return ptr->defUse.getSingleDef(); }
+  auto defI() { return ptr->defUse.getSingleDef()->instr(); }
+
+  auto parentI() { return parent()->defUse.getSingleDef()->instr(); }
+  // todo: do not ref hw stuff here, make hw wrapper
+  ProcessRef parent() { return defI().operand(1)->as<ProcessRef>(); }
 };
 
 template <bool Ordered>
@@ -208,7 +206,7 @@ inline BlockRef_iterator<Ordered>::BlockRef_iterator(BlockRef block,
 
 inline BlockRef_iterator_base::BlockRef_iterator_base(BlockRef block,
                                                       uint32_t pos)
-    : block(block.getPtr()), obj(block.getObjID()), pos(pos) {}
+    : block(block.getPtr()), pos(pos) {}
 
 inline BlockRef_iterator_base CFG::operator[](ObjRef<Instr> ref) {
   assert(contains(ref));
@@ -218,7 +216,7 @@ inline BlockRef_iterator_base CFG::operator[](ObjRef<Instr> ref) {
 }
 
 inline auto BlockRef_iterator_base::blockRef() const {
-  return BlockRef{obj, block};
+  return BlockRef{block->ref.getObjID(), block};
 }
 
 template <> struct ObjTraits<Block> {
