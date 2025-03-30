@@ -13,10 +13,15 @@ public:
   // todo: add stuff like edge-triggered, comb, ...
   Process(DynObjRef) {}
 
+  // todo: to process ref
   auto blocks() { return defUse.uses(); }
 };
 
-using ProcessRef = FatObjRef<Process>;
+class ProcessRef : public FatObjRef<Process> {
+public:
+  using FatObjRef<Process>::FatObjRef;
+  ProcessRef(const FatObjRef<Process> ref) : FatObjRef<Process>(ref) {}
+};
 
 template <> struct ObjTraits<Process> {
   static constexpr DialectID dialect{DIALECT_RTL};

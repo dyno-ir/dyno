@@ -9,6 +9,7 @@ class Wire {
 public:
   InstrDefUse defUse;
 
+  // todo: move public methods in wire Ref (ideally via mixin)
   auto getSingleDef() { return defUse.getSingleDef(); }
   auto hasSingleDef() { return defUse.hasSingleDef(); }
   auto getSingleUse() { return defUse.getSingleUse(); }

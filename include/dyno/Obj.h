@@ -148,7 +148,7 @@ public:
   using RTTIUtilMixin<FatObjRef<T>>::is;
   FatObjRef() {}
   FatObjRef(nullref_t) : ObjRef<T>(nullref), ptr(nullptr) {}
-  FatObjRef(ObjRef<T> ref, T *ptr = nullptr) : ObjRef<T>(ref), ptr(ptr) {}
+  FatObjRef(ObjRef<T> ref, T *ptr) : ObjRef<T>(ref), ptr(ptr) {}
   FatObjRef(ObjRef<T> ref, T &ptr) : ObjRef<T>(ref), ptr(&ptr) {}
   FatObjRef(ObjID obj, T *ptr) : ObjRef<T>(obj), ptr(ptr) {}
   FatObjRef(ObjID obj, T &ptr) : ObjRef<T>(obj), ptr(&ptr) {}
@@ -209,6 +209,7 @@ public:
     assert((::is<U, FatDynObjRef>(*this)));
     return U{obj, ptr};
   }
+  static bool is_impl(FatDynObjRef<>) { return true; }
 };
 
 template <typename T> struct ObjTraits {

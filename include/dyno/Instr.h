@@ -65,7 +65,7 @@ public:
 
   void destroy();
 
-  // we need this so is_impl functions can take this as an arg
+  // we need this so is_impl functions can take this as an arg (todo: in OperandRef)
   operator FatDynObjRef<>() const { return fat(); }
   // for as<>
   template <typename T> explicit operator T() const {
@@ -83,7 +83,7 @@ class Instr : public TrailingObjArr<Instr, Operand> {
   friend class InstrBuilder;
 
   DialectID dialect;
-  uint8_t _unused;
+  uint8_t _unused; // num extra operands/storage
   OpcodeID opc;
   uint16_t numOperands;
   uint16_t numDefs;
@@ -200,6 +200,7 @@ private:
 
 class InstrRef : public FatObjRef<Instr> {
   friend class InstrDefUse;
+  using FatObjRef<Instr>::FatObjRef;
 
 public:
   class iterator {

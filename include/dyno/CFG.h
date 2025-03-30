@@ -43,9 +43,9 @@ public:
   auto def() { return defUse.getSingleDef(); }
   auto defI() { return defUse.getSingleDef()->instr(); }
 
-  auto parentProcI() { return defUse.getSingleUse()->instr(); }
+  auto parentI() { return parent()->defUse.getSingleDef()->instr(); }
   // todo: do not ref hw stuff here, make hw wrapper
-  auto parentProc() { return defUse.getSingleUse()->instr().def()->as<ProcessRef>(); }
+  ProcessRef parent() { return defI().operand(1)->as<ProcessRef>(); }
 };
 
 using BlockStore = NewDeleteObjStore<Block>;

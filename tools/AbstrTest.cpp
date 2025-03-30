@@ -8,7 +8,9 @@ int main()
 {
     HWContext ctx;
 
-    auto proc = ctx.createProcess();
+    auto mod = ctx.createModule("test");
+
+    auto proc = ctx.createProcess(mod);
     auto block = proc->blocks().begin()->instr().def()->as<BlockRef>();
     HWInstrBuilder build{ctx, block.begin()};
     auto add1 = build.buildAdd(build.buildConst32(20), build.buildConst32(21));
@@ -16,7 +18,7 @@ int main()
     auto sub = build.buildSub(add2.defW(), add1.defW());
 
 
-    auto proc2 = ctx.createProcess();
+    auto proc2 = ctx.createProcess(mod);
     auto block2 = proc2->blocks().begin()->instr().def()->as<BlockRef>();
     HWInstrBuilder build2{ctx, block2.begin()};
     auto add3 = build2.buildAdd(add1.defW(), add2.defW(), sub.defW());
