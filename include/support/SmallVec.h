@@ -93,8 +93,8 @@ public:
 
   bool isSmall() { return arr == getInlineArrPtr(); }
 
-  size_type size() { return sz; }
-  bool empty() { return !sz; }
+  size_type size() const { return sz; }
+  bool empty() const { return !sz; }
 
   T &back() {
     assert(sz > 0);

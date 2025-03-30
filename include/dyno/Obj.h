@@ -1,14 +1,12 @@
 #pragma once
 
 #include <bit>
-#include <cassert>
 #include <cstddef>
 #include <cstdint>
-#include <dyno/IDs.h>
 #include <functional>
-#include <string_view>
 #include <support/Bits.h>
-
+#include <support/RTTI.h>
+#include <type_traits>
 namespace dyno {
 
 template <typename T> struct ObjTraits;
@@ -37,15 +35,20 @@ using InterfaceID = IDImpl<uint16_t>;
 
 const inline TyID::num_t TY_DEF_USE_START = bit_mask_msb<TyID::num_t>();
 
+class DynObjRef;
+template <typename T = void> class FatDynObjRef;
+
 /// Note: Can be uninitialized!
-template <typename T> class ObjRef {
+template <typename T> class ObjRef : public RTTIUtilMixin<ObjRef<T>> {
 protected:
   ObjID obj;
 
 public:
   using Traits = ObjTraits<T>;
+  using value_type = T;
 
   ObjRef() {}
+  ObjRef(nullref_t) : obj(ObjID::INVALID) {}
   explicit constexpr ObjRef(ObjID obj) : obj(obj) {}
 
   explicit operator bool() const { return static_cast<bool>(obj); }
@@ -53,10 +56,12 @@ public:
   DialectID getDialectID() { return Traits::dialect; }
   TyID getTyID() { return Traits::ty; }
   ObjID getObjID() { return obj; }
+
+  static bool is_impl(const DynObjRef &Ref);
 };
 
 /// Note: Can be uninitialized!
-class alignas(uint64_t) DynObjRef {
+class alignas(uint64_t) DynObjRef : public RTTIUtilMixin<DynObjRef> {
 public:
   template <unsigned N, unsigned Pos>
   using CustomField = BitField<uint16_t, N, Pos>;
@@ -78,11 +83,10 @@ public:
     return {ObjTraits<T>::dialect, ObjTraits<T>::ty, obj, 0};
   }
 
-  static DynObjRef invalid() {
-    return DynObjRef{DialectID{0}, TyID{0}, ObjID::INVALID, 0};
-  };
-
   DynObjRef() {}
+  DynObjRef(nullref_t) : dialect(0), ty(0), custom(0), obj(ObjID::INVALID) {}
+
+  static DynObjRef invalid() { return nullref; };
 
   template <typename T>
   DynObjRef(ObjRef<T> ref) : DynObjRef(ofObj<T>(ref.getObjID())) {}
@@ -96,15 +100,6 @@ public:
   void clearCustom() { custom = 0; }
 
   explicit operator bool() const { return isCustom() || bool(obj); }
-
-  template <typename T> bool isTy() const {
-    return dialect == ObjTraits<T>::dialect && ty == ObjTraits<T>::ty;
-  }
-
-  /*template <typename T> auto as() const {*/
-  /*  assert(isTy<T>());*/
-  /*  return ObjTraits<T>::RefT(*this);*/
-  /*}*/
 
   DialectID getDialectID() const { return dialect; }
   TyID getTyID() const { return ty; }
@@ -121,52 +116,104 @@ public:
     return a.custom == b.custom && a.dialect == b.dialect && a.ty == b.ty &&
            a.obj == b.obj;
   }
+
+  // always true, we can support arbitrary ObjRefs
+  template <typename T> static bool is_impl(ObjRef<T>) { return true; }
+
+  template <typename T> explicit operator ObjRef<T>() const {
+    assert((::is<ObjRef<T>, DynObjRef>(*this)));
+    return ObjRef<T>{obj};
+  }
+
+  template <typename T> explicit operator T() const {
+    assert((::is<T, DynObjRef>(*this)));
+    return T{obj};
+  }
+
+  //FatDynObjRef<> fat();
 };
 static_assert(sizeof(DynObjRef) == 8);
 
 /// Note: Can be uninitialized!
-template <typename T> class FatObjRef : public ObjRef<T> {
+template <typename T>
+  requires(!std::is_void_v<T>)
+class FatObjRef : public ObjRef<T>, public RTTIUtilMixin<FatObjRef<T>> {
 protected:
   T *ptr;
 
 public:
+  using value_type = T;
+  using RTTIUtilMixin<FatObjRef<T>>::as;
+  using RTTIUtilMixin<FatObjRef<T>>::dyn_as;
+  using RTTIUtilMixin<FatObjRef<T>>::is;
   FatObjRef() {}
-  FatObjRef(ObjRef<T> ref, T *ptr = nullptr) : ObjRef<T>(ref), ptr(ptr) {}
+  FatObjRef(nullref_t) : ObjRef<T>(nullref), ptr(nullptr) {}
+  FatObjRef(ObjRef<T> ref, T *ptr) : ObjRef<T>(ref), ptr(ptr) {}
   FatObjRef(ObjRef<T> ref, T &ptr) : ObjRef<T>(ref), ptr(&ptr) {}
+  FatObjRef(ObjID obj, T *ptr) : ObjRef<T>(obj), ptr(ptr) {}
+  FatObjRef(ObjID obj, T &ptr) : ObjRef<T>(obj), ptr(&ptr) {}
+  FatObjRef(ObjID obj, void *ptr)
+      : ObjRef<T>(obj), ptr(reinterpret_cast<T *>(ptr)) {}
 
-  /*template <typename TT = T> auto as() const {*/
-  /*  assert(is<TT>());*/
-  /*  using RefT = ObjTraits<TT>::FatRefT;*/
-  /*  return RefT((*this));*/
-  /*}*/
+  static bool is_impl(const DynObjRef &Ref);
 
   T *getPtr() const { return ptr; }
-  T &operator*() const { return *ptr; }
-  T *operator->() const { return ptr; }
+  T &operator*() const {
+    assert(ptr && "ptr uninitialized");
+    return *ptr;
+  }
+  T *operator->() const {
+    assert(ptr && "ptr uninitialized");
+    return ptr;
+  }
 };
 
 /// Note: Can be uninitialized!
-template <typename T = void> class FatDynObjRef : public DynObjRef {
+template <typename T>
+class FatDynObjRef : public DynObjRef, public RTTIUtilMixin<FatDynObjRef<T>> {
 protected:
   T *ptr;
 
 public:
+  using value_type = T;
+  using RTTIUtilMixin<FatDynObjRef<T>>::as;
+  using RTTIUtilMixin<FatDynObjRef<T>>::dyn_as;
+  using RTTIUtilMixin<FatDynObjRef<T>>::is;
   FatDynObjRef() {}
+  FatDynObjRef(nullref_t) : DynObjRef(nullref), ptr(nullptr) {}
   FatDynObjRef(DynObjRef ref, T *ptr = nullptr) : DynObjRef(ref), ptr(ptr) {}
-  FatDynObjRef(DynObjRef ref, T &ptr) : DynObjRef(ref), ptr(&ptr) {}
-  FatDynObjRef(FatObjRef<T> ref) : DynObjRef(ref), ptr(ref.getPtr()) {}
+  template <typename U = T, typename = std::enable_if_t<!std::is_void_v<U>>>
+  FatDynObjRef(DynObjRef ref, U &ptr) : DynObjRef(ref), ptr(&ptr) {}
+  template <typename U = T, typename = std::enable_if_t<!std::is_void_v<U>>>
+  FatDynObjRef(FatObjRef<U> ref) : DynObjRef(ref), ptr(ref.getPtr()) {}
 
-  /*template <typename TT = T> auto as() const {*/
-  /*  assert(is<TT>());*/
-  /*  using RefT = ObjTraits<TT>::FatRefT;*/
-  /*  return RefT((*this));*/
-  /*}*/
+  template <typename V, typename U = T, typename = std::enable_if_t<std::is_void_v<U>>>
+  FatDynObjRef(FatDynObjRef<V> ref) : DynObjRef(ref), ptr(ref.getPtr()) {}
 
-  /*explicit operator bool() { return ptr; }*/
+
+  template <typename U> static bool is_impl(ObjRef<U>) { return true; }
 
   T *getPtr() const { return ptr; }
-  T &operator*() const { return *ptr; }
-  T *operator->() const { return ptr; }
+  template <typename U = T, typename = std::enable_if_t<!std::is_void_v<U>>>
+  U &operator*() const {
+    assert(ptr && "ptr uninitialized");
+    return *ptr;
+  }
+  template <typename U = T, typename = std::enable_if_t<!std::is_void_v<U>>>
+  U *operator->() const {
+    assert(ptr && "ptr uninitialized");
+    return ptr;
+  }
+
+  template <typename U> explicit operator FatObjRef<U>() const {
+    assert((::is<FatObjRef<U>, FatDynObjRef>(*this)));
+    return FatObjRef<U>{ObjRef<U>{obj}, reinterpret_cast<U *>(ptr)};
+  }
+  template <typename U> explicit operator U() const {
+    assert((::is<U, FatDynObjRef>(*this)));
+    return U{obj, ptr};
+  }
+  static bool is_impl(FatDynObjRef<>) { return true; }
 };
 
 template <typename T> struct ObjTraits {
@@ -198,6 +245,48 @@ concept TrailingObj = requires(T x) {
   x.getAllocSize();
 };
 
+template <typename T> bool ObjRef<T>::is_impl(const DynObjRef &Ref) {
+  return Ref.getDialectID() == Traits::dialect && Ref.getTyID() == Traits::ty;
+}
+
+template <typename T>
+  requires(!std::is_void_v<T>)
+bool FatObjRef<T>::is_impl(const DynObjRef &Ref) {
+  return Ref.getDialectID() == ObjTraits<T>::dialect &&
+         Ref.getTyID() == ObjTraits<T>::ty;
+}
+
+// template <typename T>
+// concept IsFatDynObjRef = (requires {
+//   typename T::value_type;
+// } && std::is_same_v<T, FatDynObjRef<typename T::value_type>>);
+
+// template <typename T>
+// concept IsDynObjRef = std::derived_from<T, DynObjRef>;
+
+// template <typename T>
+// concept IsFatObjRef = (requires { typename T::value_type; } &&
+//                        std::derived_from<T, FatObjRef<typename
+//                        T::value_type>>);
+
+// template <typename T>
+// concept IsObjRef = (requires { typename T::value_type; } &&
+//                     std::derived_from<T, ObjRef<typename T::value_type>>);
+
+// template <typename T>
+// concept IsAnyDynRef = IsDynObjRef<T> || IsFatDynObjRef<T>;
+
+// template <typename T>
+// concept IsAnyFatRef = IsFatObjRef<T> || IsFatDynObjRef<T>;
+
+// template <typename T>
+// concept IsAnyObjRef = IsDynObjRef<T> || IsFatDynObjRef<T> || IsObjRef<T> ||
+// IsFatObjRef<T>;
+
+//FatDynObjRef<> DynObjRef::fat() {
+//  return FatDynObjRef<>{*this, GlobalResolver::resolve(dialect, ty)};
+//}
+
 } // namespace dyno
 
 template <> struct std::hash<dyno::DynObjRef> {
@@ -205,3 +294,13 @@ template <> struct std::hash<dyno::DynObjRef> {
     return std::bit_cast<size_t>(ref);
   }
 };
+
+template <typename T> struct IsByValueRTTI<dyno::ObjRef<T>> : std::true_type {};
+
+template <typename T>
+struct IsByValueRTTI<dyno::FatObjRef<T>> : std::true_type {};
+
+template <> struct IsByValueRTTI<dyno::DynObjRef> : std::true_type {};
+
+template <typename T>
+struct IsByValueRTTI<dyno::FatDynObjRef<T>> : std::true_type {};

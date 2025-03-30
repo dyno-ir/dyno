@@ -1,3 +1,4 @@
+#include "dyno/Obj.h"
 #include "hw/HWAbstraction.h"
 
 
@@ -7,21 +8,32 @@ int main()
 {
     HWContext ctx;
 
-    auto proc = ctx.createProcess();
-    auto block = BlockRef{*proc->blocks().begin()->instr().def()->fat<Block>()};
+    auto mod = ctx.createModule("test");
+
+    auto reg = ctx.createRegister(mod);
+
+    auto proc = ctx.createProcess(mod);
+    auto block = proc.blocks().begin()->instr().def()->as<BlockRef>();
     HWInstrBuilder build{ctx, block.begin()};
     auto add1 = build.buildAdd(build.buildConst32(20), build.buildConst32(21));
-    auto add2 = build.buildAdd(add1.def()->fat<Wire>(), build.buildConst32(1));
-    auto sub = build.buildSub(add2.def()->fat<Wire>(), add1.def()->fat<Wire>());
+    auto add2 = build.buildAdd(add1.defW(), build.buildConst32(1));
+    auto sub = build.buildSub(add2.defW(), add1.defW());
+    auto store = build.buildStore(reg, sub.defW());
 
 
-    auto proc2 = ctx.createProcess();
-    auto block2 = BlockRef{*proc2->blocks().begin()->instr().def()->fat<Block>()};
+    auto proc2 = ctx.createProcess(mod);
+    auto block2 = proc2.blocks().begin()->instr().def()->as<BlockRef>();
     HWInstrBuilder build2{ctx, block2.begin()};
-    auto add3 = build2.buildAdd(add1.def()->fat<Wire>(), add2.def()->fat<Wire>(), sub.def()->fat<Wire>());
-
+    auto load = build2.buildLoad(reg);
+    auto add3 = build2.buildAdd(load.defW(), build.buildConst32(1));
 
     HWPrinter print;
 
     print.printCtx(ctx);
+
+    auto pblock = add3.parentBlock(ctx);
+    assert(pblock.as<FatDynObjRef<>>() == block2.as<FatDynObjRef<>>());
+
+    auto pproc = add3.parentProc(ctx);
+    assert(pproc.as<FatDynObjRef<>>() == proc2.as<FatDynObjRef<>>());
 }

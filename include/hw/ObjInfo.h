@@ -8,7 +8,7 @@ namespace dyno {
 
 constexpr DialectInfo rtlDialectInfo{"rtl"};
 
-constexpr TyInfo rtlTyInfo[] = {{"wire"}, {"process"}};
+constexpr TyInfo rtlTyInfo[] = {{"wire"}, {"register"}, {"process"}, {"module"}};
 
 constexpr OpcodeInfo rtlOpcodeInfo[] = {
 #define HEADER

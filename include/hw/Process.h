@@ -1,6 +1,5 @@
 #pragma once
 
-#include "dyno/CFG.h"
 #include "dyno/Instr.h"
 #include "dyno/Obj.h"
 #include "hw/IDs.h"
@@ -12,11 +11,15 @@ public:
   InstrDefUse defUse;
   // todo: add stuff like edge-triggered, comb, ...
   Process(DynObjRef) {}
-
-  auto blocks() { return defUse.uses(); }
 };
 
-using ProcessRef = FatObjRef<Process>;
+class ProcessRef : public FatObjRef<Process> {
+public:
+  using FatObjRef<Process>::FatObjRef;
+  ProcessRef(const FatObjRef<Process> ref) : FatObjRef<Process>(ref) {}
+
+  auto blocks() { return ptr->defUse.uses(); }
+};
 
 template <> struct ObjTraits<Process> {
   static constexpr DialectID dialect{DIALECT_RTL};

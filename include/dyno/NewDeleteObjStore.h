@@ -9,7 +9,8 @@
 #include <vector>
 
 namespace dyno {
-
+// todo: mechanism to downsize map
+// todo: hooks (e.g delete -> remove from CSE structural) first delete only, create via builder
 template <typename T> class NewDeleteObjStore {
 private:
   using Traits = ObjTraits<T>;
@@ -30,8 +31,7 @@ private:
   auto objs() {
     return Range{map.elements}
         .transform([](auto i, auto *ptr) {
-          return ptr ? std::optional{FatObjRef<T>{
-                           ObjRef<T>(ObjID(i)), *ptr}}
+          return ptr ? std::optional{FatObjRef<T>{ObjRef<T>(ObjID(i)), *ptr}}
                      : std::nullopt;
         })
         .discard_optional();
@@ -45,8 +45,8 @@ public:
   NewDeleteObjStore &operator=(NewDeleteObjStore &&) = delete;
   ~NewDeleteObjStore() {
     for (auto *ptr : map.elements) {
-      // FIXME: This probably isn't entirely legal for custom alloc sz
-      ::delete ptr;
+      ptr->~T();
+      free(ptr);
     }
   }
 
@@ -55,7 +55,8 @@ public:
     requires(!TrailingObj<T>)
   {
     auto ref = createRef();
-    T *ptr = new T(ref, std::forward<Args>(args)...);
+    void *alloc = malloc(sizeof(T));
+    T *ptr = new (alloc) T(ref, std::forward<Args>(args)...);
     map[ref] = ptr;
     return {ref, *ptr};
   }
@@ -65,7 +66,7 @@ public:
     requires TrailingObj<T>
   {
     auto ref = createRef();
-    void *alloc = ::operator new(T::getAllocSize(sz));
+    void *alloc = malloc(T::getAllocSize(sz));
     T *ptr = new (alloc) T(ref, sz, std::forward<Args>(args)...);
     map[ref] = ptr;
     return {ref, *ptr};
@@ -77,8 +78,8 @@ public:
     assert(map[ref] && "Invalid ref");
     freeIds.push_back(ref.getObjID());
     map[ref] = nullptr;
-    // FIXME: This probably isn't entirely legal for custom alloc sz
-    ::delete ref.getPtr();
+    ref.getPtr()->~T();
+    free(ref.getPtr());
   }
 
   auto begin() { return objs().begin(); }

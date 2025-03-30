@@ -2,10 +2,10 @@
 
 #include <dyno/Instr.h>
 #include <dyno/Obj.h>
+#include <hw/DefUseMixin.h>
 #include <hw/IDs.h>
 
 namespace dyno {
-
 class Wire {
 public:
   InstrDefUse defUse;
@@ -13,12 +13,18 @@ public:
   Wire(DynObjRef) {}
 };
 
-// tobi: why is this a dyn obj ref when instr ref isn't?
-using WireRef = FatDynObjRef<Wire>;
+class WireRef : public FatObjRef<Wire>, public InstrDefUseMixin<WireRef> {
+public:
+  using FatObjRef<Wire>::FatObjRef;
+  WireRef(FatObjRef<Wire> ref) : FatObjRef<Wire>(ref) {}
+
+  auto getDefI() { return getDef().instr(); }
+};
 
 template <> struct ObjTraits<Wire> {
   static constexpr DialectID dialect{DIALECT_RTL};
   static constexpr TyID ty{RTL_WIRE};
   using FatRefT = WireRef;
 };
+
 } // namespace dyno
