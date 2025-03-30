@@ -7,10 +7,10 @@ template <typename It> class Range;
 template <typename T> class earlyincr_iterator {
 public:
   using iterator_category = std::forward_iterator_tag;
-  using value_type = T::value_type;
-  using pointer = T::pointer;
-  using reference = T::reference;
-  using difference_type = T::difference_type;
+  using value_type = std::iterator_traits<T>::value_type;
+  using pointer = std::iterator_traits<T>::pointer;
+  using reference = std::iterator_traits<T>::reference;
+  using difference_type = std::iterator_traits<T>::difference_type;
 
   earlyincr_iterator() = default;
   earlyincr_iterator(T it) : it(it) {}
@@ -46,10 +46,10 @@ inline auto make_earlyincr_range(std::ranges::forward_range auto &&rg) {
 template <typename T> class deref_iterator {
 public:
   using iterator_category = std::forward_iterator_tag;
-  using value_type = T::value_type;
-  using pointer = T::pointer;
-  using reference = T::reference;
-  using difference_type = T::difference_type;
+  using value_type = std::iterator_traits<T>::value_type;
+  using pointer = std::iterator_traits<T>::pointer;
+  using reference = std::iterator_traits<T>::reference;
+  using difference_type = std::iterator_traits<T>::difference_type;
 
   deref_iterator() = default;
   deref_iterator(T it) : it(it) {}
@@ -86,10 +86,10 @@ template <typename T, typename TransformT> class transform_iterator {
 
 public:
   using iterator_category = std::forward_iterator_tag;
-  using value_type = decltype(transformF(i, *it));
-  using pointer = value_type *;
-  using reference = value_type &;
-  using difference_type = T::difference_type;
+  using value_type = std::iterator_traits<T>::value_type;
+  using pointer = std::iterator_traits<T>::pointer;
+  using reference = std::iterator_traits<T>::reference;
+  using difference_type = std::iterator_traits<T>::difference_type;
 
   transform_iterator() = default;
   transform_iterator(T it) : it(it) {}
@@ -127,10 +127,10 @@ template <typename T> class enumerate_iterator {
 
 public:
   using iterator_category = std::forward_iterator_tag;
-  using value_type = std::pair<size_t, decltype(*it)>;
-  using pointer = value_type *;
-  using reference = value_type &;
-  using difference_type = T::difference_type;
+  using value_type = std::iterator_traits<T>::value_type;
+  using pointer = std::iterator_traits<T>::pointer;
+  using reference = std::iterator_traits<T>::reference;
+  using difference_type = std::iterator_traits<T>::difference_type;
 
   enumerate_iterator() = default;
   enumerate_iterator(T it) : it(it), i(0) {}
@@ -173,10 +173,10 @@ template <typename T, typename FilterT> class filter_iterator {
 
 public:
   using iterator_category = std::forward_iterator_tag;
-  using value_type = decltype(*it);
-  using pointer = value_type *;
-  using reference = value_type &;
-  using difference_type = T::difference_type;
+  using value_type = std::iterator_traits<T>::value_type;
+  using pointer = std::iterator_traits<T>::pointer;
+  using reference = std::iterator_traits<T>::reference;
+  using difference_type = std::iterator_traits<T>::difference_type;
 
   filter_iterator() = default;
   filter_iterator(T it, T itEnd, FilterT filterF)
@@ -220,10 +220,10 @@ template <typename T> class discard_optional_iterator {
 
 public:
   using iterator_category = std::forward_iterator_tag;
-  using value_type = decltype(*it);
-  using pointer = value_type *;
-  using reference = value_type &;
-  using difference_type = T::difference_type;
+  using value_type = std::iterator_traits<T>::value_type;
+  using pointer = std::iterator_traits<T>::pointer;
+  using reference = std::iterator_traits<T>::reference;
+  using difference_type = std::iterator_traits<T>::difference_type;
 
   discard_optional_iterator() = default;
   discard_optional_iterator(T it, T itEnd) : it(it), itEnd(itEnd) { prime(); }

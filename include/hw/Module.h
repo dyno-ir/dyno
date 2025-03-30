@@ -23,7 +23,18 @@ public:
   ModuleRef(const FatObjRef<Module> ref) : FatObjRef<Module>(ref) {}
   InstrRef getModuleInstr() { return ptr->defUse.getSingleDef()->instr(); }
 
-  auto procs() { return ptr->defUse.uses(); }
+  // FIXME: stand-in for better solution.
+  // maybe just own register in the module & have no register instruction at all?
+  auto procs() {
+    return ptr->defUse.uses().filter([](OperandRef ref) {
+      return ref.instr().getOpcode() == HW_PROCESS_INSTR;
+    });
+  }
+  auto regs() {
+    return ptr->defUse.uses().filter([](OperandRef ref) {
+      return ref.instr().getOpcode() == HW_REGISTER_INSTR;
+    });
+  }
 };
 
 template <> struct ObjTraits<Module> {

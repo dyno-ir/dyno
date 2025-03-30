@@ -16,8 +16,10 @@ public:
   Register(DynObjRef) {}
 };
 
-class RegisterRef : FatObjRef<Register> {
+class RegisterRef : public FatObjRef<Register> {
+public:
   using FatObjRef<Register>::FatObjRef;
+  RegisterRef(FatObjRef<Register> ref) : FatObjRef<Register>(ref) {}
 };
 
 template <> struct ObjTraits<Register> {

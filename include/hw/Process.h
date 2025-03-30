@@ -1,6 +1,5 @@
 #pragma once
 
-#include "dyno/CFG.h"
 #include "dyno/Instr.h"
 #include "dyno/Obj.h"
 #include "hw/IDs.h"

@@ -187,6 +187,10 @@ public:
   template <typename U = T, typename = std::enable_if_t<!std::is_void_v<U>>>
   FatDynObjRef(FatObjRef<U> ref) : DynObjRef(ref), ptr(ref.getPtr()) {}
 
+  template <typename V, typename U = T, typename = std::enable_if_t<std::is_void_v<U>>>
+  FatDynObjRef(FatDynObjRef<V> ref) : DynObjRef(ref), ptr(ref.getPtr()) {}
+
+
   template <typename U> static bool is_impl(ObjRef<U>) { return true; }
 
   T *getPtr() const { return ptr; }

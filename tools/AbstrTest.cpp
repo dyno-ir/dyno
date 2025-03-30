@@ -10,18 +10,22 @@ int main()
 
     auto mod = ctx.createModule("test");
 
+    auto reg = ctx.createRegister(mod);
+
     auto proc = ctx.createProcess(mod);
     auto block = proc.blocks().begin()->instr().def()->as<BlockRef>();
     HWInstrBuilder build{ctx, block.begin()};
     auto add1 = build.buildAdd(build.buildConst32(20), build.buildConst32(21));
     auto add2 = build.buildAdd(add1.defW(), build.buildConst32(1));
     auto sub = build.buildSub(add2.defW(), add1.defW());
+    auto store = build.buildStore(reg, sub.defW());
 
 
     auto proc2 = ctx.createProcess(mod);
     auto block2 = proc2.blocks().begin()->instr().def()->as<BlockRef>();
     HWInstrBuilder build2{ctx, block2.begin()};
-    auto add3 = build2.buildAdd(add1.defW(), add2.defW(), sub.defW());
+    auto load = build2.buildLoad(reg);
+    auto add3 = build2.buildAdd(load.defW(), build.buildConst32(1));
 
     HWPrinter print;
 

@@ -45,6 +45,15 @@ public:
     return moduleRef;
   }
 
+  RegisterRef createRegister(ModuleRef parent) {
+    auto regRef = RegisterRef{regs.create()};
+    // in order for the reg to use anything it must be an instr as well
+    auto regInstr = InstrRef{instrs.create(2, DialectID{DIALECT_RTL}, OpcodeID{HW_REGISTER_INSTR})};
+    InstrBuilder{regInstr}.addRef(regRef).other().addRef(parent);
+
+    return regRef;
+  }
+
   ProcessRef createProcess(ModuleRef parent) {
     auto blockRef = cfg.blocks.create(cfg);
     auto blockInstrRef = InstrRef{
@@ -121,6 +130,15 @@ public:
   template <typename LHS, typename RHS> HWInstrRef buildSub(LHS lhs, RHS rhs) {
     return buildInstr(OpcodeID{HW_SUB}, lhs, rhs);
   }
+
+  HWInstrRef buildLoad(RegisterRef reg) {
+    return buildInstr(OpcodeID{HW_LOAD}, reg);
+  }
+
+  HWInstrRef buildStore(RegisterRef reg, FatObjRef<Wire> value) {
+    return buildInstr(OpcodeID{HW_STORE}, reg, value);
+  }
+
 
   // todo: full constant support
   ConstantRef buildConst32(uint32_t value) { return ConstantRef{32, value}; }
