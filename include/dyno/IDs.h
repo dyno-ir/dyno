@@ -8,6 +8,7 @@ namespace dyno {
 
 enum CoreDialectID : uint8_t {
   DIALECT_CORE = 0,
+  DIALECT_SCF,
   DIALECT_CUSTOM,
 };
 

@@ -5,16 +5,16 @@
 
 namespace dyno {
 
-constexpr DialectInfo rtlDialectInfo{"rtl"};
+constexpr DialectInfo scfDialectInfo{"scf"};
 
-constexpr TyInfo rtlTyInfo[] = {{"wire"}, {"register"}, {"process"}, {"module"}};
+constexpr TyInfo scfTyInfo[] = {{"construct"}};
 
-constexpr OpcodeInfo rtlOpcodeInfo[] = {
+constexpr OpcodeInfo scfOpcodeInfo[] = {
 #define HEADER
 #define FOOTER
 #define ADD_OP(x)                                                              \
   { #x }
-#include "HWOps.inc"
+#include "SCFOps.inc"
 };
 
 }; // namespace dyno

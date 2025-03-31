@@ -23,9 +23,19 @@ int main()
 
     auto proc2 = ctx.createProcess(mod);
     auto block2 = proc2.blocks().begin()->instr().def()->as<BlockRef>();
-    HWInstrBuilder build2{ctx, block2.begin()};
-    auto load = build2.buildLoad(reg);
-    auto add3 = build2.buildAdd(load.defW(), build.buildConst32(1));
+
+    build.setInsertPoint(block2.begin());
+    auto load = build.buildLoad(reg);
+    auto add3 = build.buildAdd(load.defW(), build.buildConst32(1));
+    auto ifelse = build.buildIfElse(add3.defW());
+
+    build.setInsertPoint(ifelse.getTrueBlock().begin());
+    build.buildSCFYield(ifelse.getSCFConstruct(), build.buildConst32(42));
+
+    build.setInsertPoint(ifelse.getFalseBlock().begin());
+    build.buildSCFYield(ifelse.getSCFConstruct(), build.buildConst32(1337));
+
+
 
     HWPrinter print;
 

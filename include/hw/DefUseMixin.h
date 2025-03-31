@@ -1,3 +1,4 @@
+#pragma once
 #include "dyno/Instr.h"
 namespace dyno {
 
