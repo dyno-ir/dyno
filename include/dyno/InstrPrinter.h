@@ -57,6 +57,11 @@ public:
     printAlways(ref);
     str << "\n";
   }
+
+  void reset()
+  {
+    introduced.clear();
+  }
 };
 
 class InstrPrinter {

@@ -72,10 +72,8 @@ public:
 
 class HWInstrRef : public InstrRef {
 public:
-  HWInstrRef() {}
+  using InstrRef::InstrRef;
   HWInstrRef(const InstrRef &ref) : InstrRef(ref) {}
-  HWInstrRef(ObjID obj, void *ptr) : InstrRef(obj, ptr) {}
-  HWInstrRef(nullref_t) : InstrRef(nullref) {}
 
   WireRef operandW(uint n) { return operand(n)->as<WireRef>(); }
   InstrRef operandI(uint n) { return operandW(n).getDefI(); }
@@ -165,9 +163,18 @@ public:
       instrPrinter.print(InstrRef{instr});
     }
     std::cout << "\nstructured dump:\n";
+
+    refPrinter.reset();
+
     for (auto mod : ctx.getModules()) {
       auto moduleRef = ModuleRef{mod};
       std::cout << "module(" << mod.getObjID() << ", " << mod->name << "):\n";
+
+      for (auto reg : moduleRef.regs())
+      {
+        refPrinter.introduceRef(reg.instr().def()->as<FatDynObjRef<>>());
+      }
+
       for (auto proc : moduleRef.procs()) {
         auto procRef = proc.instr().def()->as<ProcessRef>();
         std::cout << "proc(" << procRef.getObjID() << "):\n";
