@@ -382,6 +382,9 @@ inline void Operand::destroy() {
   if (isDefUseOperand(ref)) {
     fat<InstrDefUse>()->erase(ref);
   }
+
+  // maybe delete/decrement refcnt of constant operands here?
+  //if (ref.getTyID() == CORE_CONSTANT) {}
 }
 
 inline InstrRef OperandRef::instr() const { return instrRef.as<InstrRef>(); }

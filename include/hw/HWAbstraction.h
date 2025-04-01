@@ -22,6 +22,7 @@ namespace dyno {
 
 class HWContext {
 
+  ConstantStore constants;
   NewDeleteObjStore<Module> modules;
   NewDeleteObjStore<Register> regs;
   NewDeleteObjStore<SCFConstruct> scfConstrs;
@@ -32,6 +33,7 @@ class HWContext {
   // todo: processes & modules
 
 public:
+  auto &getConstants() { return constants; }
   auto &getModules() { return modules; }
   auto &getRegs() { return regs; }
   auto &getSCFConstrs() { return scfConstrs; }
@@ -207,7 +209,11 @@ public:
   }
 
   // todo: full constant support
-  ConstantRef buildConst32(uint32_t value) { return ConstantRef{32, value}; }
+  ConstantRef buildConst(uint bits, uint64_t value) {
+    // still quite problematic, this constant is never deleted.
+    // Could do unique_ptr or shared_ptr style implementation for safety.
+    return ConstantBuilder{ctx.getConstants()}.build(bits, value);
+  }
 
   void setInsertPoint(BlockRef_iterator<true> it) { insert = it; }
 };

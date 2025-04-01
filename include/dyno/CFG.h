@@ -82,6 +82,7 @@ public:
 
   value_type &operator*() const { return entry().ref; }
   pointer operator->() const { return &entry().ref; }
+  InstrRef instr() const { return entry().ref; }
 
   void erase() {
     entryOrderedPrev().next = entry().next;
