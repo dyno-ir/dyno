@@ -86,9 +86,9 @@ template <typename T, typename TransformT> class transform_iterator {
 
 public:
   using iterator_category = std::forward_iterator_tag;
-  using value_type = std::iterator_traits<T>::value_type;
-  using pointer = std::iterator_traits<T>::pointer;
-  using reference = std::iterator_traits<T>::reference;
+  using value_type = decltype(transformF(i, *it));
+  using pointer = value_type *;
+  using reference = value_type &;
   using difference_type = std::iterator_traits<T>::difference_type;
 
   transform_iterator() = default;
@@ -127,9 +127,9 @@ template <typename T> class enumerate_iterator {
 
 public:
   using iterator_category = std::forward_iterator_tag;
-  using value_type = std::iterator_traits<T>::value_type;
-  using pointer = std::iterator_traits<T>::pointer;
-  using reference = std::iterator_traits<T>::reference;
+  using value_type = std::pair<size_t, std::remove_reference<decltype(*it)>>;
+  using pointer = value_type *;
+  using reference = value_type &;
   using difference_type = std::iterator_traits<T>::difference_type;
 
   enumerate_iterator() = default;
