@@ -183,9 +183,8 @@ public:
     auto ifInstr = scfConstr.getDef().instr();
 
     if (sizeof...(value) >= ifInstr.getNumDefs()) {
-      auto newInstr = InstrRef{
-          ctx.getInstrs().create(sizeof...(value) + 4,
-                                 DialectID{DIALECT_SCF}, OpcodeID{SCF_IF})};
+      auto newInstr = InstrRef{ctx.getInstrs().create(
+          sizeof...(value) + 4, DialectID{DIALECT_SCF}, OpcodeID{SCF_IF})};
 
       InstrBuilder build{newInstr};
       for (uint i = 1; i < ifInstr.getNumDefs(); i++)
@@ -245,10 +244,33 @@ public:
 
     for (auto mod : ctx.getModules()) {
       auto moduleRef = ModuleRef{mod};
-      std::cout << "module(" << mod.getObjID() << ", " << mod->name << "):\n";
+      std::cout << "module(" << mod.getObjID() << ", " << mod->name << ",\n";
+      for (auto port : moduleRef->ports) {
+        switch (RegisterRef{port}.getPortType()) {
+        case Register::PORT_IN:
+          std::cout << "in: ";
+          break;
+        case Register::PORT_OUT:
+          std::cout << "out: ";
+          break;
+        case Register::PORT_INOUT:
+          std::cout << "io: ";
+          break;
+        case Register::PORT_PARAM_IN:
+          std::cout << "param: ";
+          break;
+        case Register::PORT_NONE:
+          unreachable();
+        }
+
+        refPrinter.introduceRef(port);
+      }
+      std::cout << "):\n";
 
       for (auto reg : moduleRef.regs()) {
-        refPrinter.introduceRef(reg.instr().def()->as<FatDynObjRef<>>());
+        auto asRegRef = reg.instr().def()->as<RegisterRef>();
+        if (!asRegRef.isPort())
+          refPrinter.introduceRef(asRegRef);
       }
 
       for (auto proc : moduleRef.procs()) {

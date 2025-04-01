@@ -9,8 +9,15 @@ int main()
     HWContext ctx;
 
     auto mod = ctx.createModule("test");
+    auto portIn = ctx.createRegister(mod);
+    mod.addPort(portIn, Register::PORT_IN);
+
+    auto portOut = ctx.createRegister(mod);
+    mod.addPort(portOut, Register::PORT_OUT);
 
     auto reg = ctx.createRegister(mod);
+
+
 
     auto proc = ctx.createProcess(mod);
     auto block = proc.blocks().begin()->instr().def()->as<BlockRef>();
@@ -42,7 +49,7 @@ int main()
 
 
     build.setInsertPoint(block2.end());
-    build.buildStore(reg, ifelse.getYieldValue());
+    build.buildStore(mod->ports[1], ifelse.getYieldValue());
 
     HWPrinter print;
 

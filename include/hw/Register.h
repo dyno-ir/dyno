@@ -9,17 +9,34 @@
 namespace dyno {
 
 class Register {
-public:
-  InstrDefUse defUse;
-  // todo: size
+  friend class RegisterRef;
+  friend class ModuleRef;
 
+public:
+  enum PortType : uint8_t {
+    PORT_NONE,
+    PORT_IN,
+    PORT_OUT,
+    PORT_INOUT,
+    PORT_PARAM_IN
+  };
+
+  InstrDefUse defUse;
   Register(DynObjRef) {}
+
+  // could also put this in Instr customStorage
+private:
+  uint16_t portIndex;
+  PortType portType = PORT_NONE;
 };
 
 class RegisterRef : public FatObjRef<Register> {
 public:
   using FatObjRef<Register>::FatObjRef;
   RegisterRef(FatObjRef<Register> ref) : FatObjRef<Register>(ref) {}
+
+  auto getPortType() { return ptr->portType; }
+  auto isPort() { return ptr->portType != Register::PORT_NONE; }
 };
 
 template <> struct ObjTraits<Register> {

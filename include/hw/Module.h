@@ -3,6 +3,8 @@
 #include "dyno/Instr.h"
 #include "dyno/Obj.h"
 #include "hw/IDs.h"
+#include "hw/Register.h"
+#include "support/SmallVec.h"
 
 namespace dyno {
 
@@ -13,6 +15,9 @@ class Module {
 public:
   InstrDefUse defUse;
   std::string name;
+
+  // todo: fast ordered (inline linked list) smallvec wrapper?
+  SmallVec<FatObjRef<Register>, 8> ports;
 
   Module(DynObjRef, std::string name) : name(name) {}
 };
@@ -34,6 +39,12 @@ public:
     return ptr->defUse.uses().filter([](OperandRef ref) {
       return ref.instr().getOpcode() == HW_REGISTER_INSTR;
     });
+  }
+
+  void addPort(RegisterRef ref, Register::PortType portType) {
+    ref.getPtr()->portIndex = ptr->ports.size();
+    ref.getPtr()->portType = portType;
+    ptr->ports.emplace_back(ref);
   }
 };
 
