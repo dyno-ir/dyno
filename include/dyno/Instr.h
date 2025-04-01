@@ -42,12 +42,18 @@ public:
   Operand &operator=(const Operand &) = delete;
   Operand &operator=(Operand &&) = delete;
 
-public:
   template <typename T = void> FatDynObjRef<T> fat() const {
     auto ptr = custom.as<T *>();
     return {ref, *ptr};
   }
+  template <typename T = void> FatDynObjRef<T> cleanFat() const {
+    auto f = fat<T>();
+    if (isDefUseOperand(ref))
+      f.clearCustom();
+    return f;
+  }
 
+public:
   template <typename T> void emplace(FatDynObjRef<T> newRef) {
     ref = newRef;
     InlineStorageRef<T *>{custom}.emplace(newRef.getPtr());
@@ -65,11 +71,12 @@ public:
 
   void destroy();
 
-  // we need this so is_impl functions can take this as an arg (todo: in OperandRef)
-  operator FatDynObjRef<>() const { return fat(); }
+  // we need this so is_impl functions can take this as an arg (todo: in
+  // OperandRef)
+  operator FatDynObjRef<>() const { return cleanFat(); }
   // for as<>
   template <typename T> explicit operator T() const {
-    return static_cast<T>(fat());
+    return static_cast<T>(cleanFat());
   }
 };
 static_assert(sizeof(Operand) == 16);
@@ -354,6 +361,11 @@ private:
     assert(pos < refs.size());
     assert(refs.size() > 0);
     if (refs[pos].isDef()) {
+      if (numDefs > 1 && pos != numDefs - 1) {
+        refs[pos] = std::move(refs[numDefs - 1]);
+        refs[pos]->ref.setCustom(pos);
+        pos = numDefs - 1;
+      }
       --numDefs;
     }
     auto it = refs.begin() + pos;

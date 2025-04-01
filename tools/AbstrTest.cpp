@@ -30,10 +30,13 @@ int main()
     auto ifelse = build.buildIfElse(add3.defW());
 
     build.setInsertPoint(ifelse.getTrueBlock().begin());
-    build.buildSCFYield(ifelse.getSCFConstruct(), build.buildConst32(42));
+    ifelse = build.buildSCFYield(ifelse.getSCFConstruct(), build.buildConst32(42)).second;
 
     build.setInsertPoint(ifelse.getFalseBlock().begin());
-    build.buildSCFYield(ifelse.getSCFConstruct(), build.buildConst32(1337));
+    ifelse = build.buildSCFYield(ifelse.getSCFConstruct(), build.buildConst32(1337)).second;
+
+    build.setInsertPoint(block2.end());
+    build.buildStore(reg, ifelse.getYieldValue());
 
 
 

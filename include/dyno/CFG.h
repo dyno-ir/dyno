@@ -93,6 +93,13 @@ public:
     }
   }
 
+  void replace(InstrRef ref) {
+    auto &lval = cfg().map.get_ensure(ref);
+    lval = cfg().map[entry().ref];
+    cfg().map[entry().ref] = CFG::Node{nullref, 0};
+    entry().ref = ref;
+  }
+
   void insertPrev(InstrRef ref) {
     uint32_t newID = block->instrs.size();
     block->instrs.emplace_back(ref, IDImpl<uint32_t>{pos},

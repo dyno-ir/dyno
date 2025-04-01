@@ -17,7 +17,6 @@
 #include "scf/SCF.h"
 #include <dyno/NewDeleteObjStore.h>
 #include <iostream>
-#include <optional>
 
 namespace dyno {
 
@@ -116,37 +115,44 @@ public:
 
   void insertInstr(InstrRef instr) { insert.insertPrev(instr); }
 
-  template <typename... Ts> void addRefs(InstrRef instr, Ts... operands) {
-    auto defWire = ctx.getWires().create();
+  template <typename... Ts>
+  void addRefs(InstrRef instr, bool addWireDef, Ts... operands) {
     InstrBuilder build{instr};
-    build.addRef(defWire).other();
+    if (addWireDef) {
+      auto defWire = ctx.getWires().create();
+      build.addRef(defWire);
+    }
+    build.other();
     ([&] { build.addRef(operands); }(), ...);
   }
 
   template <typename... Ts>
-  HWInstrRef buildInstr(DialectID dialect, OpcodeID opcode, Ts... operands) {
-    auto instr = InstrRef{
-        ctx.getInstrs().create(1 + sizeof...(operands), dialect, opcode)};
+  HWInstrRef buildInstr(DialectID dialect, OpcodeID opcode, bool addWireDef,
+                        Ts... operands) {
+    auto instr = InstrRef{ctx.getInstrs().create(
+        addWireDef + sizeof...(operands), dialect, opcode)};
 
     insertInstr(instr);
-    addRefs(instr, operands...);
+    addRefs(instr, addWireDef, operands...);
     return HWInstrRef{instr};
   }
 
   template <typename... Ts> HWInstrRef buildAdd(Ts... operands) {
-    return buildInstr(DialectID{DIALECT_RTL}, OpcodeID{HW_ADD}, operands...);
+    return buildInstr(DialectID{DIALECT_RTL}, OpcodeID{HW_ADD}, true,
+                      operands...);
   }
 
   template <typename LHS, typename RHS> HWInstrRef buildSub(LHS lhs, RHS rhs) {
-    return buildInstr(DialectID{DIALECT_RTL}, OpcodeID{HW_SUB}, lhs, rhs);
+    return buildInstr(DialectID{DIALECT_RTL}, OpcodeID{HW_SUB}, true, lhs, rhs);
   }
 
   HWInstrRef buildLoad(RegisterRef reg) {
-    return buildInstr(DialectID{DIALECT_RTL}, OpcodeID{HW_LOAD}, reg);
+    return buildInstr(DialectID{DIALECT_RTL}, OpcodeID{HW_LOAD}, true, reg);
   }
 
   HWInstrRef buildStore(RegisterRef reg, FatDynObjRef<> value) {
-    return buildInstr(DialectID{DIALECT_RTL}, OpcodeID{HW_STORE}, reg, value);
+    return buildInstr(DialectID{DIALECT_RTL}, OpcodeID{HW_STORE}, false, reg,
+                      value);
   }
 
   IfInstrRef buildIfElse(FatDynObjRef<> cond) {
@@ -165,13 +171,39 @@ public:
     return IfInstrRef{instrRef};
   }
 
-  HWInstrRef buildSCFYield(SCFConstructRef scfConstr, FatDynObjRef<> value) {
-    // todo: ideally this would dynamically add a Wire def to the associated
+  template <typename... Ts>
+  auto buildSCFYield(SCFConstructRef scfConstr, Ts... value) {
+    // todo: ideally this would dynamically add Wires to the associated
     // IfInstrRef. Alternative is a GET_YIELD instr or something, but then we
     // end up with 3 categories in the SCFConstruct vreg use list (YIELD,
-    // GET_YIELD and block)
-    return buildInstr(DialectID{DIALECT_SCF}, OpcodeID{SCF_YIELD}, scfConstr,
-                      value);
+    // GET_YIELD and block). For now naive implementation as reference, just
+    // delete old instr and rebuild
+    auto ifInstr = scfConstr.getDef().instr();
+
+    if (sizeof...(value) >= ifInstr.getNumDefs()) {
+      auto newInstr = InstrRef{
+          ctx.getInstrs().create(sizeof...(value) + 4,
+                                 DialectID{DIALECT_SCF}, OpcodeID{SCF_IF})};
+
+      InstrBuilder build{newInstr};
+      for (uint i = 1; i < ifInstr.getNumDefs(); i++)
+        build.addRef(ifInstr.operand(i)->as<FatDynObjRef<>>());
+
+      for (uint i = 0; i < sizeof...(value) - ifInstr.getNumDefs() + 1; i++)
+        build.addRef(scfConstr).addRef(ctx.getWires().create());
+
+      build.other();
+      for (uint i = ifInstr.getNumDefs(); i < ifInstr.getNumOperands(); i++)
+        build.addRef(ifInstr.operand(i)->as<FatDynObjRef<>>());
+
+      HWInstrRef{ifInstr}.iter(ctx).replace(newInstr);
+      ctx.getInstrs().destroy(ifInstr);
+      ifInstr = newInstr;
+    }
+
+    auto yieldInstr = buildInstr(DialectID{DIALECT_SCF}, OpcodeID{SCF_YIELD},
+                                 false, scfConstr, value...);
+    return std::make_pair(yieldInstr, ifInstr);
   }
 
   // todo: full constant support
