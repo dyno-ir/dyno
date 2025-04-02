@@ -15,7 +15,9 @@
 HEADER
 
 ADD_OP(IF),
+ADD_OP(WHILE),
 ADD_OP(YIELD),
+ADD_OP(YIELD_COND), // yield with additional bool continue arg, for while loop
 
 FOOTER
 

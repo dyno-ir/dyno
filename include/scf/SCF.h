@@ -8,7 +8,7 @@
 namespace dyno {
 
 // use this for all scf constructs to keep obj bloat down. two purposes:
-// vreg for yields, and as parent to owned blocks (not yet implemented)
+// vreg for yields, and as parent to owned blocks
 class SCFConstruct {
 public:
   InstrDefUse defUse;
@@ -29,32 +29,62 @@ template <> struct ObjTraits<SCFConstruct> {
   using FatRefT = SCFConstruct;
 };
 
-// defs: (yield_vreg, wire...); uses: (true_block, false_block)
+// defs: (scfconstr, vreg...); uses: (cond_vreg, true_block, false_block)
 class IfInstrRef : public InstrRef {
 public:
   using InstrRef::InstrRef;
   IfInstrRef(const InstrRef &ref) : InstrRef(ref) {}
 
-  // todo: could use some custom bits in instr to figure out whether false block
-  // or yield_vreg exist.
+  bool hasFalseBlock() { return getNumOperands() > 2; }
+  uint getNumYieldValues() { return getNumDefs() - 1; }
 
   FatDynObjRef<> getCondValue() {
     return this->operand(getNumOperands() - 3)->as<FatDynObjRef<>>();
   }
   BlockRef getTrueBlock() {
-    return this->operand(getNumOperands() - 2)->as<BlockRef>();
+    return this->operand(getNumOperands() - (hasFalseBlock() ? 2 : 1))
+        ->as<BlockRef>();
   }
   BlockRef getFalseBlock() {
+    if (!hasFalseBlock())
+      return nullref;
     return this->operand(getNumOperands() - 1)->as<BlockRef>();
   }
   SCFConstructRef getSCFConstruct() {
     return this->operand(0)->as<SCFConstructRef>();
   }
   // do not ref specific value vreg like Wire here
-  FatDynObjRef<> getYieldValue(int n = 0) {
+  FatDynObjRef<> getYieldValue(uint n = 0) {
+    assert(n < getNumYieldValues());
     return this->operand(1 + n)->as<FatDynObjRef<>>();
   }
-  uint numYieldWires() { return getNumOperands() - 3; }
+};
+
+// defs: (scfconstr, vreg...); uses: (cond_bl, body_bl, vreg...)
+class WhileInstrRef : public InstrRef {
+public:
+  using InstrRef::InstrRef;
+  WhileInstrRef(const InstrRef &ref) : InstrRef(ref) {}
+
+  uint getNumYieldValues() { return (getNumDefs() - 1); }
+
+  BlockRef getCondBlock() {
+    return this->operand(getNumDefs())->as<BlockRef>();
+  }
+  BlockRef getBodyBlock() {
+    return this->operand(getNumDefs() + 1)->as<BlockRef>();
+  }
+  SCFConstructRef getSCFConstruct() {
+    return this->operand(0)->as<SCFConstructRef>();
+  }
+  FatDynObjRef<> getYieldValue(uint n = 0) {
+    assert(n < getNumYieldValues());
+    return this->operand(1 + n)->as<FatDynObjRef<>>();
+  }
+  FatDynObjRef<> getInputValue(uint n = 0) {
+    assert(n < getNumYieldValues());
+    return this->operand(2 + getNumYieldValues() + n)->as<FatDynObjRef<>>();
+  }
 };
 
 }; // namespace dyno

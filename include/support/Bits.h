@@ -4,9 +4,7 @@
 #include <cassert>
 #include <climits>
 #include <concepts>
-#include <cstdint>
 #include <type_traits>
-#include <bit>
 
 template <std::unsigned_integral T>
 constexpr unsigned bit_mask_sz = sizeof(T) * CHAR_BIT;
@@ -34,17 +32,14 @@ template <typename T> constexpr T bit_mask_zeros(unsigned n, unsigned pos = 0) {
   return ~bit_mask_ones<T>(n, pos);
 }
 
-
-template <typename T> constexpr T bit_mask_nbits(unsigned nbits)
-{
+template <typename T> constexpr T bit_mask_nbits(unsigned nbits) {
   return (T(1) << nbits) - 1;
 }
 
-
 template <typename T> constexpr unsigned clog2(T val) {
-  if (val == 0) return 0;
+  if (val == 0)
+    return 0;
   return bit_mask_sz<T> - std::countl_zero(val - 1);
-
 }
 
 template <typename NumT, unsigned N, unsigned Pos> class BitField {

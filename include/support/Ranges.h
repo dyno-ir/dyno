@@ -127,7 +127,7 @@ template <typename T> class enumerate_iterator {
 
 public:
   using iterator_category = std::forward_iterator_tag;
-  using value_type = std::pair<size_t, std::remove_reference<decltype(*it)>>;
+  using value_type = std::pair<size_t, decltype(*it)>;
   using pointer = value_type *;
   using reference = value_type &;
   using difference_type = std::iterator_traits<T>::difference_type;

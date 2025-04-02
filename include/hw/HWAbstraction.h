@@ -15,6 +15,7 @@
 #include "scf/IDs.h"
 #include "scf/ObjInfo.h"
 #include "scf/SCF.h"
+#include "support/Utility.h"
 #include <dyno/NewDeleteObjStore.h>
 #include <iostream>
 
@@ -180,31 +181,70 @@ public:
     // end up with 3 categories in the SCFConstruct vreg use list (YIELD,
     // GET_YIELD and block). For now naive implementation as reference, just
     // delete old instr and rebuild
-    auto ifInstr = scfConstr.getDef().instr();
 
-    if (sizeof...(value) >= ifInstr.getNumDefs()) {
-      auto newInstr = InstrRef{ctx.getInstrs().create(
-          sizeof...(value) + 4, DialectID{DIALECT_SCF}, OpcodeID{SCF_IF})};
+    OpcodeID opcode = OpcodeID{SCF_YIELD};
 
-      InstrBuilder build{newInstr};
-      for (uint i = 1; i < ifInstr.getNumDefs(); i++)
-        build.addRef(ifInstr.operand(i)->as<FatDynObjRef<>>());
+    auto instr = scfConstr.getDef().instr();
+    switch (instr.getOpcode()) {
+    case SCF_IF: {
+      if (sizeof...(value) >= instr.getNumDefs()) {
+        auto newInstr = InstrRef{ctx.getInstrs().create(
+            sizeof...(value) + 4, DialectID{DIALECT_SCF}, OpcodeID{SCF_IF})};
 
-      for (uint i = 0; i < sizeof...(value) - ifInstr.getNumDefs() + 1; i++)
-        build.addRef(scfConstr).addRef(ctx.getWires().create());
+        InstrBuilder build{newInstr};
+        for (uint i = 1; i < instr.getNumDefs(); i++)
+          build.addRef(instr.operand(i)->as<FatDynObjRef<>>());
 
-      build.other();
-      for (uint i = ifInstr.getNumDefs(); i < ifInstr.getNumOperands(); i++)
-        build.addRef(ifInstr.operand(i)->as<FatDynObjRef<>>());
+        for (uint i = 0; i < sizeof...(value) - instr.getNumDefs() + 1; i++)
+          build.addRef(scfConstr).addRef(ctx.getWires().create());
 
-      HWInstrRef{ifInstr}.iter(ctx).replace(newInstr);
-      ctx.getInstrs().destroy(ifInstr);
-      ifInstr = newInstr;
+        build.other();
+        for (uint i = instr.getNumDefs(); i < instr.getNumOperands(); i++)
+          build.addRef(instr.operand(i)->as<FatDynObjRef<>>());
+
+        HWInstrRef{instr}.iter(ctx).replace(newInstr);
+        ctx.getInstrs().destroy(instr);
+        instr = newInstr;
+      }
+      break;
+    }
+    case SCF_WHILE: {
+      WhileInstrRef asWhile{instr};
+      // conditional yield is just implicit for now, one more arg
+      if (sizeof...(Ts) == asWhile.getNumYieldValues() + 1)
+        opcode = OpcodeID{SCF_YIELD_COND};
+      else {
+        assert(sizeof...(Ts) == asWhile.getNumYieldValues());
+      }
+      break;
+    }
+    default:
+      dyno_unreachable("undefined");
     }
 
-    auto yieldInstr = buildInstr(DialectID{DIALECT_SCF}, OpcodeID{SCF_YIELD},
+    auto yieldInstr = buildInstr(DialectID{DIALECT_SCF}, opcode,
                                  false, scfConstr, value...);
-    return std::make_pair(yieldInstr, ifInstr);
+    return std::make_pair(yieldInstr, instr);
+  }
+
+  template <typename... Ts> auto buildWhile(Ts... inputs) {
+    SCFConstructRef scfConstr{ctx.getSCFConstrs().create()};
+    InstrRef instrRef = InstrRef{
+        ctx.getInstrs().create(3 + 2 * sizeof...(inputs),
+                               DialectID{DIALECT_SCF}, OpcodeID{SCF_WHILE})};
+    insertInstr(instrRef);
+
+    InstrBuilder build{instrRef};
+    build.addRef(scfConstr);
+    for (uint i = 0; i < sizeof...(inputs); i++)
+      build.addRef(ctx.getWires().create());
+    // todo: copy over all parents for nested scf constructs?
+    build.other();
+    build.addRef(ctx.createBlock(insert.blockRef().parent(), scfConstr));
+    build.addRef(ctx.createBlock(insert.blockRef().parent(), scfConstr));
+    ([&]() { build.addRef(inputs); }(), ...);
+
+    return WhileInstrRef{instrRef};
   }
 
   // todo: full constant support

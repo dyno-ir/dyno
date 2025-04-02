@@ -65,13 +65,14 @@ public:
 
   uint64_t valTrunc64() {
     if (customField<IsInline>()) {
+      // todo: can also assume val is normalized.
       if (customField<IsZext>())
         return obj & bit_mask_nbits<uint32_t>(customField<NBits>());
       else if (customField<IsSext>())
         return (int64_t(obj) << (64 - customField<NBits>())) >>
                (64 - customField<NBits>());
       else
-        unreachable();
+        dyno_unreachable("neither sign nor zext");
     } else {
       // assuming the stored value is normalized
       return words()[0];

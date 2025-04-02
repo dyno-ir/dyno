@@ -42,14 +42,27 @@ int main()
     build.setInsertPoint(ifelse.getFalseBlock().begin());
     ifelse = build.buildSCFYield(ifelse.getSCFConstruct(), build.buildConst(64, 1337)).second;
 
+    build.setInsertPoint(block2.end());
+    build.buildStore(mod->ports[1], ifelse.getYieldValue());
+
+
     //auto endIt = ifelse.getFalseBlock().end();
     //--endIt;
     //ctx.getInstrs().destroy(endIt.instr());
     //endIt.erase();
 
 
-    build.setInsertPoint(block2.end());
-    build.buildStore(mod->ports[1], ifelse.getYieldValue());
+    auto block3 = ctx.createProcess(mod).blocks().begin()->instr().def()->as<BlockRef>();
+    build.setInsertPoint(block3.begin());
+    auto whileInstr = build.buildWhile(build.buildConst(32, 128));
+    build.setInsertPoint(whileInstr.getCondBlock().begin());
+    auto sub2 = build.buildSub(whileInstr.getYieldValue(0), build.buildConst(32, 1));
+    build.buildSCFYield(whileInstr.getSCFConstruct(), sub2.defW(), /*todo: convert to bool*/sub2.defW());
+    build.setInsertPoint(whileInstr.getBodyBlock().begin());
+    build.buildStore(reg, whileInstr.getYieldValue(0));
+    build.buildSCFYield(whileInstr.getSCFConstruct(), whileInstr.getYieldValue(0));
+
+
 
     HWPrinter print;
 
