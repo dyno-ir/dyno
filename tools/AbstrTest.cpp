@@ -63,6 +63,11 @@ int main()
     build.buildSCFYield(whileInstr.getSCFConstruct(), whileInstr.getYieldValue(0));
 
 
+    auto func = build.buildFunc(mod);
+    build.setInsertPoint(func.getBlock().begin());
+    auto param = build.buildFuncParam(func.func());
+    build.buildFuncReturn(func.func(), param.defW(), build.buildConst(32, 1));
+
 
     HWPrinter print;
 

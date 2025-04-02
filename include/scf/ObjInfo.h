@@ -7,7 +7,7 @@ namespace dyno {
 
 constexpr DialectInfo scfDialectInfo{"scf"};
 
-constexpr TyInfo scfTyInfo[] = {{"construct"}};
+constexpr TyInfo scfTyInfo[] = {{"construct"}, {"func"}};
 
 constexpr OpcodeInfo scfOpcodeInfo[] = {
 #define HEADER

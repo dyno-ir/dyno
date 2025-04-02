@@ -4,6 +4,7 @@
 #include "dyno/Obj.h"
 #include "hw/IDs.h"
 #include "hw/Register.h"
+#include "scf/IDs.h"
 #include "support/SmallVec.h"
 
 namespace dyno {
@@ -32,12 +33,17 @@ public:
   // maybe just own register in the module & have no register instruction at all?
   auto procs() {
     return ptr->defUse.uses().filter([](OperandRef ref) {
-      return ref.instr().getOpcode() == HW_PROCESS_INSTR;
+      return ref.instr().getDialect() == DIALECT_RTL && ref.instr().getOpcode() == HW_PROCESS_INSTR;
     });
   }
   auto regs() {
     return ptr->defUse.uses().filter([](OperandRef ref) {
-      return ref.instr().getOpcode() == HW_REGISTER_INSTR;
+      return ref.instr().getDialect() == DIALECT_RTL && ref.instr().getOpcode() == HW_REGISTER_INSTR;
+    });
+  }
+  auto funcs() {
+    return ptr->defUse.uses().filter([](OperandRef ref) {
+      return ref.instr().getDialect() == DIALECT_SCF && ref.instr().getOpcode() == SCF_FUNC_INSTR;
     });
   }
 

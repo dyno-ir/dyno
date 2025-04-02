@@ -12,6 +12,7 @@
 #include "hw/Process.h"
 #include "hw/Register.h"
 #include "hw/Wire.h"
+#include "scf/Function.h"
 #include "scf/IDs.h"
 #include "scf/ObjInfo.h"
 #include "scf/SCF.h"
@@ -28,6 +29,7 @@ class HWContext {
   NewDeleteObjStore<Register> regs;
   NewDeleteObjStore<SCFConstruct> scfConstrs;
   NewDeleteObjStore<Wire> wires;
+  NewDeleteObjStore<SCFFunc> funcs;
   NewDeleteObjStore<Process> procs;
   CFG cfg;
   NewDeleteObjStore<Instr> instrs;
@@ -39,6 +41,7 @@ public:
   auto &getRegs() { return regs; }
   auto &getSCFConstrs() { return scfConstrs; }
   auto &getWires() { return wires; }
+  auto &getFuncs() { return funcs; }
   auto &getProcs() { return procs; }
   auto &getInstrs() { return instrs; }
   auto &getCFG() { return cfg; }
@@ -167,8 +170,8 @@ public:
     InstrBuilder build{instrRef};
     build.addRef(scfConstr).other().addRef(cond);
 
-    auto trueBl = ctx.createBlock(insert.blockRef().parent(), scfConstr);
-    auto falseBl = ctx.createBlock(insert.blockRef().parent(), scfConstr);
+    auto trueBl = ctx.createBlock(insert.blockRef().parent() /*, scfConstr*/);
+    auto falseBl = ctx.createBlock(insert.blockRef().parent() /*, scfConstr*/);
 
     build.addRef(trueBl).addRef(falseBl);
     return IfInstrRef{instrRef};
@@ -222,8 +225,8 @@ public:
       dyno_unreachable("undefined");
     }
 
-    auto yieldInstr = buildInstr(DialectID{DIALECT_SCF}, opcode,
-                                 false, scfConstr, value...);
+    auto yieldInstr =
+        buildInstr(DialectID{DIALECT_SCF}, opcode, false, scfConstr, value...);
     return std::make_pair(yieldInstr, instr);
   }
 
@@ -240,11 +243,36 @@ public:
       build.addRef(ctx.getWires().create());
     // todo: copy over all parents for nested scf constructs?
     build.other();
-    build.addRef(ctx.createBlock(insert.blockRef().parent(), scfConstr));
-    build.addRef(ctx.createBlock(insert.blockRef().parent(), scfConstr));
+    build.addRef(ctx.createBlock(insert.blockRef().parent() /*, scfConstr*/));
+    build.addRef(ctx.createBlock(insert.blockRef().parent() /*, scfConstr*/));
     ([&]() { build.addRef(inputs); }(), ...);
 
     return WhileInstrRef{instrRef};
+  }
+
+  auto buildFunc(ModuleRef parent) {
+    auto funcRef = SCFFuncRef{ctx.getFuncs().create()};
+    auto funcInstr = FuncInstrRef{ctx.getInstrs().create(
+        3, DialectID{DIALECT_SCF}, OpcodeID{SCF_FUNC_INSTR})};
+
+    InstrBuilder{funcInstr}.addRef(funcRef).other().addRef(parent).addRef(
+        ctx.createBlock(funcRef));
+    return funcInstr;
+  }
+
+  auto buildFuncParam(SCFFuncRef func) {
+    auto instr =
+        buildInstr(DialectID{DIALECT_SCF}, OpcodeID{SCF_PARAM}, true, func);
+    func.addParam(instr);
+    return instr;
+  }
+
+  template <typename... Ts>
+  auto buildFuncReturn(SCFFuncRef func, Ts... retvals) {
+    auto instr = buildInstr(DialectID{DIALECT_SCF}, OpcodeID{SCF_RETURN}, false,
+                            func, retvals...);
+    func.addReturn(instr);
+    return instr;
   }
 
   // todo: full constant support
@@ -311,6 +339,20 @@ public:
         auto asRegRef = reg.instr().def()->as<RegisterRef>();
         if (!asRegRef.isPort())
           refPrinter.introduceRef(asRegRef);
+      }
+
+      for (auto func : moduleRef.funcs()) {
+        auto asFuncRef = FuncInstrRef{func.instr()};
+        std::cout << "func(" << asFuncRef.def().getRef().getObjID() << "):\n";
+
+        for (auto block : asFuncRef.blocks()) {
+          auto blockRef = block.instr().def()->as<BlockRef>();
+          std::cout << "block(" << blockRef.getObjID() << "):\n";
+
+          for (auto insn = blockRef.begin(); insn != blockRef.end(); insn++) {
+            instrPrinter.print(*insn);
+          }
+        }
       }
 
       for (auto proc : moduleRef.procs()) {
