@@ -295,7 +295,14 @@ class InstrDefUse {
   friend class Operand;
   friend class OperandRef;
 
+  using insert_hook_t = bool (*)(InstrDefUse *, OperandRef);
+  using erase_hook_t = bool (*)(InstrDefUse *, DynObjRef);
+
   SmallVec<OperandRef, 4> refs;
+  // could move existence into a bit field, and store these after InstrDefUse
+  // in the parent object.
+  insert_hook_t insertHook = nullptr;
+  erase_hook_t eraseHook = nullptr;
   uint16_t numDefs = 0;
 
 public:
@@ -337,10 +344,50 @@ public:
   Range<iterator> defs() { return {def_begin(), def_end()}; }
   Range<iterator> uses() { return {use_begin(), use_end()}; }
 
+  void setInsertHook(insert_hook_t insertHook) {
+    this->insertHook = insertHook;
+  }
+  void setEraseHook(erase_hook_t eraseHook) { this->eraseHook = eraseHook; }
+
+  void manual_move(uint from, uint to) {
+    if (to == from)
+      return;
+    assert(to <= refs.size());
+    assert(from < refs.size());
+    if (to == refs.size()) {
+      refs.emplace_back(std::move(refs[from]));
+    } else {
+      refs[to] = std::move(refs[from]);
+    }
+    refs[to]->ref.setCustom(to);
+  }
+
+  void manual_insert(uint idx, OperandRef opRef) {
+    assert(idx <= refs.size());
+    if (idx == refs.size()) {
+      refs.emplace_back(opRef);
+    } else {
+      refs[idx] = opRef;
+    }
+    refs[idx]->ref.setCustom(idx);
+  }
+
+  void manual_pop_back() {
+    refs.back()->ref.setCustom(0);
+    refs.pop_back();
+  }
+
 private:
   void insert(OperandRef opRef) {
     assert(opRef.hasDefUse());
     assert(!opRef->ref.isCustom());
+    if (insertHook) [[unlikely]] {
+      if (insertHook(this, opRef)) {
+        if (opRef.isDef())
+          numDefs++;
+        return;
+      }
+    }
     unsigned pos;
     if (opRef.isDef()) {
       pos = numDefs++;
@@ -360,6 +407,14 @@ private:
     unsigned pos = ref.getCustom();
     assert(pos < refs.size());
     assert(refs.size() > 0);
+    if (eraseHook) [[unlikely]] {
+      bool isDef = refs[pos].isDef();
+      if (eraseHook(this, ref)) {
+        if (isDef)
+          numDefs--;
+        return;
+      }
+    }
     if (refs[pos].isDef()) {
       if (numDefs > 1 && pos != numDefs - 1) {
         refs[pos] = std::move(refs[numDefs - 1]);
@@ -384,7 +439,7 @@ inline void Operand::destroy() {
   }
 
   // maybe delete/decrement refcnt of constant operands here?
-  //if (ref.getTyID() == CORE_CONSTANT) {}
+  // if (ref.getTyID() == CORE_CONSTANT) {}
 }
 
 inline InstrRef OperandRef::instr() const { return instrRef.as<InstrRef>(); }
