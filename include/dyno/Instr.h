@@ -311,6 +311,8 @@ class InstrDefUse {
   erase_hook_t eraseHook = nullptr;
 
 public:
+  using operand_t = Operand;
+  using operand_ref_t = OperandRef;
   using iterator = const OperandRef *;
 
   unsigned getNumDefsAndUses() const { return refs.size(); }
@@ -552,7 +554,7 @@ class GenericDefUse {
   friend class Operand;
 
   using insert_hook_t = bool (*)(GenericDefUse *, GenericOperand);
-  using erase_hook_t = bool (*)(GenericDefUse *, GenericOperand);
+  using erase_hook_t = bool (*)(GenericDefUse *, DynObjRef);
 
   const uint8_t magic = 1;
   uint16_t numSelfUses = 0;
@@ -564,7 +566,15 @@ class GenericDefUse {
   erase_hook_t eraseHook = nullptr;
 
 public:
+  // no distinction unlike InstrDefuse. A GenericOperand refs another
+  // GenericOperand.
+  using operand_t = GenericOperand;
+  using operand_ref_t = GenericOperand;
   using iterator = const GenericOperand *;
+
+  GenericDefUse() = default;
+  GenericDefUse(uint8_t derivedMagic) : magic(derivedMagic) {}
+
   unsigned getNumUses() const { return refs.size() - numSelfUses; }
 
   bool hasSingleUse() const { return getNumUses() == 1; }
@@ -575,10 +585,10 @@ public:
     return use_begin();
   }
 
-  iterator begin() { return refs.begin() + numSelfUses; }
+  iterator begin() { return refs.begin(); }
   iterator end() { return refs.end(); }
 
-  iterator use_begin() { return begin(); }
+  iterator use_begin() { return begin() + numSelfUses; }
   iterator use_end() { return end(); }
 
   Range<iterator> uses() { return {use_begin(), use_end()}; }
@@ -655,7 +665,7 @@ private:
     assert(pos < refs.size());
     assert(refs.size() > 0);
     if (eraseHook) [[unlikely]] {
-      if (eraseHook(this, otherOpRef)) {
+      if (eraseHook(this, otherOpRef.ref)) {
         return;
       }
     }
@@ -666,6 +676,86 @@ private:
       refs.back().setLinkedPos(pos);
     }
     refs.erase_unordered(it);
+  }
+};
+
+template <typename Base, uint NumCategories, auto ClassifierF>
+class CategoricalDefUse : public Base {
+  // Essentially two options for custom DefUse. Either purely static and just
+  // hook into insert/erase like here, or an actualy derived type. That requires
+  // a new magic number and casting checks in all places though, so much more
+  // boilerplate.
+public:
+  using classifier_func_t = uint (*)(typename Base::operand_ref_t);
+  std::array<uint32_t, NumCategories> catBounds = {};
+  CategoricalDefUse() {
+    this->setEraseHook(erase);
+    this->setInsertHook(insert);
+  }
+  static uint
+  classifyIdx(CategoricalDefUse<Base, NumCategories, ClassifierF> *self,
+              uint idx) {
+    // i bet this is faster than binary search
+    for (size_t i = 0; i < NumCategories; i++)
+      if (self->catBounds[i] > idx)
+        return i;
+    dyno_unreachable("not classified");
+  }
+  static uint classifyIdxBinSearch(
+      CategoricalDefUse<Base, NumCategories, ClassifierF> *self, uint idx) {
+    size_t lb = 0;
+    size_t ub = NumCategories - 1;
+
+    while (true) {
+      size_t center = lb + (ub - lb) / 2;
+
+      size_t lower = (center == 0) ? 0 : self->catBounds[center - 1];
+      size_t upper = self->catBounds[center];
+
+      if (idx < lower)
+        ub = center;
+      else if (idx >= upper)
+        lb = center + 1;
+      else
+        return center;
+    }
+  }
+
+  static bool insert(Base *base, Base::operand_ref_t ref) {
+
+    auto self =
+        static_cast<CategoricalDefUse<Base, NumCategories, ClassifierF> *>(
+            base);
+
+    uint useClassID = ClassifierF(ref);
+    // O(#categories) insertion, keeps inter-category order but not intra (base
+    // case of this for use+def is implemented in instrDefUse)
+    for (uint id = NumCategories - 1; id != useClassID; id--) {
+      base->manual_move(self->catBounds[id - 1], self->catBounds[id]);
+      self->catBounds[id]++;
+    }
+    base->manual_insert(self->catBounds[useClassID]++, ref);
+    return true;
+  }
+  static bool erase(Base *base, DynObjRef ref) {
+
+    auto self =
+        static_cast<CategoricalDefUse<Base, NumCategories, ClassifierF> *>(
+            base);
+
+    uint useClassID = classifyIdx(self, ref.getCustom());
+    // move last ref in same category into slot we're freeing
+    base->manual_move(self->catBounds[useClassID] - 1, ref.getCustom());
+    for (uint id = useClassID; id < NumCategories - 1; id++) {
+      // move last of next category into last of current category (now first of
+      // next category)
+      base->manual_move(self->catBounds[id + 1] - 1, self->catBounds[id] - 1);
+      self->catBounds[id]--;
+    }
+
+    base->manual_pop_back();
+    self->catBounds[NumCategories - 1]--;
+    return true;
   }
 };
 

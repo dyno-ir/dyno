@@ -20,20 +20,26 @@ public:
   enum UseClass { UC_DEF, UC_REG, UC_PROC, UC_FUNC, UC_COUNT };
 
 private:
-  static uint classifyUse(InstrRef ref) {
-    uint32_t type = (ref.getDialect() << 16) | ref.getOpcode();
+  static uint classifyUse(GenericOperand ref) {
+
+    if (ref.getRef().is<ProcessRef>())
+      return UC_PROC;
+
+    auto instrRef = ref.getRef().as<InstrRef>();
+
+    uint32_t type = (instrRef.getDialect() << 16) | instrRef.getOpcode();
     switch (type) {
+    case (DIALECT_RTL << 16 | HW_MODULE_INSTR):
+      return UC_DEF;
     case (DIALECT_RTL << 16 | HW_REGISTER_INSTR):
       return UC_REG;
-    case (DIALECT_RTL << 16 | HW_PROCESS_INSTR):
-      return UC_PROC;
     case (DIALECT_SCF << 16 | SCF_FUNC_INSTR):
       return UC_FUNC;
     default:
       dyno_unreachable("type cannot use module");
     }
   }
-  static uint classifyIdx(Module *mod, uint idx) {
+  /*static uint classifyIdx(Module *mod, uint idx) {
     // i bet this is faster than binary search
     for (size_t i = 0; i < UC_COUNT; i++)
       if (mod->catBounds[i] > idx)
@@ -87,12 +93,12 @@ private:
     self->manual_pop_back();
     asModule->catBounds[UC_COUNT - 1]--;
     return true;
-  }
+  }*/
 
 public:
-  GenericDefUse defUse;
+  CategoricalDefUse<GenericDefUse, UC_COUNT, classifyUse> defUse;
   std::string name;
-  std::array<uint32_t, UC_COUNT> catBounds = {};
+  // std::array<uint32_t, UC_COUNT> catBounds = {};
 
   // todo: fast ordered (inline linked list) smallvec wrapper?
   SmallVec<FatObjRef<Register>, 8> ports;
@@ -111,31 +117,32 @@ public:
 
 private:
   auto usesOfCategory(Module::UseClass uc) {
-    return Range{ptr->defUse.begin() + ((uc == 0) ? 0 : ptr->catBounds[uc - 1]),
-                 ptr->defUse.begin() + ptr->catBounds[uc]};
+    return Range{ptr->defUse.begin() +
+                     ((uc == 0) ? 0 : ptr->defUse.catBounds[uc - 1]),
+                 ptr->defUse.begin() + ptr->defUse.catBounds[uc]};
   }
 
 public:
   auto procs() {
-    // return usesOfCategory(Module::UC_PROC);
-    return ptr->defUse.uses().filter(
-        [](GenericOperand ref) { return ref.getRef().is<ProcessRef>(); });
+    return usesOfCategory(Module::UC_PROC);
+    // return ptr->defUse.uses().filter(
+    //     [](GenericOperand ref) { return ref.getRef().is<ProcessRef>(); });
   }
   auto regs() {
-    // return usesOfCategory(Module::UC_REG);
-    return ptr->defUse.uses().filter([](GenericOperand ref) {
-      return ref.getRef().is<InstrRef>() &&
-             ref.getRef().as<InstrRef>().getDialect() == DIALECT_RTL &&
-             ref.getRef().as<InstrRef>().getOpcode() == HW_REGISTER_INSTR;
-    });
+    return usesOfCategory(Module::UC_REG);
+    // return ptr->defUse.uses().filter([](GenericOperand ref) {
+    //   return ref.getRef().is<InstrRef>() &&
+    //          ref.getRef().as<InstrRef>().getDialect() == DIALECT_RTL &&
+    //          ref.getRef().as<InstrRef>().getOpcode() == HW_REGISTER_INSTR;
+    // });
   }
   auto funcs() {
-    // return usesOfCategory(Module::UC_FUNC);
-    return ptr->defUse.uses().filter([](GenericOperand ref) {
-      return ref.getRef().is<InstrRef>() &&
-             ref.getRef().as<InstrRef>().getDialect() == DIALECT_SCF &&
-             ref.getRef().as<InstrRef>().getOpcode() == SCF_FUNC_INSTR;
-    });
+    return usesOfCategory(Module::UC_FUNC);
+    // return ptr->defUse.uses().filter([](GenericOperand ref) {
+    //   return ref.getRef().is<InstrRef>() &&
+    //          ref.getRef().as<InstrRef>().getDialect() == DIALECT_SCF &&
+    //          ref.getRef().as<InstrRef>().getOpcode() == SCF_FUNC_INSTR;
+    // });
   }
 
   void addPort(RegisterRef ref, Register::PortType portType) {
