@@ -196,11 +196,13 @@ public:
             sizeof...(value) + 4, DialectID{DIALECT_SCF}, OpcodeID{SCF_IF})};
 
         InstrBuilder build{newInstr};
+        build.addRef(scfConstr);
+
         for (uint i = 1; i < instr.getNumDefs(); i++)
           build.addRef(instr.operand(i)->as<FatDynObjRef<>>());
 
         for (uint i = 0; i < sizeof...(value) - instr.getNumDefs() + 1; i++)
-          build.addRef(scfConstr).addRef(ctx.getWires().create());
+          build.addRef(ctx.getWires().create());
 
         build.other();
         for (uint i = instr.getNumDefs(); i < instr.getNumOperands(); i++)

@@ -58,10 +58,7 @@ public:
     str << "\n";
   }
 
-  void reset()
-  {
-    introduced.clear();
-  }
+  void reset() { introduced.clear(); }
 };
 
 class InstrPrinter {

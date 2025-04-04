@@ -4,6 +4,7 @@
 #include "support/Bits.h"
 #include "support/RTTI.h"
 #include "support/SmallVec.h"
+#include "support/Utility.h"
 #include <cassert>
 #include <cstdint>
 #include <dyno/Interface.h>
@@ -35,9 +36,6 @@ class Operand : public RTTIUtilMixin<Operand> {
 
   static inline bool isDefUseOperand(DynObjRef ref) {
     return ref.getTyID() & bit_mask_msb<TyID::num_t>();
-  }
-  static inline bool isGenericDefUseOperand(DynObjRef ref) {
-    return ref.getTyID() & bit_mask_msb<TyID::num_t>(1);
   }
 
 public:
@@ -72,6 +70,8 @@ public:
     assert(!isDefUseOperand(newRef));
     ref = newRef;
   }
+
+  void *ptr() { return *custom.as<void *>(); }
 
   void destroy();
 
@@ -163,10 +163,7 @@ public:
 
   DynObjRef getRef() const { return (*this)->ref; }
 
-  bool hasDefUse() {
-    return Operand::isDefUseOperand(getRef()) ||
-           Operand::isGenericDefUseOperand(getRef());
-  }
+  bool hasDefUse() { return Operand::isDefUseOperand(getRef()); }
 
   InstrDefUse &defUse() {
     assert(hasDefUse());
@@ -305,12 +302,13 @@ class InstrDefUse {
   using insert_hook_t = bool (*)(InstrDefUse *, OperandRef);
   using erase_hook_t = bool (*)(InstrDefUse *, DynObjRef);
 
+  const uint8_t magic = 0;
+  uint16_t numDefs = 0;
   SmallVec<OperandRef, 4> refs;
   // could move existence into a bit field, and store these after InstrDefUse
   // in the parent object.
   insert_hook_t insertHook = nullptr;
   erase_hook_t eraseHook = nullptr;
-  uint16_t numDefs = 0;
 
 public:
   using iterator = const OperandRef *;
@@ -440,15 +438,6 @@ private:
   }
 };
 
-inline void Operand::destroy() {
-  if (isDefUseOperand(ref)) {
-    fat<InstrDefUse>()->erase(ref);
-  }
-
-  // maybe delete/decrement refcnt of constant operands here?
-  // if (ref.getTyID() == CORE_CONSTANT) {}
-}
-
 inline InstrRef OperandRef::instr() const { return instrRef.as<InstrRef>(); }
 
 template <> struct ObjTraits<Instr> {
@@ -532,6 +521,7 @@ class GenericDefUse;
 class GenericOperand {
   friend class GenericDefUse;
   friend class OperandRef;
+  friend class Operand;
 
   FatDynObjRef<> ref;
 
@@ -559,12 +549,14 @@ public:
 class GenericDefUse {
   friend class GenericOperand;
   friend class OperandRef;
+  friend class Operand;
 
   using insert_hook_t = bool (*)(GenericDefUse *, GenericOperand);
   using erase_hook_t = bool (*)(GenericDefUse *, GenericOperand);
 
-  SmallVec<GenericOperand, 4> refs;
+  const uint8_t magic = 1;
   uint16_t numSelfUses = 0;
+  SmallVec<GenericOperand, 4> refs;
 
   // could move existence into a bit field, and store these after InstrDefUse
   // in the parent object.
@@ -609,20 +601,20 @@ public:
     refs[to].setLinkedPos(to);
   }
 
-  /*void manual_insert(uint idx, OperandRef opRef) {
+  void manual_insert(uint idx, GenericOperand opRef) {
     assert(idx <= refs.size());
     if (idx == refs.size()) {
       refs.emplace_back(opRef);
     } else {
       refs[idx] = opRef;
     }
-    refs[idx]->ref.setCustom(idx);
+    refs[idx].setLinkedPos(idx);
   }
 
   void manual_pop_back() {
-    refs.back()->ref.setCustom(0);
+    refs.back().setLinkedPos(0);
     refs.pop_back();
-  }*/
+  }
 
   void addUse(dyno::FatDynObjRef<GenericDefUse> self,
               dyno::FatDynObjRef<GenericDefUse> other) {
@@ -648,7 +640,6 @@ public:
 
 private:
   void insert(GenericOperand opRef) {
-    // assert(!opRef->ref.isCustom());
     if (insertHook) [[unlikely]] {
       if (insertHook(this, opRef)) {
         return;
@@ -679,8 +670,6 @@ private:
 };
 
 inline void GenericOperand::setLinkedPos(uint16_t pos) {
-  // could also add magic byte at start of DefUses for classification rather
-  // than reserve another bit in the tyID.
   if (auto asInstrRef = ref.dyn_as<InstrRef>())
     asInstrRef.operand(ref.getCustom())->ref.setCustom(pos);
   else
@@ -688,12 +677,46 @@ inline void GenericOperand::setLinkedPos(uint16_t pos) {
 }
 
 inline void OperandRef::addToDefUse() const {
-  if (Operand::isGenericDefUseOperand(getRef()))
-    (*this)->fat<GenericDefUse>()->insert(GenericOperand{instrRef});
-  else {
-    assert(Operand::isDefUseOperand(getRef()));
+  assert(Operand::isDefUseOperand(getRef()));
+  uint8_t magic = *reinterpret_cast<uint8_t *>((*this)->ptr());
+
+  // try to not slow down the hot path too much.
+  // could also write specializations of this without dynamic dispatch
+  // if ref type is known.
+  switch (magic) {
+  [[likely]] case 0:
     (*this)->fat<InstrDefUse>()->insert(*this);
+    return;
+  case 1:
+    (*this)->fat<GenericDefUse>()->insert(GenericOperand{instrRef});
+    return;
+  default:
+    dyno_unreachable("invalid magic num");
   }
+}
+
+inline void Operand::destroy() {
+  if (isDefUseOperand(ref)) {
+    uint8_t magic = *reinterpret_cast<uint8_t *>(ptr());
+
+    // try to not slow down the hot path too much.
+    // could also write specializations of this without dynamic dispatch
+    // if ref type is known.
+    switch (magic) {
+    [[likely]] case 0:
+      fat<InstrDefUse>()->erase(ref);
+      return;
+    case 1:
+      fat<GenericDefUse>()->erase(
+          GenericOperand{FatDynObjRef<>{ref, ptr()}, ref.getCustom()});
+      return;
+    default:
+      dyno_unreachable("invalid magic num");
+    }
+  }
+
+  // maybe delete/decrement refcnt of constant operands here?
+  // if (ref.getTyID() == CORE_CONSTANT) {}
 }
 
 } // namespace dyno
