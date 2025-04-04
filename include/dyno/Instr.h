@@ -28,12 +28,16 @@ class Operand : public RTTIUtilMixin<Operand> {
   friend class OperandRef;
   friend class InstrBuilder;
   friend class InstrDefUse;
+  friend class GenericOperand;
 
   DynObjRef ref;
   InlineStorage<8> custom;
 
   static inline bool isDefUseOperand(DynObjRef ref) {
     return ref.getTyID() & bit_mask_msb<TyID::num_t>();
+  }
+  static inline bool isGenericDefUseOperand(DynObjRef ref) {
+    return ref.getTyID() & bit_mask_msb<TyID::num_t>(1);
   }
 
 public:
@@ -159,7 +163,10 @@ public:
 
   DynObjRef getRef() const { return (*this)->ref; }
 
-  bool hasDefUse() { return Operand::isDefUseOperand(getRef()); }
+  bool hasDefUse() {
+    return Operand::isDefUseOperand(getRef()) ||
+           Operand::isGenericDefUseOperand(getRef());
+  }
 
   InstrDefUse &defUse() {
     assert(hasDefUse());
@@ -444,11 +451,6 @@ inline void Operand::destroy() {
 
 inline InstrRef OperandRef::instr() const { return instrRef.as<InstrRef>(); }
 
-inline void OperandRef::addToDefUse() const {
-  assert(Operand::isDefUseOperand(getRef()));
-  (*this)->fat<InstrDefUse>()->insert(*this);
-}
-
 template <> struct ObjTraits<Instr> {
   static constexpr DialectID dialect{DIALECT_CORE};
   static constexpr TyID ty{CORE_INSTR};
@@ -524,6 +526,175 @@ template <> struct InterfaceTraits<OpcodeInfo> {
 };
 
 class BinopInstrRef : public InstrRef {};
+
+class GenericDefUse;
+
+class GenericOperand {
+  friend class GenericDefUse;
+  friend class OperandRef;
+
+  FatDynObjRef<> ref;
+
+  GenericOperand(dyno::FatDynObjRef<> other, uint16_t pos = 0) : ref(other) {
+    ref.setCustom(pos);
+  }
+  GenericOperand(FatDynObjRef<Instr> ref) : ref(ref) {}
+
+  GenericDefUse &refdDefUse() const {
+    assert(!ref.is<FatObjRef<Instr>>());
+    return *reinterpret_cast<GenericDefUse *>(ref.getPtr());
+  }
+
+  // InstrRef instr() const { return ref.as<InstrRef>(); }
+
+  void setLinkedPos(uint16_t pos);
+
+public:
+  FatDynObjRef<> getRef() const { return ref; }
+
+  // GenericOperand &operator*() const;
+  // GenericOperand *operator->() const;
+};
+
+class GenericDefUse {
+  friend class GenericOperand;
+  friend class OperandRef;
+
+  using insert_hook_t = bool (*)(GenericDefUse *, GenericOperand);
+  using erase_hook_t = bool (*)(GenericDefUse *, GenericOperand);
+
+  SmallVec<GenericOperand, 4> refs;
+  uint16_t numSelfUses = 0;
+
+  // could move existence into a bit field, and store these after InstrDefUse
+  // in the parent object.
+  insert_hook_t insertHook = nullptr;
+  erase_hook_t eraseHook = nullptr;
+
+public:
+  using iterator = const GenericOperand *;
+  unsigned getNumUses() const { return refs.size() - numSelfUses; }
+
+  bool hasSingleUse() const { return getNumUses() == 1; }
+
+  iterator getSingleUse() {
+    if (!hasSingleUse())
+      return nullptr;
+    return use_begin();
+  }
+
+  iterator begin() { return refs.begin() + numSelfUses; }
+  iterator end() { return refs.end(); }
+
+  iterator use_begin() { return begin(); }
+  iterator use_end() { return end(); }
+
+  Range<iterator> uses() { return {use_begin(), use_end()}; }
+
+  void setInsertHook(insert_hook_t insertHook) {
+    this->insertHook = insertHook;
+  }
+  void setEraseHook(erase_hook_t eraseHook) { this->eraseHook = eraseHook; }
+
+  void manual_move(uint from, uint to) {
+    if (to == from)
+      return;
+    assert(to <= refs.size());
+    assert(from < refs.size());
+    if (to == refs.size()) {
+      refs.emplace_back(std::move(refs[from]));
+    } else {
+      refs[to] = std::move(refs[from]);
+    }
+    refs[to].setLinkedPos(to);
+  }
+
+  /*void manual_insert(uint idx, OperandRef opRef) {
+    assert(idx <= refs.size());
+    if (idx == refs.size()) {
+      refs.emplace_back(opRef);
+    } else {
+      refs[idx] = opRef;
+    }
+    refs[idx]->ref.setCustom(idx);
+  }
+
+  void manual_pop_back() {
+    refs.back()->ref.setCustom(0);
+    refs.pop_back();
+  }*/
+
+  void addUse(dyno::FatDynObjRef<GenericDefUse> self,
+              dyno::FatDynObjRef<GenericDefUse> other) {
+    assert(self.getPtr() == this);
+    if (numSelfUses != refs.size()) {
+      manual_move(numSelfUses, refs.size());
+      refs[numSelfUses] = GenericOperand{other, 0};
+    } else
+      refs.emplace_back(GenericOperand{other, 0});
+
+    other->insert(GenericOperand{self, numSelfUses});
+    numSelfUses++;
+  }
+
+  void eraseUse(iterator it) {
+    uint pos = it - refs.begin();
+    (*it).refdDefUse().erase(*it);
+    manual_move(refs.size(), pos);
+
+    // refs.back()->ref.setCustom(0);
+    refs.pop_back();
+  }
+
+private:
+  void insert(GenericOperand opRef) {
+    // assert(!opRef->ref.isCustom());
+    if (insertHook) [[unlikely]] {
+      if (insertHook(this, opRef)) {
+        return;
+      }
+    }
+    unsigned pos = refs.size();
+    refs.emplace_back(opRef);
+    opRef.setLinkedPos(pos);
+  }
+
+  void erase(GenericOperand otherOpRef) {
+    unsigned pos = otherOpRef.ref.getCustom();
+    assert(pos < refs.size());
+    assert(refs.size() > 0);
+    if (eraseHook) [[unlikely]] {
+      if (eraseHook(this, otherOpRef)) {
+        return;
+      }
+    }
+    auto it = refs.begin() + pos;
+    if (it == refs.end() - 1) {
+      refs.back().setLinkedPos(0);
+    } else {
+      refs.back().setLinkedPos(pos);
+    }
+    refs.erase_unordered(it);
+  }
+};
+
+inline void GenericOperand::setLinkedPos(uint16_t pos) {
+  // could also add magic byte at start of DefUses for classification rather
+  // than reserve another bit in the tyID.
+  if (auto asInstrRef = ref.dyn_as<InstrRef>())
+    asInstrRef.operand(ref.getCustom())->ref.setCustom(pos);
+  else
+    refdDefUse().refs[ref.getCustom()].ref.setCustom(pos);
+}
+
+inline void OperandRef::addToDefUse() const {
+  if (Operand::isGenericDefUseOperand(getRef()))
+    (*this)->fat<GenericDefUse>()->insert(GenericOperand{instrRef});
+  else {
+    assert(Operand::isDefUseOperand(getRef()));
+    (*this)->fat<InstrDefUse>()->insert(*this);
+  }
+}
 
 } // namespace dyno
 template <> struct IsByValueRTTI<dyno::Operand> : std::true_type {};

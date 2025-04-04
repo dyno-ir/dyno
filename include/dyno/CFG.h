@@ -202,7 +202,7 @@ public:
   auto def() { return ptr->defUse.getSingleDef(); }
   auto defI() { return ptr->defUse.getSingleDef()->instr(); }
 
-  auto parentI() { return parent()->defUse.getSingleDef()->instr(); }
+  //auto parentI() { return parent()->defUse.getSingleDef()->instr(); }
   // todo: do not ref hw stuff here, make hw wrapper
   ProcessRef parent() { return defI().operand(1)->as<ProcessRef>(); }
 };

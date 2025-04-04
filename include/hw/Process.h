@@ -8,7 +8,7 @@ namespace dyno {
 
 class Process {
 public:
-  InstrDefUse defUse;
+  GenericDefUse defUse;
   // todo: add stuff like edge-triggered, comb, ...
   Process(DynObjRef) {}
 };

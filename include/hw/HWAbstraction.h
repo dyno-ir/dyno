@@ -79,9 +79,10 @@ public:
 
   ProcessRef createProcess(ModuleRef parent) {
     auto procRef = procs.create();
-    auto procInstRef = InstrRef{
-        instrs.create(2, DialectID{DIALECT_RTL}, OpcodeID{HW_PROCESS_INSTR})};
-    InstrBuilder{procInstRef}.addRef(procRef).other().addRef(parent);
+    procRef->defUse.addUse(procRef.as<FatDynObjRef<>>(), parent.as<FatDynObjRef<>>());
+    //auto procInstRef = InstrRef{
+    //    instrs.create(2, DialectID{DIALECT_RTL}, OpcodeID{HW_PROCESS_INSTR})};
+    //InstrBuilder{procInstRef}.addRef(procRef).other().addRef(parent);
     createBlock(procRef);
     return procRef;
   }
@@ -336,13 +337,13 @@ public:
       std::cout << "):\n";
 
       for (auto reg : moduleRef.regs()) {
-        auto asRegRef = reg.instr().def()->as<RegisterRef>();
+        auto asRegRef = reg.getRef().as<InstrRef>().def()->as<RegisterRef>();
         if (!asRegRef.isPort())
           refPrinter.introduceRef(asRegRef);
       }
 
       for (auto func : moduleRef.funcs()) {
-        auto asFuncRef = FuncInstrRef{func.instr()};
+        auto asFuncRef = FuncInstrRef{func.getRef().as<InstrRef>()};
         std::cout << "func(" << asFuncRef.def().getRef().getObjID() << "):\n";
 
         for (auto block : asFuncRef.blocks()) {
@@ -356,10 +357,10 @@ public:
       }
 
       for (auto proc : moduleRef.procs()) {
-        auto procRef = proc.instr().def()->as<ProcessRef>();
+        auto procRef = proc.getRef().as<ProcessRef>();
         std::cout << "proc(" << procRef.getObjID() << "):\n";
         for (auto block : procRef.blocks()) {
-          auto blockRef = block.instr().def()->as<BlockRef>();
+          auto blockRef = block.getRef().as<InstrRef>().def()->as<BlockRef>();
           std::cout << "block(" << blockRef.getObjID() << "):\n";
 
           for (auto insn = blockRef.begin(); insn != blockRef.end(); insn++) {

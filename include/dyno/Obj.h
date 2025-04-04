@@ -130,7 +130,7 @@ public:
     return T{obj};
   }
 
-  //FatDynObjRef<> fat();
+  // FatDynObjRef<> fat();
 };
 static_assert(sizeof(DynObjRef) == 8);
 
@@ -187,9 +187,12 @@ public:
   template <typename U = T, typename = std::enable_if_t<!std::is_void_v<U>>>
   FatDynObjRef(FatObjRef<U> ref) : DynObjRef(ref), ptr(ref.getPtr()) {}
 
-  template <typename V, typename U = T, typename = std::enable_if_t<std::is_void_v<U>>>
+  template <typename V, typename U = T,
+            typename = std::enable_if_t<std::is_void_v<U>>>
   FatDynObjRef(FatDynObjRef<V> ref) : DynObjRef(ref), ptr(ref.getPtr()) {}
 
+  FatDynObjRef(FatDynObjRef<> ref)
+      : DynObjRef(ref), ptr(reinterpret_cast<T *>(ref.getPtr())) {}
 
   template <typename U> static bool is_impl(ObjRef<U>) { return true; }
 
@@ -283,9 +286,9 @@ bool FatObjRef<T>::is_impl(const DynObjRef &Ref) {
 // concept IsAnyObjRef = IsDynObjRef<T> || IsFatDynObjRef<T> || IsObjRef<T> ||
 // IsFatObjRef<T>;
 
-//FatDynObjRef<> DynObjRef::fat() {
-//  return FatDynObjRef<>{*this, GlobalResolver::resolve(dialect, ty)};
-//}
+// FatDynObjRef<> DynObjRef::fat() {
+//   return FatDynObjRef<>{*this, GlobalResolver::resolve(dialect, ty)};
+// }
 
 } // namespace dyno
 

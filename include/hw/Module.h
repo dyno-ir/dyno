@@ -3,6 +3,7 @@
 #include "dyno/Instr.h"
 #include "dyno/Obj.h"
 #include "hw/IDs.h"
+#include "hw/Process.h"
 #include "hw/Register.h"
 #include "scf/IDs.h"
 #include "support/SmallVec.h"
@@ -89,7 +90,7 @@ private:
   }
 
 public:
-  InstrDefUse defUse;
+  GenericDefUse defUse;
   std::string name;
   std::array<uint32_t, UC_COUNT> catBounds = {};
 
@@ -97,8 +98,8 @@ public:
   SmallVec<FatObjRef<Register>, 8> ports;
 
   Module(DynObjRef, std::string name) : name(name) {
-    defUse.setInsertHook(insertHook);
-    defUse.setEraseHook(eraseHook);
+    // defUse.setInsertHook(insertHook);
+    // defUse.setEraseHook(eraseHook);
   }
 };
 
@@ -106,7 +107,7 @@ class ModuleRef : public FatObjRef<Module> {
 public:
   using FatObjRef<Module>::FatObjRef;
   ModuleRef(const FatObjRef<Module> ref) : FatObjRef<Module>(ref) {}
-  InstrRef getModuleInstr() { return ptr->defUse.getSingleDef()->instr(); }
+  // InstrRef getModuleInstr() { return ptr->defUse.getSingleDef()->instr(); }
 
 private:
   auto usesOfCategory(Module::UseClass uc) {
@@ -116,25 +117,25 @@ private:
 
 public:
   auto procs() {
-    return usesOfCategory(Module::UC_PROC);
-    // return ptr->defUse.uses().filter([](OperandRef ref) {
-    //   return ref.instr().getDialect() == DIALECT_RTL &&
-    //          ref.instr().getOpcode() == HW_PROCESS_INSTR;
-    // });
+    // return usesOfCategory(Module::UC_PROC);
+    return ptr->defUse.uses().filter(
+        [](GenericOperand ref) { return ref.getRef().is<ProcessRef>(); });
   }
   auto regs() {
-    return usesOfCategory(Module::UC_REG);
-    // return ptr->defUse.uses().filter([](OperandRef ref) {
-    //   return ref.instr().getDialect() == DIALECT_RTL &&
-    //          ref.instr().getOpcode() == HW_REGISTER_INSTR;
-    // });
+    // return usesOfCategory(Module::UC_REG);
+    return ptr->defUse.uses().filter([](GenericOperand ref) {
+      return ref.getRef().is<InstrRef>() &&
+             ref.getRef().as<InstrRef>().getDialect() == DIALECT_RTL &&
+             ref.getRef().as<InstrRef>().getOpcode() == HW_REGISTER_INSTR;
+    });
   }
   auto funcs() {
-    return usesOfCategory(Module::UC_FUNC);
-    // return ptr->defUse.uses().filter([](OperandRef ref) {
-    //   return ref.instr().getDialect() == DIALECT_SCF &&
-    //          ref.instr().getOpcode() == SCF_FUNC_INSTR;
-    // });
+    // return usesOfCategory(Module::UC_FUNC);
+    return ptr->defUse.uses().filter([](GenericOperand ref) {
+      return ref.getRef().is<InstrRef>() &&
+             ref.getRef().as<InstrRef>().getDialect() == DIALECT_SCF &&
+             ref.getRef().as<InstrRef>().getOpcode() == SCF_FUNC_INSTR;
+    });
   }
 
   void addPort(RegisterRef ref, Register::PortType portType) {
