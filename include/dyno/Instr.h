@@ -302,7 +302,6 @@ class InstrDefUse {
   using insert_hook_t = bool (*)(InstrDefUse *, OperandRef);
   using erase_hook_t = bool (*)(InstrDefUse *, DynObjRef);
 
-  const uint8_t magic = 0;
   uint16_t numDefs = 0;
   SmallVec<OperandRef, 4> refs;
   // could move existence into a bit field, and store these after InstrDefUse
@@ -518,8 +517,9 @@ template <> struct InterfaceTraits<OpcodeInfo> {
 
 class BinopInstrRef : public InstrRef {};
 
-class GenericDefUse;
 
+#if 0
+class GenericDefUse;
 class GenericOperand {
   friend class GenericDefUse;
   friend class OperandRef;
@@ -556,7 +556,6 @@ class GenericDefUse {
   using insert_hook_t = bool (*)(GenericDefUse *, GenericOperand);
   using erase_hook_t = bool (*)(GenericDefUse *, DynObjRef);
 
-  const uint8_t magic = 1;
   uint16_t numSelfUses = 0;
   SmallVec<GenericOperand, 4> refs;
 
@@ -678,6 +677,7 @@ private:
     refs.erase_unordered(it);
   }
 };
+#endif
 
 template <typename Base, uint NumCategories, auto ClassifierF>
 class CategoricalDefUse : public Base {
@@ -759,50 +759,30 @@ public:
   }
 };
 
+#if 0
 inline void GenericOperand::setLinkedPos(uint16_t pos) {
   if (auto asInstrRef = ref.dyn_as<InstrRef>())
     asInstrRef.operand(ref.getCustom())->ref.setCustom(pos);
   else
     refdDefUse().refs[ref.getCustom()].ref.setCustom(pos);
 }
+#endif
 
 inline void OperandRef::addToDefUse() const {
   assert(Operand::isDefUseOperand(getRef()));
-  uint8_t magic = *reinterpret_cast<uint8_t *>((*this)->ptr());
 
   // try to not slow down the hot path too much.
   // could also write specializations of this without dynamic dispatch
   // if ref type is known.
-  switch (magic) {
-  [[likely]] case 0:
-    (*this)->fat<InstrDefUse>()->insert(*this);
-    return;
-  case 1:
-    (*this)->fat<GenericDefUse>()->insert(GenericOperand{instrRef});
-    return;
-  default:
-    dyno_unreachable("invalid magic num");
-  }
+  (*this)->fat<InstrDefUse>()->insert(*this);
 }
 
 inline void Operand::destroy() {
   if (isDefUseOperand(ref)) {
-    uint8_t magic = *reinterpret_cast<uint8_t *>(ptr());
-
     // try to not slow down the hot path too much.
     // could also write specializations of this without dynamic dispatch
     // if ref type is known.
-    switch (magic) {
-    [[likely]] case 0:
-      fat<InstrDefUse>()->erase(ref);
-      return;
-    case 1:
-      fat<GenericDefUse>()->erase(
-          GenericOperand{FatDynObjRef<>{ref, ptr()}, ref.getCustom()});
-      return;
-    default:
-      dyno_unreachable("invalid magic num");
-    }
+    fat<InstrDefUse>()->erase(ref);
   }
 
   // maybe delete/decrement refcnt of constant operands here?

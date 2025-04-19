@@ -50,27 +50,37 @@ public:
   /*}*/
 };
 
-/*class Interfaces {*/
-/*private:*/
-/*  std::vector<void *> interfaces;*/
-/*  unsigned numDialects;*/
-/**/
-/*public:*/
-/*  Interfaces(unsigned numDialects, unsigned numInterfaces)*/
-/*      : interfaces(numInterfaces * numDialects), numDialects(numDialects) {}*/
-/**/
-/*  template <typename T>*/
-/*  void registerInterface(unsigned dialectID,*/
-/*                         InterfaceTraits<T>::DispatchT entry) {*/
-/*    using Traits = InterfaceTraits<T>;*/
-/*    interfaces[numDialects * Traits::ID + dialectID] = entry;*/
-/*  }*/
-/**/
-/*  template <typename T> InterfaceDispatch<T> get() {*/
-/*    using Traits = InterfaceTraits<T>;*/
-/*    return reinterpret_cast<Traits::DispatchT *>(*/
-/*        &interfaces[numDialects * Traits::ID]);*/
-/*  }*/
-/*};*/
+// class Interfaces {
+// private:
+//   std::vector<void *> interfaces;
+//   unsigned numDialects;
+
+// public:
+//   Interfaces(unsigned numDialects, unsigned numInterfaces)
+//       : interfaces(numInterfaces * numDialects), numDialects(numDialects) {}
+
+//   template <typename T>
+//   void registerInterface(unsigned dialectID,
+//                          InterfaceTraits<T>::DispatchT entry) {
+//     using Traits = InterfaceTraits<T>;
+//     interfaces[numDialects * Traits::ID + dialectID] = entry;
+//   }
+
+//   template <typename T> InterfaceDispatch<T> get() {
+//     using Traits = InterfaceTraits<T>;
+//     return reinterpret_cast<Traits::DispatchT *>(
+//         &interfaces[numDialects * Traits::ID]);
+//   }
+// };
+
+// load from 64k lookup table of dialect + type
+// InterfaceTraits for type tells you what to do with the value
+
+// e.g. resolving arbitrary DynObjRef to FatDynObjRef
+// dialect + type lookup gives you ptr
+// ptr must implement operator [] (you don't know the type obj store type but
+// should still be generic...)
+// i guess you need to define at runtime what type of interface you registered
+// for type via interface traits.
 
 } // namespace dyno

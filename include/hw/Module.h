@@ -3,7 +3,6 @@
 #include "dyno/Instr.h"
 #include "dyno/Obj.h"
 #include "hw/IDs.h"
-#include "hw/Process.h"
 #include "hw/Register.h"
 #include "scf/IDs.h"
 #include "support/SmallVec.h"
@@ -20,17 +19,16 @@ public:
   enum UseClass { UC_DEF, UC_REG, UC_PROC, UC_FUNC, UC_COUNT };
 
 private:
-  static uint classifyUse(GenericOperand ref) {
+  static uint classifyUse(OperandRef ref) {
 
-    if (ref.getRef().is<ProcessRef>())
-      return UC_PROC;
-
-    auto instrRef = ref.getRef().as<InstrRef>();
+    auto instrRef = ref.instr();
 
     uint32_t type = (instrRef.getDialect() << 16) | instrRef.getOpcode();
     switch (type) {
     case (DIALECT_RTL << 16 | HW_MODULE_INSTR):
       return UC_DEF;
+    case (DIALECT_RTL << 16 | HW_PROCESS_INSTR):
+      return UC_PROC;
     case (DIALECT_RTL << 16 | HW_REGISTER_INSTR):
       return UC_REG;
     case (DIALECT_SCF << 16 | SCF_FUNC_INSTR):
@@ -96,17 +94,14 @@ private:
   }*/
 
 public:
-  CategoricalDefUse<GenericDefUse, UC_COUNT, classifyUse> defUse;
+  CategoricalDefUse<InstrDefUse, UC_COUNT, classifyUse> defUse;
   std::string name;
   // std::array<uint32_t, UC_COUNT> catBounds = {};
 
   // todo: fast ordered (inline linked list) smallvec wrapper?
   SmallVec<FatObjRef<Register>, 8> ports;
 
-  Module(DynObjRef, std::string name) : name(name) {
-    // defUse.setInsertHook(insertHook);
-    // defUse.setEraseHook(eraseHook);
-  }
+  Module(DynObjRef, std::string name) : name(name) {}
 };
 
 class ModuleRef : public FatObjRef<Module> {
