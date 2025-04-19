@@ -37,68 +37,11 @@ private:
       dyno_unreachable("type cannot use module");
     }
   }
-  /*static uint classifyIdx(Module *mod, uint idx) {
-    // i bet this is faster than binary search
-    for (size_t i = 0; i < UC_COUNT; i++)
-      if (mod->catBounds[i] > idx)
-        return i;
-    dyno_unreachable("not classified");
-  }
-  static uint classifyIdxBinSearch(Module *mod, uint idx) {
-    size_t lb = 0;
-    size_t ub = UC_COUNT - 1;
-
-    while (true) {
-      size_t center = lb + (ub - lb) / 2;
-
-      size_t lower = (center == 0) ? 0 : mod->catBounds[center - 1];
-      size_t upper = mod->catBounds[center];
-
-      if (idx < lower)
-        ub = center;
-      else if (idx >= upper)
-        lb = center + 1;
-      else
-        return center;
-    }
-  }
-  static bool insertHook(InstrDefUse *self, OperandRef ref) {
-    uint useClassID = ref.isDef() ? UC_DEF : classifyUse(ref.instr());
-    Module *asModule = reinterpret_cast<Module *>(self);
-    // O(#categories) insertion, keeps inter-category order but not intra (base
-    // case of this for use+def is implemented in instrDefUse)
-    for (uint id = UC_COUNT - 1; id != useClassID; id--) {
-      self->manual_move(asModule->catBounds[id - 1], asModule->catBounds[id]);
-      asModule->catBounds[id]++;
-    }
-    self->manual_insert(asModule->catBounds[useClassID]++, ref);
-    return true;
-  }
-  static bool eraseHook(InstrDefUse *self, DynObjRef ref) {
-    Module *asModule = reinterpret_cast<Module *>(self);
-
-    uint useClassID = classifyIdx(asModule, ref.getCustom());
-    // move last ref in same category into slot we're freeing
-    self->manual_move(asModule->catBounds[useClassID] - 1, ref.getCustom());
-    for (uint id = useClassID; id < UC_COUNT - 1; id++) {
-      // move last of next category into last of current category (now first of
-      // next category)
-      self->manual_move(asModule->catBounds[id + 1] - 1,
-                        asModule->catBounds[id] - 1);
-      asModule->catBounds[id]--;
-    }
-
-    self->manual_pop_back();
-    asModule->catBounds[UC_COUNT - 1]--;
-    return true;
-  }*/
 
 public:
   CategoricalDefUse<InstrDefUse, UC_COUNT, classifyUse> defUse;
   std::string name;
-  // std::array<uint32_t, UC_COUNT> catBounds = {};
 
-  // todo: fast ordered (inline linked list) smallvec wrapper?
   SmallVec<FatObjRef<Register>, 8> ports;
 
   Module(DynObjRef, std::string name) : name(name) {}
@@ -108,7 +51,6 @@ class ModuleRef : public FatObjRef<Module> {
 public:
   using FatObjRef<Module>::FatObjRef;
   ModuleRef(const FatObjRef<Module> ref) : FatObjRef<Module>(ref) {}
-  // InstrRef getModuleInstr() { return ptr->defUse.getSingleDef()->instr(); }
 
 private:
   auto usesOfCategory(Module::UseClass uc) {
@@ -120,24 +62,12 @@ private:
 public:
   auto procs() {
     return usesOfCategory(Module::UC_PROC);
-    // return ptr->defUse.uses().filter(
-    //     [](GenericOperand ref) { return ref.getRef().is<ProcessRef>(); });
   }
   auto regs() {
     return usesOfCategory(Module::UC_REG);
-    // return ptr->defUse.uses().filter([](GenericOperand ref) {
-    //   return ref.getRef().is<InstrRef>() &&
-    //          ref.getRef().as<InstrRef>().getDialect() == DIALECT_RTL &&
-    //          ref.getRef().as<InstrRef>().getOpcode() == HW_REGISTER_INSTR;
-    // });
   }
   auto funcs() {
     return usesOfCategory(Module::UC_FUNC);
-    // return ptr->defUse.uses().filter([](GenericOperand ref) {
-    //   return ref.getRef().is<InstrRef>() &&
-    //          ref.getRef().as<InstrRef>().getDialect() == DIALECT_SCF &&
-    //          ref.getRef().as<InstrRef>().getOpcode() == SCF_FUNC_INSTR;
-    // });
   }
 
   void addPort(RegisterRef ref, Register::PortType portType) {
