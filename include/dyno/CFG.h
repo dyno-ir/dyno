@@ -4,7 +4,6 @@
 #include "dyno/NewDeleteObjStore.h"
 #include "dyno/Obj.h"
 #include "dyno/ObjMap.h"
-#include "hw/Process.h"
 #include "support/RTTI.h"
 #include <cassert>
 
@@ -201,10 +200,7 @@ public:
 
   auto def() { return ptr->defUse.getSingleDef(); }
   auto defI() { return ptr->defUse.getSingleDef()->instr(); }
-
-  //auto parentI() { return parent()->defUse.getSingleDef()->instr(); }
-  // todo: do not ref hw stuff here, make hw wrapper
-  ProcessRef parent() { return defI().operand(1)->as<ProcessRef>(); }
+  auto parent() { return defI().operand(1)->fat(); }
 };
 
 template <bool Ordered>

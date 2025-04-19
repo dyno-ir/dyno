@@ -1,5 +1,6 @@
 #pragma once
 
+#include "dyno/CFG.h"
 #include "dyno/Instr.h"
 #include "dyno/Obj.h"
 #include "hw/IDs.h"
@@ -18,7 +19,11 @@ public:
   using FatObjRef<Process>::FatObjRef;
   ProcessRef(const FatObjRef<Process> ref) : FatObjRef<Process>(ref) {}
 
-  auto blocks() { return ptr->defUse.uses(); }
+  auto blocks() {
+    return ptr->defUse.uses().transform([](size_t i, const OperandRef &ref) {
+      return ref.instr().def()->as<BlockRef>();
+    });
+  }
 };
 
 template <> struct ObjTraits<Process> {

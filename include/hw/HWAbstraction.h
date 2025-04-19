@@ -338,16 +338,14 @@ public:
       std::cout << "):\n";
 
       for (auto reg : moduleRef.regs()) {
-        auto asRegRef = reg.instr().def()->as<RegisterRef>();
-        if (!asRegRef.isPort())
-          refPrinter.introduceRef(asRegRef);
+        if (!reg.isPort())
+          refPrinter.introduceRef(reg);
       }
 
       for (auto func : moduleRef.funcs()) {
-        auto asFuncRef = FuncInstrRef{func.instr()};
-        std::cout << "func(" << asFuncRef.def().getRef().getObjID() << "):\n";
+        std::cout << "func(" << func.def().getRef().getObjID() << "):\n";
 
-        for (auto block : asFuncRef.blocks()) {
+        for (auto block : func.blocks()) {
           auto blockRef = block.instr().def()->as<BlockRef>();
           std::cout << "block(" << blockRef.getObjID() << "):\n";
 
@@ -358,13 +356,11 @@ public:
       }
 
       for (auto proc : moduleRef.procs()) {
-        auto procRef = proc.instr().def()->as<ProcessRef>();
-        std::cout << "proc(" << procRef.getObjID() << "):\n";
-        for (auto block : procRef.blocks()) {
-          auto blockRef = block.instr().def()->as<BlockRef>();
-          std::cout << "block(" << blockRef.getObjID() << "):\n";
+        std::cout << "proc(" << proc.getObjID() << "):\n";
+        for (auto block : proc.blocks()) {
+          std::cout << "block(" << block.getObjID() << "):\n";
 
-          for (auto insn = blockRef.begin(); insn != blockRef.end(); insn++) {
+          for (auto insn = block.begin(); insn != block.end(); insn++) {
             instrPrinter.print(*insn);
           }
         }

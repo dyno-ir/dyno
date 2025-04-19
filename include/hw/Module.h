@@ -3,7 +3,9 @@
 #include "dyno/Instr.h"
 #include "dyno/Obj.h"
 #include "hw/IDs.h"
+#include "hw/Process.h"
 #include "hw/Register.h"
+#include "scf/Function.h"
 #include "scf/IDs.h"
 #include "support/SmallVec.h"
 #include "support/Utility.h"
@@ -52,22 +54,25 @@ public:
   using FatObjRef<Module>::FatObjRef;
   ModuleRef(const FatObjRef<Module> ref) : FatObjRef<Module>(ref) {}
 
-private:
-  auto usesOfCategory(Module::UseClass uc) {
-    return Range{ptr->defUse.begin() +
-                     ((uc == 0) ? 0 : ptr->defUse.catBounds[uc - 1]),
-                 ptr->defUse.begin() + ptr->defUse.catBounds[uc]};
-  }
-
 public:
   auto procs() {
-    return usesOfCategory(Module::UC_PROC);
+    return ptr->defUse.usesOfCategory(Module::UC_PROC)
+        .transform([](size_t i, const OperandRef &OpRef) {
+          return OpRef.instr().def()->as<ProcessRef>();
+        });
   }
   auto regs() {
-    return usesOfCategory(Module::UC_REG);
+    return ptr->defUse.usesOfCategory(Module::UC_REG)
+        .transform([](size_t i, const OperandRef &OpRef) {
+          return OpRef.instr().def()->as<RegisterRef>();
+        });
   }
   auto funcs() {
-    return usesOfCategory(Module::UC_FUNC);
+    return ptr->defUse.usesOfCategory(Module::UC_FUNC)
+        .transform([](size_t i, const OperandRef &OpRef) {
+          return FuncInstrRef{OpRef.instr()};
+        });
+    ;
   }
 
   void addPort(RegisterRef ref, Register::PortType portType) {

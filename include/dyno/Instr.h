@@ -37,6 +37,10 @@ class Operand : public RTTIUtilMixin<Operand> {
   static inline bool isDefUseOperand(DynObjRef ref) {
     return ref.getTyID() & bit_mask_msb<TyID::num_t>();
   }
+  template <typename T = void> FatDynObjRef<T> customFat() const {
+    auto ptr = custom.as<T *>();
+    return {ref, *ptr};
+  }
 
 public:
   Operand(const Operand &) = delete;
@@ -45,11 +49,7 @@ public:
   Operand &operator=(Operand &&) = delete;
 
   template <typename T = void> FatDynObjRef<T> fat() const {
-    auto ptr = custom.as<T *>();
-    return {ref, *ptr};
-  }
-  template <typename T = void> FatDynObjRef<T> cleanFat() const {
-    auto f = fat<T>();
+    auto f = customFat<T>();
     if (isDefUseOperand(ref))
       f.clearCustom();
     return f;
@@ -77,10 +77,10 @@ public:
 
   // we need this so is_impl functions can take this as an arg (todo: in
   // OperandRef)
-  operator FatDynObjRef<>() const { return cleanFat(); }
+  operator FatDynObjRef<>() const { return fat(); }
   // for as<>
   template <typename T> explicit operator T() const {
-    return static_cast<T>(cleanFat());
+    return static_cast<T>(fat());
   }
 };
 static_assert(sizeof(Operand) == 16);
@@ -167,7 +167,7 @@ public:
 
   InstrDefUse &defUse() {
     assert(hasDefUse());
-    return *(*this)->fat<InstrDefUse>();
+    return *(*this)->customFat<InstrDefUse>();
   }
 
   OperandRef &operator++() {
@@ -591,6 +591,11 @@ public:
     self->catBounds[NumCategories - 1]--;
     return true;
   }
+
+  auto usesOfCategory(uint uc) {
+    return Range{this->begin() + ((uc == 0) ? 0 : catBounds[uc - 1]),
+                 this->begin() + catBounds[uc]};
+  }
 };
 
 #if 0
@@ -608,7 +613,7 @@ inline void OperandRef::addToDefUse() const {
   // try to not slow down the hot path too much.
   // could also write specializations of this without dynamic dispatch
   // if ref type is known.
-  (*this)->fat<InstrDefUse>()->insert(*this);
+  (*this)->customFat<InstrDefUse>()->insert(*this);
 }
 
 inline void Operand::destroy() {
@@ -616,7 +621,7 @@ inline void Operand::destroy() {
     // try to not slow down the hot path too much.
     // could also write specializations of this without dynamic dispatch
     // if ref type is known.
-    fat<InstrDefUse>()->erase(ref);
+    customFat<InstrDefUse>()->erase(ref);
   }
 
   // maybe delete/decrement refcnt of constant operands here?

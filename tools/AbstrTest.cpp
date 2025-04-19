@@ -20,7 +20,7 @@ int main()
 
 
     auto proc = ctx.createProcess(mod);
-    auto block = proc.blocks().begin()->instr().def()->as<BlockRef>();
+    auto block = *proc.blocks().begin();
     HWInstrBuilder build{ctx, block.begin()};
     auto add1 = build.buildAdd(build.buildConst(32, 20), build.buildConst(32, 21));
     auto add2 = build.buildAdd(add1.defW(), build.buildConst(32, 1));
@@ -29,7 +29,7 @@ int main()
 
 
     auto proc2 = ctx.createProcess(mod);
-    auto block2 = proc2.blocks().begin()->instr().def()->as<BlockRef>();
+    auto block2 = *proc2.blocks().begin();
 
     build.setInsertPoint(block2.begin());
     auto load = build.buildLoad(reg);
@@ -52,7 +52,7 @@ int main()
     //endIt.erase();
 
 
-    auto block3 = ctx.createProcess(mod).blocks().begin()->instr().def()->as<BlockRef>();
+    auto block3 = *ctx.createProcess(mod).blocks().begin();
     build.setInsertPoint(block3.begin());
     auto whileInstr = build.buildWhile(build.buildConst(32, 128));
     build.setInsertPoint(whileInstr.getCondBlock().begin());
