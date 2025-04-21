@@ -19,6 +19,11 @@ public:
   SmallVec()
       : SmallVecImpl<T>(std::launder(reinterpret_cast<T *>(storage.storage)),
                         N) {}
+  SmallVec(size_t size)
+      : SmallVecImpl<T>(std::launder(reinterpret_cast<T *>(storage.storage)),
+                        N) {
+    this->resize(size);
+  }
 };
 
 template <typename T> class SmallVecImpl {
@@ -91,6 +96,28 @@ public:
     sz = 0;
   }
 
+  void resize(size_type n) {
+    if (n < sz) {
+      std::destroy(begin() + n, end());
+    }
+    else if (n > sz) {
+      reserve(n);
+    }
+    sz = n;
+  }
+
+  void reserve(size_type n) {
+    if (n <= cap)
+      return;
+    assert(cap > 0);
+
+    T *newArr = reinterpret_cast<T *>(::operator new[](n * sizeof(T)));
+    std::uninitialized_move(begin(), end(), newArr);
+    destroy();
+    arr = newArr;
+    cap = n;
+  }
+
   bool isSmall() { return arr == getInlineArrPtr(); }
 
   size_type size() const { return sz; }
@@ -144,4 +171,7 @@ public:
 
   iterator begin() { return arr; }
   iterator end() { return arr + sz; }
+
+  const iterator begin() const { return arr; }
+  const iterator end() const { return arr + sz; }
 };

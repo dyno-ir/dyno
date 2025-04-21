@@ -281,7 +281,7 @@ public:
   ConstantRef buildConst(uint bits, uint64_t value) {
     // still quite problematic, this constant is never deleted.
     // Could do unique_ptr or shared_ptr style implementation for safety.
-    return ConstantBuilder{ctx.getConstants()}.build(bits, value);
+    return ConstantBuilder{ctx.getConstants()}.val(bits, value);
   }
 
   void setInsertPoint(BlockRef_iterator<true> it) { insert = it; }

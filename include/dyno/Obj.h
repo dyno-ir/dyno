@@ -73,6 +73,7 @@ protected:
   ObjID obj;
 
   template <typename FieldT> FieldT customField() { return FieldT{custom}; }
+  template <typename FieldT> const FieldT customField() const { return FieldT{const_cast<uint16_t&>(custom)}; }
 
 public:
   template <typename T> static DynObjRef ofTy() {
@@ -229,10 +230,12 @@ template <typename T> struct ObjTraits {
 template <typename Derived, typename T> class TrailingObjArr {
 private:
   Derived &derived() { return static_cast<Derived &>(*this); }
+  const Derived &derived() const { return static_cast<const Derived &>(*this); }
 
 protected:
   TrailingObjArr() { static_assert(alignof(T) <= alignof(Derived)); }
   T *trailing() { return reinterpret_cast<T *>(&derived() + 1); }
+  const T *trailing() const { return reinterpret_cast<const T *>(&derived() + 1); }
 
 public:
   static constexpr size_t getAllocSize(size_t n) {

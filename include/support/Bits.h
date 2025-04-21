@@ -36,10 +36,14 @@ template <typename T> constexpr T bit_mask_nbits(unsigned nbits) {
   return (T(1) << nbits) - 1;
 }
 
+template <typename T> constexpr T bit_mask_ms_nbits(unsigned nbits) {
+  return bit_mask_ones<T>(nbits) << (bit_mask_sz<T> - nbits);
+}
+
 template <typename T> constexpr unsigned clog2(T val) {
   if (val == 0)
     return 0;
-  return bit_mask_sz<T> - std::countl_zero(val - 1);
+  return bit_mask_sz<T> - std::countl_zero(val);
 }
 
 template <typename NumT, unsigned N, unsigned Pos> class BitField {
@@ -65,9 +69,9 @@ public:
     return *this;
   }
 
-  operator num_t() { return get(); }
+  operator num_t() const { return get(); }
 
-  num_t get() { return (num & mask_ones) >> pos; }
+  num_t get() const { return (num & mask_ones) >> pos; }
 
   void clr() { num &= mask_zeros; }
 
