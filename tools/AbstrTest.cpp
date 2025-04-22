@@ -68,11 +68,12 @@ int main() {
   build.setInsertPoint(func.getBlock().begin());
   auto param = build.buildFuncParam(func.func());
   auto ret =
-      build.buildFuncReturn(func.func(), param.defW(), build.buildConst(32, 1));
+      build.buildFuncReturn(func.func(), param.defW(), build.buildConst(64, 1UL << 40));
   build.buildFuncReturn(func.func(), param.defW(),
                         ConstantBuilder{ctx.getConstants()}
                             .add(ret.operand(2)->as<ConstantRef>())
                             .add(1)
+                            .add(-1)
                             .get());
 
   HWPrinter print;

@@ -7,6 +7,7 @@
 #include <dyno/NewDeleteObjStore.h>
 #include <dyno/Obj.h>
 #include <span>
+#include <unordered_map>
 
 namespace dyno {
 
@@ -16,7 +17,9 @@ class ConstantBuilder;
 constexpr size_t BigIntExtendBits = 2;
 
 class BigInt {
+  friend class Constant;
   friend class ConstantBuilder;
+  friend class ConstantStore;
   SmallVec<uint32_t, 4> words;
   uint32_t numBits;
   uint8_t extend;
@@ -79,16 +82,21 @@ private:
     return num;
   }
 
-  void normalize() {
-    uint32_t storedBits = getNumWords() * bit_mask_sz<uint32_t>;
-    // only in this case do we have a chance to reform extend, otherwise keep
-    // using existing
-    if (storedBits >= numBits) {
-      extend = words.back() & bit_mask_ms_nbits<uint32_t>(BigIntExtendBits);
-    }
+  void prune() {
     uint32_t extendMask = repeat_extend(extend);
     while (words.size() != 1 && words.back() == extendMask)
       words.pop_back();
+  }
+
+  void normalize() {
+    if (getNumWords() * bit_mask_sz<uint32_t> < numBits)
+      prune();
+
+    // try to find new extend
+    if (getNumWords() * bit_mask_sz<uint32_t> >= numBits) {
+      extend = words.back() & bit_mask_ms_nbits<uint32_t>(BigIntExtendBits);
+      prune();
+    }
   }
 
   template <auto OpFunc, typename T0, typename T1>
@@ -139,6 +147,19 @@ private:
     out.numBits = maxNumBits;
     out.normalize();
   }
+
+  template <typename T>
+  friend bool operator==(const BigInt &lhs, const T &rhs) {
+    if (!(lhs.getNumBits() == rhs.getNumBits() &&
+          lhs.getNumWords() == rhs.getNumWords() &&
+          lhs.getExtend() == rhs.getExtend()))
+      return false;
+
+    for (size_t i = 0; i < lhs.getNumWords(); i++)
+      if (lhs.getWords()[i] != rhs.getWords()[i])
+        return false;
+    return true;
+  }
 };
 
 class alignas(uint64_t) Constant : public TrailingObjArr<Constant, uint32_t> {
@@ -150,10 +171,14 @@ class alignas(uint64_t) Constant : public TrailingObjArr<Constant, uint32_t> {
   unsigned numWords;
 
 public:
-  Constant(DynObjRef ref, unsigned numWords, unsigned numBits, unsigned extend)
-      : numBits(numBits),
-        numWords((numWords & ~bit_mask_ms_nbits<unsigned>(BigIntExtendBits)) |
-                 extend << (bit_mask_sz<unsigned> - BigIntExtendBits)) {}
+  Constant(DynObjRef ref, size_t sz, const BigInt &bigInt)
+      : numBits(bigInt.getNumBits()),
+        numWords((bigInt.getNumWords() &
+                  ~bit_mask_ms_nbits<unsigned>(BigIntExtendBits)) |
+                 bigInt.getExtend()
+                     << (bit_mask_sz<unsigned> - BigIntExtendBits)) {
+    std::copy(bigInt.getWords().begin(), bigInt.getWords().end(), trailing());
+  }
 
   Constant(const Constant &) = delete;
   Constant(Constant &&) = delete;
@@ -169,8 +194,6 @@ private:
   }
 };
 static_assert(TrailingObj<Constant>);
-
-using ConstantStore = NewDeleteObjStore<Constant>;
 
 class ConstantRef : public FatDynObjRef<Constant> {
   friend class ConstantBuilder;
@@ -230,11 +253,58 @@ public:
     return obj.num;
   }
 
-  friend std::ostream &operator<<(std::ostream &os, const ConstantRef &self) {}
-
+  // friend std::ostream &operator<<(std::ostream &os, const ConstantRef &self) {}
   // public:
   //   friend std::string to_string(ConstantRef const &self) {
   //   }
+};
+
+class ConstantStore {
+  NewDeleteObjStore<Constant> store;
+
+  // Just using hash as a key rather than the Constant itself. We want to do the
+  // full key compare part manually so that we can compare with BigInt rather
+  // than Constant.
+  std::unordered_multimap<uint32_t, ObjRef<Constant>> map;
+
+public:
+  uint32_t hash(uint32_t a) {
+    a = (a ^ 61) ^ (a >> 16);
+    a = a + (a << 3);
+    a = a ^ (a >> 4);
+    a = a * 0x27d4eb2d;
+    a = a ^ (a >> 15);
+    return a;
+  }
+
+  template <typename T> uint32_t constantHash(const T &constant) {
+    uint32_t acc = 0;
+    acc ^= hash(constant.getExtend());
+    acc ^= hash(constant.getNumBits());
+    acc ^= hash(constant.getNumWords());
+    for (const auto word : constant.getWords())
+      acc ^= hash(word);
+    return acc;
+  }
+
+  ConstantRef findOrInsert(const BigInt &bigInt) {
+    uint32_t hash = constantHash(bigInt);
+    for (auto [it, rangeEnd] = map.equal_range(hash); it != rangeEnd; ++it) {
+      auto ref = store.resolve(it->second);
+      if (bigInt == ConstantRef{ref})
+        return ref;
+    }
+
+    auto ref = store.create(bigInt.getNumWords(), bigInt);
+    map.insert(std::make_pair(hash, ref));
+    return ref;
+  }
+
+  Constant &operator[](ObjRef<Constant> ref) { return store[ref]; }
+  void destroy(FatObjRef<Constant> ref) { return store.destroy(ref); }
+  FatObjRef<Constant> resolve(ObjRef<Constant> ref) {
+    return store.resolve(ref);
+  }
 };
 
 class ConstantBuilder {
@@ -262,7 +332,8 @@ public:
     if (cur.getNumWords() == 1 &&
         cur.getNumBits() < (1ULL << ConstantRef::NBits::size))
       return ConstantRef{cur.getNumBits(), cur.words[0], cur.extend};
-    dyno_unreachable("unimplemented");
+
+    return store.findOrInsert(cur);
   }
 
   operator ConstantRef() { return get(); }
