@@ -6,6 +6,7 @@
 #include <dyno/IDs.h>
 #include <dyno/NewDeleteObjStore.h>
 #include <dyno/Obj.h>
+#include <iomanip>
 #include <span>
 #include <unordered_map>
 
@@ -15,6 +16,8 @@ class ConstantRef;
 class ConstantBuilder;
 
 constexpr size_t BigIntExtendBits = 2;
+constexpr size_t WordBits = sizeof(uint32_t) * 8;
+constexpr size_t WordBitsM1 = WordBits - 1;
 
 class BigInt {
   friend class Constant;
@@ -41,13 +44,41 @@ public:
       return __builtin_addc(lhs, rhs, cin, cout);
     }>(out, lhs, rhs);
   }
+  template <typename T0, typename T1>
+  static void subOp(BigInt &out, const T0 &lhs, const T1 &rhs) {
+    return linearOp<[](unsigned lhs, unsigned rhs, unsigned cin,
+                       unsigned *cout) {
+      return __builtin_subc(lhs, rhs, cin, cout);
+    }>(out, lhs, rhs);
+  }
+  template <typename T0, typename T1>
+  static void andOp(BigInt &out, const T0 &lhs, const T1 &rhs) {
+    return linearOp<[](unsigned lhs, unsigned rhs,
+                       [[maybe_unused]] unsigned cin,
+                       [[maybe_unused]] unsigned *cout) { return lhs & rhs; }>(
+        out, lhs, rhs);
+  }
+  template <typename T0, typename T1>
+  static void orOp(BigInt &out, const T0 &lhs, const T1 &rhs) {
+    return linearOp<[](unsigned lhs, unsigned rhs,
+                       [[maybe_unused]] unsigned cin,
+                       [[maybe_unused]] unsigned *cout) { return lhs | rhs; }>(
+        out, lhs, rhs);
+  }
+  template <typename T0, typename T1>
+  static void xorOp(BigInt &out, const T0 &lhs, const T1 &rhs) {
+    return linearOp<[](unsigned lhs, unsigned rhs,
+                       [[maybe_unused]] unsigned cin,
+                       [[maybe_unused]] unsigned *cout) { return lhs ^ rhs; }>(
+        out, lhs, rhs);
+  }
 
   void set(uint64_t val, unsigned bits) {
-    if (bits <= 32)
+    if (bits <= WordBits)
       return set((uint32_t)val, bits);
     words.resize(2);
     words[0] = val;
-    words[1] = val >> 32;
+    words[1] = val >> WordBits;
     numBits = bits;
     normalize();
   }
@@ -59,20 +90,108 @@ public:
   void setPruned(uint64_t val) {
     unsigned bits = clog2(val);
     numBits = bits;
-    words.resize(bits <= 32 ? 1 : 2);
+    words.resize(bits <= WordBits ? 1 : 2);
     words[0] = val;
     if (words.size() == 2) {
-      words[1] = val >> 32;
+      words[1] = val >> WordBits;
       normalize();
     }
   }
   uint32_t getNumBits() const { return numBits; }
 
+  void setExtend(uint8_t extend) { this->extend = extend & 3; }
+
+  template <typename T0>
+  static void shlOp(BigInt &out, const T0 &lhs, uint32_t rhs) {
+    uint32_t shamtWords = rhs / WordBits;
+    uint32_t shamtRem = rhs % WordBits;
+    uint8_t oldExtend = lhs.extend;
+    if ((rhs & 1) && (out.extend == 2 || out.extend == 3))
+      out.extend = ~oldExtend;
+    else
+      out.extend = oldExtend;
+
+    auto originalNumWords = lhs.getNumWords();
+
+    out.words.resize(
+        std::min(originalNumWords + ((rhs + WordBitsM1) / WordBits),
+                 (lhs.getNumBits() + WordBitsM1) / WordBits));
+
+    for (ssize_t i = out.getNumWords() - 1; i >= 0; i--) {
+      ssize_t idxHigh = i - shamtWords;
+      ssize_t idxLow = i - (shamtWords + 1);
+
+      uint32_t low;
+      if (idxLow < 0)
+        low = 0;
+      else if (idxLow >= originalNumWords)
+        low = repeatExtend(oldExtend);
+      else
+        low = lhs.getWords()[idxLow];
+
+      uint32_t high;
+      if (idxHigh < 0)
+        high = 0;
+      else if (idxHigh >= originalNumWords)
+        high = repeatExtend(oldExtend);
+      else
+        high = lhs.getWords()[idxHigh];
+
+      out.words[i] = (high << shamtRem) |
+                     ((shamtRem == 0) ? 0 : (low >> (WordBits - shamtRem)));
+    }
+    out.normalize();
+  }
+
+  template <typename T>
+  friend bool operator==(const BigInt &lhs, const T &rhs) {
+    if (!(lhs.getNumBits() == rhs.getNumBits() &&
+          lhs.getNumWords() == rhs.getNumWords() &&
+          lhs.getExtend() == rhs.getExtend()))
+      return false;
+
+    for (size_t i = 0; i < lhs.getNumWords(); i++)
+      if (lhs.getWords()[i] != rhs.getWords()[i])
+        return false;
+    return true;
+  }
+
+  friend std::ostream &operator<<(std::ostream &os, const BigInt &self) {
+    ssize_t hexDigits = (self.numBits + 3) / 4;
+    ssize_t wordHexDigits = self.getNumWords() * 8;
+
+    uint32_t extend = repeatExtend(self.extend) & 0xF;
+
+    auto toHex = [](int n) -> char {
+      return n > 9 ? (n + 'a' - 10) : (n + '0');
+    };
+
+    ssize_t extendDigits = hexDigits - wordHexDigits;
+    for (ssize_t i = 0; i < extendDigits; i++) {
+      size_t digit = hexDigits - i - 1;
+      if (i == 0 && self.numBits % 4 != 0)
+        os << toHex(extend & ((1 << (self.numBits % 4)) - 1));
+      else
+        os << toHex(extend);
+      if (digit % 8 == 0)
+        os << '\'';
+    }
+
+    auto flags = os.flags();
+    for (ssize_t i = self.getNumWords() - 1; i >= 0; i--) {
+      os << std::hex << std::setfill('0') << std::setw(8) << self.getWords()[i];
+      if (i != 0)
+        os << '\'';
+    }
+    os.flags(flags);
+    return os;
+  }
+
 private:
   BigInt(uint32_t numBits, uint32_t numWords, uint32_t extend)
       : words(numWords), numBits(numBits), extend(extend) {}
 
-  static constexpr unsigned repeat_extend(uint8_t num) {
+  static constexpr unsigned repeatExtend(uint32_t num) {
     unsigned fact = BigIntExtendBits;
     num &= bit_mask_ones<unsigned>(BigIntExtendBits);
     while (fact != bit_mask_sz<unsigned>) {
@@ -83,7 +202,7 @@ private:
   }
 
   void prune() {
-    uint32_t extendMask = repeat_extend(extend);
+    uint32_t extendMask = repeatExtend(extend);
     while (words.size() != 1 && words.back() == extendMask)
       words.pop_back();
   }
@@ -104,7 +223,6 @@ private:
 
     // assert(lhs.getNumBits() == rhs.getNumBits());
     unsigned maxNumBits = std::max(lhs.getNumBits(), rhs.getNumBits());
-
     unsigned numWords = std::max(lhs.getNumWords(), rhs.getNumWords());
     unsigned minNumWords = std::max(lhs.getNumWords(), rhs.getNumWords());
 
@@ -131,12 +249,12 @@ private:
       unsigned lhsVal, rhsVal;
 
       if (i >= lhs.getNumWords())
-        lhsVal = repeat_extend(lhs.getExtend());
+        lhsVal = repeatExtend(lhs.getExtend());
       else
         lhsVal = lhs.getWords()[i];
 
       if (i >= rhs.getNumWords())
-        rhsVal = repeat_extend(rhs.getExtend());
+        rhsVal = repeatExtend(rhs.getExtend());
       else
         rhsVal = rhs.getWords()[i];
 
@@ -146,19 +264,6 @@ private:
     out.extend = extend;
     out.numBits = maxNumBits;
     out.normalize();
-  }
-
-  template <typename T>
-  friend bool operator==(const BigInt &lhs, const T &rhs) {
-    if (!(lhs.getNumBits() == rhs.getNumBits() &&
-          lhs.getNumWords() == rhs.getNumWords() &&
-          lhs.getExtend() == rhs.getExtend()))
-      return false;
-
-    for (size_t i = 0; i < lhs.getNumWords(); i++)
-      if (lhs.getWords()[i] != rhs.getWords()[i])
-        return false;
-    return true;
   }
 };
 
@@ -253,8 +358,8 @@ public:
     return obj.num;
   }
 
-  // friend std::ostream &operator<<(std::ostream &os, const ConstantRef &self) {}
-  // public:
+  // friend std::ostream &operator<<(std::ostream &os, const ConstantRef &self)
+  // {} public:
   //   friend std::string to_string(ConstantRef const &self) {
   //   }
 };
@@ -319,12 +424,44 @@ public:
     return *this;
   }
 
-  ConstantBuilder &add(const uint64_t val) {
-    BigInt::addOp(cur, cur, BigInt{val});
-    return *this;
-  }
   ConstantBuilder &add(ConstantRef rhs) {
     BigInt::addOp(cur, cur, rhs);
+    return *this;
+  }
+  ConstantBuilder &add(BigInt rhs) {
+    BigInt::addOp(cur, cur, rhs);
+    return *this;
+  }
+  ConstantBuilder &sub(ConstantRef rhs) {
+    BigInt::subOp(cur, cur, rhs);
+    return *this;
+  }
+  ConstantBuilder &sub(BigInt rhs) {
+    BigInt::subOp(cur, cur, rhs);
+    return *this;
+  }
+  ConstantBuilder &bitAND(ConstantRef rhs) {
+    BigInt::andOp(cur, cur, rhs);
+    return *this;
+  }
+  ConstantBuilder &bitAND(BigInt rhs) {
+    BigInt::andOp(cur, cur, rhs);
+    return *this;
+  }
+  ConstantBuilder &bitOR(ConstantRef rhs) {
+    BigInt::orOp(cur, cur, rhs);
+    return *this;
+  }
+  ConstantBuilder &bitOR(BigInt rhs) {
+    BigInt::orOp(cur, cur, rhs);
+    return *this;
+  }
+  ConstantBuilder &bitXOR(ConstantRef rhs) {
+    BigInt::xorOp(cur, cur, rhs);
+    return *this;
+  }
+  ConstantBuilder &bitXOR(BigInt rhs) {
+    BigInt::xorOp(cur, cur, rhs);
     return *this;
   }
 
