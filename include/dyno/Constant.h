@@ -3,6 +3,7 @@
 #include "support/Bits.h"
 #include "support/SmallVec.h"
 #include "support/Utility.h"
+#include <algorithm>
 #include <dyno/IDs.h>
 #include <dyno/NewDeleteObjStore.h>
 #include <dyno/Obj.h>
@@ -10,6 +11,7 @@
 #include <iostream>
 #include <ostream>
 #include <span>
+#include <type_traits>
 #include <unordered_map>
 
 namespace dyno {
@@ -56,6 +58,7 @@ protected:
     return getWord(i / WordBits) & (1 << (i % WordBits));
   }
   bool getSignBit() const { return getBit(self().getNumBits()); }
+  bool isExtended() const { return self().getNumWords() != getExtNumWords(); }
 };
 
 class BigInt : public BigIntMixin<BigInt> {
@@ -152,6 +155,7 @@ public:
     uint32_t shamtWords = rhs / WordBits;
     uint32_t shamtRem = rhs % WordBits;
     uint8_t oldExtend = lhs.extend;
+    out.numBits = lhs.getNumBits();
     if ((rhs & 1) && (out.extend == 1 || out.extend == 2))
       out.extend = (~oldExtend) & bit_mask_ones<uint8_t>(BigIntExtendBits);
     else
@@ -294,6 +298,154 @@ public:
     return out;
   }
 
+  template <int Mode, typename T>
+  static void resizeOp(BigInt &out, const T &lhs, uint32_t newSize) {
+
+    auto copyIfDifferent = [&]() {
+      if (lhs.getWords().begin() != out.getWords().begin())
+        std::copy_n(lhs.getWords().begin(),
+                    std::min(lhs.getNumWords(), out.getNumWords()),
+                    out.getWords().begin());
+    };
+
+    // truncate
+    if (newSize < lhs.getNumBits()) {
+      out.words.resize(
+          std::min(lhs.getNumWords(), (newSize + WordBitsM1) / WordBits));
+      copyIfDifferent();
+      out.numBits = newSize;
+
+      // cutting of top (bits) make reveal a collapsable section
+      out.normalize();
+      return;
+    }
+
+    uint8_t newExtend;
+    if constexpr (Mode == 0)
+      newExtend = 0;
+    else if constexpr (Mode == 1)
+      newExtend = lhs.getSignBit() ? 0b11 : 0;
+    else
+      static_assert(false);
+
+    if ((newExtend == lhs.extend || !lhs.isExtended())) {
+      // as long as extend stays the same (or is freely assignable) we can
+      // extend by just changing numBits
+      out.words.resize(lhs.getNumWords());
+      copyIfDifferent();
+
+      out.numBits = newSize;
+      out.extend = newExtend;
+
+      // no need to normalize here
+      return;
+    }
+
+    // else we need to materialize lhs's extend bits
+    out.words.resize(lhs.getExtNumWords());
+    for (size_t i = lhs.getNumWords(); i < lhs.getExtNumWords(); i++)
+      out.getWords()[i] = lhs.getWord(i);
+
+    out.numBits = newSize;
+    out.extend = newExtend;
+  }
+
+  template <typename T0, typename T1>
+  static auto udivmodOp(const T0 &lhs, const T1 &rhs) {
+    const uint64_t base = 1UL << 32;
+
+    BigInt quot = BigInt::ofLen(lhs.getNumBits());
+    BigInt rem = BigInt::ofLen(rhs.getNumBits());
+
+    // todo: 64 and maybe 128 bit division fast paths.
+
+    size_t highWordIdx;
+    if (rhs.getExtend() == 0)
+      highWordIdx = rhs.getNumWords() - 1;
+    else
+      highWordIdx = rhs.getExtNumWords() - 1;
+
+    // divisor is 32 bits or less.
+    if (highWordIdx == 0) {
+      int32_t k = 0;
+      for (ssize_t i = quot.getNumWords() - 1; i >= 0; i--) {
+        // pull down one digit
+        auto t = (k * base + lhs.getWord(i));
+        // do single digit division
+        quot.words[i] = t / rhs.getWord(0);
+        // correct back
+        k = t - quot.words[i] * rhs.getWord(0);
+      }
+      rem.words[0] = k;
+
+      return std::make_pair(std::move(quot), std::move(rem));
+    }
+
+    // Normalize by shifting v left just enough so that
+    // its high-order bit is on, and shift u left the
+    // same amount. We may have to append a high-order
+    // digit on the dividend; we do that unconditionally.
+    BigInt un;
+    BigInt vn;
+
+    // Find most significant 1 bit.
+    uint32_t shamt = __builtin_clz(rhs.getWord(highWordIdx));
+    vn.resizeOp<0>(vn, rhs, (highWordIdx + 1) * 32 - shamt);
+    BigInt::shlOp(vn, vn, shamt);
+
+    BigInt::resizeOp<0>(un, lhs, lhs.getNumBits() + shamt);
+    BigInt::shlOp(un, un, shamt);
+    un.expand();
+
+    std::cout << "un = " << un << "\n";
+    std::cout << "vn = " << vn << "\n";
+
+    size_t n = vn.getExtNumWords();
+    for (ssize_t i = un.getNumWords() - 1 - n; i >= 0; i--) {
+      uint64_t t = (un.getWord(i + n) * base + un.getWord(i + n - 1));
+
+      uint64_t qhat = t / vn.getWord(n - 1);
+      uint64_t rhat = t - qhat * vn.getWord(n - 1);
+
+      while (1) {
+        if (qhat >= base ||
+            qhat * vn.getWord(n - 2) > base * rhat + un.getWord(i + n - 2)) {
+          qhat--;
+          rhat += vn.getWord(n - 1);
+          if (rhat < base) [[unlikely]]
+            continue;
+        }
+        break;
+      }
+
+      uint64_t k = 0;
+      for (size_t j = 0; j < n; j++) {
+        auto p = qhat * vn.getWord(j);
+        t = un.getWord(i + j) - k - (p & 0xFFFF'FFFF);
+        un.words[i + j] = t;
+        k = (p >> 32) - (t >> 32);
+      }
+      t = un.getWord(i + n) - k;
+      un.words[i + n] = t;
+
+      quot.words[i] = qhat;
+      if (t < 0) {
+        quot.words[i] -= 1;
+        k = 0;
+        for (size_t j = 0; j < n; j++) {
+          t = un.getWord(i + j) + vn.getWord(j) + k;
+          un.words[i + j] = t;
+          k = t >> 32;
+        }
+        un.words[i + n] += k;
+      }
+    }
+
+    BigInt::lshrOp(rem, un, shamt);
+    BigInt::resizeOp<0>(rem, rem, rhs.getNumBits());
+    return std::make_pair(std::move(quot), std::move(rem));
+  }
+
   template <typename T0>
   static void shlOp(BigInt &out, const T0 &lhs, uint32_t rhs) {
     shiftOp<true>(out, lhs, rhs);
@@ -373,13 +525,27 @@ private:
   }
 
   void normalize() {
+
     if (getNumWords() * bit_mask_sz<uint32_t> < numBits)
       prune();
     else if (getNumWords() * bit_mask_sz<uint32_t> >= numBits) {
       extend = (words.back() & bit_mask_ms_nbits<uint32_t>(BigIntExtendBits)) >>
                (bit_mask_sz<uint32_t> - BigIntExtendBits);
+      // truncate last word and fill with extend.
+      if (getNumBits() % 32 != 0) {
+        auto mask = (1 << (getNumBits() % 32)) - 1;
+        words.back() &= mask;
+        words.back() |= (~mask & repeatExtend(extend));
+      }
       prune();
     }
+  }
+
+  // opposite of normalize
+  void expand() {
+    auto oldSize = getNumWords();
+    words.resize(getExtNumWords());
+    std::fill(words.begin() + oldSize, words.end(), repeatExtend(extend));
   }
 
   template <auto OpFunc, typename T0, typename T1>
