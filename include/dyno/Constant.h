@@ -7,6 +7,8 @@
 #include <dyno/NewDeleteObjStore.h>
 #include <dyno/Obj.h>
 #include <iomanip>
+#include <iostream>
+#include <ostream>
 #include <span>
 #include <unordered_map>
 
@@ -16,17 +18,57 @@ class ConstantRef;
 class ConstantBuilder;
 
 constexpr size_t BigIntExtendBits = 2;
-constexpr size_t WordBits = sizeof(uint32_t) * 8;
-constexpr size_t WordBitsM1 = WordBits - 1;
+constexpr uint32_t WordBits = sizeof(uint32_t) * 8;
+constexpr uint32_t WordBitsM1 = WordBits - 1;
 
-class BigInt {
+template <typename Derived> class BigIntMixin {
+
+  // Base API for BigInt is getNumWords, getExtend and getWords.
+  // This is for utility functions using that API that may be shared by all
+  // implementing BigInt API.
+  Derived &self() { return *static_cast<Derived *>(this); }
+  const Derived &self() const { return *static_cast<const Derived *>(this); }
+
+protected:
+  static uint32_t bitsToWords(uint32_t bits) {
+    return (bits + WordBitsM1) / WordBits;
+  }
+  static constexpr unsigned repeatExtend(uint32_t num) {
+    unsigned fact = BigIntExtendBits;
+    num &= bit_mask_ones<unsigned>(BigIntExtendBits);
+    while (fact != bit_mask_sz<unsigned>) {
+      num |= (num << fact);
+      fact <<= 1;
+    }
+    return num;
+  }
+  uint32_t getExtNumWords() const { return bitsToWords(self().getNumBits()); }
+  uint32_t getWord(uint32_t i) const {
+    if (i > bitsToWords(self().getNumBits()))
+      dyno_unreachable("out of bounds");
+
+    if (i >= self().getNumWords())
+      return repeatExtend(self().getExtend());
+    return self().getWords()[i];
+  }
+
+  bool getBit(uint32_t i) const {
+    return getWord(i / WordBits) & (1 << (i % WordBits));
+  }
+  bool getSignBit() const { return getBit(self().getNumBits()); }
+};
+
+class BigInt : public BigIntMixin<BigInt> {
   friend class Constant;
   friend class ConstantBuilder;
   friend class ConstantStore;
+  friend class BigIntMixin;
+
   SmallVec<uint32_t, 4> words;
   uint32_t numBits;
   uint8_t extend;
 
+protected:
   unsigned getNumWords() const { return words.size(); }
   unsigned getExtend() const { return extend; }
   std::span<uint32_t> getWords() { return words; }
@@ -36,6 +78,10 @@ public:
   BigInt() : words(), numBits(0), extend(0) {}
   BigInt(uint64_t val) { setPruned(val); }
   BigInt(uint64_t val, unsigned bits) { set(val, bits); }
+
+  static BigInt ofLen(uint32_t bits) {
+    return BigInt{bits, (bits + WordBitsM1) / WordBits, 0};
+  }
 
   template <typename T0, typename T1>
   static void addOp(BigInt &out, const T0 &lhs, const T1 &rhs) {
@@ -155,8 +201,7 @@ public:
           else if (idxLow == out.words.size() - 1)
             low &= ((1 << (lhs.getNumBits()) % 32)) - 1;
         }
-      }
-      else
+      } else
         low = lhs.getWords()[idxLow];
 
       uint32_t high;
@@ -170,8 +215,7 @@ public:
           else if (idxHigh == out.words.size() - 1)
             high &= (1 << (lhs.getNumBits() % 32)) - 1;
         }
-      }
-      else
+      } else
         high = lhs.getWords()[idxHigh];
 
       if constexpr (Left) {
@@ -183,6 +227,71 @@ public:
       }
     }
     out.normalize();
+  }
+
+  template <int Mode = 0, typename T0, typename T1>
+  static BigInt mulOp(const T0 &lhs, const T1 &rhs) {
+
+    size_t resultBits;
+    switch (Mode) {
+    case 0: // trunc
+      resultBits = std::max(lhs.getNumBits(), rhs.getNumBits());
+      break;
+    case 1: // extending, unsigned
+      [[fallthrough]];
+    case 2: // extending, signed
+      resultBits = lhs.getNumBits() + rhs.getNumBits();
+      break;
+    }
+    auto out = BigInt::ofLen(resultBits);
+
+    for (size_t i = 0; i < lhs.getExtNumWords(); i++) {
+
+      uint64_t carry = 0;
+
+      for (size_t j = 0;
+           j < rhs.getExtNumWords() && (i + j) < out.getNumWords(); j++) {
+        uint32_t lhsVal = lhs.getWord(i);
+        uint32_t rhsVal = rhs.getWord(j);
+
+        uint64_t result = uint64_t(lhsVal) * rhsVal;
+
+        size_t outIdx = i + j;
+
+        uint64_t temp = result + carry + out.getWords()[outIdx];
+
+        out.getWords()[outIdx] = uint32_t(temp);
+        carry = temp >> 32;
+      }
+
+      if (size_t idx = i + rhs.getExtNumWords(); idx < out.getNumWords())
+        out.getWords()[idx] = carry;
+    }
+
+    // correct result for signed multiply
+    if constexpr (Mode == 2) {
+      if (lhs.getSignBit()) {
+        uint32_t b = 0;
+        for (size_t i = 0; i < rhs.getExtNumWords() &&
+                           i + lhs.getExtNumWords() < out.getNumWords();
+             i++) {
+          out.getWords()[i + lhs.getExtNumWords()] = __builtin_subc(
+              out.getWords()[i + lhs.getExtNumWords()], rhs.getWord(i), b, &b);
+        }
+      }
+      if (rhs.getSignBit()) {
+        uint32_t b = 0;
+        for (size_t i = 0; i < lhs.getExtNumWords() &&
+                           i + rhs.getExtNumWords() < out.getNumWords();
+             i++) {
+          out.getWords()[i + rhs.getExtNumWords()] = __builtin_subc(
+              out.getWords()[i + rhs.getExtNumWords()], lhs.getWord(i), b, &b);
+        }
+      }
+    }
+
+    out.normalize();
+    return out;
   }
 
   template <typename T0>
@@ -239,7 +348,7 @@ public:
       uint32_t word = self.getWords()[i];
       size_t width = 8;
 
-      if (i == self.getNumWords() - 1 && extendDigits <= 0) {
+      if (i == self.getNumWords() - 1 && extendDigits < 0) {
         width = (hexDigits % 8);
         word &= (1 << (self.getNumBits() % 32)) - 1;
       }
@@ -256,29 +365,19 @@ private:
   BigInt(uint32_t numBits, uint32_t numWords, uint32_t extend)
       : words(numWords), numBits(numBits), extend(extend) {}
 
-  static constexpr unsigned repeatExtend(uint32_t num) {
-    unsigned fact = BigIntExtendBits;
-    num &= bit_mask_ones<unsigned>(BigIntExtendBits);
-    while (fact != bit_mask_sz<unsigned>) {
-      num |= (num << fact);
-      fact <<= 1;
-    }
-    return num;
-  }
-
   void prune() {
     uint32_t extendMask = repeatExtend(extend);
     while (words.size() != 1 && words.back() == extendMask)
       words.pop_back();
+    words.try_to_inline();
   }
 
   void normalize() {
     if (getNumWords() * bit_mask_sz<uint32_t> < numBits)
       prune();
-
-    // try to find new extend
-    if (getNumWords() * bit_mask_sz<uint32_t> >= numBits) {
-      extend = words.back() & bit_mask_ms_nbits<uint32_t>(BigIntExtendBits);
+    else if (getNumWords() * bit_mask_sz<uint32_t> >= numBits) {
+      extend = (words.back() & bit_mask_ms_nbits<uint32_t>(BigIntExtendBits)) >>
+               (bit_mask_sz<uint32_t> - BigIntExtendBits);
       prune();
     }
   }
@@ -365,7 +464,8 @@ private:
 };
 static_assert(TrailingObj<Constant>);
 
-class ConstantRef : public FatDynObjRef<Constant> {
+class ConstantRef : public FatDynObjRef<Constant>,
+                    public BigIntMixin<ConstantRef> {
   friend class ConstantBuilder;
   using IsInline = DynObjRef::CustomField<1, 0>;
   using ExtPattern = DynObjRef::CustomField<BigIntExtendBits, 1>;
@@ -381,7 +481,7 @@ public:
   ConstantRef(unsigned n, uint32_t val, uint8_t extPattern)
       : FatDynObjRef<Constant>(DynObjRef::ofTy<Constant>()) {
     customField<IsInline>() = true;
-    customField<ExtPattern>() = 0;
+    customField<ExtPattern>() = extPattern;
     customField<NBits>() = n;
     obj = ObjID{val};
   }
