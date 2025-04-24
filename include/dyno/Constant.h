@@ -101,46 +101,103 @@ public:
 
   void setExtend(uint8_t extend) { this->extend = extend & 3; }
 
-  template <typename T0>
-  static void shlOp(BigInt &out, const T0 &lhs, uint32_t rhs) {
+  template <bool Left, bool Arith = false, typename T0>
+  static void shiftOp(BigInt &out, const T0 &lhs, uint32_t rhs) {
     uint32_t shamtWords = rhs / WordBits;
     uint32_t shamtRem = rhs % WordBits;
     uint8_t oldExtend = lhs.extend;
-    if ((rhs & 1) && (out.extend == 2 || out.extend == 3))
-      out.extend = ~oldExtend;
+    if ((rhs & 1) && (out.extend == 1 || out.extend == 2))
+      out.extend = (~oldExtend) & bit_mask_ones<uint8_t>(BigIntExtendBits);
     else
-      out.extend = oldExtend;
+      out.extend = oldExtend & bit_mask_ones<uint8_t>(BigIntExtendBits);
 
     auto originalNumWords = lhs.getNumWords();
 
-    out.words.resize(
-        std::min(originalNumWords + ((rhs + WordBitsM1) / WordBits),
-                 (lhs.getNumBits() + WordBitsM1) / WordBits));
+    if constexpr (Left)
+      out.words.resize(
+          std::min(originalNumWords + ((rhs + WordBitsM1) / WordBits),
+                   (lhs.getNumBits() + WordBitsM1) / WordBits));
+    else {
+      if (!Arith && out.extend != 0) {
+        out.words.resize((lhs.getNumBits() + WordBitsM1) / WordBits);
+        out.extend = 0;
+      }
+    }
 
-    for (ssize_t i = out.getNumWords() - 1; i >= 0; i--) {
-      ssize_t idxHigh = i - shamtWords;
-      ssize_t idxLow = i - (shamtWords + 1);
+    ssize_t lower = 0;
+    ssize_t upper = out.getNumWords();
+    ssize_t step = 1;
+    if (Left) {
+      lower = upper - 1;
+      upper = -1;
+      step = -1;
+    }
+
+    for (ssize_t i = lower; i != upper; i += step) {
+      ssize_t idxHigh;
+      ssize_t idxLow;
+      if constexpr (Left) {
+        idxHigh = i - shamtWords;
+        idxLow = i - (shamtWords + 1);
+      } else {
+        idxHigh = i + shamtWords + 1;
+        idxLow = i + shamtWords;
+      }
 
       uint32_t low;
       if (idxLow < 0)
         low = 0;
-      else if (idxLow >= originalNumWords)
+      else if (idxLow >= originalNumWords) {
         low = repeatExtend(oldExtend);
+        if constexpr (!Left && !Arith) {
+          if (idxLow >= out.words.size())
+            low = 0;
+          else if (idxLow == out.words.size() - 1)
+            low &= ((1 << (lhs.getNumBits()) % 32)) - 1;
+        }
+      }
       else
         low = lhs.getWords()[idxLow];
 
       uint32_t high;
       if (idxHigh < 0)
         high = 0;
-      else if (idxHigh >= originalNumWords)
+      else if (idxHigh >= originalNumWords) {
         high = repeatExtend(oldExtend);
+        if constexpr (!Left && !Arith) {
+          if (idxHigh >= out.words.size())
+            high = 0;
+          else if (idxHigh == out.words.size() - 1)
+            high &= (1 << (lhs.getNumBits() % 32)) - 1;
+        }
+      }
       else
         high = lhs.getWords()[idxHigh];
 
-      out.words[i] = (high << shamtRem) |
-                     ((shamtRem == 0) ? 0 : (low >> (WordBits - shamtRem)));
+      if constexpr (Left) {
+        out.words[i] = (high << shamtRem) |
+                       ((shamtRem == 0) ? 0 : (low >> (WordBits - shamtRem)));
+      } else {
+        out.words[i] = ((shamtRem == 0) ? 0 : (high << (WordBits - shamtRem))) |
+                       (low >> shamtRem);
+      }
     }
     out.normalize();
+  }
+
+  template <typename T0>
+  static void shlOp(BigInt &out, const T0 &lhs, uint32_t rhs) {
+    shiftOp<true>(out, lhs, rhs);
+  }
+
+  template <typename T0>
+  static void lshrOp(BigInt &out, const T0 &lhs, uint32_t rhs) {
+    shiftOp<false>(out, lhs, rhs);
+  }
+
+  template <typename T0>
+  static void ashrOp(BigInt &out, const T0 &lhs, uint32_t rhs) {
+    shiftOp<false, true>(out, lhs, rhs);
   }
 
   template <typename T>
@@ -179,7 +236,15 @@ public:
 
     auto flags = os.flags();
     for (ssize_t i = self.getNumWords() - 1; i >= 0; i--) {
-      os << std::hex << std::setfill('0') << std::setw(8) << self.getWords()[i];
+      uint32_t word = self.getWords()[i];
+      size_t width = 8;
+
+      if (i == self.getNumWords() - 1 && extendDigits <= 0) {
+        width = (hexDigits % 8);
+        word &= (1 << (self.getNumBits() % 32)) - 1;
+      }
+
+      os << std::hex << std::setfill('0') << std::setw(width) << word;
       if (i != 0)
         os << '\'';
     }
@@ -326,10 +391,6 @@ public:
                ? std::span<const uint32_t>{&obj.num, 1}
                : std::span<const uint32_t>{ptr->trailing(), ptr->numWords};
   }
-  // bool getIsSext() {
-  //   return isInline() ? customField<IsSext>()
-  //                     : (ptr->numWords & bit_mask_msb<unsigned>());
-  // };
   uint8_t getExtend() const {
     return isInline() ? customField<ExtPattern>() : ptr->getExtend();
   }
@@ -357,11 +418,6 @@ public:
     assert(isInline());
     return obj.num;
   }
-
-  // friend std::ostream &operator<<(std::ostream &os, const ConstantRef &self)
-  // {} public:
-  //   friend std::string to_string(ConstantRef const &self) {
-  //   }
 };
 
 class ConstantStore {
