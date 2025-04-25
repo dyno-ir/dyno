@@ -28,6 +28,11 @@ public:
       : SmallVecImpl<T>(std::launder(reinterpret_cast<T *>(storage.storage)), N,
                         std::move(o)) {}
 
+  SmallVec &operator=(SmallVec &&o) {
+    this->SmallVecImpl<T>::operator=(std::move(o));
+    return *this;
+  }
+
   SmallVec(size_t size)
       : SmallVecImpl<T>(std::launder(reinterpret_cast<T *>(storage.storage)),
                         N) {

@@ -8,6 +8,7 @@
 #include <dyno/NewDeleteObjStore.h>
 #include <dyno/Obj.h>
 #include <iomanip>
+#include <ios>
 #include <iostream>
 #include <ostream>
 #include <span>
@@ -59,6 +60,56 @@ protected:
   }
   bool getSignBit() const { return getBit(self().getNumBits()); }
   bool isExtended() const { return self().getNumWords() != getExtNumWords(); }
+
+public:
+  void toStream(std::ostream &os, int base = 16) const;
+  friend std::ostream &operator<<(std::ostream &os, const Derived &self) {
+    auto base = (os.flags() & std::ios_base::basefield);
+    assert(base != std::ios_base::oct && "octal unsupported");
+    self.toStream(os, base == std::ios_base::hex ? 16 : 10);
+    return os;
+  }
+
+  friend bool operator==(const Derived &rhs, int64_t lhs) {
+    if (rhs.getNumWords() > 2)
+      return false;
+    if (rhs.getWord(0) != uint32_t(lhs) ||
+        rhs.getWord(1) != uint32_t(lhs >> 32))
+      return false;
+    if (lhs < 0 && rhs.getNumBits() > 64 && rhs.getExtend() != 0b11)
+      return false;
+
+    return true;
+  }
+
+  template <typename T, typename = typename std::enable_if<
+                            std::is_base_of<BigIntMixin<T>, T>::value>::type>
+  friend bool operator==(const Derived &lhs, const T &rhs) {
+    if (!(lhs.getNumBits() == rhs.getNumBits() &&
+          lhs.getNumWords() == rhs.getNumWords() &&
+          lhs.getExtend() == rhs.getExtend()))
+      return false;
+
+    for (size_t i = 0; i < lhs.getNumWords(); i++)
+      if (lhs.getWords()[i] != rhs.getWords()[i])
+        return false;
+    return true;
+  }
+};
+
+class BigIntZero : public BigIntMixin<BigIntZero> {
+  friend class Constant;
+  friend class ConstantBuilder;
+  friend class ConstantStore;
+  friend class BigIntMixin;
+  friend class BigInt;
+
+  uint32_t bits;
+  uint32_t getNumWords() const { return 0; }
+  uint32_t getNumBits() const { return bits; }
+  uint8_t getExtend() const { return 0; }
+  std::span<uint32_t> getWords() const { return std::span<uint32_t>(); };
+  BigIntZero(uint32_t bits) : bits(bits) {}
 };
 
 class BigInt : public BigIntMixin<BigInt> {
@@ -77,7 +128,36 @@ protected:
   std::span<uint32_t> getWords() { return words; }
   const std::span<uint32_t> getWords() const { return words; }
 
+private:
+  BigInt(uint32_t numBits, uint32_t numWords, uint32_t extend)
+      : words(numWords), numBits(numBits), extend(extend) {}
+
 public:
+  template <typename T, typename = typename std::enable_if<
+                            std::is_base_of<BigIntMixin<T>, T>::value>::type>
+  BigInt &operator=(const T &other) {
+    this->numBits = other.getNumBits();
+    this->extend = other.getExtend();
+    this->words.resize(other.getNumWords());
+    std::copy(other.getWords().begin(), other.getWords().end(),
+              this->getWords().begin());
+    return *this;
+  }
+
+  BigInt &operator=(const BigInt &other) {
+    return this->BigInt::operator= <BigInt>(other);
+  }
+  BigInt(const BigInt &other) : BigInt() { (*this) = other; }
+
+  template <typename T, typename = typename std::enable_if<
+                            std::is_base_of<BigIntMixin<T>, T>::value>::type>
+  BigInt(const T &other) : BigInt() {
+    (*this) = other;
+  }
+
+  BigInt &operator=(BigInt &&other) = default;
+  BigInt(BigInt &&other) = default;
+
   BigInt() : words(), numBits(0), extend(0) {}
   BigInt(uint64_t val) { setPruned(val); }
   BigInt(uint64_t val, unsigned bits) { set(val, bits); }
@@ -120,6 +200,10 @@ public:
                        [[maybe_unused]] unsigned cin,
                        [[maybe_unused]] unsigned *cout) { return lhs ^ rhs; }>(
         out, lhs, rhs);
+  }
+
+  template <typename T> static void negateOp(BigInt &out, const T &lhs) {
+    subOp(out, BigIntZero(lhs.getNumBits()), lhs);
   }
 
   void set(uint64_t val, unsigned bits) {
@@ -378,6 +462,9 @@ public:
       }
       rem.words[0] = k;
 
+      quot.normalize();
+      rem.normalize();
+
       return std::make_pair(std::move(quot), std::move(rem));
     }
 
@@ -443,6 +530,8 @@ public:
 
     BigInt::lshrOp(rem, un, shamt);
     BigInt::resizeOp<0>(rem, rem, rhs.getNumBits());
+
+    quot.normalize();
     return std::make_pair(std::move(quot), std::move(rem));
   }
 
@@ -462,23 +551,11 @@ public:
   }
 
   template <typename T>
-  friend bool operator==(const BigInt &lhs, const T &rhs) {
-    if (!(lhs.getNumBits() == rhs.getNumBits() &&
-          lhs.getNumWords() == rhs.getNumWords() &&
-          lhs.getExtend() == rhs.getExtend()))
-      return false;
-
-    for (size_t i = 0; i < lhs.getNumWords(); i++)
-      if (lhs.getWords()[i] != rhs.getWords()[i])
-        return false;
-    return true;
-  }
-
-  friend std::ostream &operator<<(std::ostream &os, const BigInt &self) {
-    ssize_t hexDigits = (self.numBits + 3) / 4;
+  static void stream_hex(std::ostream &os, const T &self) {
+    ssize_t hexDigits = (self.getNumBits() + 3) / 4;
     ssize_t wordHexDigits = self.getNumWords() * 8;
 
-    uint32_t extend = repeatExtend(self.extend) & 0xF;
+    uint32_t extend = repeatExtend(self.getExtend()) & 0xF;
 
     auto toHex = [](int n) -> char {
       return n > 9 ? (n + 'a' - 10) : (n + '0');
@@ -487,8 +564,8 @@ public:
     ssize_t extendDigits = hexDigits - wordHexDigits;
     for (ssize_t i = 0; i < extendDigits; i++) {
       size_t digit = hexDigits - i - 1;
-      if (i == 0 && self.numBits % 4 != 0)
-        os << toHex(extend & ((1 << (self.numBits % 4)) - 1));
+      if (i == 0 && self.getNumBits() % 4 != 0)
+        os << toHex(extend & ((1 << (self.getNumBits() % 4)) - 1));
       else
         os << toHex(extend);
       if (digit % 8 == 0)
@@ -510,13 +587,33 @@ public:
         os << '\'';
     }
     os.flags(flags);
-    return os;
+  }
+
+  template <typename T>
+  static void stream_dec(std::ostream &os, const T &self) {
+    if (self.getSignBit()) {
+      BigInt temp;
+      BigInt::negateOp(temp, self);
+      os << "-";
+      stream_dec(os, temp);
+      return;
+    }
+    SmallVec<uint8_t, 32> str;
+
+    BigInt q = 10;
+    BigInt n{self};
+    BigInt r;
+
+    do {
+      std::tie(n, r) = BigInt::udivmodOp(n, q);
+      str.emplace_back(r.getWord(0));
+    } while (n != 0);
+
+    for (ssize_t i = str.size() - 1; i >= 0; i--)
+      os << uint32_t(str[i]);
   }
 
 private:
-  BigInt(uint32_t numBits, uint32_t numWords, uint32_t extend)
-      : words(numWords), numBits(numBits), extend(extend) {}
-
   void prune() {
     uint32_t extendMask = repeatExtend(extend);
     while (words.size() != 1 && words.back() == extendMask)
@@ -554,7 +651,7 @@ private:
     // assert(lhs.getNumBits() == rhs.getNumBits());
     unsigned maxNumBits = std::max(lhs.getNumBits(), rhs.getNumBits());
     unsigned numWords = std::max(lhs.getNumWords(), rhs.getNumWords());
-    unsigned minNumWords = std::max(lhs.getNumWords(), rhs.getNumWords());
+    unsigned minNumWords = std::min(lhs.getNumWords(), rhs.getNumWords());
 
     unsigned _unused = 0;
 
@@ -596,6 +693,17 @@ private:
     out.normalize();
   }
 };
+
+static_assert(std::is_constructible_v<BigInt, BigInt &>);
+
+template <typename Derived>
+void BigIntMixin<Derived>::toStream(std::ostream &os, int base) const {
+  if (base == 16)
+    BigInt::stream_hex(os, self());
+  else if (base == 10)
+    BigInt::stream_dec(os, self());
+  else dyno_unreachable("only dec and hex supported");
+}
 
 class alignas(uint64_t) Constant : public TrailingObjArr<Constant, uint32_t> {
   // we store u32's here st inline storage can use the same API with numWords =
