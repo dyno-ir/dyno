@@ -4,6 +4,7 @@
 #include "support/SmallVec.h"
 #include "support/Utility.h"
 #include <algorithm>
+#include <cmath>
 #include <dyno/IDs.h>
 #include <dyno/NewDeleteObjStore.h>
 #include <dyno/Obj.h>
@@ -12,6 +13,7 @@
 #include <iostream>
 #include <ostream>
 #include <span>
+#include <string>
 #include <type_traits>
 #include <unordered_map>
 
@@ -24,7 +26,14 @@ constexpr size_t BigIntExtendBits = 2;
 constexpr uint32_t WordBits = sizeof(uint32_t) * 8;
 constexpr uint32_t WordBitsM1 = WordBits - 1;
 
+class BigInt;
+template <typename Derived> class BigIntMixin;
+
+template <typename T>
+concept BigIntAPI = std::is_base_of<BigIntMixin<T>, T>::value;
+
 template <typename Derived> class BigIntMixin {
+  friend class BigInt;
 
   // Base API for BigInt is getNumWords, getExtend and getWords.
   // This is for utility functions using that API that may be shared by all
@@ -70,6 +79,9 @@ public:
     return os;
   }
 
+  // there's some weird ambiguity with this being indepedent of bits but the
+  // other == checking exact equality. Maybe make this a func instead of
+  // operator.
   friend bool operator==(const Derived &rhs, int64_t lhs) {
     if (rhs.getNumWords() > 2)
       return false;
@@ -82,8 +94,7 @@ public:
     return true;
   }
 
-  template <typename T, typename = typename std::enable_if<
-                            std::is_base_of<BigIntMixin<T>, T>::value>::type>
+  template <BigIntAPI T>
   friend bool operator==(const Derived &lhs, const T &rhs) {
     if (!(lhs.getNumBits() == rhs.getNumBits() &&
           lhs.getNumWords() == rhs.getNumWords() &&
@@ -133,9 +144,7 @@ private:
       : words(numWords), numBits(numBits), extend(extend) {}
 
 public:
-  template <typename T, typename = typename std::enable_if<
-                            std::is_base_of<BigIntMixin<T>, T>::value>::type>
-  BigInt &operator=(const T &other) {
+  template <BigIntAPI T> BigInt &operator=(const T &other) {
     this->numBits = other.getNumBits();
     this->extend = other.getExtend();
     this->words.resize(other.getNumWords());
@@ -149,11 +158,7 @@ public:
   }
   BigInt(const BigInt &other) : BigInt() { (*this) = other; }
 
-  template <typename T, typename = typename std::enable_if<
-                            std::is_base_of<BigIntMixin<T>, T>::value>::type>
-  BigInt(const T &other) : BigInt() {
-    (*this) = other;
-  }
+  template <BigIntAPI T> BigInt(const T &other) : BigInt() { (*this) = other; }
 
   BigInt &operator=(BigInt &&other) = default;
   BigInt(BigInt &&other) = default;
@@ -166,41 +171,19 @@ public:
     return BigInt{bits, (bits + WordBitsM1) / WordBits, 0};
   }
 
-  template <typename T0, typename T1>
-  static void addOp(BigInt &out, const T0 &lhs, const T1 &rhs) {
-    return linearOp<[](unsigned lhs, unsigned rhs, unsigned cin,
-                       unsigned *cout) {
-      return __builtin_addc(lhs, rhs, cin, cout);
-    }>(out, lhs, rhs);
+#define LINEAR_OP(ident, code)                                                 \
+  template <typename T0, typename T1>                                          \
+  static void ident(BigInt &out, const T0 &lhs, const T1 &rhs) {               \
+    return linearOp<[](unsigned lhs, unsigned rhs,                             \
+                       [[maybe_unused]] unsigned cin,                          \
+                       [[maybe_unused]] unsigned *cout) { return code; }>(     \
+        out, lhs, rhs);                                                        \
   }
-  template <typename T0, typename T1>
-  static void subOp(BigInt &out, const T0 &lhs, const T1 &rhs) {
-    return linearOp<[](unsigned lhs, unsigned rhs, unsigned cin,
-                       unsigned *cout) {
-      return __builtin_subc(lhs, rhs, cin, cout);
-    }>(out, lhs, rhs);
-  }
-  template <typename T0, typename T1>
-  static void andOp(BigInt &out, const T0 &lhs, const T1 &rhs) {
-    return linearOp<[](unsigned lhs, unsigned rhs,
-                       [[maybe_unused]] unsigned cin,
-                       [[maybe_unused]] unsigned *cout) { return lhs & rhs; }>(
-        out, lhs, rhs);
-  }
-  template <typename T0, typename T1>
-  static void orOp(BigInt &out, const T0 &lhs, const T1 &rhs) {
-    return linearOp<[](unsigned lhs, unsigned rhs,
-                       [[maybe_unused]] unsigned cin,
-                       [[maybe_unused]] unsigned *cout) { return lhs | rhs; }>(
-        out, lhs, rhs);
-  }
-  template <typename T0, typename T1>
-  static void xorOp(BigInt &out, const T0 &lhs, const T1 &rhs) {
-    return linearOp<[](unsigned lhs, unsigned rhs,
-                       [[maybe_unused]] unsigned cin,
-                       [[maybe_unused]] unsigned *cout) { return lhs ^ rhs; }>(
-        out, lhs, rhs);
-  }
+  LINEAR_OP(addOp, __builtin_addc(lhs, rhs, cin, cout))
+  LINEAR_OP(subOp, __builtin_subc(lhs, rhs, cin, cout))
+  LINEAR_OP(andOp, lhs &rhs)
+  LINEAR_OP(orOp, lhs | rhs)
+  LINEAR_OP(xorOp, lhs ^ rhs)
 
   template <typename T> static void negateOp(BigInt &out, const T &lhs) {
     subOp(out, BigIntZero(lhs.getNumBits()), lhs);
@@ -484,8 +467,8 @@ public:
     BigInt::shlOp(un, un, shamt);
     un.expand();
 
-    std::cout << "un = " << un << "\n";
-    std::cout << "vn = " << vn << "\n";
+    // std::cout << "un = " << un << "\n";
+    // std::cout << "vn = " << vn << "\n";
 
     size_t n = vn.getExtNumWords();
     for (ssize_t i = un.getNumWords() - 1 - n; i >= 0; i--) {
@@ -550,6 +533,48 @@ public:
     shiftOp<false, true>(out, lhs, rhs);
   }
 
+  static std::optional<BigInt> parseHex(std::span<const char> digits) {
+    BigInt out = BigInt::ofLen(digits.size() * 4);
+    size_t i = digits.size() - 1;
+    for (const char digit : digits) {
+
+      unsigned val;
+      if (digit >= '0' && digit <= '9')
+        val = digit - '0';
+      else if (digit >= 'a' && digit <= 'f')
+        val = digit - 'a' + 10;
+      else if (digit >= 'A' && digit <= 'F')
+        val = digit - 'A' + 10;
+      else
+        return std::nullopt;
+
+      out.words[i / 8] |= (val << (i % 8) * 4);
+      i--;
+    }
+    out.normalize();
+    return out;
+  }
+  static std::optional<BigInt> parseDec(std::span<const char> digits) {
+    double bits = ceil(digits.size() * std::log2(10.));
+    BigInt out = BigInt::ofLen(size_t(bits));
+    BigInt base = 10;
+
+    for (const char digit : digits) {
+      out = BigInt::mulOp(out, base);
+
+      uint64_t val;
+      if (digit >= '0' && digit <= '9')
+        val = digit - '0';
+      else
+        return std::nullopt;
+
+      BigInt::addOp(out, out, BigInt{val});
+    }
+
+    return out;
+  }
+
+private:
   template <typename T>
   static void stream_hex(std::ostream &os, const T &self) {
     ssize_t hexDigits = (self.getNumBits() + 3) / 4;
@@ -612,8 +637,6 @@ public:
     for (ssize_t i = str.size() - 1; i >= 0; i--)
       os << uint32_t(str[i]);
   }
-
-private:
   void prune() {
     uint32_t extendMask = repeatExtend(extend);
     while (words.size() != 1 && words.back() == extendMask)
@@ -660,6 +683,10 @@ private:
     // above.
     unsigned extend =
         OpFunc(lhs.getExtend(), rhs.getExtend(), _unused, &_unused);
+    if ((extend & ~3)) {
+      // fall back to full calculation on overflow or underflow.
+      numWords = std::max(lhs.getExtNumWords(), rhs.getExtNumWords());
+    }
 
     // out might be lhs or rhs so this must not erase data
     out.words.resize(numWords);
@@ -694,7 +721,79 @@ private:
   }
 };
 
-static_assert(std::is_constructible_v<BigInt, BigInt &>);
+// fixme: make constexpr (at least parsing)
+static inline BigInt operator""_b(const char *str) {
+  std::optional<BigInt> rv = std::nullopt;
+  if (str[0] == '0' && str[1] == 'x') {
+    rv = BigInt::parseHex(std::span<const char>{
+        str + 2, std::char_traits<char>::length(str) - 2});
+  } else
+    rv = BigInt::parseDec(std::span{str, std::char_traits<char>::length(str)});
+  assert(rv && "invalid str literal");
+  return *rv;
+}
+
+#define LINEAR_OP_OPERATOR_INST(identSimple, identAssign, func)                \
+  template <BigIntAPI T0, BigIntAPI T1>                                        \
+  inline BigInt identSimple(const T0 &lhs, const T1 &rhs) {                    \
+    BigInt out;                                                                \
+    BigInt::func(out, lhs, rhs);                                               \
+    return out;                                                                \
+  }                                                                            \
+  template <BigIntAPI T>                                                       \
+  inline BigInt &identAssign(BigInt &lhs, const T &rhs) {                      \
+    BigInt::func(lhs, lhs, rhs);                                               \
+    return lhs;                                                                \
+  }
+LINEAR_OP_OPERATOR_INST(operator+, operator+=, addOp)
+LINEAR_OP_OPERATOR_INST(operator-, operator-=, subOp)
+LINEAR_OP_OPERATOR_INST(operator&, operator&=, andOp)
+LINEAR_OP_OPERATOR_INST(operator|, operator|=, orOp)
+LINEAR_OP_OPERATOR_INST(operator^, operator^=, xorOp)
+
+#define SHIFT_OP_OPERATOR_INST(identSimple, identAssign, func)                 \
+  template <BigIntAPI T0>                                                      \
+  inline BigInt identSimple(const T0 &lhs, uint32_t rhs) {                     \
+    BigInt out;                                                                \
+    BigInt::func(out, lhs, rhs);                                               \
+    return out;                                                                \
+  }                                                                            \
+  inline BigInt &identAssign(BigInt &lhs, uint32_t rhs) {                      \
+    BigInt::func(lhs, lhs, rhs);                                               \
+    return lhs;                                                                \
+  }
+SHIFT_OP_OPERATOR_INST(operator<<, operator<<=, shlOp)
+SHIFT_OP_OPERATOR_INST(operator>>, operator>>=, lshrOp)
+
+template <BigIntAPI T0, BigIntAPI T1>
+inline BigInt operator*(const T0 &lhs, const T1 &rhs) {
+  return BigInt::mulOp<0>(lhs, rhs);
+}
+template <BigIntAPI T0, BigIntAPI T1>
+inline BigInt operator/(const T0 &lhs, const T1 &rhs) {
+  return BigInt::udivmodOp<0>(lhs, rhs).first;
+}
+template <BigIntAPI T0, BigIntAPI T1>
+inline BigInt operator%(const T0 &lhs, const T1 &rhs) {
+  return BigInt::udivmodOp<0>(lhs, rhs).second;
+}
+
+#define OP_ASSIGN_TRIVIAL(identAssign, operator)                               \
+  template <BigIntAPI T>                                                       \
+  inline BigInt &identAssign(BigInt &lhs, const T &rhs) {                      \
+    auto res = lhs operator rhs;                                               \
+    lhs = std::move(res);                                                      \
+    return lhs;                                                                \
+  }
+OP_ASSIGN_TRIVIAL(operator*=, *)
+OP_ASSIGN_TRIVIAL(operator/=, /)
+OP_ASSIGN_TRIVIAL(operator%=, %)
+
+template <BigIntAPI T0> inline BigInt operator-(const T0 &val) {
+  BigInt out;
+  BigInt::negateOp(out, val);
+  return out;
+}
 
 template <typename Derived>
 void BigIntMixin<Derived>::toStream(std::ostream &os, int base) const {
@@ -702,7 +801,8 @@ void BigIntMixin<Derived>::toStream(std::ostream &os, int base) const {
     BigInt::stream_hex(os, self());
   else if (base == 10)
     BigInt::stream_dec(os, self());
-  else dyno_unreachable("only dec and hex supported");
+  else
+    dyno_unreachable("only dec and hex supported");
 }
 
 class alignas(uint64_t) Constant : public TrailingObjArr<Constant, uint32_t> {
@@ -854,44 +954,36 @@ public:
     return *this;
   }
 
-  ConstantBuilder &add(ConstantRef rhs) {
-    BigInt::addOp(cur, cur, rhs);
+#define SIMPLE_OP(ident, impl)                                                 \
+  template <BigIntAPI T> ConstantBuilder &ident(const T &rhs) {                \
+    BigInt::impl(cur, cur, rhs);                                               \
+    return *this;                                                              \
+  }                                                                            \
+  ConstantBuilder &ident(uint64_t rhs) {                \
+    BigInt::impl(cur, cur, BigInt{rhs});                                       \
+    return *this;                                                              \
+  }
+
+  SIMPLE_OP(add, addOp)
+  SIMPLE_OP(sub, subOp)
+  SIMPLE_OP(bitAND, andOp)
+  SIMPLE_OP(bitOR, orOp)
+  SIMPLE_OP(bitXOR, xorOp)
+
+  ConstantBuilder &neg() {
+    BigInt::negateOp(cur, cur);
     return *this;
   }
-  ConstantBuilder &add(BigInt rhs) {
-    BigInt::addOp(cur, cur, rhs);
+  template <BigIntAPI T> ConstantBuilder &mul(const T &rhs) {
+    cur = BigInt::mulOp(cur, rhs);
     return *this;
   }
-  ConstantBuilder &sub(ConstantRef rhs) {
-    BigInt::subOp(cur, cur, rhs);
+  template <BigIntAPI T> ConstantBuilder &udiv(const T &rhs) {
+    cur = BigInt::udivmodOp(cur, rhs).first;
     return *this;
   }
-  ConstantBuilder &sub(BigInt rhs) {
-    BigInt::subOp(cur, cur, rhs);
-    return *this;
-  }
-  ConstantBuilder &bitAND(ConstantRef rhs) {
-    BigInt::andOp(cur, cur, rhs);
-    return *this;
-  }
-  ConstantBuilder &bitAND(BigInt rhs) {
-    BigInt::andOp(cur, cur, rhs);
-    return *this;
-  }
-  ConstantBuilder &bitOR(ConstantRef rhs) {
-    BigInt::orOp(cur, cur, rhs);
-    return *this;
-  }
-  ConstantBuilder &bitOR(BigInt rhs) {
-    BigInt::orOp(cur, cur, rhs);
-    return *this;
-  }
-  ConstantBuilder &bitXOR(ConstantRef rhs) {
-    BigInt::xorOp(cur, cur, rhs);
-    return *this;
-  }
-  ConstantBuilder &bitXOR(BigInt rhs) {
-    BigInt::xorOp(cur, cur, rhs);
+  template <BigIntAPI T> ConstantBuilder &umod(const T &rhs) {
+    cur = BigInt::udivmodOp(cur, rhs).second;
     return *this;
   }
 
