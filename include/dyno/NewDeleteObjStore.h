@@ -10,7 +10,8 @@
 
 namespace dyno {
 // todo: mechanism to downsize map
-// todo: hooks (e.g delete -> remove from CSE structural) first delete only, create via builder
+// todo: hooks (e.g delete -> remove from CSE structural) first delete only,
+// create via builder
 template <typename T> class NewDeleteObjStore {
 private:
   using Traits = ObjTraits<T>;
@@ -81,6 +82,8 @@ public:
     ref.getPtr()->~T();
     free(ref.getPtr());
   }
+
+  FatObjRef<T> resolve(ObjRef<T> ref) { return FatObjRef<T>{ref, map[ref]}; }
 
   auto begin() { return objs().begin(); }
   auto end() { return objs().end(); }

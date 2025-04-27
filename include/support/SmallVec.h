@@ -19,6 +19,36 @@ public:
   SmallVec()
       : SmallVecImpl<T>(std::launder(reinterpret_cast<T *>(storage.storage)),
                         N) {}
+
+  SmallVec(SmallVecImpl<T> &&o)
+      : SmallVecImpl<T>(std::launder(reinterpret_cast<T *>(storage.storage)), N,
+                        std::move(o)) {}
+
+  SmallVec(SmallVec<T, N> &&o)
+      : SmallVecImpl<T>(std::launder(reinterpret_cast<T *>(storage.storage)), N,
+                        std::move(o)) {}
+
+  SmallVec &operator=(SmallVec &&o) {
+    this->SmallVecImpl<T>::operator=(std::move(o));
+    return *this;
+  }
+
+  SmallVec(size_t size)
+      : SmallVecImpl<T>(std::launder(reinterpret_cast<T *>(storage.storage)),
+                        N) {
+    this->resize(size);
+  }
+
+  SmallVec(size_t size, const T &templ)
+      : SmallVecImpl<T>(std::launder(reinterpret_cast<T *>(storage.storage)),
+                        N) {
+    this->resize(size, templ);
+  }
+
+  void try_to_inline() {
+    return this->SmallVecImpl<T>::try_to_inline(
+        reinterpret_cast<T *>(storage.storage), N);
+  }
 };
 
 template <typename T> class SmallVecImpl {
@@ -46,8 +76,6 @@ private:
     cap = newCap;
   }
 
-  T *getInlineArrPtr() { return *static_cast<SmallVec<T, 1> &>(*this).storage; }
-
   void destroy() {
     if (!arr)
       return; // Moved-from state
@@ -63,15 +91,68 @@ private:
     ::operator delete[](arr);
   }
 
+  struct SmallVectorAlignmentAndSize {
+    alignas(SmallVecImpl<T>) char base[sizeof(SmallVecImpl<T>)];
+    alignas(T) char inlineElemns[sizeof(T)];
+  };
+  void *getInlineArrPtr() const {
+    return const_cast<void *>(reinterpret_cast<const void *>(
+        reinterpret_cast<const char *>(this) +
+        offsetof(SmallVectorAlignmentAndSize, inlineElemns)));
+  }
+  bool isInline() { return arr == getInlineArrPtr(); }
+
 protected:
   SmallVecImpl(T *arr, size_type cap) : sz(0), cap(cap), arr(arr) {}
 
   ~SmallVecImpl() { destroy(); }
 
   SmallVecImpl(const SmallVecImpl &) = delete;
-  SmallVecImpl(SmallVecImpl &&o) = delete;
   SmallVecImpl &operator=(const SmallVecImpl &) = delete;
-  SmallVecImpl &operator=(SmallVecImpl &&) = delete;
+
+  SmallVecImpl(T *arr, size_type cap, SmallVecImpl &&o)
+      : SmallVecImpl<T>(arr, cap) {
+    (*this).operator=(std::move(o));
+  }
+  SmallVecImpl &operator=(SmallVecImpl &&o) {
+    if (&o == this)
+      return *this;
+
+    if (!o.isInline()) {
+      this->destroy();
+      this->arr = o.arr;
+      this->sz = o.sz;
+      this->cap = o.cap;
+
+      o.arr = nullptr;
+    } else if (this->size() >= o.size()) {
+      iterator it = this->begin();
+
+      if (o.size() != 0)
+        it = std::move(o.begin(), o.end(), it);
+
+      std::destroy(it, this->end());
+      sz = o.sz;
+    } else {
+      destroyElts();
+      resize(o.size());
+      std::move(o.begin(), o.end(), this->begin());
+      sz = o.sz;
+    }
+
+    return *this;
+  }
+
+  void try_to_inline(T *inlinePtr, size_t inlineSize) {
+    if (this->sz <= inlineSize && arr != inlinePtr) {
+      std::move(begin(), end(), inlinePtr);
+      destroyElts();
+      ::operator delete[](arr);
+
+      cap = inlineSize;
+      arr = inlinePtr;
+    }
+  }
 
 public:
   T &operator[](size_type pos) {
@@ -89,6 +170,43 @@ public:
   void clear() {
     destroyElts();
     sz = 0;
+  }
+
+  void resize_no_init(size_type n) {
+    if (n < sz) {
+      std::destroy(begin() + n, end());
+    } else if (n > sz) {
+      reserve(n);
+    }
+    sz = n;
+  }
+
+  void resize(size_type n, const T &templ) {
+    size_t oldSz = sz;
+    resize_no_init(n);
+    if (n > oldSz) {
+      std::uninitialized_fill(begin() + oldSz, end(), templ);
+    }
+  }
+
+  void resize(size_type n) {
+    size_t oldSz = sz;
+    resize_no_init(n);
+    if (n > oldSz) {
+      std::uninitialized_value_construct(begin() + oldSz, end());
+    }
+  }
+
+  void reserve(size_type n) {
+    if (n <= cap)
+      return;
+    assert(cap > 0);
+
+    T *newArr = reinterpret_cast<T *>(::operator new[](n * sizeof(T)));
+    std::uninitialized_move(begin(), end(), newArr);
+    destroy();
+    arr = newArr;
+    cap = n;
   }
 
   bool isSmall() { return arr == getInlineArrPtr(); }
@@ -144,4 +262,7 @@ public:
 
   iterator begin() { return arr; }
   iterator end() { return arr + sz; }
+
+  const iterator begin() const { return arr; }
+  const iterator end() const { return arr + sz; }
 };

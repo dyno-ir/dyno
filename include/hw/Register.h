@@ -18,6 +18,7 @@ public:
     PORT_IN,
     PORT_OUT,
     PORT_INOUT,
+    PORT_REF,
     PORT_PARAM_IN
   };
 

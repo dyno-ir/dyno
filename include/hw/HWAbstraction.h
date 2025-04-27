@@ -195,11 +195,13 @@ public:
             sizeof...(value) + 4, DialectID{DIALECT_SCF}, OpcodeID{SCF_IF})};
 
         InstrBuilder build{newInstr};
+        build.addRef(scfConstr);
+
         for (uint i = 1; i < instr.getNumDefs(); i++)
           build.addRef(instr.operand(i)->as<FatDynObjRef<>>());
 
         for (uint i = 0; i < sizeof...(value) - instr.getNumDefs() + 1; i++)
-          build.addRef(scfConstr).addRef(ctx.getWires().create());
+          build.addRef(ctx.getWires().create());
 
         build.other();
         for (uint i = instr.getNumDefs(); i < instr.getNumOperands(); i++)
@@ -279,7 +281,7 @@ public:
   ConstantRef buildConst(uint bits, uint64_t value) {
     // still quite problematic, this constant is never deleted.
     // Could do unique_ptr or shared_ptr style implementation for safety.
-    return ConstantBuilder{ctx.getConstants()}.build(bits, value);
+    return ConstantBuilder{ctx.getConstants()}.val(bits, value);
   }
 
   void setInsertPoint(BlockRef_iterator<true> it) { insert = it; }
@@ -336,16 +338,14 @@ public:
       std::cout << "):\n";
 
       for (auto reg : moduleRef.regs()) {
-        auto asRegRef = reg.instr().def()->as<RegisterRef>();
-        if (!asRegRef.isPort())
-          refPrinter.introduceRef(asRegRef);
+        if (!reg.isPort())
+          refPrinter.introduceRef(reg);
       }
 
       for (auto func : moduleRef.funcs()) {
-        auto asFuncRef = FuncInstrRef{func.instr()};
-        std::cout << "func(" << asFuncRef.def().getRef().getObjID() << "):\n";
+        std::cout << "func(" << func.def().getRef().getObjID() << "):\n";
 
-        for (auto block : asFuncRef.blocks()) {
+        for (auto block : func.blocks()) {
           auto blockRef = block.instr().def()->as<BlockRef>();
           std::cout << "block(" << blockRef.getObjID() << "):\n";
 
@@ -356,13 +356,11 @@ public:
       }
 
       for (auto proc : moduleRef.procs()) {
-        auto procRef = proc.instr().def()->as<ProcessRef>();
-        std::cout << "proc(" << procRef.getObjID() << "):\n";
-        for (auto block : procRef.blocks()) {
-          auto blockRef = block.instr().def()->as<BlockRef>();
-          std::cout << "block(" << blockRef.getObjID() << "):\n";
+        std::cout << "proc(" << proc.getObjID() << "):\n";
+        for (auto block : proc.blocks()) {
+          std::cout << "block(" << block.getObjID() << "):\n";
 
-          for (auto insn = blockRef.begin(); insn != blockRef.end(); insn++) {
+          for (auto insn = block.begin(); insn != block.end(); insn++) {
             instrPrinter.print(*insn);
           }
         }

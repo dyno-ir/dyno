@@ -6,7 +6,6 @@
 #include <dyno/IDs.h>
 
 namespace dyno {
-
 // enum SCFDialectID : uint8_t { DIALECT_SCF = DIALECT_SCF };
 enum SCFTyID : uint8_t { SCF_CONSTRUCT = 0 | TY_DEF_USE_START, SCF_FUNC = 1 | TY_DEF_USE_START };
 

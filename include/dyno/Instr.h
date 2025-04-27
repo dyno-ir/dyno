@@ -4,6 +4,7 @@
 #include "support/Bits.h"
 #include "support/RTTI.h"
 #include "support/SmallVec.h"
+#include "support/Utility.h"
 #include <cassert>
 #include <cstdint>
 #include <dyno/Interface.h>
@@ -28,12 +29,17 @@ class Operand : public RTTIUtilMixin<Operand> {
   friend class OperandRef;
   friend class InstrBuilder;
   friend class InstrDefUse;
+  friend class GenericOperand;
 
   DynObjRef ref;
   InlineStorage<8> custom;
 
   static inline bool isDefUseOperand(DynObjRef ref) {
     return ref.getTyID() & bit_mask_msb<TyID::num_t>();
+  }
+  template <typename T = void> FatDynObjRef<T> customFat() const {
+    auto ptr = custom.as<T *>();
+    return {ref, *ptr};
   }
 
 public:
@@ -43,11 +49,7 @@ public:
   Operand &operator=(Operand &&) = delete;
 
   template <typename T = void> FatDynObjRef<T> fat() const {
-    auto ptr = custom.as<T *>();
-    return {ref, *ptr};
-  }
-  template <typename T = void> FatDynObjRef<T> cleanFat() const {
-    auto f = fat<T>();
+    auto f = customFat<T>();
     if (isDefUseOperand(ref))
       f.clearCustom();
     return f;
@@ -69,14 +71,16 @@ public:
     ref = newRef;
   }
 
+  void *ptr() { return *custom.as<void *>(); }
+
   void destroy();
 
   // we need this so is_impl functions can take this as an arg (todo: in
   // OperandRef)
-  operator FatDynObjRef<>() const { return cleanFat(); }
+  operator FatDynObjRef<>() const { return fat(); }
   // for as<>
   template <typename T> explicit operator T() const {
-    return static_cast<T>(cleanFat());
+    return static_cast<T>(fat());
   }
 };
 static_assert(sizeof(Operand) == 16);
@@ -163,7 +167,7 @@ public:
 
   InstrDefUse &defUse() {
     assert(hasDefUse());
-    return *(*this)->fat<InstrDefUse>();
+    return *(*this)->customFat<InstrDefUse>();
   }
 
   OperandRef &operator++() {
@@ -295,10 +299,19 @@ class InstrDefUse {
   friend class Operand;
   friend class OperandRef;
 
-  SmallVec<OperandRef, 4> refs;
+  using insert_hook_t = bool (*)(InstrDefUse *, OperandRef);
+  using erase_hook_t = bool (*)(InstrDefUse *, DynObjRef);
+
   uint16_t numDefs = 0;
+  SmallVec<OperandRef, 4> refs;
+  // could move existence into a bit field, and store these after InstrDefUse
+  // in the parent object.
+  insert_hook_t insertHook = nullptr;
+  erase_hook_t eraseHook = nullptr;
 
 public:
+  using operand_t = Operand;
+  using operand_ref_t = OperandRef;
   using iterator = const OperandRef *;
 
   unsigned getNumDefsAndUses() const { return refs.size(); }
@@ -337,10 +350,50 @@ public:
   Range<iterator> defs() { return {def_begin(), def_end()}; }
   Range<iterator> uses() { return {use_begin(), use_end()}; }
 
+  void setInsertHook(insert_hook_t insertHook) {
+    this->insertHook = insertHook;
+  }
+  void setEraseHook(erase_hook_t eraseHook) { this->eraseHook = eraseHook; }
+
+  void manual_move(uint from, uint to) {
+    if (to == from)
+      return;
+    assert(to <= refs.size());
+    assert(from < refs.size());
+    if (to == refs.size()) {
+      refs.emplace_back(std::move(refs[from]));
+    } else {
+      refs[to] = std::move(refs[from]);
+    }
+    refs[to]->ref.setCustom(to);
+  }
+
+  void manual_insert(uint idx, OperandRef opRef) {
+    assert(idx <= refs.size());
+    if (idx == refs.size()) {
+      refs.emplace_back(opRef);
+    } else {
+      refs[idx] = opRef;
+    }
+    refs[idx]->ref.setCustom(idx);
+  }
+
+  void manual_pop_back() {
+    refs.back()->ref.setCustom(0);
+    refs.pop_back();
+  }
+
 private:
   void insert(OperandRef opRef) {
     assert(opRef.hasDefUse());
     assert(!opRef->ref.isCustom());
+    if (insertHook) [[unlikely]] {
+      if (insertHook(this, opRef)) {
+        if (opRef.isDef())
+          numDefs++;
+        return;
+      }
+    }
     unsigned pos;
     if (opRef.isDef()) {
       pos = numDefs++;
@@ -360,6 +413,14 @@ private:
     unsigned pos = ref.getCustom();
     assert(pos < refs.size());
     assert(refs.size() > 0);
+    if (eraseHook) [[unlikely]] {
+      bool isDef = refs[pos].isDef();
+      if (eraseHook(this, ref)) {
+        if (isDef)
+          numDefs--;
+        return;
+      }
+    }
     if (refs[pos].isDef()) {
       if (numDefs > 1 && pos != numDefs - 1) {
         refs[pos] = std::move(refs[numDefs - 1]);
@@ -378,21 +439,7 @@ private:
   }
 };
 
-inline void Operand::destroy() {
-  if (isDefUseOperand(ref)) {
-    fat<InstrDefUse>()->erase(ref);
-  }
-
-  // maybe delete/decrement refcnt of constant operands here?
-  //if (ref.getTyID() == CORE_CONSTANT) {}
-}
-
 inline InstrRef OperandRef::instr() const { return instrRef.as<InstrRef>(); }
-
-inline void OperandRef::addToDefUse() const {
-  assert(Operand::isDefUseOperand(getRef()));
-  (*this)->fat<InstrDefUse>()->insert(*this);
-}
 
 template <> struct ObjTraits<Instr> {
   static constexpr DialectID dialect{DIALECT_CORE};
@@ -469,6 +516,117 @@ template <> struct InterfaceTraits<OpcodeInfo> {
 };
 
 class BinopInstrRef : public InstrRef {};
+
+template <typename Base, uint NumCategories, auto ClassifierF>
+class CategoricalDefUse : public Base {
+public:
+  using classifier_func_t = uint (*)(typename Base::operand_ref_t);
+  std::array<uint32_t, NumCategories> catBounds = {};
+  CategoricalDefUse() {
+    this->setEraseHook(erase);
+    this->setInsertHook(insert);
+  }
+  static uint
+  classifyIdx(CategoricalDefUse<Base, NumCategories, ClassifierF> *self,
+              uint idx) {
+    // i bet this is faster than binary search
+    for (size_t i = 0; i < NumCategories; i++)
+      if (self->catBounds[i] > idx)
+        return i;
+    dyno_unreachable("not classified");
+  }
+  static uint classifyIdxBinSearch(
+      CategoricalDefUse<Base, NumCategories, ClassifierF> *self, uint idx) {
+    size_t lb = 0;
+    size_t ub = NumCategories - 1;
+
+    while (true) {
+      size_t center = lb + (ub - lb) / 2;
+
+      size_t lower = (center == 0) ? 0 : self->catBounds[center - 1];
+      size_t upper = self->catBounds[center];
+
+      if (idx < lower)
+        ub = center;
+      else if (idx >= upper)
+        lb = center + 1;
+      else
+        return center;
+    }
+  }
+
+  static bool insert(Base *base, Base::operand_ref_t ref) {
+
+    auto self =
+        static_cast<CategoricalDefUse<Base, NumCategories, ClassifierF> *>(
+            base);
+
+    uint useClassID = ClassifierF(ref);
+    // O(#categories) insertion, keeps inter-category order but not intra (base
+    // case of this for use+def is implemented in instrDefUse)
+    for (uint id = NumCategories - 1; id != useClassID; id--) {
+      base->manual_move(self->catBounds[id - 1], self->catBounds[id]);
+      self->catBounds[id]++;
+    }
+    base->manual_insert(self->catBounds[useClassID]++, ref);
+    return true;
+  }
+  static bool erase(Base *base, DynObjRef ref) {
+
+    auto self =
+        static_cast<CategoricalDefUse<Base, NumCategories, ClassifierF> *>(
+            base);
+
+    uint useClassID = classifyIdx(self, ref.getCustom());
+    // move last ref in same category into slot we're freeing
+    base->manual_move(self->catBounds[useClassID] - 1, ref.getCustom());
+    for (uint id = useClassID; id < NumCategories - 1; id++) {
+      // move last of next category into last of current category (now first of
+      // next category)
+      base->manual_move(self->catBounds[id + 1] - 1, self->catBounds[id] - 1);
+      self->catBounds[id]--;
+    }
+
+    base->manual_pop_back();
+    self->catBounds[NumCategories - 1]--;
+    return true;
+  }
+
+  auto usesOfCategory(uint uc) {
+    return Range{this->begin() + ((uc == 0) ? 0 : catBounds[uc - 1]),
+                 this->begin() + catBounds[uc]};
+  }
+};
+
+#if 0
+inline void GenericOperand::setLinkedPos(uint16_t pos) {
+  if (auto asInstrRef = ref.dyn_as<InstrRef>())
+    asInstrRef.operand(ref.getCustom())->ref.setCustom(pos);
+  else
+    refdDefUse().refs[ref.getCustom()].ref.setCustom(pos);
+}
+#endif
+
+inline void OperandRef::addToDefUse() const {
+  assert(Operand::isDefUseOperand(getRef()));
+
+  // try to not slow down the hot path too much.
+  // could also write specializations of this without dynamic dispatch
+  // if ref type is known.
+  (*this)->customFat<InstrDefUse>()->insert(*this);
+}
+
+inline void Operand::destroy() {
+  if (isDefUseOperand(ref)) {
+    // try to not slow down the hot path too much.
+    // could also write specializations of this without dynamic dispatch
+    // if ref type is known.
+    customFat<InstrDefUse>()->erase(ref);
+  }
+
+  // maybe delete/decrement refcnt of constant operands here?
+  // if (ref.getTyID() == CORE_CONSTANT) {}
+}
 
 } // namespace dyno
 template <> struct IsByValueRTTI<dyno::Operand> : std::true_type {};

@@ -4,7 +4,6 @@
 #include "dyno/NewDeleteObjStore.h"
 #include "dyno/Obj.h"
 #include "dyno/ObjMap.h"
-#include "hw/Process.h"
 #include "support/RTTI.h"
 #include <cassert>
 
@@ -178,6 +177,7 @@ public:
   BlockRef(ObjRef<Block> obj, Block *block) : FatObjRef<Block>(obj, block) {}
   BlockRef(ObjRef<Block> obj, Block &block) : FatObjRef<Block>(obj, block) {}
   BlockRef(const FatObjRef<Block> &ref) : FatObjRef<Block>(ref) {}
+  BlockRef() : FatObjRef<Block>() {}
   // BlockRef(iterator ref) : FatObjRef<Block>(ref->getPtr()) {}
 
   // these constructors are needed for casting impl (maybe we can somehow get
@@ -201,10 +201,7 @@ public:
 
   auto def() { return ptr->defUse.getSingleDef(); }
   auto defI() { return ptr->defUse.getSingleDef()->instr(); }
-
-  auto parentI() { return parent()->defUse.getSingleDef()->instr(); }
-  // todo: do not ref hw stuff here, make hw wrapper
-  ProcessRef parent() { return defI().operand(1)->as<ProcessRef>(); }
+  auto parent() { return defI().operand(1)->fat(); }
 };
 
 template <bool Ordered>

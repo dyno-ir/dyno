@@ -73,6 +73,7 @@ protected:
   ObjID obj;
 
   template <typename FieldT> FieldT customField() { return FieldT{custom}; }
+  template <typename FieldT> const FieldT customField() const { return FieldT{const_cast<uint16_t&>(custom)}; }
 
 public:
   template <typename T> static DynObjRef ofTy() {
@@ -130,7 +131,7 @@ public:
     return T{obj};
   }
 
-  //FatDynObjRef<> fat();
+  // FatDynObjRef<> fat();
 };
 static_assert(sizeof(DynObjRef) == 8);
 
@@ -187,9 +188,12 @@ public:
   template <typename U = T, typename = std::enable_if_t<!std::is_void_v<U>>>
   FatDynObjRef(FatObjRef<U> ref) : DynObjRef(ref), ptr(ref.getPtr()) {}
 
-  template <typename V, typename U = T, typename = std::enable_if_t<std::is_void_v<U>>>
+  template <typename V, typename U = T,
+            typename = std::enable_if_t<std::is_void_v<U>>>
   FatDynObjRef(FatDynObjRef<V> ref) : DynObjRef(ref), ptr(ref.getPtr()) {}
 
+  FatDynObjRef(FatDynObjRef<> ref)
+      : DynObjRef(ref), ptr(reinterpret_cast<T *>(ref.getPtr())) {}
 
   template <typename U> static bool is_impl(ObjRef<U>) { return true; }
 
@@ -226,10 +230,12 @@ template <typename T> struct ObjTraits {
 template <typename Derived, typename T> class TrailingObjArr {
 private:
   Derived &derived() { return static_cast<Derived &>(*this); }
+  const Derived &derived() const { return static_cast<const Derived &>(*this); }
 
 protected:
   TrailingObjArr() { static_assert(alignof(T) <= alignof(Derived)); }
   T *trailing() { return reinterpret_cast<T *>(&derived() + 1); }
+  const T *trailing() const { return reinterpret_cast<const T *>(&derived() + 1); }
 
 public:
   static constexpr size_t getAllocSize(size_t n) {
@@ -283,9 +289,9 @@ bool FatObjRef<T>::is_impl(const DynObjRef &Ref) {
 // concept IsAnyObjRef = IsDynObjRef<T> || IsFatDynObjRef<T> || IsObjRef<T> ||
 // IsFatObjRef<T>;
 
-//FatDynObjRef<> DynObjRef::fat() {
-//  return FatDynObjRef<>{*this, GlobalResolver::resolve(dialect, ty)};
-//}
+// FatDynObjRef<> DynObjRef::fat() {
+//   return FatDynObjRef<>{*this, GlobalResolver::resolve(dialect, ty)};
+// }
 
 } // namespace dyno
 

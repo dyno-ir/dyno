@@ -9,3 +9,5 @@ target_link_libraries(abstrtest PRIVATE coreSupport)
 
 add_executable(rttitest RTTI.cpp)
 target_link_libraries(rttitest PRIVATE coreSupport)
+
+add_subdirectory(dyno-sv)
