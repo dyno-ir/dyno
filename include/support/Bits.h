@@ -41,9 +41,10 @@ template <typename T> constexpr T bit_mask_ms_nbits(unsigned nbits) {
 }
 
 template <typename T> constexpr unsigned clog2(T val) {
-  if (val == 0)
-    return 0;
-  return bit_mask_sz<T> - std::countl_zero(val);
+  return std::bit_width(val);
+  //if (val == 0)
+  //  return 0;
+  //return bit_mask_sz<T> - std::countl_zero(val);
 }
 
 template <typename NumT, unsigned N, unsigned Pos> class BitField {

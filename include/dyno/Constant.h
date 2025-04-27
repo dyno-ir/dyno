@@ -23,6 +23,8 @@ class ConstantRef;
 class ConstantBuilder;
 
 constexpr size_t BigIntExtendBits = 2;
+constexpr size_t BigIntCustomBits = 1;
+
 constexpr uint32_t WordBits = sizeof(uint32_t) * 8;
 constexpr uint32_t WordBitsM1 = WordBits - 1;
 
@@ -108,7 +110,7 @@ public:
   }
 };
 
-class BigIntZero : public BigIntMixin<BigIntZero> {
+class PatBigInt : public BigIntMixin<PatBigInt> {
   friend class Constant;
   friend class ConstantBuilder;
   friend class ConstantStore;
@@ -116,11 +118,13 @@ class BigIntZero : public BigIntMixin<BigIntZero> {
   friend class BigInt;
 
   uint32_t bits;
+  uint8_t extend;
   uint32_t getNumWords() const { return 0; }
   uint32_t getNumBits() const { return bits; }
-  uint8_t getExtend() const { return 0; }
+  uint8_t getExtend() const { return extend; }
   std::span<uint32_t> getWords() const { return std::span<uint32_t>(); };
-  BigIntZero(uint32_t bits) : bits(bits) {}
+  PatBigInt(uint32_t bits, uint8_t pattern2bit)
+      : bits(bits), extend(pattern2bit) {}
 };
 
 class BigInt : public BigIntMixin<BigInt> {
@@ -186,7 +190,7 @@ public:
   LINEAR_OP(xorOp, lhs ^ rhs)
 
   template <typename T> static void negateOp(BigInt &out, const T &lhs) {
-    subOp(out, BigIntZero(lhs.getNumBits()), lhs);
+    subOp(out, PatBigInt(lhs.getNumBits(), 0), lhs);
   }
 
   void set(uint64_t val, unsigned bits) {
@@ -841,13 +845,16 @@ static_assert(TrailingObj<Constant>);
 class ConstantRef : public FatDynObjRef<Constant>,
                     public BigIntMixin<ConstantRef> {
   friend class ConstantBuilder;
+
+  static constexpr size_t RemCustomBits = 1;
+
   using IsInline = DynObjRef::CustomField<1, 0>;
   using ExtPattern = DynObjRef::CustomField<BigIntExtendBits, 1>;
-  using NBits =
-      DynObjRef::CustomField<15 - BigIntExtendBits, 1 + BigIntExtendBits>;
+  using NBits = DynObjRef::CustomField<15 - BigIntExtendBits - RemCustomBits,
+                                       1 + BigIntExtendBits>;
+  using Custom = DynObjRef::CustomField<RemCustomBits, 16 - RemCustomBits>;
 
-public:
-  using FatDynObjRef<Constant>::FatDynObjRef;
+      public : using FatDynObjRef<Constant>::FatDynObjRef;
 
   explicit ConstantRef(FatDynObjRef<Constant> ref)
       : FatDynObjRef<Constant>(ref) {}
@@ -959,7 +966,7 @@ public:
     BigInt::impl(cur, cur, rhs);                                               \
     return *this;                                                              \
   }                                                                            \
-  ConstantBuilder &ident(uint64_t rhs) {                \
+  ConstantBuilder &ident(uint64_t rhs) {                                       \
     BigInt::impl(cur, cur, BigInt{rhs});                                       \
     return *this;                                                              \
   }

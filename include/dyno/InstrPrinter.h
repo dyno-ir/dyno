@@ -22,7 +22,7 @@ public:
       : str(str), dialectI(dialectI), tyI(tyI) {}
 
   void printAlways(DynObjRef ref) {
-    str << "ref." << dialectI[ref].name << '.' << tyI[ref].name << '('
+    str << "&" << dialectI[ref].name << '.' << tyI[ref].name << '('
         << ref.getObjID() << ")";
     printCustom(ref);
   }

@@ -177,6 +177,7 @@ public:
   BlockRef(ObjRef<Block> obj, Block *block) : FatObjRef<Block>(obj, block) {}
   BlockRef(ObjRef<Block> obj, Block &block) : FatObjRef<Block>(obj, block) {}
   BlockRef(const FatObjRef<Block> &ref) : FatObjRef<Block>(ref) {}
+  BlockRef() : FatObjRef<Block>() {}
   // BlockRef(iterator ref) : FatObjRef<Block>(ref->getPtr()) {}
 
   // these constructors are needed for casting impl (maybe we can somehow get
