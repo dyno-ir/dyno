@@ -45,7 +45,7 @@ template <typename Derived> class BigIntMixin {
 
 protected:
   static uint32_t bitsToWords(uint32_t bits) {
-    return (bits + WordBitsM1) / WordBits;
+    return round_up_div(bits, WordBits);
   }
   static constexpr unsigned repeatExtend(uint32_t num) {
     unsigned fact = BigIntExtendBits;
@@ -172,7 +172,7 @@ public:
   BigInt(uint64_t val, unsigned bits) { set(val, bits); }
 
   static BigInt ofLen(uint32_t bits) {
-    return BigInt{bits, (bits + WordBitsM1) / WordBits, 0};
+    return BigInt{bits, round_up_div(bits, WordBits), 0};
   }
 
 #define LINEAR_OP(ident, code)                                                 \
@@ -236,11 +236,11 @@ public:
 
     if constexpr (Left)
       out.words.resize(
-          std::min(originalNumWords + ((rhs + WordBitsM1) / WordBits),
-                   (lhs.getNumBits() + WordBitsM1) / WordBits));
+          std::min(originalNumWords + (round_up_div(rhs, WordBits)),
+                   round_up_div(lhs.getNumBits(), WordBits)));
     else {
       if (!Arith && out.extend != 0) {
-        out.words.resize((lhs.getNumBits() + WordBitsM1) / WordBits);
+        out.words.resize(round_up_div(lhs.getNumBits(), WordBits));
         out.extend = 0;
       }
     }
@@ -382,7 +382,7 @@ public:
     // truncate
     if (newSize < lhs.getNumBits()) {
       out.words.resize(
-          std::min(lhs.getNumWords(), (newSize + WordBitsM1) / WordBits));
+          std::min(lhs.getNumWords(), round_up_div(newSize, WordBits)));
       copyIfDifferent();
       out.numBits = newSize;
 
@@ -854,7 +854,8 @@ class ConstantRef : public FatDynObjRef<Constant>,
                                        1 + BigIntExtendBits>;
   using Custom = DynObjRef::CustomField<RemCustomBits, 16 - RemCustomBits>;
 
-      public : using FatDynObjRef<Constant>::FatDynObjRef;
+public:
+  using FatDynObjRef<Constant>::FatDynObjRef;
 
   explicit ConstantRef(FatDynObjRef<Constant> ref)
       : FatDynObjRef<Constant>(ref) {}

@@ -1,5 +1,4 @@
 #pragma once
-
 #include <bit>
 #include <cassert>
 #include <climits>
@@ -32,12 +31,8 @@ template <typename T> constexpr T bit_mask_zeros(unsigned n, unsigned pos = 0) {
   return ~bit_mask_ones<T>(n, pos);
 }
 
-template <typename T> constexpr T bit_mask_nbits(unsigned nbits) {
-  return (T(1) << nbits) - 1;
-}
-
 template <typename T> constexpr T bit_mask_ms_nbits(unsigned nbits) {
-  return bit_mask_ones<T>(nbits) << (bit_mask_sz<T> - nbits);
+  return bit_mask_ones<T>(nbits, (bit_mask_sz<T> - nbits));
 }
 
 template <typename T> constexpr unsigned clog2(T val) {
@@ -45,6 +40,10 @@ template <typename T> constexpr unsigned clog2(T val) {
   //if (val == 0)
   //  return 0;
   //return bit_mask_sz<T> - std::countl_zero(val);
+}
+
+template <typename T> constexpr T round_up_div(T dividend, T divisor) {
+  return (dividend + divisor - 1) / divisor;
 }
 
 template <typename NumT, unsigned N, unsigned Pos> class BitField {
