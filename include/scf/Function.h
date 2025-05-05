@@ -1,6 +1,6 @@
 #pragma once
 #include "dyno/CFG.h"
-#include "dyno/IDs.h"
+#include "dyno/DialectInfo.h"
 #include "dyno/Instr.h"
 #include "dyno/Obj.h"
 #include "hw/DefUseMixin.h"
@@ -52,11 +52,12 @@ public:
   SCFFuncRef func() { return this->def()->as<SCFFuncRef>(); }
   uint getNumParams() { return func()->params.size(); }
 
-  BlockRef getBlock() { return this->operand(2)->as<BlockRef>(); }
+  BlockRef getBlock() { return this->operand(1)->as<BlockRef>(); }
 
   auto blocks() {
     return func()->defUse.uses().filter([](OperandRef ref) {
-      return ref.instr().getDialect() == DIALECT_RTL && ref.instr().getOpcode() == HW_BLOCK_INSTR;
+      return ref.instr().getDialect() == DIALECT_RTL &&
+             ref.instr().getOpcode() == HW_BLOCK_INSTR;
     });
   }
 };

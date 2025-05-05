@@ -201,7 +201,8 @@ public:
 
   auto def() { return ptr->defUse.getSingleDef(); }
   auto defI() { return ptr->defUse.getSingleDef()->instr(); }
-  auto parent() { return defI().operand(1)->fat(); }
+
+  bool empty() { return size() == 0; }
 };
 
 template <bool Ordered>

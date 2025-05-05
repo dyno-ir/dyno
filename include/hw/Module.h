@@ -1,5 +1,6 @@
 #pragma once
 
+#include "dyno/DialectInfo.h"
 #include "dyno/Instr.h"
 #include "dyno/Obj.h"
 #include "hw/IDs.h"
@@ -53,39 +54,51 @@ class ModuleRef : public FatObjRef<Module> {
 public:
   using FatObjRef<Module>::FatObjRef;
   ModuleRef(const FatObjRef<Module> ref) : FatObjRef<Module>(ref) {}
-
-public:
-  auto procs() {
-    return ptr->defUse.usesOfCategory(Module::UC_PROC)
-        .transform([](size_t i, const OperandRef &OpRef) {
-          return OpRef.instr().def()->as<ProcessRef>();
-        });
-  }
-  auto regs() {
-    return ptr->defUse.usesOfCategory(Module::UC_REG)
-        .transform([](size_t i, const OperandRef &OpRef) {
-          return OpRef.instr().def()->as<RegisterRef>();
-        });
-  }
-  auto funcs() {
-    return ptr->defUse.usesOfCategory(Module::UC_FUNC)
-        .transform([](size_t i, const OperandRef &OpRef) {
-          return FuncInstrRef{OpRef.instr()};
-        });
-    ;
-  }
-
-  void addPort(RegisterRef ref, Register::PortType portType) {
-    ref.getPtr()->portIndex = ptr->ports.size();
-    ref.getPtr()->portType = portType;
-    ptr->ports.emplace_back(ref);
-  }
 };
 
 template <> struct ObjTraits<Module> {
   static constexpr DialectID dialect{DIALECT_RTL};
   static constexpr TyID ty{RTL_MODULE};
   using FatRefT = ModuleRef;
+};
+
+class ModuleIRef : public InstrRef {
+public:
+  using InstrRef::InstrRef;
+  ModuleIRef(InstrRef instr) : InstrRef(instr) {}
+
+  ModuleRef mod() { return def(0)->as<ModuleRef>(); }
+  BlockRef block() { return def(1)->as<BlockRef>(); }
+
+  void addPort(RegisterRef ref, Register::PortType portType) {
+    ref.getPtr()->portIndex = mod()->ports.size();
+    ref.getPtr()->portType = portType;
+    mod()->ports.emplace_back(ref);
+  }
+
+  auto procs() {
+    return mod()
+        ->defUse.usesOfCategory(Module::UC_PROC)
+        .transform([](size_t i, const OperandRef &OpRef) {
+          // this kind of cast should maybe check dialect/opcode.
+          return OpRef.instr().as<ProcessIRef>();
+        });
+  }
+  auto regs() {
+    return mod()
+        ->defUse.usesOfCategory(Module::UC_REG)
+        .transform([](size_t i, const OperandRef &OpRef) {
+          return OpRef.instr().def()->as<RegisterRef>();
+        });
+  }
+  auto funcs() {
+    return mod()
+        ->defUse.usesOfCategory(Module::UC_FUNC)
+        .transform([](size_t i, const OperandRef &OpRef) {
+          return FuncInstrRef{OpRef.instr()};
+        });
+    ;
+  }
 };
 
 }; // namespace dyno

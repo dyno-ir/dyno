@@ -1,3 +1,4 @@
+#if 0
 #include "dyno/Constant.h"
 #include "dyno/IDs.h"
 #include "hw/IDs.h"
@@ -22,7 +23,6 @@ void basic()
 }
 
 int main() {
-#if 0
   Interface<DialectInfo> dialectI{dialectIs.data()};
   Interface<TyInfo> tyI{tyIs.data()};
   Interface<OpcodeInfo> opcI{opcodeIs.data()};
@@ -72,5 +72,5 @@ int main() {
     }
     std::cout << "----------\n";
   }
-#endif
 }
+#endif

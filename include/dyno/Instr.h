@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Obj.h"
 #include "dyno/IDs.h"
 #include "support/Bits.h"
 #include "support/RTTI.h"
@@ -287,12 +288,18 @@ public:
 
   DialectID getDialect() { return (*this)->dialect; }
   OpcodeID getOpcode() { return (*this)->opc; }
+  DialectID getDialectID() = delete;
+
   unsigned getNumOperands() { return (*this)->numOperands; }
   unsigned getNumDefs() { return (*this)->numDefs; }
   unsigned getNumOthers() { return (*this)->numOperands - (*this)->numDefs; }
 
   Range<iterator> defs() { return {def_begin(), def_end()}; }
   Range<iterator> others() { return {other_begin(), other_end()}; }
+
+  bool isOpc(DialectID dialect, OpcodeID opcode) {
+    return getDialect() == dialect && getOpcode() == opcode;
+  }
 };
 
 class InstrDefUse {
@@ -337,6 +344,15 @@ public:
     if (!hasSingleUse())
       return nullptr;
     return use_begin();
+  }
+
+  iterator getDef(uint n) {
+    assert(n < numDefs);
+    return def_begin() + n;
+  }
+  iterator getUse(uint n) {
+    assert(n + numDefs < refs.size());
+    return use_begin() + n;
   }
 
   iterator begin() { return refs.begin(); }
@@ -497,12 +513,6 @@ public:
     return *this;
   }
 };
-
-struct OpcodeInfo {
-  std::string_view name;
-};
-
-constexpr OpcodeInfo coreOpcodeInfo[] = {{"block_instr"}};
 
 template <> struct InterfaceTraits<OpcodeInfo> {
   static const OpcodeInfo *dispatch1(InstrRef ref,

@@ -10,7 +10,7 @@ namespace dyno {
 
 class Register {
   friend class RegisterRef;
-  friend class ModuleRef;
+  friend class ModuleIRef;
 
 public:
   enum PortType : uint8_t {

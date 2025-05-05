@@ -1,5 +1,3 @@
-#include "dyno/Constant.h"
-#include "dyno/Obj.h"
 #include "hw/HWAbstraction.h"
 
 using namespace dyno;
@@ -17,7 +15,7 @@ int main() {
   auto reg = ctx.createRegister(mod);
 
   auto proc = ctx.createProcess(mod);
-  auto block = *proc.blocks().begin();
+  auto block = proc.block();
   HWInstrBuilder build{ctx, block.begin()};
   auto add1 =
       build.buildAdd(build.buildConst(32, 20), build.buildConst(32, 21));
@@ -26,7 +24,7 @@ int main() {
   auto store = build.buildStore(reg, sub.defW());
 
   auto proc2 = ctx.createProcess(mod);
-  auto block2 = *proc2.blocks().begin();
+  auto block2 = proc2.block();
 
   build.setInsertPoint(block2.begin());
   auto load = build.buildLoad(reg);
@@ -34,46 +32,41 @@ int main() {
   auto ifelse = build.buildIfElse(add3.defW());
 
   build.setInsertPoint(ifelse.getTrueBlock().begin());
-  ifelse =
-      build.buildSCFYield(ifelse.getSCFConstruct(), build.buildConst(32, 42))
-          .second;
+  ifelse = build.buildSCFYield(build.buildConst(32, 42)).second;
 
   build.setInsertPoint(ifelse.getFalseBlock().begin());
-  ifelse =
-      build.buildSCFYield(ifelse.getSCFConstruct(), build.buildConst(32, 1337))
-          .second;
+  ifelse = build.buildSCFYield(build.buildConst(32, 1337)).second;
 
-  build.setInsertPoint(block2.end());
-  build.buildStore(mod->ports[1], ifelse.getYieldValue());
+  build.setInsertPoint(proc2.block().end());
+  build.buildStore(mod.mod()->ports[1], ifelse.getYieldValue());
 
   // auto endIt = ifelse.getFalseBlock().end();
   //--endIt;
   // ctx.getInstrs().destroy(endIt.instr());
   // endIt.erase();
 
-  auto block3 = *ctx.createProcess(mod).blocks().begin();
+  auto block3 = ctx.createProcess(mod).block();
   build.setInsertPoint(block3.begin());
   auto whileInstr = build.buildWhile(build.buildConst(32, 128));
   build.setInsertPoint(whileInstr.getCondBlock().begin());
   auto sub2 =
       build.buildSub(whileInstr.getYieldValue(0), build.buildConst(32, 1));
-  build.buildSCFYield(whileInstr.getSCFConstruct(), sub2.defW(),
+  build.buildSCFYield(sub2.defW(),
                       /*todo: convert to bool*/ sub2.defW());
   build.setInsertPoint(whileInstr.getBodyBlock().begin());
   build.buildStore(reg, whileInstr.getYieldValue(0));
-  build.buildSCFYield(whileInstr.getSCFConstruct(),
-                      whileInstr.getYieldValue(0));
+  build.buildSCFYield(whileInstr.getYieldValue(0));
 
-  auto func = build.buildFunc(mod);
+  auto func = ctx.buildFunc(mod);
   build.setInsertPoint(func.getBlock().begin());
   auto param = build.buildFuncParam(func.func());
-  auto ret =
-      build.buildFuncReturn(func.func(), param.defW(), build.buildConst(64, 1UL << 40));
+  auto ret = build.buildFuncReturn(func.func(), param.defW(),
+                                   build.buildConst(64, 1UL << 40));
   build.buildFuncReturn(func.func(), param.defW(),
                         ConstantBuilder{ctx.getConstants()}
                             .add(ret.operand(2)->as<ConstantRef>())
                             .add(1)
-                            .add(-1)
+                            .bitAND(-2)
                             .get());
 
   HWPrinter print;

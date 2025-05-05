@@ -6,7 +6,7 @@
 #include "scf/IDs.h"
 
 namespace dyno {
-
+/*
 // use this for all scf constructs to keep obj bloat down. two purposes:
 // vreg for yields, and as parent to owned blocks
 class SCFConstruct {
@@ -28,62 +28,54 @@ template <> struct ObjTraits<SCFConstruct> {
   static constexpr TyID ty{SCF_CONSTRUCT};
   using FatRefT = SCFConstruct;
 };
+*/
 
-// defs: (scfconstr, vreg...); uses: (cond_vreg, true_block, false_block)
+// defs: (true_block, (false_block, vreg...)); uses: (cond_vreg)
 class IfInstrRef : public InstrRef {
 public:
   using InstrRef::InstrRef;
   IfInstrRef(const InstrRef &ref) : InstrRef(ref) {}
 
-  bool hasFalseBlock() { return getNumOperands() > 2; }
-  uint getNumYieldValues() { return getNumDefs() - 1; }
+  bool hasFalseBlock() { return getNumDefs() >= 2; }
+  uint getNumYieldValues() { return getNumDefs() < 2 ? 0 : getNumDefs() - 2; }
 
   FatDynObjRef<> getCondValue() {
-    return this->operand(getNumOperands() - 3)->as<FatDynObjRef<>>();
+    return this->operand(getNumDefs())->as<FatDynObjRef<>>();
   }
-  BlockRef getTrueBlock() {
-    return this->operand(getNumOperands() - (hasFalseBlock() ? 2 : 1))
-        ->as<BlockRef>();
-  }
+  BlockRef getTrueBlock() { return this->operand(0)->as<BlockRef>(); }
   BlockRef getFalseBlock() {
     if (!hasFalseBlock())
       return nullref;
-    return this->operand(getNumOperands() - 1)->as<BlockRef>();
-  }
-  SCFConstructRef getSCFConstruct() {
-    return this->operand(0)->as<SCFConstructRef>();
+    return this->operand(1)->as<BlockRef>();
   }
   // do not ref specific value vreg like Wire here
   FatDynObjRef<> getYieldValue(uint n = 0) {
     assert(n < getNumYieldValues());
-    return this->operand(1 + n)->as<FatDynObjRef<>>();
+    return this->operand(2 + n)->as<FatDynObjRef<>>();
   }
 };
 
-// defs: (scfconstr, vreg...); uses: (cond_bl, body_bl, vreg...)
+// defs: (cond_bl, body_bl, vreg...); uses: (cond_vreg, vreg...)
 class WhileInstrRef : public InstrRef {
 public:
   using InstrRef::InstrRef;
   WhileInstrRef(const InstrRef &ref) : InstrRef(ref) {}
 
-  uint getNumYieldValues() { return (getNumDefs() - 1); }
+  uint getNumYieldValues() { return (getNumDefs() - 2); }
 
   BlockRef getCondBlock() {
-    return this->operand(getNumDefs())->as<BlockRef>();
+    return this->operand(0)->as<BlockRef>();
   }
   BlockRef getBodyBlock() {
-    return this->operand(getNumDefs() + 1)->as<BlockRef>();
-  }
-  SCFConstructRef getSCFConstruct() {
-    return this->operand(0)->as<SCFConstructRef>();
+    return this->operand(1)->as<BlockRef>();
   }
   FatDynObjRef<> getYieldValue(uint n = 0) {
     assert(n < getNumYieldValues());
-    return this->operand(1 + n)->as<FatDynObjRef<>>();
+    return this->operand(2 + n)->as<FatDynObjRef<>>();
   }
   FatDynObjRef<> getInputValue(uint n = 0) {
     assert(n < getNumYieldValues());
-    return this->operand(2 + getNumYieldValues() + n)->as<FatDynObjRef<>>();
+    return this->operand(getNumDefs() + n)->as<FatDynObjRef<>>();
   }
 };
 

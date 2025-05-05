@@ -31,10 +31,10 @@ private:
   using Traits = InterfaceTraits<T>;
   using DispatchT = const T *;
   using DispatchRefT = const T &;
-  DispatchT *entries;
+  const DispatchT *entries;
 
 public:
-  Interface(DispatchT *entries) : entries(entries) {}
+  Interface(const DispatchT *entries) : entries(entries) {}
 
   template <size_t N>
   Interface(StaticInterface<T, N> interface) : entries(interface.entries) {}
@@ -42,7 +42,8 @@ public:
   DispatchT operator[](DialectID dialect) { return entries[dialect]; }
 
   template <typename RefT> DispatchRefT operator[](RefT ref) {
-    return Traits::dispatch2(ref, Traits::dispatch1(ref, entries));
+    return Traits::dispatch2(
+        ref, Traits::dispatch1(ref, const_cast<const T **>(entries)));
   }
 
   /*template <typename... Args> auto operator()(ObjRef ref, Args &&...args) {*/

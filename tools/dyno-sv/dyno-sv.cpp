@@ -25,8 +25,8 @@ using namespace dyno;
 class VisitorAST : public slang::ast::ASTVisitor<VisitorAST, true, true> {
 public:
   HWContext &ctx;
-  ModuleRef mod;
-  ProcessRef proc;
+  ModuleIRef mod;
+  ProcessIRef proc;
   BlockRef blockRef;
   std::unordered_map<std::string_view, RegisterRef> vars;
 
@@ -89,7 +89,7 @@ public:
   void handle_proc(const slang::ast::ProceduralBlockSymbol &block) {
     assert(mod);
     proc = ctx.createProcess(mod);
-    blockRef = *proc.blocks().begin();
+    blockRef = proc.block();
     handle_stmt(block.getBody());
   }
 

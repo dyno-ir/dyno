@@ -5,16 +5,13 @@
 #include "dyno/Instr.h"
 #include "dyno/InstrPrinter.h"
 #include "dyno/Obj.h"
-#include "dyno/ObjInfo.h"
 #include "hw/IDs.h"
 #include "hw/Module.h"
-#include "hw/ObjInfo.h"
 #include "hw/Process.h"
 #include "hw/Register.h"
 #include "hw/Wire.h"
 #include "scf/Function.h"
 #include "scf/IDs.h"
-#include "scf/ObjInfo.h"
 #include "scf/SCF.h"
 #include "support/Utility.h"
 #include <dyno/NewDeleteObjStore.h>
@@ -27,7 +24,6 @@ class HWContext {
   ConstantStore constants;
   NewDeleteObjStore<Module> modules;
   NewDeleteObjStore<Register> regs;
-  NewDeleteObjStore<SCFConstruct> scfConstrs;
   NewDeleteObjStore<Wire> wires;
   NewDeleteObjStore<SCFFunc> funcs;
   NewDeleteObjStore<Process> procs;
@@ -39,51 +35,60 @@ public:
   auto &getConstants() { return constants; }
   auto &getModules() { return modules; }
   auto &getRegs() { return regs; }
-  auto &getSCFConstrs() { return scfConstrs; }
   auto &getWires() { return wires; }
   auto &getFuncs() { return funcs; }
   auto &getProcs() { return procs; }
   auto &getInstrs() { return instrs; }
   auto &getCFG() { return cfg; }
 
-  ModuleRef createModule(std::string_view name) {
+  ModuleIRef createModule(std::string_view name) {
     auto moduleRef = modules.create(std::string(name));
     auto moduleInstr = InstrRef{
-        instrs.create(1, DialectID{DIALECT_RTL}, OpcodeID{HW_MODULE_INSTR})};
+        instrs.create(2, DialectID{DIALECT_RTL}, OpcodeID{HW_MODULE_INSTR})};
 
-    InstrBuilder{moduleInstr}.addRef(moduleRef);
-
-    return moduleRef;
+    InstrBuilder{moduleInstr}.addRef(moduleRef).addRef(createBlock());
+    return moduleInstr;
   }
 
-  RegisterRef createRegister(ModuleRef parent) {
+  RegisterRef createRegister(ModuleIRef parent) {
     auto regRef = RegisterRef{regs.create()};
     // in order for the reg to use anything it must be an instr as well
     auto regInstr = InstrRef{
-        instrs.create(2, DialectID{DIALECT_RTL}, OpcodeID{HW_REGISTER_INSTR})};
-    InstrBuilder{regInstr}.addRef(regRef).other().addRef(parent);
-
+        instrs.create(1, DialectID{DIALECT_RTL}, OpcodeID{HW_REGISTER_INSTR})};
+    InstrBuilder{regInstr}.addRef(regRef);
+    parent.block().end().insertPrev(regInstr);
     return regRef;
   }
 
-  template <typename... Ts> BlockRef createBlock(Ts... parents) {
+  BlockRef createBlock() {
     auto blockRef = cfg.blocks.create(cfg);
-    auto blockInstrRef =
-        InstrRef{instrs.create(1 + sizeof...(parents), DialectID{DIALECT_RTL},
-                               OpcodeID{HW_BLOCK_INSTR})};
-    InstrBuilder build{blockInstrRef};
-    build.addRef(blockRef).other();
-    (([&]() { build.addRef(parents); })(), ...);
+    // auto blockInstrRef =
+    //     InstrRef{instrs.create(1 + sizeof...(parents),
+    //     DialectID{DIALECT_RTL},
+    //                            OpcodeID{HW_BLOCK_INSTR})};
+    // InstrBuilder build{blockInstrRef};
+    // build.addRef(blockRef).other();
+    //(([&]() { build.addRef(parents); })(), ...);
     return blockRef;
   }
 
-  ProcessRef createProcess(ModuleRef parent) {
+  auto buildFunc(ModuleIRef parent) {
+    auto funcRef = SCFFuncRef{getFuncs().create()};
+    auto funcInstr = FuncInstrRef{getInstrs().create(2, DialectID{DIALECT_SCF},
+                                                     OpcodeID{SCF_FUNC_INSTR})};
+
+    InstrBuilder{funcInstr}.addRef(funcRef).addRef(createBlock());
+    parent.block().end().insertPrev(funcInstr);
+    return funcInstr;
+  }
+
+  ProcessIRef createProcess(ModuleIRef parent) {
     auto procRef = procs.create();
-    auto procInstRef = InstrRef{
+    auto procInstRef = ProcessIRef{
         instrs.create(2, DialectID{DIALECT_RTL}, OpcodeID{HW_PROCESS_INSTR})};
-    InstrBuilder{procInstRef}.addRef(procRef).other().addRef(parent);
-    createBlock(procRef);
-    return procRef;
+    InstrBuilder{procInstRef}.addRef(procRef).addRef(createBlock());
+    parent.block().end().insertPrev(procInstRef);
+    return procInstRef;
   }
 };
 
@@ -105,9 +110,9 @@ public:
   // todo: get rid of ctx params via global directory.
   auto iter(HWContext &ctx) { return ctx.getCFG()[this->as<ObjRef<Instr>>()]; }
   BlockRef parentBlock(HWContext &ctx) { return iter(ctx).blockRef(); }
-  ProcessRef parentProc(HWContext &ctx) {
+  ProcessIRef parentProc(HWContext &ctx) {
     auto pBlock = parentBlock(ctx);
-    return pBlock.parent().as<ProcessRef>();
+    return pBlock.defI().as<ProcessIRef>();
   }
 };
 
@@ -162,50 +167,47 @@ public:
   }
 
   IfInstrRef buildIfElse(FatDynObjRef<> cond) {
-    SCFConstructRef scfConstr{ctx.getSCFConstrs().create()};
     InstrRef instrRef = InstrRef{
-        ctx.getInstrs().create(4, DialectID{DIALECT_SCF}, OpcodeID{SCF_IF})};
+        ctx.getInstrs().create(3, DialectID{DIALECT_SCF}, OpcodeID{SCF_IF})};
     insertInstr(instrRef);
-
     InstrBuilder build{instrRef};
-    build.addRef(scfConstr).other().addRef(cond);
-
-    auto trueBl = ctx.createBlock(insert.blockRef().parent() /*, scfConstr*/);
-    auto falseBl = ctx.createBlock(insert.blockRef().parent() /*, scfConstr*/);
-
-    build.addRef(trueBl).addRef(falseBl);
+    auto trueBl = ctx.createBlock();
+    auto falseBl = ctx.createBlock();
+    build.addRef(trueBl).addRef(falseBl).other().addRef(cond);
     return IfInstrRef{instrRef};
   }
 
-  template <typename... Ts>
-  auto buildSCFYield(SCFConstructRef scfConstr, Ts... value) {
+  template <typename... Ts> auto buildSCFYield(Ts... value) {
     // todo: ideally this would dynamically add Wires to the associated
-    // IfInstrRef. Alternative is a GET_YIELD instr or something, but then we
-    // end up with 3 categories in the SCFConstruct vreg use list (YIELD,
-    // GET_YIELD and block). For now naive implementation as reference, just
-    // delete old instr and rebuild
+    // IfInstrRef. Alternative is a GET_YIELD instr or something. For now naive
+    // implementation as reference, just delete old instr and rebuild
 
     OpcodeID opcode = OpcodeID{SCF_YIELD};
+    auto instr = insert.blockRef().defI();
+    assert(instr.getDialect() == DIALECT_SCF &&
+           (instr.getOpcode().anyOf(SCF_IF, SCF_WHILE)));
 
-    auto instr = scfConstr.getDef().instr();
     switch (instr.getOpcode()) {
     case SCF_IF: {
-      if (sizeof...(value) >= instr.getNumDefs()) {
+      auto asIf = IfInstrRef{instr};
+      if (sizeof...(value) >= asIf.getNumYieldValues()) {
+
         auto newInstr = InstrRef{ctx.getInstrs().create(
-            sizeof...(value) + 4, DialectID{DIALECT_SCF}, OpcodeID{SCF_IF})};
+            sizeof...(value) + 3, DialectID{DIALECT_SCF}, OpcodeID{SCF_IF})};
 
         InstrBuilder build{newInstr};
-        build.addRef(scfConstr);
 
-        for (uint i = 1; i < instr.getNumDefs(); i++)
+        // copy over true/false blocks and existing defs
+        for (uint i = 0; i < instr.getNumDefs(); i++)
           build.addRef(instr.operand(i)->as<FatDynObjRef<>>());
 
-        for (uint i = 0; i < sizeof...(value) - instr.getNumDefs() + 1; i++)
+        // new wire defs
+        for (uint i = 0; i < sizeof...(value) - asIf.getNumYieldValues(); i++)
           build.addRef(ctx.getWires().create());
-
         build.other();
-        for (uint i = instr.getNumDefs(); i < instr.getNumOperands(); i++)
-          build.addRef(instr.operand(i)->as<FatDynObjRef<>>());
+
+        // condition
+        build.addRef(instr.operand(instr.getNumDefs())->as<FatDynObjRef<>>());
 
         HWInstrRef{instr}.iter(ctx).replace(newInstr);
         ctx.getInstrs().destroy(instr);
@@ -219,7 +221,7 @@ public:
       if (sizeof...(Ts) == asWhile.getNumYieldValues() + 1)
         opcode = OpcodeID{SCF_YIELD_COND};
       else {
-        assert(sizeof...(Ts) == asWhile.getNumYieldValues());
+        assert(sizeof...(Ts) == asWhile.getNumYieldValues() && "todo resizing");
       }
       break;
     }
@@ -227,39 +229,26 @@ public:
       dyno_unreachable("undefined");
     }
 
-    auto yieldInstr =
-        buildInstr(DialectID{DIALECT_SCF}, opcode, false, scfConstr, value...);
+    auto yieldInstr = buildInstr(DialectID{DIALECT_SCF}, OpcodeID{SCF_YIELD},
+                                 false, value...);
     return std::make_pair(yieldInstr, instr);
   }
 
   template <typename... Ts> auto buildWhile(Ts... inputs) {
-    SCFConstructRef scfConstr{ctx.getSCFConstrs().create()};
     InstrRef instrRef = InstrRef{
-        ctx.getInstrs().create(3 + 2 * sizeof...(inputs),
+        ctx.getInstrs().create(2 + 2 * sizeof...(inputs),
                                DialectID{DIALECT_SCF}, OpcodeID{SCF_WHILE})};
     insertInstr(instrRef);
 
     InstrBuilder build{instrRef};
-    build.addRef(scfConstr);
+    build.addRef(ctx.createBlock());
+    build.addRef(ctx.createBlock());
+
     for (uint i = 0; i < sizeof...(inputs); i++)
       build.addRef(ctx.getWires().create());
-    // todo: copy over all parents for nested scf constructs?
     build.other();
-    build.addRef(ctx.createBlock(insert.blockRef().parent() /*, scfConstr*/));
-    build.addRef(ctx.createBlock(insert.blockRef().parent() /*, scfConstr*/));
     ([&]() { build.addRef(inputs); }(), ...);
-
     return WhileInstrRef{instrRef};
-  }
-
-  auto buildFunc(ModuleRef parent) {
-    auto funcRef = SCFFuncRef{ctx.getFuncs().create()};
-    auto funcInstr = FuncInstrRef{ctx.getInstrs().create(
-        3, DialectID{DIALECT_SCF}, OpcodeID{SCF_FUNC_INSTR})};
-
-    InstrBuilder{funcInstr}.addRef(funcRef).other().addRef(parent).addRef(
-        ctx.createBlock(funcRef));
-    return funcInstr;
   }
 
   auto buildFuncParam(SCFFuncRef func) {
@@ -288,85 +277,49 @@ public:
 };
 
 class HWPrinter {
-  // todo: better spot for these
-  std::array<const DialectInfo *, 3> dialectIs{
-      &coreDialectInfo, &scfDialectInfo, &rtlDialectInfo};
-  std::array<const TyInfo *, 3> tyIs{coreTyInfo, scfTyInfo, rtlTyInfo};
-  std::array<const OpcodeInfo *, 3> opcodeIs{coreOpcodeInfo, scfOpcodeInfo,
-                                             rtlOpcodeInfo};
+  static constexpr std::array<const DialectInfo *, NUM_DIALECTS> dialectIs{
+#define HEADER
+#define FOOTER
+#define LAST
+#define ADD_OP(x) &DialectTraits<x>::info
+#include "dyno/DialectIDs.inc"
+  };
+  std::array<const TyInfo *, NUM_DIALECTS> tyIs{
+#define HEADER
+#define FOOTER
+#define LAST
+#define ADD_OP(x) DialectTraits<x>::tyInfo
+#include "dyno/DialectIDs.inc"
+  };
+  std::array<const OpcodeInfo *, NUM_DIALECTS> opcodeIs{
+#define HEADER
+#define FOOTER
+#define LAST
+#define ADD_OP(x) DialectTraits<x>::opcInfo
+#include "dyno/DialectIDs.inc"
+  };
 
   Interface<DialectInfo> dialectI{dialectIs.data()};
   Interface<TyInfo> tyI{tyIs.data()};
   Interface<OpcodeInfo> opcI{opcodeIs.data()};
 
-  RefPrinter refPrinter{std::cout, dialectI, tyI};
-  InstrPrinter instrPrinter{refPrinter, opcI};
+  FieldPrinter fieldPrinter{std::cout, dialectI, tyI, opcI};
+  RefPrinter refPrinter{fieldPrinter};
+  Printer printer{refPrinter};
 
 public:
+  HWPrinter() {
+    fieldPrinter.setDefaultDialects({DialectID{DIALECT_CORE},
+                                     DialectID{DIALECT_SCF},
+                                     DialectID{DIALECT_RTL}});
+  }
+
   void printCtx(HWContext &ctx) {
-    std::cout << "raw instr dump:\n";
     for (auto instr : ctx.getInstrs()) {
-      instrPrinter.print(InstrRef{instr});
-    }
-    std::cout << "\nstructured dump:\n";
-
-    refPrinter.reset();
-
-    for (auto mod : ctx.getModules()) {
-      auto moduleRef = ModuleRef{mod};
-      std::cout << "module(" << mod.getObjID() << ", " << mod->name << ",\n";
-      for (auto port : moduleRef->ports) {
-        switch (RegisterRef{port}.getPortType()) {
-        case Register::PORT_IN:
-          std::cout << "in: ";
-          break;
-        case Register::PORT_OUT:
-          std::cout << "out: ";
-          break;
-        case Register::PORT_INOUT:
-          std::cout << "io: ";
-          break;
-        case Register::PORT_PARAM_IN:
-          std::cout << "param: ";
-          break;
-        case Register::PORT_NONE:
-          unreachable();
-        }
-
-        refPrinter.introduceRef(port);
-      }
-      std::cout << "):\n";
-
-      for (auto reg : moduleRef.regs()) {
-        if (!reg.isPort())
-          refPrinter.introduceRef(reg);
-      }
-
-      for (auto func : moduleRef.funcs()) {
-        std::cout << "func(" << func.def().getRef().getObjID() << "):\n";
-
-        for (auto block : func.blocks()) {
-          auto blockRef = block.instr().def()->as<BlockRef>();
-          std::cout << "block(" << blockRef.getObjID() << "):\n";
-
-          for (auto insn = blockRef.begin(); insn != blockRef.end(); insn++) {
-            instrPrinter.print(*insn);
-          }
-        }
-      }
-
-      for (auto proc : moduleRef.procs()) {
-        std::cout << "proc(" << proc.getObjID() << "):\n";
-        for (auto block : proc.blocks()) {
-          std::cout << "block(" << block.getObjID() << "):\n";
-
-          for (auto insn = block.begin(); insn != block.end(); insn++) {
-            instrPrinter.print(*insn);
-          }
-        }
-      }
+      if (InstrRef{instr}.isOpc(DialectID{DIALECT_RTL},
+                                OpcodeID{HW_MODULE_INSTR}))
+        printer.printInstr(InstrRef{instr});
     }
   }
 };
-
 }; // namespace dyno

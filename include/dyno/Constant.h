@@ -114,7 +114,7 @@ class PatBigInt : public BigIntMixin<PatBigInt> {
   friend class Constant;
   friend class ConstantBuilder;
   friend class ConstantStore;
-  friend class BigIntMixin;
+  friend class BigIntMixin<PatBigInt>;
   friend class BigInt;
 
   uint32_t bits;
@@ -578,7 +578,6 @@ public:
     return out;
   }
 
-private:
   template <typename T>
   static void stream_hex(std::ostream &os, const T &self) {
     ssize_t hexDigits = (self.getNumBits() + 3) / 4;
@@ -648,6 +647,7 @@ private:
     words.try_to_inline();
   }
 
+private:
   void normalize() {
 
     if (getNumWords() * bit_mask_sz<uint32_t> < numBits)
@@ -861,7 +861,7 @@ public:
       : FatDynObjRef<Constant>(ref) {}
 
   ConstantRef(unsigned n, uint32_t val, uint8_t extPattern)
-      : FatDynObjRef<Constant>(DynObjRef::ofTy<Constant>()) {
+      : FatDynObjRef<Constant>(DynObjRef::ofTy<Constant>(), nullptr) {
     customField<IsInline>() = true;
     customField<ExtPattern>() = extPattern;
     customField<NBits>() = n;
@@ -1011,4 +1011,12 @@ template <> struct ObjTraits<Constant> {
   static constexpr TyID ty{CORE_CONSTANT};
   using FatRefT = ConstantRef;
 };
+
+inline void CorePrint::printConstant(std::ostream &os, FatDynObjRef<> ref,
+                                     bool printConstruct) {
+  assert(!printConstruct && "constant can't be def'd");
+  os << '#';
+  ref.as<ConstantRef>().toStream(os, 10);
+}
+
 } // namespace dyno

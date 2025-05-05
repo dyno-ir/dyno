@@ -1,39 +1,88 @@
 #pragma once
 
+#include "dyno/CFG.h"
+#include "dyno/Obj.h"
 #include <dyno/Instr.h>
 #include <dyno/Interface.h>
-#include <dyno/ObjInfo.h>
+#include <initializer_list>
 #include <iostream>
+#include <limits>
+#include <ostream>
 #include <unordered_map>
 
 namespace dyno {
 
-class RefPrinter {
-public:
-  std::ostream &str;
+class FieldPrinter {
+  std::vector<bool> isDefault =
+      std::vector<bool>(std::numeric_limits<DialectID::num_t>::max() + 1ULL);
 
+public:
   Interface<DialectInfo> dialectI;
   Interface<TyInfo> tyI;
+  Interface<OpcodeInfo> opcodeI;
+
+  std::ostream &str;
+
+  FieldPrinter(std::ostream &str, Interface<DialectInfo> dialectI,
+               Interface<TyInfo> tyI, Interface<OpcodeInfo> opcodeI)
+      : dialectI(dialectI), tyI(tyI), opcodeI(opcodeI), str(str) {}
+
+  void printType(DynObjRef ref) {
+    if (!isDefault[ref.getDialectID()]) {
+      str << dialectI[ref].name << ".";
+    }
+    str << tyI[ref].name;
+  }
+
+  void printOpcode(InstrRef ref) {
+    if (!isDefault[ref.getDialect()]) {
+      str << dialectI[ref.getDialect()]->name << ".";
+    }
+    str << opcodeI[ref].name;
+  }
+
+  void setDefaultDialects(std::initializer_list<DialectID> dialects) {
+    for (auto dial : dialects)
+      isDefault[dial] = 1;
+  }
+};
+
+class RefPrinter {
+public:
+  FieldPrinter &fieldPrinter;
+  std::ostream &str;
 
   std::unordered_map<DynObjRef, size_t> introduced;
+  RefPrinter(FieldPrinter &fieldPrinter)
+      : fieldPrinter(fieldPrinter), str(fieldPrinter.str) {}
 
-  RefPrinter(std::ostream &str, Interface<DialectInfo> dialectI,
-             Interface<TyInfo> tyI)
-      : str(str), dialectI(dialectI), tyI(tyI) {}
-
-  void printAlways(DynObjRef ref) {
-    str << "&" << dialectI[ref].name << '.' << tyI[ref].name << '('
-        << ref.getObjID() << ")";
+  void printRef(FatDynObjRef<> ref) {
+    if (fieldPrinter.tyI[ref].print) {
+      fieldPrinter.tyI[ref].print(str, ref, false);
+      return;
+    }
+    fieldPrinter.printType(ref);
+    str << '[' << ref.getObjID() << "]";
     printCustom(ref);
   }
 
-  void printCustom(DynObjRef ref) {
+  void printConstruct(FatDynObjRef<> ref) {
+    if (fieldPrinter.tyI[ref].print) {
+      fieldPrinter.tyI[ref].print(str, ref, true);
+      return;
+    }
+    fieldPrinter.printType(ref);
+    // str << '(' << ref.getObjID() << ")";
+    // printCustom(ref);
+  }
+
+  void printCustom(FatDynObjRef<> ref) {
     if (!ref.isCustom())
       return;
     str << '(' << ref.getCustom() << ')';
   }
 
-  void print(DynObjRef ref) {
+  void print(FatDynObjRef<> ref) {
     DynObjRef noCustom = ref;
     noCustom.clearCustom();
     auto it = introduced.find(noCustom);
@@ -42,49 +91,88 @@ public:
       printCustom(ref);
       return;
     }
-    printAlways(ref);
+    printRef(ref);
   }
 
-  void introduce(DynObjRef ref) {
+  void introduce(FatDynObjRef<> ref) {
     DynObjRef noCustom = ref;
     noCustom.clearCustom();
     auto [it, succ] = introduced.try_emplace(noCustom, introduced.size());
-    str << '%' << it->second << " = ";
+    str << '%' << it->second << ":";
   }
 
-  void introduceRef(DynObjRef ref) {
+  void introduceRef(FatDynObjRef<> ref) {
     introduce(ref);
-    printAlways(ref);
-    str << "\n";
+    printConstruct(ref);
   }
 
   void reset() { introduced.clear(); }
 };
 
-class InstrPrinter {
+class Printer {
   RefPrinter &refPrinter;
+  FieldPrinter &fieldPrinter;
+  int indent = 0;
+
+  void addIndent() { indent++; }
+  void removeIndent() { indent--; }
+  void printIndent() {
+    for (int i = 0; i < indent; i++)
+      str << "  ";
+  }
+  void printNewLineIndent() {
+    str << '\n';
+    for (int i = 0; i < indent; i++)
+      str << "  ";
+  }
 
 public:
   std::ostream &str;
 
-  Interface<OpcodeInfo> opcodeI;
+  Printer(RefPrinter &refPrinter)
+      : refPrinter(refPrinter), fieldPrinter(refPrinter.fieldPrinter),
+        str(refPrinter.str) {}
 
-  InstrPrinter(RefPrinter &refPrinter, Interface<OpcodeInfo> opcodeI)
-      : refPrinter(refPrinter), str(refPrinter.str), opcodeI(opcodeI) {}
+  void printBlock(BlockRef block) {
+    str << "{\n";
+    addIndent();
+    for (auto it : block) {
+      printIndent();
+      printInstr(it);
+    }
+    removeIndent();
+    if (!block.empty())
+      printIndent();
+    str << "}";
+  }
 
-  void print(InstrRef instr) {
-    refPrinter.introduce(instr);
-    str << refPrinter.dialectI[instr.getDialect()]->name << "."
-        << opcodeI[instr].name << " | ";
-    for (auto op : instr.defs()) {
-      refPrinter.print(op.getRef());
-      str << ' ';
+  void printInstr(InstrRef instr) {
+    fieldPrinter.printOpcode(instr);
+    str << ' ';
+
+    for (size_t i = 0; i < instr.getNumOperands(); i++) {
+      auto ref = instr.operand(i)->fat();
+      if (i < instr.getNumDefs()) {
+        refPrinter.introduceRef(ref);
+      } else {
+        refPrinter.print(ref);
+      }
+
+      if (i != instr.getNumOperands() - 1)
+        str << ", ";
     }
-    str << '|';
-    for (auto op : instr.others()) {
-      str << ' ';
-      refPrinter.print(op.getRef());
+
+    bool first = 1;
+    for (size_t i = 0; i < instr.getNumDefs(); i++) {
+      if (auto asBlock = instr.def(i)->dyn_as<BlockRef>()) {
+        if (first) {
+          first = 0;
+          str << ' ';
+        }
+        printBlock(asBlock);
+      }
     }
+
     str << '\n';
   }
 };

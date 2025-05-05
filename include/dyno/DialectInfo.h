@@ -1,10 +1,12 @@
 #pragma once
-
-#include "support/Bits.h"
-#include <dyno/Interface.h>
+#include "Interface.h"
+#include "Obj.h"
+#include <cstdint>
 #include <string_view>
 
 namespace dyno {
+
+#include "DialectIDs.inc"
 
 struct DialectInfo {
   std::string_view name;
@@ -12,6 +14,20 @@ struct DialectInfo {
 
 struct TyInfo {
   std::string_view name;
+  using print_func = void(std::ostream &os, FatDynObjRef<> ref, bool printConstruct);
+  print_func *print;
+
+  constexpr TyInfo(std::string_view name) : name(name), print(nullptr) {}
+  constexpr TyInfo(std::string_view name, print_func *print)
+      : name(name), print(print) {}
+};
+
+struct OpcodeInfo {
+  std::string_view name;
+};
+
+template <uint8_t> struct DialectTraits {
+  constexpr static DialectInfo info = DialectInfo{"INVALID"};
 };
 
 template <> struct InterfaceTraits<TyInfo> {
@@ -24,10 +40,4 @@ template <> struct InterfaceTraits<TyInfo> {
   }
 };
 
-constexpr DialectInfo coreDialectInfo{"core"};
-
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wc99-designator"
-constexpr TyInfo coreTyInfo[] = {{"instr"}, {"constant"}, {"block"}};
-#pragma clang diagnostic pop
 } // namespace dyno

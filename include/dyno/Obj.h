@@ -26,6 +26,14 @@ public:
   explicit operator bool() const { return *this != INVALID; }
 
   constexpr bool operator==(IDImpl o) const { return num == o.num; }
+
+  template <typename... T> bool anyOf(T... ids) {
+    for (auto id : {ids...}) {
+      if (id == num)
+        return true;
+    }
+    return false;
+  }
 };
 
 using DialectID = IDImpl<uint8_t>;
@@ -73,7 +81,9 @@ protected:
   ObjID obj;
 
   template <typename FieldT> FieldT customField() { return FieldT{custom}; }
-  template <typename FieldT> const FieldT customField() const { return FieldT{const_cast<uint16_t&>(custom)}; }
+  template <typename FieldT> const FieldT customField() const {
+    return FieldT{const_cast<uint16_t &>(custom)};
+  }
 
 public:
   template <typename T> static DynObjRef ofTy() {
@@ -182,7 +192,7 @@ public:
   using RTTIUtilMixin<FatDynObjRef<T>>::is;
   FatDynObjRef() {}
   FatDynObjRef(nullref_t) : DynObjRef(nullref), ptr(nullptr) {}
-  FatDynObjRef(DynObjRef ref, T *ptr = nullptr) : DynObjRef(ref), ptr(ptr) {}
+  FatDynObjRef(DynObjRef ref, T *ptr) : DynObjRef(ref), ptr(ptr) {}
   template <typename U = T, typename = std::enable_if_t<!std::is_void_v<U>>>
   FatDynObjRef(DynObjRef ref, U &ptr) : DynObjRef(ref), ptr(&ptr) {}
   template <typename U = T, typename = std::enable_if_t<!std::is_void_v<U>>>
@@ -235,7 +245,9 @@ private:
 protected:
   TrailingObjArr() { static_assert(alignof(T) <= alignof(Derived)); }
   T *trailing() { return reinterpret_cast<T *>(&derived() + 1); }
-  const T *trailing() const { return reinterpret_cast<const T *>(&derived() + 1); }
+  const T *trailing() const {
+    return reinterpret_cast<const T *>(&derived() + 1);
+  }
 
 public:
   static constexpr size_t getAllocSize(size_t n) {
