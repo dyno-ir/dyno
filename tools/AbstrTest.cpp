@@ -32,10 +32,10 @@ int main() {
   auto ifelse = build.buildIfElse(add3.defW());
 
   build.setInsertPoint(ifelse.getTrueBlock().begin());
-  ifelse = build.buildSCFYield(build.buildConst(32, 42)).second;
+  ifelse = build.buildYield(build.buildConst(32, 42)).second;
 
   build.setInsertPoint(ifelse.getFalseBlock().begin());
-  ifelse = build.buildSCFYield(build.buildConst(32, 1337)).second;
+  ifelse = build.buildYield(build.buildConst(32, 1337)).second;
 
   build.setInsertPoint(proc2.block().end());
   build.buildStore(mod.mod()->ports[1], ifelse.getYieldValue());
@@ -51,11 +51,11 @@ int main() {
   build.setInsertPoint(whileInstr.getCondBlock().begin());
   auto sub2 =
       build.buildSub(whileInstr.getYieldValue(0), build.buildConst(32, 1));
-  build.buildSCFYield(sub2.defW(),
+  build.buildYield(sub2.defW(),
                       /*todo: convert to bool*/ sub2.defW());
   build.setInsertPoint(whileInstr.getBodyBlock().begin());
   build.buildStore(reg, whileInstr.getYieldValue(0));
-  build.buildSCFYield(whileInstr.getYieldValue(0));
+  build.buildYield(whileInstr.getYieldValue(0));
 
   auto func = ctx.buildFunc(mod);
   build.setInsertPoint(func.getBlock().begin());

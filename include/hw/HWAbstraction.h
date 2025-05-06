@@ -5,14 +5,15 @@
 #include "dyno/Instr.h"
 #include "dyno/InstrPrinter.h"
 #include "dyno/Obj.h"
+#include "hw/HWConstant.h"
 #include "hw/IDs.h"
 #include "hw/Module.h"
 #include "hw/Process.h"
 #include "hw/Register.h"
 #include "hw/Wire.h"
-#include "scf/Function.h"
-#include "scf/IDs.h"
-#include "scf/SCF.h"
+#include "op/Function.h"
+#include "op/IDs.h"
+#include "op/StructuredControlFlow.h"
 #include "support/Utility.h"
 #include <dyno/NewDeleteObjStore.h>
 #include <iostream>
@@ -25,7 +26,7 @@ class HWContext {
   NewDeleteObjStore<Module> modules;
   NewDeleteObjStore<Register> regs;
   NewDeleteObjStore<Wire> wires;
-  NewDeleteObjStore<SCFFunc> funcs;
+  NewDeleteObjStore<Function> funcs;
   NewDeleteObjStore<Process> procs;
   CFG cfg;
   NewDeleteObjStore<Instr> instrs;
@@ -73,9 +74,9 @@ public:
   }
 
   auto buildFunc(ModuleIRef parent) {
-    auto funcRef = SCFFuncRef{getFuncs().create()};
-    auto funcInstr = FuncInstrRef{getInstrs().create(2, DialectID{DIALECT_SCF},
-                                                     OpcodeID{SCF_FUNC_INSTR})};
+    auto funcRef = FunctionRef{getFuncs().create()};
+    auto funcInstr = FuncInstrRef{
+        getInstrs().create(2, DialectID{DIALECT_OP}, OpcodeID{OP_FUNC_INSTR})};
 
     InstrBuilder{funcInstr}.addRef(funcRef).addRef(createBlock());
     parent.block().end().insertPrev(funcInstr);
@@ -148,14 +149,29 @@ public:
     return HWInstrRef{instr};
   }
 
-  template <typename... Ts> HWInstrRef buildAdd(Ts... operands) {
-    return buildInstr(DialectID{DIALECT_RTL}, OpcodeID{HW_ADD}, true,
-                      operands...);
+#define COMM_OP(ident, opcode)                                                 \
+  template <typename... Ts> HWInstrRef ident(Ts... operands) {                 \
+    return buildInstr(DialectID{DIALECT_OP}, OpcodeID{opcode}, true,           \
+                      operands...);                                            \
+  }
+  COMM_OP(buildAdd, OP_ADD)
+  COMM_OP(buildAnd, OP_AND)
+  COMM_OP(buildOr, OP_OR)
+  COMM_OP(buildXor, OP_XOR)
+  COMM_OP(buildMul, OP_MUL)
+
+#define BINOP(ident, opcode)                                                   \
+  template <typename LHS, typename RHS> HWInstrRef ident(LHS lhs, RHS rhs) {   \
+    return buildInstr(DialectID{DIALECT_OP}, OpcodeID{opcode}, true, lhs,      \
+                      rhs);                                                    \
   }
 
-  template <typename LHS, typename RHS> HWInstrRef buildSub(LHS lhs, RHS rhs) {
-    return buildInstr(DialectID{DIALECT_RTL}, OpcodeID{HW_SUB}, true, lhs, rhs);
-  }
+  BINOP(buildSub, OP_SUB)
+  BINOP(buildSDiv, OP_SDIV)
+  BINOP(buildUDiv, OP_UDIV)
+  BINOP(buildSLL, OP_SLL)
+  BINOP(buildSRL, OP_SRL)
+  BINOP(buildSRA, OP_SRA)
 
   HWInstrRef buildLoad(RegisterRef reg) {
     return buildInstr(DialectID{DIALECT_RTL}, OpcodeID{HW_LOAD}, true, reg);
@@ -168,7 +184,7 @@ public:
 
   IfInstrRef buildIfElse(FatDynObjRef<> cond) {
     InstrRef instrRef = InstrRef{
-        ctx.getInstrs().create(3, DialectID{DIALECT_SCF}, OpcodeID{SCF_IF})};
+        ctx.getInstrs().create(3, DialectID{DIALECT_OP}, OpcodeID{OP_IF})};
     insertInstr(instrRef);
     InstrBuilder build{instrRef};
     auto trueBl = ctx.createBlock();
@@ -177,23 +193,23 @@ public:
     return IfInstrRef{instrRef};
   }
 
-  template <typename... Ts> auto buildSCFYield(Ts... value) {
+  template <typename... Ts> auto buildYield(Ts... value) {
     // todo: ideally this would dynamically add Wires to the associated
     // IfInstrRef. Alternative is a GET_YIELD instr or something. For now naive
     // implementation as reference, just delete old instr and rebuild
 
-    OpcodeID opcode = OpcodeID{SCF_YIELD};
+    OpcodeID opcode = OpcodeID{OP_YIELD};
     auto instr = insert.blockRef().defI();
-    assert(instr.getDialect() == DIALECT_SCF &&
-           (instr.getOpcode().anyOf(SCF_IF, SCF_WHILE)));
+    assert(instr.getDialect() == DIALECT_OP &&
+           (instr.getOpcode().anyOf(OP_IF, OP_WHILE)));
 
     switch (instr.getOpcode()) {
-    case SCF_IF: {
+    case OP_IF: {
       auto asIf = IfInstrRef{instr};
       if (sizeof...(value) >= asIf.getNumYieldValues()) {
 
         auto newInstr = InstrRef{ctx.getInstrs().create(
-            sizeof...(value) + 3, DialectID{DIALECT_SCF}, OpcodeID{SCF_IF})};
+            sizeof...(value) + 3, DialectID{DIALECT_OP}, OpcodeID{OP_IF})};
 
         InstrBuilder build{newInstr};
 
@@ -215,11 +231,11 @@ public:
       }
       break;
     }
-    case SCF_WHILE: {
+    case OP_WHILE: {
       WhileInstrRef asWhile{instr};
       // conditional yield is just implicit for now, one more arg
       if (sizeof...(Ts) == asWhile.getNumYieldValues() + 1)
-        opcode = OpcodeID{SCF_YIELD_COND};
+        opcode = OpcodeID{OP_YIELD_COND};
       else {
         assert(sizeof...(Ts) == asWhile.getNumYieldValues() && "todo resizing");
       }
@@ -229,15 +245,14 @@ public:
       dyno_unreachable("undefined");
     }
 
-    auto yieldInstr = buildInstr(DialectID{DIALECT_SCF}, OpcodeID{SCF_YIELD},
-                                 false, value...);
+    auto yieldInstr =
+        buildInstr(DialectID{DIALECT_OP}, OpcodeID{OP_YIELD}, false, value...);
     return std::make_pair(yieldInstr, instr);
   }
 
   template <typename... Ts> auto buildWhile(Ts... inputs) {
-    InstrRef instrRef = InstrRef{
-        ctx.getInstrs().create(2 + 2 * sizeof...(inputs),
-                               DialectID{DIALECT_SCF}, OpcodeID{SCF_WHILE})};
+    InstrRef instrRef = InstrRef{ctx.getInstrs().create(
+        2 + 2 * sizeof...(inputs), DialectID{DIALECT_OP}, OpcodeID{OP_WHILE})};
     insertInstr(instrRef);
 
     InstrBuilder build{instrRef};
@@ -251,16 +266,16 @@ public:
     return WhileInstrRef{instrRef};
   }
 
-  auto buildFuncParam(SCFFuncRef func) {
+  auto buildFuncParam(FunctionRef func) {
     auto instr =
-        buildInstr(DialectID{DIALECT_SCF}, OpcodeID{SCF_PARAM}, true, func);
+        buildInstr(DialectID{DIALECT_OP}, OpcodeID{OP_PARAM}, true, func);
     func.addParam(instr);
     return instr;
   }
 
   template <typename... Ts>
-  auto buildFuncReturn(SCFFuncRef func, Ts... retvals) {
-    auto instr = buildInstr(DialectID{DIALECT_SCF}, OpcodeID{SCF_RETURN}, false,
+  auto buildFuncReturn(FunctionRef func, Ts... retvals) {
+    auto instr = buildInstr(DialectID{DIALECT_OP}, OpcodeID{OP_RETURN}, false,
                             func, retvals...);
     func.addReturn(instr);
     return instr;
@@ -274,7 +289,7 @@ public:
   }
 
   void setInsertPoint(BlockRef_iterator<true> it) { insert = it; }
-};
+}; // namespace dyno
 
 class HWPrinter {
   static constexpr std::array<const DialectInfo *, NUM_DIALECTS> dialectIs{
@@ -310,7 +325,7 @@ class HWPrinter {
 public:
   HWPrinter() {
     fieldPrinter.setDefaultDialects({DialectID{DIALECT_CORE},
-                                     DialectID{DIALECT_SCF},
+                                     DialectID{DIALECT_OP},
                                      DialectID{DIALECT_RTL}});
   }
 

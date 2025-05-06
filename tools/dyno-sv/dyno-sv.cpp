@@ -1,4 +1,5 @@
 
+#include "dyno/Obj.h"
 #include "hw/HWAbstraction.h"
 #include "hw/Module.h"
 #include "hw/Register.h"
@@ -7,7 +8,9 @@
 #include "slang/ast/Expression.h"
 #include "slang/ast/Symbol.h"
 #include "slang/ast/expressions/AssignmentExpressions.h"
+#include "slang/ast/expressions/LiteralExpressions.h"
 #include "slang/ast/expressions/MiscExpressions.h"
+#include "slang/ast/expressions/Operator.h"
 #include "slang/ast/expressions/OperatorExpressions.h"
 #include "slang/ast/symbols/BlockSymbols.h"
 #include "slang/ast/symbols/CompilationUnitSymbols.h"
@@ -34,7 +37,7 @@ public:
 
   struct Value {
     bool is_signed;
-    WireRef wire;
+    FatDynObjRef<> value;
   };
 
   void handle(const slang::ast::InstanceSymbol &node) {
@@ -56,8 +59,6 @@ public:
         ptype = Register::PORT_REF;
         break;
       }
-      // auto signal = cur_mod->make_signal(std::string(port->name), Range{0,
-      // ps.getType().getBitWidth()}, stype);
 
       auto reg = ctx.createRegister(mod);
       mod.addPort(reg, ptype);
@@ -65,7 +66,6 @@ public:
     }
 
     for (auto &member : node.body.Scope::members()) {
-      std::cout << member.name << "\n";
       switch (member.kind) {
       case slang::ast::SymbolKind::Parameter:
       case slang::ast::SymbolKind::Port:
@@ -106,13 +106,11 @@ public:
     }
     case slang::ast::StatementKind::ExpressionStatement: {
       const auto &expr_s = stmt.as<slang::ast::ExpressionStatement>();
-      std::cout << expr_s.kind << "\n";
       handle_expr(expr_s.expr);
       break;
     }
     case slang::ast::StatementKind::Timed: {
       auto &timed_s = stmt.as<slang::ast::TimedStatement>();
-      std::cout << timed_s.timing.kind << "\n";
       // todo: ?
       handle_stmt(timed_s.stmt);
       break;
@@ -163,7 +161,7 @@ public:
     switch (expr.kind) {
     case slang::ast::ExpressionKind::Assignment: {
       const auto &assign = expr.as<slang::ast::AssignmentExpression>();
-      std::cout << assign.kind << "\n";
+      //std::cout << assign.kind << "\n";
 
       auto val = handle_expr(assign.right());
 
@@ -173,14 +171,14 @@ public:
       auto sig = vars.find(left.symbol.name);
       assert(sig != vars.end());
 
-      build.buildStore(sig->second, val.wire);
+      build.buildStore(sig->second, val.value);
 
       return val;
       break;
     }
     case slang::ast::ExpressionKind::BinaryOp: {
       const auto &binop = expr.as<slang::ast::BinaryExpression>();
-      std::cout << binop.kind << "\n";
+      //std::cout << binop.kind << "\n";
 
       auto lhs = handle_expr(binop.left());
       auto rhs = handle_expr(binop.right());
@@ -189,20 +187,45 @@ public:
 
       switch (binop.op) {
       case slang::ast::BinaryOperator::Add:
-        instr = build.buildAdd(lhs.wire, rhs.wire);
+        instr = build.buildAdd(lhs.value, rhs.value);
         break;
       case slang::ast::BinaryOperator::Subtract:
-        instr = build.buildSub(lhs.wire, rhs.wire);
+        instr = build.buildSub(lhs.value, rhs.value);
         break;
-      // case slang::ast::BinaryOperator::BinaryAnd:
-      //   opc = BinOpcode::AND;
-      //   break;
-      // case slang::ast::BinaryOperator::BinaryOr:
-      //   opc = BinOpcode::OR;
-      //   break;
-      // case slang::ast::BinaryOperator::BinaryXor:
-      //   opc = BinOpcode::XOR;
-      //   break;
+      case slang::ast::BinaryOperator::Multiply:
+        instr = build.buildMul(lhs.value, rhs.value);
+        break;
+      case slang::ast::BinaryOperator::Divide:
+        switch (binop.getEffectiveSign(false)) {
+        case slang::ast::Expression::EffectiveSign::Unsigned:
+        case slang::ast::Expression::EffectiveSign::Either:
+          // todo: Either?
+          instr = build.buildUDiv(lhs.value, rhs.value);
+          break;
+        case slang::ast::Expression::EffectiveSign::Signed:
+          instr = build.buildSDiv(lhs.value, rhs.value);
+          break;
+        }
+        break;
+      case slang::ast::BinaryOperator::ArithmeticShiftLeft:
+      case slang::ast::BinaryOperator::LogicalShiftLeft:
+        instr = build.buildSLL(lhs.value, rhs.value);
+        break;
+      case slang::ast::BinaryOperator::ArithmeticShiftRight:
+        instr = build.buildSRA(lhs.value, rhs.value);
+        break;
+      case slang::ast::BinaryOperator::LogicalShiftRight:
+        instr = build.buildSRL(lhs.value, rhs.value);
+        break;
+      case slang::ast::BinaryOperator::BinaryAnd:
+        instr = build.buildAnd(lhs.value, rhs.value);
+        break;
+      case slang::ast::BinaryOperator::BinaryOr:
+        instr = build.buildOr(lhs.value, rhs.value);
+        break;
+      case slang::ast::BinaryOperator::BinaryXor:
+        instr = build.buildXor(lhs.value, rhs.value);
+        break;
       default:
         abort();
       }
@@ -226,9 +249,12 @@ public:
                    build.buildLoad(sig->second).defW()};
       break;
     }
+    case slang::ast::ExpressionKind::IntegerLiteral: {
+      const auto& asLit = expr.as<slang::ast::IntegerLiteral>();
+      //asLit.getValue()[0];
+    }
 
     case slang::ast::ExpressionKind::Invalid:
-    case slang::ast::ExpressionKind::IntegerLiteral:
     case slang::ast::ExpressionKind::RealLiteral:
     case slang::ast::ExpressionKind::TimeLiteral:
     case slang::ast::ExpressionKind::UnbasedUnsizedIntegerLiteral:
@@ -390,7 +416,6 @@ int main(int argc, char **argv) {
     printf("slang-reflect: errors found during compilation\n");
     return 1;
   }
-
 
   HWContext ctx;
 

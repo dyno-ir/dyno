@@ -37,16 +37,29 @@ template <typename T> constexpr T bit_mask_ms_nbits(unsigned nbits) {
 
 template <typename T> constexpr unsigned clog2(T val) {
   return std::bit_width(val);
-  //if (val == 0)
-  //  return 0;
-  //return bit_mask_sz<T> - std::countl_zero(val);
+  // if (val == 0)
+  //   return 0;
+  // return bit_mask_sz<T> - std::countl_zero(val);
 }
 
 template <typename T> constexpr T round_up_div(T dividend, T divisor) {
   return (dividend + divisor - 1) / divisor;
 }
 
-template <typename NumT, unsigned N, unsigned Pos> class BitField {
+template <typename T>
+static constexpr unsigned repeatBits(T x, unsigned xBits) {
+  unsigned fact = xBits;
+  assert(!(x & bit_mask_zeros<unsigned>(xBits)));
+  while (fact != bit_mask_sz<T>) {
+    x |= (x << fact);
+    fact <<= 1;
+  }
+  return x;
+}
+
+// fixme: these should use a shared base but then template param deduction
+// fails.
+template <std::integral NumT, unsigned N, unsigned Pos> class BitField {
   NumT &num;
 
 public:
@@ -83,6 +96,32 @@ public:
     num |= v << pos;
   }
 
+  void flip() { num ^= mask_ones; }
+
+  unsigned count() { return std::popcount(num & mask_ones); }
+};
+template <std::integral NumT, unsigned N, unsigned Pos>
+class BitField<const NumT, N, Pos> {
+  const NumT &num;
+
+public:
+  using num_t = const NumT;
+  using num_signed_t = std::make_signed_t<const NumT>;
+
+  static constexpr num_t mask_ones = bit_mask_ones<num_t>(N, Pos);
+  static constexpr num_t mask_zeros = bit_mask_zeros<num_t>(N, Pos);
+
+  static constexpr num_t mask_ones_noshift = bit_mask_ones<num_t>(N);
+  static constexpr num_t mask_zeros_noshift = bit_mask_zeros<num_t>(N);
+
+  static constexpr unsigned size = N;
+  static constexpr unsigned pos = Pos;
+
+  explicit BitField(num_t &v) : num(v) {}
+
+  operator num_t() const { return get(); }
+
+  num_t get() const { return (num & mask_ones) >> pos; }
   void flip() { num ^= mask_ones; }
 
   unsigned count() { return std::popcount(num & mask_ones); }

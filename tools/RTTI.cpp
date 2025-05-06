@@ -31,7 +31,7 @@ struct DerivedB : Base
 int main() {
   HWContext ctx;
   FatObjRef<Instr> instr =
-      ctx.getInstrs().create(0, DialectID{DIALECT_RTL}, OpcodeID{HW_ADD});
+      ctx.getInstrs().create(0, DialectID{DIALECT_RTL}, OpcodeID{OP_ADD});
   DynObjRef instrDyn = instr;
 
   ObjRef<Instr>::is_impl(instrDyn);

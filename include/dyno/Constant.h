@@ -5,6 +5,7 @@
 #include "support/Utility.h"
 #include <algorithm>
 #include <cmath>
+#include <concepts>
 #include <dyno/IDs.h>
 #include <dyno/NewDeleteObjStore.h>
 #include <dyno/Obj.h>
@@ -20,9 +21,14 @@
 namespace dyno {
 
 class ConstantRef;
-class ConstantBuilder;
+template <typename T> class ConstantBuilderBase;
 
+// only need one bit for sext/zext, two bits also allows extending with x or z
+// for hardware.
 constexpr size_t BigIntExtendBits = 2;
+
+// custom bits are stored in all BigIntAPI containers but unused here
+// used e.g. for hardware hasUnknown.
 constexpr size_t BigIntCustomBits = 1;
 
 constexpr uint32_t WordBits = sizeof(uint32_t) * 8;
@@ -37,9 +43,9 @@ concept BigIntAPI = std::is_base_of<BigIntMixin<T>, T>::value;
 template <typename Derived> class BigIntMixin {
   friend class BigInt;
 
-  // Base API for BigInt is getNumWords, getExtend and getWords.
-  // This is for utility functions using that API that may be shared by all
-  // implementing BigInt API.
+  // Base API for BigInt is getNumBits, getNumWords, getExtend, getCustom and
+  // getWords. This is for utility functions using that API that may be shared
+  // by all implementing BigInt API.
   Derived &self() { return *static_cast<Derived *>(this); }
   const Derived &self() const { return *static_cast<const Derived *>(this); }
 
@@ -48,13 +54,7 @@ protected:
     return round_up_div(bits, WordBits);
   }
   static constexpr unsigned repeatExtend(uint32_t num) {
-    unsigned fact = BigIntExtendBits;
-    num &= bit_mask_ones<unsigned>(BigIntExtendBits);
-    while (fact != bit_mask_sz<unsigned>) {
-      num |= (num << fact);
-      fact <<= 1;
-    }
-    return num;
+    return repeatBits(num, BigIntExtendBits);
   }
   uint32_t getExtNumWords() const { return bitsToWords(self().getNumBits()); }
   uint32_t getWord(uint32_t i) const {
@@ -112,45 +112,69 @@ public:
 
 class PatBigInt : public BigIntMixin<PatBigInt> {
   friend class Constant;
-  friend class ConstantBuilder;
   friend class ConstantStore;
   friend class BigIntMixin<PatBigInt>;
   friend class BigInt;
 
   uint32_t bits;
-  uint8_t extend;
+  uint8_t field;
+
+  template <typename T> using Extend = BitField<T, BigIntExtendBits, 0>;
+  template <typename T>
+  using Custom = BitField<T, BigIntCustomBits, BigIntExtendBits>;
+
+public:
   uint32_t getNumWords() const { return 0; }
   uint32_t getNumBits() const { return bits; }
-  uint8_t getExtend() const { return extend; }
+  uint8_t getExtend() const { return Extend{field}; }
+  uint8_t getCustom() const { return Custom{field}; }
   std::span<uint32_t> getWords() const { return std::span<uint32_t>(); };
-  PatBigInt(uint32_t bits, uint8_t pattern2bit)
-      : bits(bits), extend(pattern2bit) {}
+  PatBigInt(uint32_t bits, uint8_t pattern, uint8_t custom = 0) : bits(bits) {
+    Extend{field} = pattern;
+    Custom{field} = custom;
+  }
 };
 
 class BigInt : public BigIntMixin<BigInt> {
   friend class Constant;
-  friend class ConstantBuilder;
   friend class ConstantStore;
   friend class BigIntMixin;
+  friend class HWBigInt;
 
   SmallVec<uint32_t, 4> words;
   uint32_t numBits;
-  uint8_t extend;
+  uint8_t field;
 
-protected:
+  template <typename T> using Extend = BitField<T, BigIntExtendBits, 0>;
+  template <typename T>
+  using Custom = BitField<T, BigIntCustomBits, BigIntExtendBits>;
+
+public:
+  // big int API
   unsigned getNumWords() const { return words.size(); }
-  unsigned getExtend() const { return extend; }
+  uint8_t getExtend() const { return Extend{field}; }
+  uint8_t getCustom() const { return Custom{field}; }
   std::span<uint32_t> getWords() { return words; }
   const std::span<uint32_t> getWords() const { return words; }
 
 private:
+  auto custom() { return Custom{field}; }
   BigInt(uint32_t numBits, uint32_t numWords, uint32_t extend)
-      : words(numWords), numBits(numBits), extend(extend) {}
+      : words(numWords), numBits(numBits) {
+    Extend<uint8_t>{field} = extend;
+  }
 
 public:
+  void setExtend(uint8_t val) {
+    Extend{field} = val & bit_mask_ones<uint8_t>(BigIntExtendBits);
+  }
+  void setCustom(uint8_t val) {
+    Custom{field} = val & bit_mask_ones<uint8_t>(BigIntCustomBits);
+  }
+
   template <BigIntAPI T> BigInt &operator=(const T &other) {
     this->numBits = other.getNumBits();
-    this->extend = other.getExtend();
+    Extend{field} = other.getExtend();
     this->words.resize(other.getNumWords());
     std::copy(other.getWords().begin(), other.getWords().end(),
               this->getWords().begin());
@@ -167,7 +191,7 @@ public:
   BigInt &operator=(BigInt &&other) = default;
   BigInt(BigInt &&other) = default;
 
-  BigInt() : words(), numBits(0), extend(0) {}
+  BigInt() : words(), numBits(0), field(0) {}
   BigInt(uint64_t val) { setPruned(val); }
   BigInt(uint64_t val, unsigned bits) { set(val, bits); }
 
@@ -193,6 +217,12 @@ public:
     subOp(out, PatBigInt(lhs.getNumBits(), 0), lhs);
   }
 
+  void setRepeating(uint32_t val, unsigned bits) {
+    words.resize(1);
+    words[0] = val;
+    numBits = bits;
+    Extend{field} = val & bit_mask_ones<uint32_t>(BigIntExtendBits);
+  }
   void set(uint64_t val, unsigned bits) {
     if (bits <= WordBits)
       return set((uint32_t)val, bits);
@@ -219,18 +249,17 @@ public:
   }
   uint32_t getNumBits() const { return numBits; }
 
-  void setExtend(uint8_t extend) { this->extend = extend & 3; }
-
   template <bool Left, bool Arith = false, typename T0>
   static void shiftOp(BigInt &out, const T0 &lhs, uint32_t rhs) {
     uint32_t shamtWords = rhs / WordBits;
     uint32_t shamtRem = rhs % WordBits;
-    uint8_t oldExtend = lhs.extend;
+    uint8_t oldExtend = lhs.getExtend();
     out.numBits = lhs.getNumBits();
-    if ((rhs & 1) && (out.extend == 1 || out.extend == 2))
-      out.extend = (~oldExtend) & bit_mask_ones<uint8_t>(BigIntExtendBits);
+    if ((rhs & 1) && (Extend{out.field} == 1 || Extend{out.field} == 2))
+      Extend{out.field} =
+          (~oldExtend) & bit_mask_ones<uint8_t>(BigIntExtendBits);
     else
-      out.extend = oldExtend & bit_mask_ones<uint8_t>(BigIntExtendBits);
+      Extend{out.field} = oldExtend & bit_mask_ones<uint8_t>(BigIntExtendBits);
 
     auto originalNumWords = lhs.getNumWords();
 
@@ -239,9 +268,9 @@ public:
           std::min(originalNumWords + (round_up_div(rhs, WordBits)),
                    round_up_div(lhs.getNumBits(), WordBits)));
     else {
-      if (!Arith && out.extend != 0) {
+      if (!Arith && Extend{out.field} != 0) {
         out.words.resize(round_up_div(lhs.getNumBits(), WordBits));
-        out.extend = 0;
+        Extend{out.field} = 0;
       }
     }
 
@@ -399,14 +428,14 @@ public:
     else
       static_assert(false);
 
-    if ((newExtend == lhs.extend || !lhs.isExtended())) {
+    if ((newExtend == lhs.getExtend() || !lhs.isExtended())) {
       // as long as extend stays the same (or is freely assignable) we can
       // extend by just changing numBits
       out.words.resize(lhs.getNumWords());
       copyIfDifferent();
 
       out.numBits = newSize;
-      out.extend = newExtend;
+      Extend{out.field} = newExtend;
 
       // no need to normalize here
       return;
@@ -418,7 +447,7 @@ public:
       out.getWords()[i] = lhs.getWord(i);
 
     out.numBits = newSize;
-    out.extend = newExtend;
+    Extend{out.field} = newExtend;
   }
 
   template <typename T0, typename T1>
@@ -641,7 +670,7 @@ public:
       os << uint32_t(str[i]);
   }
   void prune() {
-    uint32_t extendMask = repeatExtend(extend);
+    uint32_t extendMask = repeatExtend(Extend{field});
     while (words.size() != 1 && words.back() == extendMask)
       words.pop_back();
     words.try_to_inline();
@@ -653,13 +682,14 @@ private:
     if (getNumWords() * bit_mask_sz<uint32_t> < numBits)
       prune();
     else if (getNumWords() * bit_mask_sz<uint32_t> >= numBits) {
-      extend = (words.back() & bit_mask_ms_nbits<uint32_t>(BigIntExtendBits)) >>
-               (bit_mask_sz<uint32_t> - BigIntExtendBits);
+      Extend{field} =
+          (words.back() & bit_mask_ms_nbits<uint32_t>(BigIntExtendBits)) >>
+          (bit_mask_sz<uint32_t> - BigIntExtendBits);
       // truncate last word and fill with extend.
       if (getNumBits() % 32 != 0) {
         auto mask = (1 << (getNumBits() % 32)) - 1;
         words.back() &= mask;
-        words.back() |= (~mask & repeatExtend(extend));
+        words.back() |= (~mask & repeatExtend(Extend{field}));
       }
       prune();
     }
@@ -669,7 +699,8 @@ private:
   void expand() {
     auto oldSize = getNumWords();
     words.resize(getExtNumWords());
-    std::fill(words.begin() + oldSize, words.end(), repeatExtend(extend));
+    std::fill(words.begin() + oldSize, words.end(),
+              repeatExtend(Extend{field}));
   }
 
   template <auto OpFunc, typename T0, typename T1>
@@ -719,7 +750,7 @@ private:
       out.words[i] = OpFunc(lhsVal, rhsVal, carry, &carry);
     }
 
-    out.extend = extend;
+    Extend{out.field} = extend & bit_mask_ones<uint8_t>(BigIntExtendBits);
     out.numBits = maxNumBits;
     out.normalize();
   }
@@ -814,16 +845,27 @@ class alignas(uint64_t) Constant : public TrailingObjArr<Constant, uint32_t> {
   // 1
   friend class ConstantRef;
   // num bits is detached from actual storage words bc we can sign/zext.
-  unsigned numBits;
-  unsigned numWords;
+  uint32_t numBits;
+  uint32_t field;
+
+  static constexpr size_t AddrSize =
+      bit_mask_sz<uint32_t> - BigIntCustomBits - BigIntExtendBits;
+
+  template <std::integral T> using AddrField = BitField<T, AddrSize, 0>;
+  template <std::integral T>
+  using ExtendField = BitField<T, BigIntExtendBits, AddrSize>;
+  template <std::integral T>
+  using CustomField =
+      BitField<T, BigIntCustomBits, AddrSize + BigIntExtendBits>;
 
 public:
   Constant(DynObjRef ref, size_t sz, const BigInt &bigInt)
-      : numBits(bigInt.getNumBits()),
-        numWords((bigInt.getNumWords() &
-                  ~bit_mask_ms_nbits<unsigned>(BigIntExtendBits)) |
-                 bigInt.getExtend()
-                     << (bit_mask_sz<unsigned> - BigIntExtendBits)) {
+      : numBits(bigInt.getNumBits()) {
+
+    AddrField{field}.set(bigInt.getNumWords());
+    ExtendField{field}.set(bigInt.getExtend());
+    CustomField{field}.set(bigInt.getCustom());
+
     std::copy(bigInt.getWords().begin(), bigInt.getWords().end(), trailing());
   }
 
@@ -833,28 +875,23 @@ public:
   Constant &operator=(Constant &&) = delete;
 
 private:
-  size_t getNumTrailing() const {
-    return numWords & ~bit_mask_ms_nbits<unsigned>(BigIntExtendBits);
-  }
-  uint8_t getExtend() const {
-    return numWords >> (bit_mask_sz<unsigned> - BigIntExtendBits);
-  }
+  size_t getNumWords() const { return AddrField{field}; }
+  uint8_t getExtend() const { return ExtendField{field}; }
+  uint8_t getCustom() const { return CustomField{field}; }
 };
 static_assert(TrailingObj<Constant>);
 
 class ConstantRef : public FatDynObjRef<Constant>,
                     public BigIntMixin<ConstantRef> {
-  friend class ConstantBuilder;
-
-  static constexpr size_t RemCustomBits = 1;
-
-  using IsInline = DynObjRef::CustomField<1, 0>;
-  using ExtPattern = DynObjRef::CustomField<BigIntExtendBits, 1>;
-  using NBits = DynObjRef::CustomField<15 - BigIntExtendBits - RemCustomBits,
-                                       1 + BigIntExtendBits>;
-  using Custom = DynObjRef::CustomField<RemCustomBits, 16 - RemCustomBits>;
+protected:
+  using Custom =
+      DynObjRef::CustomField<BigIntCustomBits, 16 - BigIntCustomBits>;
 
 public:
+  using IsInline = DynObjRef::CustomField<1, 0>;
+  using ExtPattern = DynObjRef::CustomField<BigIntExtendBits, 1>;
+  using NBits = DynObjRef::CustomField<15 - BigIntExtendBits - BigIntCustomBits,
+                                       1 + BigIntExtendBits>;
   using FatDynObjRef<Constant>::FatDynObjRef;
 
   explicit ConstantRef(FatDynObjRef<Constant> ref)
@@ -871,12 +908,16 @@ public:
   std::span<const uint32_t> getWords() const {
     return isInline()
                ? std::span<const uint32_t>{&obj.num, 1}
-               : std::span<const uint32_t>{ptr->trailing(), ptr->numWords};
+               : std::span<const uint32_t>{ptr->trailing(), getNumWords()};
   }
   uint8_t getExtend() const {
     return isInline() ? customField<ExtPattern>() : ptr->getExtend();
   }
-  unsigned getNumWords() const { return isInline() ? 1 : ptr->numWords; };
+  uint8_t getCustom() const {
+    return isInline() ? customField<Custom>() : ptr->getCustom();
+  }
+  unsigned getNumWords() const { return isInline() ? 1 : ptr->getNumWords(); };
+
   uint getNumBits() const {
     return customField<IsInline>() ? customField<NBits>() : ptr->numBits;
   };
@@ -950,24 +991,25 @@ public:
   }
 };
 
-class ConstantBuilder {
+template <typename T> class ConstantBuilderBase {
+protected:
   ConstantStore &store;
-  BigInt cur;
+  T cur;
 
 public:
-  ConstantBuilder(ConstantStore &store) : store(store) {}
+  ConstantBuilderBase(ConstantStore &store) : store(store) {}
 
-  ConstantBuilder &val(unsigned bits, uint64_t value64 = 0) {
+  ConstantBuilderBase &val(unsigned bits, uint64_t value64 = 0) {
     cur.set(value64, bits);
     return *this;
   }
 
 #define SIMPLE_OP(ident, impl)                                                 \
-  template <BigIntAPI T> ConstantBuilder &ident(const T &rhs) {                \
+  template <BigIntAPI U> ConstantBuilderBase &ident(const U &rhs) {            \
     BigInt::impl(cur, cur, rhs);                                               \
     return *this;                                                              \
   }                                                                            \
-  ConstantBuilder &ident(uint64_t rhs) {                                       \
+  ConstantBuilderBase &ident(uint64_t rhs) {                                   \
     BigInt::impl(cur, cur, BigInt{rhs});                                       \
     return *this;                                                              \
   }
@@ -978,19 +1020,19 @@ public:
   SIMPLE_OP(bitOR, orOp)
   SIMPLE_OP(bitXOR, xorOp)
 
-  ConstantBuilder &neg() {
+  ConstantBuilderBase &neg() {
     BigInt::negateOp(cur, cur);
     return *this;
   }
-  template <BigIntAPI T> ConstantBuilder &mul(const T &rhs) {
+  template <BigIntAPI U> ConstantBuilderBase &mul(const U &rhs) {
     cur = BigInt::mulOp(cur, rhs);
     return *this;
   }
-  template <BigIntAPI T> ConstantBuilder &udiv(const T &rhs) {
+  template <BigIntAPI U> ConstantBuilderBase &udiv(const U &rhs) {
     cur = BigInt::udivmodOp(cur, rhs).first;
     return *this;
   }
-  template <BigIntAPI T> ConstantBuilder &umod(const T &rhs) {
+  template <BigIntAPI U> ConstantBuilderBase &umod(const U &rhs) {
     cur = BigInt::udivmodOp(cur, rhs).second;
     return *this;
   }
@@ -998,13 +1040,15 @@ public:
   ConstantRef get() {
     if (cur.getNumWords() == 1 &&
         cur.getNumBits() < (1ULL << ConstantRef::NBits::size))
-      return ConstantRef{cur.getNumBits(), cur.words[0], cur.extend};
+      return ConstantRef{cur.getNumBits(), cur.getWords()[0], cur.getExtend()};
 
     return store.findOrInsert(cur);
   }
 
   operator ConstantRef() { return get(); }
 };
+
+using ConstantBuilder = ConstantBuilderBase<BigInt>;
 
 template <> struct ObjTraits<Constant> {
   static constexpr DialectID dialect{DIALECT_CORE};

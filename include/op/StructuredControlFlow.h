@@ -3,32 +3,9 @@
 #include "dyno/Instr.h"
 #include "dyno/Obj.h"
 #include "hw/DefUseMixin.h"
-#include "scf/IDs.h"
+#include "op/IDs.h"
 
 namespace dyno {
-/*
-// use this for all scf constructs to keep obj bloat down. two purposes:
-// vreg for yields, and as parent to owned blocks
-class SCFConstruct {
-public:
-  InstrDefUse defUse;
-
-  SCFConstruct(DynObjRef) {}
-};
-
-class SCFConstructRef : public FatObjRef<SCFConstruct>,
-                        public InstrDefUseMixin<SCFConstructRef> {
-public:
-  using FatObjRef<SCFConstruct>::FatObjRef;
-  SCFConstructRef(FatObjRef<SCFConstruct> ref) : FatObjRef<SCFConstruct>(ref) {}
-};
-
-template <> struct ObjTraits<SCFConstruct> {
-  static constexpr DialectID dialect{DIALECT_SCF};
-  static constexpr TyID ty{SCF_CONSTRUCT};
-  using FatRefT = SCFConstruct;
-};
-*/
 
 // defs: (true_block, (false_block, vreg...)); uses: (cond_vreg)
 class IfInstrRef : public InstrRef {

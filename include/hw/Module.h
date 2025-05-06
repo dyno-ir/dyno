@@ -6,8 +6,8 @@
 #include "hw/IDs.h"
 #include "hw/Process.h"
 #include "hw/Register.h"
-#include "scf/Function.h"
-#include "scf/IDs.h"
+#include "op/Function.h"
+#include "op/IDs.h"
 #include "support/SmallVec.h"
 #include "support/Utility.h"
 
@@ -34,7 +34,7 @@ private:
       return UC_PROC;
     case (DIALECT_RTL << 16 | HW_REGISTER_INSTR):
       return UC_REG;
-    case (DIALECT_SCF << 16 | SCF_FUNC_INSTR):
+    case (DIALECT_OP << 16 | OP_FUNC_INSTR):
       return UC_FUNC;
     default:
       dyno_unreachable("type cannot use module");
