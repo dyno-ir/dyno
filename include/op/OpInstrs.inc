@@ -1,0 +1,66 @@
+// Header guards explicitly unwanted!
+
+#ifndef HEADER
+#define HEADER enum SCFOps {
+#endif
+
+#ifndef FOOTER
+#define FOOTER };
+#endif
+
+#ifndef ADD_OP
+#define ADD_OP(x) x
+#endif
+
+HEADER
+
+ADD_OP(IF),
+ADD_OP(WHILE),
+ADD_OP(YIELD),
+ADD_OP(YIELD_COND), // yield with additional bool continue arg, for while loop
+
+ADD_OP(FUNC_INSTR),
+ADD_OP(PARAM),
+ADD_OP(RETURN),
+ADD_OP(CALL),
+
+
+ADD_OP(ADD),
+ADD_OP(SUB),
+ADD_OP(MUL),
+ADD_OP(UDIV),
+ADD_OP(SDIV),
+
+ADD_OP(AND),
+ADD_OP(OR),
+ADD_OP(XOR),
+
+ADD_OP(SLL),
+ADD_OP(SRL),
+ADD_OP(SRA),
+
+ADD_OP(SEXT),
+ADD_OP(ZEXT),
+ADD_OP(ANYEXT),
+
+ADD_OP(ICMP_EQ),
+ADD_OP(ICMP_NE),
+
+ADD_OP(ICMP_ULT),
+ADD_OP(ICMP_SLT),
+
+ADD_OP(ICMP_ULE),
+ADD_OP(ICMP_SLE),
+
+ADD_OP(ICMP_UGT),
+ADD_OP(ICMP_SGT),
+
+ADD_OP(ICMP_UGE),
+ADD_OP(ICMP_SGE),
+
+
+FOOTER
+
+#undef HEADER
+#undef FOOTER
+#undef ADD_OP

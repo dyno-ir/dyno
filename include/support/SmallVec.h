@@ -55,6 +55,7 @@ template <typename T> class SmallVecImpl {
 public:
   using size_type = unsigned;
   using iterator = T *;
+  using const_iterator = const T *;
   using param_type = T &;
 
 private:
@@ -263,6 +264,6 @@ public:
   iterator begin() { return arr; }
   iterator end() { return arr + sz; }
 
-  const iterator begin() const { return arr; }
-  const iterator end() const { return arr + sz; }
+  const_iterator begin() const { return arr; }
+  const_iterator end() const { return arr + sz; }
 };

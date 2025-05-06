@@ -84,17 +84,17 @@ public:
   // there's some weird ambiguity with this being indepedent of bits but the
   // other == checking exact equality. Maybe make this a func instead of
   // operator.
-  friend bool operator==(const Derived &rhs, int64_t lhs) {
-    if (rhs.getNumWords() > 2)
-      return false;
-    if (rhs.getWord(0) != uint32_t(lhs) ||
-        rhs.getWord(1) != uint32_t(lhs >> 32))
-      return false;
-    if (lhs < 0 && rhs.getNumBits() > 64 && rhs.getExtend() != 0b11)
-      return false;
-
-    return true;
-  }
+  // friend bool operator==(const Derived &rhs, int64_t lhs) {
+  //  if (rhs.getNumWords() > 2)
+  //    return false;
+  //  if (rhs.getWord(0) != uint32_t(lhs) ||
+  //      rhs.getWord(1) != uint32_t(lhs >> 32))
+  //    return false;
+  //  if (lhs < 0 && rhs.getNumBits() > 64 && rhs.getExtend() != 0b11)
+  //    return false;
+  //
+  //  return true;
+  //}
 
   template <BigIntAPI T>
   friend bool operator==(const Derived &lhs, const T &rhs) {
@@ -155,7 +155,7 @@ public:
   uint8_t getExtend() const { return Extend{field}; }
   uint8_t getCustom() const { return Custom{field}; }
   std::span<uint32_t> getWords() { return words; }
-  const std::span<uint32_t> getWords() const { return words; }
+  std::span<const uint32_t> getWords() const { return words; }
 
 private:
   auto custom() { return Custom{field}; }
@@ -197,6 +197,22 @@ public:
 
   static BigInt ofLen(uint32_t bits) {
     return BigInt{bits, round_up_div(bits, WordBits), 0};
+  }
+
+  static BigInt fromRaw(std::span<uint32_t> data, uint32_t bits, uint8_t extend,
+                        uint8_t custom) {
+    auto rv = BigInt{bits, (uint32_t)data.size(), extend};
+    std::copy(data.begin(), data.end(), rv.words.begin());
+    return rv;
+  }
+  static BigInt fromRaw(SmallVecImpl<uint32_t> &&data, uint32_t bits,
+                        uint8_t extend, uint8_t custom) {
+    auto rv = BigInt{};
+    rv.words = std::move(data);
+    rv.numBits = bits;
+    rv.setExtend(extend);
+    rv.setCustom(custom);
+    return rv;
   }
 
 #define LINEAR_OP(ident, code)                                                 \
@@ -402,7 +418,7 @@ public:
   static void resizeOp(BigInt &out, const T &lhs, uint32_t newSize) {
 
     auto copyIfDifferent = [&]() {
-      if (lhs.getWords().begin() != out.getWords().begin())
+      if (lhs.getWords().begin().base() != out.getWords().begin().base())
         std::copy_n(lhs.getWords().begin(),
                     std::min(lhs.getNumWords(), out.getNumWords()),
                     out.getWords().begin());
@@ -505,7 +521,7 @@ public:
 
     size_t n = vn.getExtNumWords();
     for (ssize_t i = un.getNumWords() - 1 - n; i >= 0; i--) {
-      uint64_t t = (un.getWord(i + n) * base + un.getWord(i + n - 1));
+      int64_t t = (un.getWord(i + n) * base + un.getWord(i + n - 1));
 
       uint64_t qhat = t / vn.getWord(n - 1);
       uint64_t rhat = t - qhat * vn.getWord(n - 1);
@@ -521,7 +537,7 @@ public:
         break;
       }
 
-      uint64_t k = 0;
+      int64_t k = 0;
       for (size_t j = 0; j < n; j++) {
         auto p = qhat * vn.getWord(j);
         t = un.getWord(i + j) - k - (p & 0xFFFF'FFFF);
@@ -664,7 +680,7 @@ public:
     do {
       std::tie(n, r) = BigInt::udivmodOp(n, q);
       str.emplace_back(r.getWord(0));
-    } while (n != 0);
+    } while (n != BigInt{0, n.getNumBits()});
 
     for (ssize_t i = str.size() - 1; i >= 0; i--)
       os << uint32_t(str[i]);
@@ -1001,6 +1017,17 @@ public:
 
   ConstantBuilderBase &val(unsigned bits, uint64_t value64 = 0) {
     cur.set(value64, bits);
+    return *this;
+  }
+
+  ConstantBuilderBase &raw(unsigned bits, std::span<uint32_t> data,
+                           uint8_t extend = 0) {
+    cur = BigInt::fromRaw(data, bits, extend, 0);
+    return *this;
+  }
+  ConstantBuilderBase &raw(unsigned bits, SmallVecImpl<uint32_t> &&data,
+                           uint8_t extend = 0) {
+    cur = BigInt::fromRaw(std::move(data), bits, extend, 0);
     return *this;
   }
 

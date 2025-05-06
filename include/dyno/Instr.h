@@ -212,9 +212,11 @@ private:
 
 class InstrRef : public FatObjRef<Instr> {
   friend class InstrDefUse;
-  using FatObjRef<Instr>::FatObjRef;
 
 public:
+  using FatObjRef<Instr>::FatObjRef;
+  explicit InstrRef(FatObjRef<Instr> instrRef) : FatObjRef<Instr>(instrRef) {}
+
   class iterator {
     OperandRef ref;
 
@@ -258,11 +260,6 @@ public:
     OperandRef *operator->() { return &ref; }
   };
   static_assert(std::bidirectional_iterator<iterator>);
-
-  InstrRef() {}
-  explicit InstrRef(FatObjRef<Instr> instrRef) : FatObjRef<Instr>(instrRef) {}
-  InstrRef(ObjID obj, void *ptr) : FatObjRef<Instr>(obj, ptr) {}
-  InstrRef(nullref_t) : FatObjRef<Instr>(nullref) {}
 
   iterator begin() { return OperandRef{*this, 0}; }
   iterator end() { return OperandRef{*this, (*this)->numOperands}; }
@@ -438,7 +435,7 @@ private:
       }
     }
     if (refs[pos].isDef()) {
-      if (numDefs > 1 && pos != numDefs - 1) {
+      if (numDefs > 1 && pos != numDefs - 1U) {
         refs[pos] = std::move(refs[numDefs - 1]);
         refs[pos]->ref.setCustom(pos);
         pos = numDefs - 1;

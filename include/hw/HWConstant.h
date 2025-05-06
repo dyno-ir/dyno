@@ -25,8 +25,8 @@ class HWBigInt : public BigInt {
 
   static constexpr uint32_t EXT0_MASK = REP00;
   static constexpr uint32_t EXT1_MASK = REP01;
-  static constexpr uint32_t EXTZ_MASK = REP10;
-  static constexpr uint32_t EXTX_MASK = REP11;
+  static constexpr uint32_t EXTX_MASK = REP10;
+  static constexpr uint32_t EXTZ_MASK = REP11;
 
   // returns 10 for equal pairs
   static constexpr uint32_t pair_equal_mask(uint32_t lhs, uint32_t rhs) {
@@ -108,7 +108,8 @@ class HWBigInt : public BigInt {
       words[i] = (pack_bits(words[2 * i + 1]) << 16) | pack_bits(words[2 * i]);
     }
     if (outNumWords != getNumWords() / 2)
-      words[outNumWords - 1] = (repeatExtend(getExtend()) << 16) | pack_bits(words[getNumWords() - 1]);
+      words[outNumWords - 1] = (repeatExtend(getExtend()) << 16) |
+                               pack_bits(words[getNumWords() - 1]);
 
     words.resize(outNumWords);
     numBits /= 2;
@@ -131,6 +132,8 @@ class HWBigInt : public BigInt {
 
 public:
   using BigInt::BigInt;
+  HWBigInt(const BigInt &b) : BigInt(b) {}
+  HWBigInt(BigInt &&b) : BigInt(std::move(b)) {}
 
   template <auto Func4S, auto Func2S, typename T0, typename T1>
   static void bitwiseOp(HWBigInt &out, const T0 &lhs, const T1 &rhs) {
@@ -305,8 +308,35 @@ public:
 
 class HWConstantRef : public ConstantRef {
   using HasUnknown = ConstantRef::Custom;
+public:
+  using ConstantRef::ConstantRef;
 };
 
-using HWConstantBuilder = ConstantBuilderBase<HWBigInt>;
+
+
+class HWConstantBuilder : public ConstantBuilderBase<HWBigInt> {
+public:
+  using ConstantBuilderBase<HWBigInt>::ConstantBuilderBase;
+
+  HWConstantBuilder &raw(unsigned bits, std::span<uint32_t> data,
+                         bool hasUnk = false, uint8_t extend = 0) {
+    cur = HWBigInt{BigInt::fromRaw(data, bits, extend, hasUnk)};
+    return *this;
+  }
+  HWConstantBuilder &raw(unsigned bits, SmallVecImpl<uint32_t> &&data,
+                         bool hasUnk = false, uint8_t extend = 0) {
+    cur = BigInt::fromRaw(std::move(data), bits, extend, hasUnk);
+    return *this;
+  }
+
+  //operator HWConstantRef() { return HWConstantRef{get()}; }
+};
+
+//inline void CorePrint::printConstant(std::ostream &os, FatDynObjRef<> ref,
+//                                     bool printConstruct) {
+//  assert(!printConstruct && "constant can't be def'd");
+//  os << '#';
+//  ref.as<HWConstantRef>().toStream(os, 10);
+//}
 
 } // namespace dyno
