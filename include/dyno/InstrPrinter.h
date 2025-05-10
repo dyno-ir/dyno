@@ -12,7 +12,31 @@
 
 namespace dyno {
 
-class FieldPrinter {
+class IndentPrinter {
+public:
+  std::ostream &str;
+
+  int indent = 0;
+
+  void addIndent() { indent++; }
+  void removeIndent() { indent--; }
+  void printIndent() {
+    for (int i = 0; i < indent; i++)
+      str << "  ";
+  }
+  void printNewLineIndent() {
+    str << '\n';
+    for (int i = 0; i < indent; i++)
+      str << "  ";
+  }
+
+  IndentPrinter(std::ostream &str) : str(str) {}
+};
+
+class Printer {
+  IndentPrinter indentPrint;
+  std::unordered_map<DynObjRef, size_t> introduced;
+
   std::vector<bool> isDefault =
       std::vector<bool>(std::numeric_limits<DialectID::num_t>::max() + 1ULL);
 
@@ -23,9 +47,10 @@ public:
 
   std::ostream &str;
 
-  FieldPrinter(std::ostream &str, Interface<DialectInfo> dialectI,
-               Interface<TyInfo> tyI, Interface<OpcodeInfo> opcodeI)
-      : dialectI(dialectI), tyI(tyI), opcodeI(opcodeI), str(str) {}
+  Printer(std::ostream &str, Interface<DialectInfo> dialectI,
+          Interface<TyInfo> tyI, Interface<OpcodeInfo> opcodeI)
+      : indentPrint(str), dialectI(dialectI), tyI(tyI), opcodeI(opcodeI),
+        str(str) {}
 
   void printType(DynObjRef ref) {
     if (!isDefault[ref.getDialectID()]) {
@@ -45,35 +70,23 @@ public:
     for (auto dial : dialects)
       isDefault[dial] = 1;
   }
-};
 
-class RefPrinter {
-public:
-  FieldPrinter &fieldPrinter;
-  std::ostream &str;
-
-  std::unordered_map<DynObjRef, size_t> introduced;
-  RefPrinter(FieldPrinter &fieldPrinter)
-      : fieldPrinter(fieldPrinter), str(fieldPrinter.str) {}
-
-  void printRef(FatDynObjRef<> ref) {
-    if (fieldPrinter.tyI[ref].print) {
-      fieldPrinter.tyI[ref].print(str, ref, false);
+  void printUse(FatDynObjRef<> ref) {
+    if (tyI[ref].print) {
+      tyI[ref].print(str, ref, false);
       return;
     }
-    fieldPrinter.printType(ref);
+    printType(ref);
     str << '[' << ref.getObjID() << "]";
     printCustom(ref);
   }
 
-  void printConstruct(FatDynObjRef<> ref) {
-    if (fieldPrinter.tyI[ref].print) {
-      fieldPrinter.tyI[ref].print(str, ref, true);
+  void printDef(FatDynObjRef<> ref) {
+    if (tyI[ref].print) {
+      tyI[ref].print(str, ref, true);
       return;
     }
-    fieldPrinter.printType(ref);
-    // str << '(' << ref.getObjID() << ")";
-    // printCustom(ref);
+    printType(ref);
   }
 
   void printCustom(FatDynObjRef<> ref) {
@@ -82,7 +95,7 @@ public:
     str << '(' << ref.getCustom() << ')';
   }
 
-  void print(FatDynObjRef<> ref) {
+  void printRefOrUse(FatDynObjRef<> ref) {
     DynObjRef noCustom = ref;
     noCustom.clearCustom();
     auto it = introduced.find(noCustom);
@@ -91,7 +104,7 @@ public:
       printCustom(ref);
       return;
     }
-    printRef(ref);
+    printUse(ref);
   }
 
   void introduce(FatDynObjRef<> ref) {
@@ -101,61 +114,36 @@ public:
     str << '%' << it->second << ":";
   }
 
-  void introduceRef(FatDynObjRef<> ref) {
+  void introduceAndPrintDef(FatDynObjRef<> ref) {
     introduce(ref);
-    printConstruct(ref);
+    printDef(ref);
   }
 
   void reset() { introduced.clear(); }
-};
-
-class Printer {
-  RefPrinter &refPrinter;
-  FieldPrinter &fieldPrinter;
-  int indent = 0;
-
-  void addIndent() { indent++; }
-  void removeIndent() { indent--; }
-  void printIndent() {
-    for (int i = 0; i < indent; i++)
-      str << "  ";
-  }
-  void printNewLineIndent() {
-    str << '\n';
-    for (int i = 0; i < indent; i++)
-      str << "  ";
-  }
-
-public:
-  std::ostream &str;
-
-  Printer(RefPrinter &refPrinter)
-      : refPrinter(refPrinter), fieldPrinter(refPrinter.fieldPrinter),
-        str(refPrinter.str) {}
 
   void printBlock(BlockRef block) {
     str << "{\n";
-    addIndent();
+    indentPrint.addIndent();
     for (auto it : block) {
-      printIndent();
+      indentPrint.printIndent();
       printInstr(it);
     }
-    removeIndent();
+    indentPrint.removeIndent();
     if (!block.empty())
-      printIndent();
+      indentPrint.printIndent();
     str << "}";
   }
 
   void printInstr(InstrRef instr) {
-    fieldPrinter.printOpcode(instr);
+    printOpcode(instr);
     str << ' ';
 
     for (size_t i = 0; i < instr.getNumOperands(); i++) {
       auto ref = instr.operand(i)->fat();
       if (i < instr.getNumDefs()) {
-        refPrinter.introduceRef(ref);
+        introduceAndPrintDef(ref);
       } else {
-        refPrinter.print(ref);
+        printRefOrUse(ref);
       }
 
       if (i != instr.getNumOperands() - 1)

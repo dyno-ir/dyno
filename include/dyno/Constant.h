@@ -100,7 +100,8 @@ public:
   friend bool operator==(const Derived &lhs, const T &rhs) {
     if (!(lhs.getNumBits() == rhs.getNumBits() &&
           lhs.getNumWords() == rhs.getNumWords() &&
-          lhs.getExtend() == rhs.getExtend()))
+          lhs.getExtend() == rhs.getExtend() &&
+          lhs.getCustom() == rhs.getCustom()))
       return false;
 
     for (size_t i = 0; i < lhs.getNumWords(); i++)
@@ -979,6 +980,7 @@ public:
 
   template <typename T> uint32_t constantHash(const T &constant) {
     uint32_t acc = 0;
+    acc ^= hash(constant.getCustom());
     acc ^= hash(constant.getExtend());
     acc ^= hash(constant.getNumBits());
     acc ^= hash(constant.getNumWords());

@@ -25,8 +25,8 @@ class HWBigInt : public BigInt {
 
   static constexpr uint32_t EXT0_MASK = REP00;
   static constexpr uint32_t EXT1_MASK = REP01;
-  static constexpr uint32_t EXTX_MASK = REP10;
-  static constexpr uint32_t EXTZ_MASK = REP11;
+  static constexpr uint32_t EXTZ_MASK = REP10;
+  static constexpr uint32_t EXTX_MASK = REP11;
 
   // returns 10 for equal pairs
   static constexpr uint32_t pair_equal_mask(uint32_t lhs, uint32_t rhs) {
@@ -332,11 +332,11 @@ public:
   //operator HWConstantRef() { return HWConstantRef{get()}; }
 };
 
-//inline void CorePrint::printConstant(std::ostream &os, FatDynObjRef<> ref,
-//                                     bool printConstruct) {
-//  assert(!printConstruct && "constant can't be def'd");
-//  os << '#';
-//  ref.as<HWConstantRef>().toStream(os, 10);
-//}
+// inline void CorePrint::printConstant(std::ostream &os, FatDynObjRef<> ref,
+//                                      bool printConstruct) {
+//   assert(!printConstruct && "constant can't be def'd");
+//   os << '#';
+//   ref.as<HWConstantRef>().toStream(os, 10);
+// }
 
 } // namespace dyno

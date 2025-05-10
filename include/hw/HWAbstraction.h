@@ -299,14 +299,14 @@ class HWPrinter {
 #define ADD_OP(x) &DialectTraits<x>::info
 #include "dyno/DialectIDs.inc"
   };
-  std::array<const TyInfo *, NUM_DIALECTS> tyIs{
+  static constexpr std::array<const TyInfo *, NUM_DIALECTS> tyIs{
 #define HEADER
 #define FOOTER
 #define LAST
 #define ADD_OP(x) DialectTraits<x>::tyInfo
 #include "dyno/DialectIDs.inc"
   };
-  std::array<const OpcodeInfo *, NUM_DIALECTS> opcodeIs{
+  static constexpr std::array<const OpcodeInfo *, NUM_DIALECTS> opcodeIs{
 #define HEADER
 #define FOOTER
 #define LAST
@@ -318,13 +318,11 @@ class HWPrinter {
   Interface<TyInfo> tyI{tyIs.data()};
   Interface<OpcodeInfo> opcI{opcodeIs.data()};
 
-  FieldPrinter fieldPrinter{std::cout, dialectI, tyI, opcI};
-  RefPrinter refPrinter{fieldPrinter};
-  Printer printer{refPrinter};
+  Printer printer{std::cout, dialectI, tyI, opcI};
 
 public:
   HWPrinter() {
-    fieldPrinter.setDefaultDialects({DialectID{DIALECT_CORE},
+    printer.setDefaultDialects({DialectID{DIALECT_CORE},
                                      DialectID{DIALECT_OP},
                                      DialectID{DIALECT_RTL}});
   }
