@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <functional>
 #include <support/Bits.h>
+#include <support/DenseMapInfo.h>
 #include <support/RTTI.h>
 #include <type_traits>
 namespace dyno {
@@ -13,17 +14,18 @@ template <typename T> struct ObjTraits;
 
 template <typename NumT> class IDImpl {
 public:
-  static inline IDImpl INVALID = IDImpl{bit_mask_ones<NumT>()};
+  static constexpr IDImpl invalid() { return IDImpl{bit_mask_ones<NumT>()}; }
+  static const inline IDImpl INVALID = invalid();
 
   using num_t = NumT;
   num_t num;
 
-  IDImpl() {}
+  constexpr IDImpl() {};
   constexpr explicit IDImpl(num_t num) : num(num) {}
 
   operator num_t() { return num; }
 
-  explicit operator bool() const { return *this != INVALID; }
+  explicit operator bool() const { return *this != invalid(); }
 
   constexpr bool operator==(IDImpl o) const { return num == o.num; }
 
@@ -51,8 +53,9 @@ template <typename T>
 class FatObjRef;
 
 template <typename T>
-concept IsFatDynObjRef = (requires { typename T::value_type; } &&
-                       std::derived_from<T, FatDynObjRef<typename T::value_type>>);
+concept IsFatDynObjRef = (requires {
+  typename T::value_type;
+} && std::derived_from<T, FatDynObjRef<typename T::value_type>>);
 
 template <typename T>
 concept IsDynObjRef = std::derived_from<T, DynObjRef>;
@@ -70,7 +73,6 @@ concept IsPureObjRef = IsObjRef<T> && !IsFatObjRef<T>;
 
 template <typename T>
 concept IsPureDynObjRef = IsDynObjRef<T> && !IsFatDynObjRef<T>;
-
 
 template <typename T>
 concept IsAnyDynRef = IsDynObjRef<T> || IsFatDynObjRef<T>;
@@ -131,7 +133,8 @@ public:
   }
 
   DynObjRef() {}
-  DynObjRef(nullref_t) : dialect(0), ty(0), custom(0), obj(ObjID::INVALID) {}
+  constexpr DynObjRef(nullref_t)
+      : dialect(0), ty(0), custom(0), obj(ObjID::invalid()) {}
 
   static DynObjRef invalid() { return nullref; };
 
@@ -209,7 +212,8 @@ public:
 
   template <IsFatDynObjRef U> explicit operator U() const {
     assert((::is<U, FatObjRef>(*this)));
-    return U{DynObjRef::ofObj<typename U::value_type>(this->obj), reinterpret_cast<U::value_type*>(ptr)};
+    return U{DynObjRef::ofObj<typename U::value_type>(this->obj),
+             reinterpret_cast<U::value_type *>(ptr)};
   }
 };
 
@@ -261,9 +265,9 @@ public:
   }
   template <IsFatDynObjRef U> explicit operator U() const {
     assert((::is<U, FatDynObjRef>(*this)));
-    return U{*this, reinterpret_cast<U::value_type*>(ptr)};
+    return U{*this, reinterpret_cast<U::value_type *>(ptr)};
   }
-  #ifdef __clang__
+#ifdef __clang__
   // these exist in DynObjRef, clang needs duplicate tho
   template <IsPureObjRef U> explicit operator U() const {
     assert((::is<U, FatDynObjRef>(*this)));
@@ -273,8 +277,7 @@ public:
     assert((::is<U, FatDynObjRef>(*this)));
     return U{*this};
   }
-  #endif
-
+#endif
 
   static bool is_impl(FatDynObjRef<>) { return true; }
 };
@@ -332,6 +335,21 @@ bool FatObjRef<T>::is_impl(const DynObjRef &Ref) {
 template <> struct std::hash<dyno::DynObjRef> {
   size_t operator()(const dyno::DynObjRef &ref) const {
     return std::bit_cast<size_t>(ref);
+  }
+};
+
+template <> struct DenseMapInfo<dyno::DynObjRef> {
+  static constexpr dyno::DynObjRef getEmptyKey() { return dyno::nullref; }
+  static constexpr dyno::DynObjRef getTombstoneKey() {
+    return dyno::DynObjRef{dyno::DialectID::invalid(), dyno::TyID::invalid(),
+                           dyno::ObjID::invalid(), 1};
+  }
+  static unsigned getHashValue(const dyno::DynObjRef &k) {
+    return std::hash<dyno::DynObjRef>()(k);
+  }
+  static unsigned isEqual(const dyno::DynObjRef &lhs,
+                          const dyno::DynObjRef &rhs) {
+    return std::bit_cast<uint64_t>(lhs) == std::bit_cast<uint64_t>(rhs);
   }
 };
 

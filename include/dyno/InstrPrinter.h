@@ -5,13 +5,12 @@
 #include "dyno/DialectInfo.h"
 #include "dyno/IDs.h"
 #include "dyno/Obj.h"
+#include "support/DenseMap.h"
 #include <dyno/Instr.h>
 #include <dyno/Interface.h>
 #include <initializer_list>
 #include <iostream>
-#include <limits>
 #include <ostream>
-#include <unordered_map>
 
 namespace dyno {
 
@@ -38,7 +37,7 @@ public:
 
 class PrinterBase {
   IndentPrinter indentPrint;
-  std::unordered_map<DynObjRef, size_t> introduced;
+  DenseMap<DynObjRef, size_t> introduced;
 
   std::vector<bool> isDefault = std::vector<bool>(NUM_DIALECTS);
 
@@ -112,7 +111,7 @@ public:
     noCustom.clearCustom();
     auto it = introduced.find(noCustom);
     if (it != introduced.end()) {
-      str << '%' << it->second;
+      str << '%' << it.val();
       printCustom(ref);
       return;
     }
@@ -122,8 +121,8 @@ public:
   void introduce(FatDynObjRef<> ref) {
     DynObjRef noCustom = ref;
     noCustom.clearCustom();
-    auto [it, succ] = introduced.try_emplace(noCustom, introduced.size());
-    str << '%' << it->second << ":";
+    auto it = introduced.insert(noCustom, introduced.size());
+    str << '%' << it.val() << ":";
   }
 
   void introduceAndPrintDef(FatDynObjRef<> ref) {
