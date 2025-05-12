@@ -1,5 +1,4 @@
 #include "dyno/Constant.h"
-#include "hw/HWConstant.h"
 using namespace dyno;
 
 void constants() {
@@ -54,16 +53,11 @@ void constants5() {
 }
 
 void constants6() {
-  HWBigInt a(0b01010101'11010101, 16);
+  BigInt a(0b01010101'11010101, 16);
   a.setCustom(true);
 
-  HWBigInt b(0b01010101'00000000, 16);
+  BigInt b(0b01010101'00000000, 16);
   b.setCustom(true);
-
-  HWBigInt::andOp(a, a, b);
-
-  HWBigInt::stream_hex(std::cout, a);
-  std::cout << "\n";
 }
 
 int main() {

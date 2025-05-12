@@ -5,7 +5,6 @@
 #include "dyno/Instr.h"
 #include "dyno/InstrPrinter.h"
 #include "dyno/Obj.h"
-#include "hw/HWConstant.h"
 #include "hw/IDs.h"
 #include "hw/Module.h"
 #include "hw/Process.h"

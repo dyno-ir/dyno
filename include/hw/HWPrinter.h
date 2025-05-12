@@ -44,7 +44,7 @@ public:
   virtual bool printTypeCore(FatDynObjRef<> ref, bool def) override {
     switch (ref.getTyID()) {
     case CORE_CONSTANT: {
-      str << '#' << ref.as<HWConstantRef>();
+      str << '#' << ref.as<ConstantRef>();
       return true;
     }
     default:
