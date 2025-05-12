@@ -14,12 +14,8 @@ struct DialectInfo {
 
 struct TyInfo {
   std::string_view name;
-  using print_func = void(std::ostream &os, FatDynObjRef<> ref, bool printConstruct);
-  print_func *print;
 
-  constexpr TyInfo(std::string_view name) : name(name), print(nullptr) {}
-  constexpr TyInfo(std::string_view name, print_func *print)
-      : name(name), print(print) {}
+  constexpr TyInfo(std::string_view name) : name(name) {}
 };
 
 struct OpcodeInfo {

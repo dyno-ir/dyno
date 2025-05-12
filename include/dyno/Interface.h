@@ -14,6 +14,7 @@ template <typename T> struct InterfaceTraits {
   static const T &dispatch2(DynObjRef ref, const T *interface) {
     return *interface;
   }
+  static const unsigned ID = ~0;
 };
 
 template <typename T, size_t N> class StaticInterface {
@@ -51,28 +52,70 @@ public:
   /*}*/
 };
 
-// class Interfaces {
-// private:
-//   std::vector<void *> interfaces;
-//   unsigned numDialects;
+template <size_t NumDialects, typename... Types> class Interfaces {
+  std::array<std::tuple<Types...>, NumDialects> arr = {};
 
-// public:
-//   Interfaces(unsigned numDialects, unsigned numInterfaces)
-//       : interfaces(numInterfaces * numDialects), numDialects(numDialects) {}
+  template <typename T> static constexpr size_t type_index() {
+    return type_index_impl<T, Types...>(
+        std::make_index_sequence<sizeof...(Types)>{});
+  }
 
-//   template <typename T>
-//   void registerInterface(unsigned dialectID,
-//                          InterfaceTraits<T>::DispatchT entry) {
-//     using Traits = InterfaceTraits<T>;
-//     interfaces[numDialects * Traits::ID + dialectID] = entry;
-//   }
+  template <typename T, typename... Ts, size_t... Is>
+  static constexpr size_t type_index_impl(std::index_sequence<Is...>) {
+    size_t result = 0;
+    bool found = ((std::is_same_v<T, Ts> ? (result = Is, true) : false) || ...);
+    assert(found);
+    return result;
+  }
 
-//   template <typename T> InterfaceDispatch<T> get() {
-//     using Traits = InterfaceTraits<T>;
-//     return reinterpret_cast<Traits::DispatchT *>(
-//         &interfaces[numDialects * Traits::ID]);
-//   }
-// };
+  template <typename T> T &get(size_t index) {
+    return std::get<type_index<T>()>(arr[index]);
+  }
+  template <typename T> const T &get(size_t index) const {
+    return std::get<type_index<T>()>(arr[index]);
+  }
+
+public:
+  template <typename T> void registerVal(size_t i, const T &t) {
+    assert(i < NumDialects);
+    get<T>(i) = t;
+  }
+
+  template <typename T> const T &getVal(size_t i) const {
+    assert(i < NumDialects);
+    return get<T>(i);
+  }
+
+  template <typename T, typename... Args>
+  auto call(FatDynObjRef<> ref, Args &&...args) const {
+    auto fn = getVal<T>(ref.getDialectID());
+    assert(fn && "not registered");
+    return fn(std::forward(args...));
+  }
+};
+
+class DynInterfaces {
+private:
+  std::vector<void *> interfaces;
+  unsigned numDialects;
+
+public:
+  DynInterfaces(unsigned numDialects, unsigned numInterfaces)
+      : interfaces(numInterfaces * numDialects), numDialects(numDialects) {}
+
+  template <typename T>
+  void registerInterface(unsigned dialectID,
+                         InterfaceTraits<T>::DispatchT entry) {
+    using Traits = InterfaceTraits<T>;
+    interfaces[numDialects * Traits::ID + dialectID] = entry;
+  }
+
+  template <typename T> Interface<T> get() {
+    using Traits = InterfaceTraits<T>;
+    return reinterpret_cast<Traits::DispatchT *>(
+        &interfaces[numDialects * Traits::ID]);
+  }
+};
 
 // load from 64k lookup table of dialect + type
 // InterfaceTraits for type tells you what to do with the value

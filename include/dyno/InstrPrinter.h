@@ -1,6 +1,9 @@
 #pragma once
 
 #include "dyno/CFG.h"
+#include "dyno/Constant.h"
+#include "dyno/DialectInfo.h"
+#include "dyno/IDs.h"
 #include "dyno/Obj.h"
 #include <dyno/Instr.h>
 #include <dyno/Interface.h>
@@ -33,33 +36,42 @@ public:
   IndentPrinter(std::ostream &str) : str(str) {}
 };
 
-class Printer {
+class PrinterBase {
   IndentPrinter indentPrint;
   std::unordered_map<DynObjRef, size_t> introduced;
 
-  std::vector<bool> isDefault =
-      std::vector<bool>(std::numeric_limits<DialectID::num_t>::max() + 1ULL);
+  std::vector<bool> isDefault = std::vector<bool>(NUM_DIALECTS);
 
 public:
   Interface<DialectInfo> dialectI;
   Interface<TyInfo> tyI;
   Interface<OpcodeInfo> opcodeI;
 
+protected:
+  struct type {
+    using print_fn = bool (PrinterBase::*)(FatDynObjRef<> ref, bool def);
+  };
+  struct opc {
+    using print_fn = bool (PrinterBase::*)(FatDynObjRef<> ref, bool def);
+  };
+  Interfaces<NUM_DIALECTS, type::print_fn, opc::print_fn> interfaces;
+
+public:
   std::ostream &str;
 
-  Printer(std::ostream &str, Interface<DialectInfo> dialectI,
-          Interface<TyInfo> tyI, Interface<OpcodeInfo> opcodeI)
+  PrinterBase(std::ostream &str, Interface<DialectInfo> dialectI,
+              Interface<TyInfo> tyI, Interface<OpcodeInfo> opcodeI)
       : indentPrint(str), dialectI(dialectI), tyI(tyI), opcodeI(opcodeI),
         str(str) {}
 
-  void printType(DynObjRef ref) {
+  void printTypeDefault(DynObjRef ref) {
     if (!isDefault[ref.getDialectID()]) {
       str << dialectI[ref].name << ".";
     }
     str << tyI[ref].name;
   }
 
-  void printOpcode(InstrRef ref) {
+  void printOpcodeDefault(InstrRef ref) {
     if (!isDefault[ref.getDialect()]) {
       str << dialectI[ref.getDialect()]->name << ".";
     }
@@ -72,21 +84,21 @@ public:
   }
 
   void printUse(FatDynObjRef<> ref) {
-    if (tyI[ref].print) {
-      tyI[ref].print(str, ref, false);
-      return;
+    if (auto func = interfaces.getVal<type::print_fn>(ref.getDialectID())) {
+      if ((this->*func)(ref, false))
+        return;
     }
-    printType(ref);
+    printTypeDefault(ref);
     str << '[' << ref.getObjID() << "]";
     printCustom(ref);
   }
 
   void printDef(FatDynObjRef<> ref) {
-    if (tyI[ref].print) {
-      tyI[ref].print(str, ref, true);
-      return;
+    if (auto func = interfaces.getVal<type::print_fn>(ref.getDialectID())) {
+      if ((this->*func)(ref, true))
+        return;
     }
-    printType(ref);
+    printTypeDefault(ref);
   }
 
   void printCustom(FatDynObjRef<> ref) {
@@ -135,7 +147,7 @@ public:
   }
 
   void printInstr(InstrRef instr) {
-    printOpcode(instr);
+    printOpcodeDefault(instr);
     str << ' ';
 
     for (size_t i = 0; i < instr.getNumOperands(); i++) {
@@ -162,6 +174,30 @@ public:
     }
 
     str << '\n';
+  }
+};
+
+class Printer : public PrinterBase {
+  using PrinterBase::opc;
+  using PrinterBase::type;
+
+public:
+  Printer(std::ostream &str, Interface<DialectInfo> dialectI,
+          Interface<TyInfo> tyI, Interface<OpcodeInfo> opcodeI)
+      : PrinterBase(str, dialectI, tyI, opcodeI) {
+    interfaces.registerVal<type::print_fn>(
+        DIALECT_CORE, static_cast<type::print_fn>(&Printer::printTypeCore));
+  }
+
+  bool printTypeCore(FatDynObjRef<> ref, bool def) {
+    switch (ref.getTyID()) {
+    case CORE_CONSTANT: {
+      str << '#' << ref.as<ConstantRef>();
+      return true;
+    }
+    default:
+      return false;
+    }
   }
 };
 

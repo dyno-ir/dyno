@@ -1085,11 +1085,4 @@ template <> struct ObjTraits<Constant> {
   using FatRefT = ConstantRef;
 };
 
-inline void CorePrint::printConstant(std::ostream &os, FatDynObjRef<> ref,
-                                     bool printConstruct) {
-  assert(!printConstruct && "constant can't be def'd");
-  os << '#';
-  ref.as<ConstantRef>().toStream(os, 10);
-}
-
 } // namespace dyno
