@@ -1,4 +1,5 @@
 
+#include "dyno/Constant.h"
 #include "dyno/Obj.h"
 #include "hw/HWAbstraction.h"
 #include "hw/HWPrinter.h"
@@ -9,6 +10,7 @@
 #include "slang/ast/Expression.h"
 #include "slang/ast/Symbol.h"
 #include "slang/ast/expressions/AssignmentExpressions.h"
+#include "slang/ast/expressions/ConversionExpression.h"
 #include "slang/ast/expressions/LiteralExpressions.h"
 #include "slang/ast/expressions/MiscExpressions.h"
 #include "slang/ast/expressions/Operator.h"
@@ -20,6 +22,9 @@
 #include "slang/diagnostics/DiagnosticEngine.h"
 #include "slang/diagnostics/Diagnostics.h"
 #include "slang/driver/Driver.h"
+#include "slang/numeric/SVInt.h"
+#include "support/Bits.h"
+#include "support/SmallVec.h"
 #include <iostream>
 #include <ostream>
 #include <slang/syntax/SyntaxNode.h>
@@ -154,6 +159,33 @@ public:
     }
   }
 
+  ConstantRef toDynoConstant(const slang::SVInt &svint) {
+    ConstantRef ref;
+    std::span<const uint32_t> data{
+        reinterpret_cast<const uint32_t *>(svint.getRawPtr()),
+        2 * svint.getNumWords()};
+    if (!svint.hasUnknown()) {
+      ref = ConstantBuilder{ctx.getConstants()}.raw(
+          (unsigned)svint.getBitWidth(), data);
+    } else {
+      SmallVec<uint32_t, 16> buf{round_up_div(2 * svint.getBitWidth(), 32U)};
+
+      std::span<const uint16_t> data16{
+          reinterpret_cast<const uint16_t *>(data.data()), data.size() * 2};
+      for (size_t i = 0; i < buf.size(); i++) {
+        buf[i] = (unpack_bits(data16[i + data16.size() / 2]) << 1) |
+                 unpack_bits(data16[i]);
+        // flip x and z
+        uint32_t mask = (buf[i] & repeatBits(0b10U, 2)) >> 1;
+        buf[i] ^= mask;
+      }
+
+      ref = ConstantBuilder{ctx.getConstants()}.raw(2 * svint.getBitWidth(),
+                                                    std::move(buf), 0, 1);
+    }
+    return ref;
+  }
+
   Value handle_expr(const slang::ast::Expression &expr) {
     assert(blockRef);
 
@@ -252,13 +284,24 @@ public:
     }
     case slang::ast::ExpressionKind::IntegerLiteral: {
       const auto &asLit = expr.as<slang::ast::IntegerLiteral>();
-      asLit.getValue();
+      return Value{(bool)asLit.getEffectiveSign(false),
+                   toDynoConstant(asLit.getValue())};
+    }
+    case slang::ast::ExpressionKind::UnbasedUnsizedIntegerLiteral: {
+      const auto &asLit = expr.as<slang::ast::UnbasedUnsizedIntegerLiteral>();
+      return Value{(bool)asLit.getEffectiveSign(false),
+                   toDynoConstant(asLit.getValue())};
+    }
+
+    case slang::ast::ExpressionKind::Conversion: {
+      const auto &asConv = expr.as<slang::ast::ConversionExpression>();
+      return handle_expr(asConv.operand());
     }
 
     case slang::ast::ExpressionKind::Invalid:
     case slang::ast::ExpressionKind::RealLiteral:
     case slang::ast::ExpressionKind::TimeLiteral:
-    case slang::ast::ExpressionKind::UnbasedUnsizedIntegerLiteral:
+
     case slang::ast::ExpressionKind::NullLiteral:
     case slang::ast::ExpressionKind::UnboundedLiteral:
     case slang::ast::ExpressionKind::StringLiteral:
@@ -272,7 +315,6 @@ public:
     case slang::ast::ExpressionKind::RangeSelect:
     case slang::ast::ExpressionKind::MemberAccess:
     case slang::ast::ExpressionKind::Call:
-    case slang::ast::ExpressionKind::Conversion:
     case slang::ast::ExpressionKind::DataType:
     case slang::ast::ExpressionKind::TypeReference:
     case slang::ast::ExpressionKind::ArbitrarySymbol:

@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cmath>
 #include <concepts>
+#include <cstdint>
 #include <dyno/IDs.h>
 #include <dyno/NewDeleteObjStore.h>
 #include <dyno/Obj.h>
@@ -66,18 +67,30 @@ protected:
     return self().getWords()[i];
   }
 
-  bool getBit(uint32_t i) const {
-    return getWord(i / WordBits) & (1 << (i % WordBits));
+  uint8_t getBit(uint32_t i) const {
+    if (!self().getCustom())
+      return !!(getWord(i / WordBits) & (1 << (i % WordBits)));
+    i *= 2;
+    return (getWord(i / WordBits) >> (i % WordBits)) &
+           bit_mask_ones<uint32_t>(BigIntExtendBits);
   }
-  bool getSignBit() const { return getBit(self().getNumBits()); }
+  uint8_t getSignBit() const { return getBit(self().getNumBits()); }
   bool isExtended() const { return self().getNumWords() != getExtNumWords(); }
 
 public:
-  void toStream(std::ostream &os, int base = 16) const;
+  void toStream(std::ostream &os, int base = 16, bool unsized = false) const;
   friend std::ostream &operator<<(std::ostream &os, const Derived &self) {
-    auto base = (os.flags() & std::ios_base::basefield);
-    assert(base != std::ios_base::oct && "octal unsupported");
-    self.toStream(os, base == std::ios_base::hex ? 16 : 10);
+    int base = 16;
+
+    if (self.getCustom() && self.getNumBits() < 16)
+      base = 2;
+    else if (!self.getCustom() && (self.getLimitedVal() <= 255 ||
+                                   (self.getLimitedVal() < UINT32_MAX &&
+                                    ((self.getLimitedVal() + 1) % 100) <= 1))) {
+      base = 10;
+    }
+
+    self.toStream(os, base);
     return os;
   }
 
@@ -93,6 +106,15 @@ public:
       if (lhs.getWords()[i] != rhs.getWords()[i])
         return false;
     return true;
+  }
+
+  uint32_t getLimitedVal() const {
+    assert(!self().getCustom());
+    if (self().getNumWords() > 1)
+      return UINT32_MAX;
+    if (self().getExtNumWords() > 1 && self().getExtend() != 0)
+      return UINT32_MAX;
+    return self().getWords()[0];
   }
 };
 
@@ -145,9 +167,10 @@ public:
 
 private:
   auto custom() { return Custom{field}; }
-  BigInt(uint32_t numBits, uint32_t numWords, uint32_t extend)
+  BigInt(uint32_t numBits, uint32_t numWords, uint8_t extend, uint8_t custom)
       : words(numWords), numBits(numBits) {
     Extend<uint8_t>{field} = extend;
+    Custom<uint8_t>{field} = custom;
   }
 
 public:
@@ -161,6 +184,7 @@ public:
   template <BigIntAPI T> BigInt &operator=(const T &other) {
     this->numBits = other.getNumBits();
     Extend{field} = other.getExtend();
+    Custom{field} = other.getCustom();
     this->words.resize(other.getNumWords());
     std::copy(other.getWords().begin(), other.getWords().end(),
               this->getWords().begin());
@@ -182,13 +206,16 @@ public:
   BigInt(uint64_t val, unsigned bits) { set(val, bits); }
 
   static BigInt ofLen(uint32_t bits) {
-    return BigInt{bits, round_up_div(bits, WordBits), 0};
+    return BigInt{bits, round_up_div(bits, WordBits), 0, 0};
   }
 
-  static BigInt fromRaw(std::span<uint32_t> data, uint32_t bits, uint8_t extend,
-                        uint8_t custom) {
-    auto rv = BigInt{bits, (uint32_t)data.size(), extend};
+  static BigInt fromRaw(std::span<const uint32_t> data, uint32_t bits,
+                        uint8_t extend, uint8_t custom) {
+    auto rv = BigInt{bits, (uint32_t)data.size(), extend, 0};
     std::copy(data.begin(), data.end(), rv.words.begin());
+    rv.normalize();
+    if (rv.getCustom())
+      rv.conv4To2StateIfPossible();
     return rv;
   }
   static BigInt fromRaw(SmallVecImpl<uint32_t> &&data, uint32_t bits,
@@ -198,6 +225,9 @@ public:
     rv.numBits = bits;
     rv.setExtend(extend);
     rv.setCustom(custom);
+    rv.normalize();
+    if (rv.getCustom())
+      rv.conv4To2StateIfPossible();
     return rv;
   }
 
@@ -579,17 +609,10 @@ public:
   static constexpr uint32_t EXTZ_MASK = REP10;
   static constexpr uint32_t EXTX_MASK = REP11;
 
-  // returns 10 for equal pairs
-  static constexpr uint32_t pair_equal_mask(uint32_t lhs, uint32_t rhs) {
-    lhs ^= rhs;
-    uint32_t lhsSC = ~(((lhs & REP01) + REP01) | lhs | REP01);
-    return lhsSC;
-  }
-
   // could specialize these with the fancy AVX512 LUT function
   static constexpr uint32_t and_4state(uint32_t lhs, uint32_t rhs) {
-    uint32_t lhsSC = pair_equal_mask(lhs, REP00);
-    uint32_t rhsSC = pair_equal_mask(rhs, REP00);
+    uint32_t lhsSC = n_equal_mask<2>(lhs, REP00);
+    uint32_t rhsSC = n_equal_mask<2>(rhs, REP00);
 
     lhsSC |= lhsSC >> 1;
     rhsSC |= rhsSC >> 1;
@@ -612,8 +635,8 @@ public:
     return ((lhs ^ rhs) | lhsX | rhsX);
   }
   static constexpr uint32_t or_4state(uint32_t lhs, uint32_t rhs) {
-    uint32_t lhsSC = pair_equal_mask(lhs, REP01);
-    uint32_t rhsSC = pair_equal_mask(rhs, REP01);
+    uint32_t lhsSC = n_equal_mask<2>(lhs, REP01);
+    uint32_t rhsSC = n_equal_mask<2>(rhs, REP01);
 
     uint32_t lhsX = (lhs & REP10);
     lhsX |= lhsX >> 1;
@@ -631,30 +654,10 @@ public:
   //   static_assert(BigInt::or_4state(0b00'01'10'10'11, 0b01'00'01'00'00) ==
   //                 0b01'01'01'11'11);
   // }
-  static constexpr uint16_t pack_bits(uint32_t x) {
-    x &= 0x55555555;
-
-    x = (x | (x >> 1)) & 0x33333333;
-    x = (x | (x >> 2)) & 0x0F0F0F0F;
-    x = (x | (x >> 4)) & 0x00FF00FF;
-    x = (x | (x >> 8)) & 0x0000FFFF;
-
-    return x;
-  }
-
-  static constexpr uint32_t unpack_bits(uint16_t x) {
-    x = (x | (x << 8)) & 0x00FF00FF;
-    x = (x | (x << 4)) & 0x0F0F0F0F;
-    x = (x | (x << 2)) & 0x33333333;
-    x = (x | (x << 1)) & 0x55555555;
-
-    return x;
-  }
 
   // 4 State Ops
   void conv4To2State() {
     Extend{field} = (Extend{field} & 1) * 0b11;
-
     size_t outNumWords = round_up_div(getNumWords(), 2U);
     for (size_t i = 0; i < getNumWords() / 2; i++) {
       words[i] = (pack_bits(words[2 * i + 1]) << 16) | pack_bits(words[2 * i]);
@@ -663,6 +666,20 @@ public:
       words[outNumWords - 1] = (repeatExtend(getExtend()) << 16) |
                                pack_bits(words[getNumWords() - 1]);
 
+    words.resize(outNumWords);
+    numBits /= 2;
+    setCustom(0);
+  }
+  void conv4To2StateHi() {
+    Extend{field} = ((Extend{field} >> 1) & 1) * 0b11;
+    size_t outNumWords = round_up_div(getNumWords(), 2U);
+    for (size_t i = 0; i < getNumWords() / 2; i++) {
+      words[i] = (pack_bits(words[2 * i + 1] >> 1) << 16) |
+                 pack_bits(words[2 * i] >> 1);
+    }
+    if (outNumWords != getNumWords() / 2)
+      words[outNumWords - 1] = ((repeatExtend(getExtend()) >> 1) << 16) |
+                               pack_bits(words[getNumWords() - 1] >> 1);
     words.resize(outNumWords);
     numBits /= 2;
     setCustom(0);
@@ -876,7 +893,7 @@ public:
     os.flags(flags);
   }
   template <typename T>
-  static void stream_hex_4s(std::ostream &os, const T &self) {
+  static void stream_hex_4s_vlog(std::ostream &os, const T &self) {
     if (!self.getCustom())
       return BigInt::stream_hex(os, self);
 
@@ -929,8 +946,30 @@ public:
   }
 
   template <typename T>
-  static void stream_dec(std::ostream &os, const T &self) {
-    if (self.getSignBit()) {
+  static void stream_bin(std::ostream &os, const T &self) {
+    for (ssize_t i = self.getNumBits() - 1; i >= 0; i--) {
+      os << (self.getBit(i) ? '1' : '0');
+      size_t digit = self.getNumBits() - 1 - i;
+      if (digit != 0 && (digit % 8) == 0)
+        os << "\'";
+    }
+  }
+
+  template <typename T>
+  static void stream_bin_4s_vlog(std::ostream &os, const T &self) {
+    std::array<char, 4> bitToStr = {'0', '1', 'z', 'x'};
+    for (ssize_t i = (self.getNumBits() / 2) - 1; i >= 0; i--) {
+      os << bitToStr[self.getBit(i)];
+      size_t digit = (self.getNumBits() / 2) - 1 - i;
+      if (digit != 0 && (digit % 8) == 0)
+        os << "\'";
+    }
+  }
+
+  template <typename T>
+  static void stream_dec(std::ostream &os, const T &self,
+                         bool isSigned = false) {
+    if (self.getSignBit() && isSigned) {
       BigInt temp;
       BigInt::negateOp(temp, self);
       os << "-";
@@ -961,7 +1000,6 @@ public:
 
 private:
   void normalize() {
-
     if (getNumWords() * bit_mask_sz<uint32_t> < numBits)
       prune();
     else if (getNumWords() * bit_mask_sz<uint32_t> >= numBits) {
@@ -1114,13 +1152,36 @@ template <BigIntAPI T0> inline BigInt operator-(const T0 &val) {
 }
 
 template <typename Derived>
-void BigIntMixin<Derived>::toStream(std::ostream &os, int base) const {
-  if (base == 16)
-    BigInt::stream_hex(os, self());
-  else if (base == 10)
-    BigInt::stream_dec(os, self());
-  else
-    dyno_unreachable("only dec and hex supported");
+void BigIntMixin<Derived>::toStream(std::ostream &os, int base,
+                                    bool unsized) const {
+  const char *baseStr = (base == 16 ? "h" : (base == 10 ? "d" : "b"));
+  if (self().getCustom()) {
+    if (!unsized)
+      os << self().getNumBits() / 2 << "'" << baseStr;
+
+    if (base == 2) {
+      BigInt::stream_bin_4s_vlog(os, self());
+      return;
+    }
+    BigInt val{self()};
+    BigInt unk{self()};
+    val.conv4To2State();
+    unk.conv4To2StateHi();
+    val.toStream(os, base, true);
+    os << "?";
+    unk.toStream(os, base, true);
+  } else {
+    if (!unsized)
+      os << self().getNumBits() << "'" << baseStr;
+    if (base == 16) {
+      BigInt::stream_hex(os, self());
+    } else if (base == 10) {
+      BigInt::stream_dec(os, self());
+    } else if (base == 2) {
+      BigInt::stream_bin(os, self());
+    } else
+      dyno_unreachable("only hex, dec and bin supported");
+  }
 }
 
 class alignas(uint64_t) Constant : public TrailingObjArr<Constant, uint32_t> {
@@ -1180,11 +1241,12 @@ public:
   explicit ConstantRef(FatDynObjRef<Constant> ref)
       : FatDynObjRef<Constant>(ref) {}
 
-  ConstantRef(unsigned n, uint32_t val, uint8_t extPattern)
+  ConstantRef(unsigned n, uint32_t val, uint8_t extPattern, uint8_t custom)
       : FatDynObjRef<Constant>(DynObjRef::ofTy<Constant>(), nullptr) {
     customField<IsInline>() = true;
-    customField<ExtPattern>() = extPattern;
     customField<NBits>() = n;
+    customField<ExtPattern>() = extPattern;
+    customField<Custom>() = custom;
     obj = ObjID{val};
   }
 
@@ -1204,20 +1266,6 @@ public:
   uint getNumBits() const {
     return customField<IsInline>() ? customField<NBits>() : ptr->numBits;
   };
-
-  uint64_t valTrunc64() {
-    if (customField<IsInline>()) {
-      if (customField<ExtPattern>() == 0)
-        return (uint32_t)obj;
-      else if (customField<ExtPattern>() == 3)
-        return (int32_t)obj;
-      else
-        dyno_unreachable("neither sign nor zext");
-    } else {
-      // assuming the stored value is normalized
-      return getWords()[0];
-    }
-  }
 
   bool isInline() const { return customField<IsInline>(); }
   uint32_t valInline() const {
@@ -1287,14 +1335,14 @@ public:
     cur.set(value64, bits);
     return *this;
   }
-  ConstantBuilderBase &raw(unsigned bits, std::span<uint32_t> data,
-                           uint8_t extend = 0) {
-    cur = BigInt::fromRaw(data, bits, extend, 0);
+  ConstantBuilderBase &raw(unsigned bits, std::span<const uint32_t> data,
+                           uint8_t extend = 0, uint8_t custom = 0) {
+    cur = BigInt::fromRaw(data, bits, extend, custom);
     return *this;
   }
   ConstantBuilderBase &raw(unsigned bits, SmallVecImpl<uint32_t> &&data,
-                           uint8_t extend = 0) {
-    cur = BigInt::fromRaw(std::move(data), bits, extend, 0);
+                           uint8_t extend = 0, uint8_t custom = 0) {
+    cur = BigInt::fromRaw(std::move(data), bits, extend, custom);
     return *this;
   }
   ConstantBuilderBase &undef(unsigned bits) {
@@ -1355,7 +1403,8 @@ public:
   ConstantRef get() {
     if (cur.getNumWords() == 1 &&
         cur.getNumBits() < (1ULL << ConstantRef::NBits::size))
-      return ConstantRef{cur.getNumBits(), cur.getWords()[0], cur.getExtend()};
+      return ConstantRef{cur.getNumBits(), cur.getWords()[0], cur.getExtend(),
+                         cur.getCustom()};
 
     return store.findOrInsert(cur);
   }

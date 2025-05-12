@@ -261,6 +261,8 @@ public:
     return retVal;
   }
 
+  T *data() { return begin(); }
+
   iterator begin() { return arr; }
   iterator end() { return arr + sz; }
 

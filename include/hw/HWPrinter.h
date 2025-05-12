@@ -41,17 +41,6 @@ public:
                         DialectID{DIALECT_RTL}});
   }
 
-  virtual bool printTypeCore(FatDynObjRef<> ref, bool def) override {
-    switch (ref.getTyID()) {
-    case CORE_CONSTANT: {
-      str << '#' << ref.as<ConstantRef>();
-      return true;
-    }
-    default:
-      return this->Printer::printTypeCore(ref, def);
-    }
-  }
-
   void printCtx(HWContext &ctx) {
     for (auto instr : ctx.getInstrs()) {
       if (InstrRef{instr}.isOpc(DialectID{DIALECT_RTL},

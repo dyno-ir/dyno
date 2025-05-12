@@ -6,7 +6,7 @@ module Test(
 );
 
 always_comb begin
-  OUT_sum = IN_a + IN_b;
+  OUT_sum = IN_a + 5'bxzzzz + 64'hdeadbeefdeadbeef + 2000;
 end
 
 endmodule

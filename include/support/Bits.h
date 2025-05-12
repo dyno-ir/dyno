@@ -3,6 +3,7 @@
 #include <cassert>
 #include <climits>
 #include <concepts>
+#include <cstdint>
 #include <type_traits>
 
 template <std::unsigned_integral T>
@@ -55,6 +56,36 @@ static constexpr unsigned repeatBits(T x, unsigned xBits) {
     fact <<= 1;
   }
   return x;
+}
+
+static constexpr uint16_t pack_bits(uint32_t x) {
+  x &= 0x55555555;
+
+  x = (x | (x >> 1)) & 0x33333333;
+  x = (x | (x >> 2)) & 0x0F0F0F0F;
+  x = (x | (x >> 4)) & 0x00FF00FF;
+  x = (x | (x >> 8)) & 0x0000FFFF;
+
+  return x;
+}
+
+static constexpr uint32_t unpack_bits(uint16_t x) {
+  uint32_t xx = x;
+  xx = (xx | (xx << 8)) & 0x00FF00FF;
+  xx = (xx | (xx << 4)) & 0x0F0F0F0F;
+  xx = (xx | (xx << 2)) & 0x33333333;
+  xx = (xx | (xx << 1)) & 0x55555555;
+
+  return xx;
+}
+
+// split integer into regions of N bits, return 1000... for each region if equal
+template <int N, std::integral T>
+static constexpr T n_equal_mask(T lhs, T rhs) {
+  constexpr T REP01 = repeatBits((T(1) << (N - 1)) - T(1), N);
+  lhs ^= rhs;
+  T lhsSC = ~(((lhs & REP01) + REP01) | lhs | REP01);
+  return lhsSC;
 }
 
 // fixme: these should use a shared base but then template param deduction
