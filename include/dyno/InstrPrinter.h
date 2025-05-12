@@ -177,6 +177,7 @@ public:
 };
 
 class Printer : public PrinterBase {
+protected:
   using PrinterBase::opc;
   using PrinterBase::type;
 

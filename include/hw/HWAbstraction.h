@@ -1,10 +1,12 @@
 #pragma once
 #include "dyno/CFG.h"
 #include "dyno/Constant.h"
+#include "dyno/DialectInfo.h"
 #include "dyno/IDs.h"
 #include "dyno/Instr.h"
 #include "dyno/InstrPrinter.h"
 #include "dyno/Obj.h"
+#include "dyno/RefUnion.h"
 #include "hw/IDs.h"
 #include "hw/Module.h"
 #include "hw/Process.h"
@@ -19,6 +21,22 @@
 
 namespace dyno {
 
+class HWValue : public FatRefUnion<WireRef, ConstantRef> {
+public:
+  std::optional<uint32_t> numBits() const {
+    switch (getDialectID() << 8 | getTyID()) {
+    case (DIALECT_CORE << 8) | CORE_CONSTANT:
+      return this->as<ConstantRef>().getNumBits();
+    case (DIALECT_RTL << 8) | RTL_WIRE:
+      return this->as<WireRef>().getBitSize();
+    default:
+      dyno_unreachable("invalid value");
+    }
+  }
+
+  using FatRefUnion::operator=;
+};
+
 class HWContext {
 
   ConstantStore constants;
@@ -29,7 +47,6 @@ class HWContext {
   NewDeleteObjStore<Process> procs;
   CFG cfg;
   NewDeleteObjStore<Instr> instrs;
-  // todo: processes & modules
 
 public:
   auto &getConstants() { return constants; }
@@ -171,6 +188,29 @@ public:
   BINOP(buildSLL, OP_SLL)
   BINOP(buildSRL, OP_SRL)
   BINOP(buildSRA, OP_SRA)
+
+  HWInstrRef buildExt(uint32_t newSize, FatDynObjRef<> value, bool sign) {
+    auto ref = buildInstr(DialectID{DIALECT_OP},
+                          OpcodeID{sign ? OP_SEXT : OP_ZEXT}, true, value);
+
+    assert(ref.defW().getBitSize().value_or(0) < newSize);
+    ref.defW().setBitSize(newSize);
+    return ref;
+  }
+  HWInstrRef buildZExt(uint32_t newSize, FatDynObjRef<> value) {
+    return buildExt(newSize, value, false);
+  }
+  HWInstrRef buildSExt(uint32_t newSize, FatDynObjRef<> value) {
+    return buildExt(newSize, value, true);
+  }
+  HWInstrRef buildTrunc(uint32_t newSize, FatDynObjRef<> value) {
+    auto ref =
+        buildInstr(DialectID{DIALECT_OP}, OpcodeID{OP_TRUNC}, true, value);
+
+    assert(ref.defW().getBitSize().value_or(UINT32_MAX) > newSize);
+    ref.defW().setBitSize(newSize);
+    return ref;
+  }
 
   HWInstrRef buildLoad(RegisterRef reg) {
     return buildInstr(DialectID{DIALECT_RTL}, OpcodeID{HW_LOAD}, true, reg);

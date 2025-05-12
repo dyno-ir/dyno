@@ -1,6 +1,7 @@
 #pragma once
 #include "dyno/IDs.h"
 #include "dyno/InstrPrinter.h"
+#include "dyno/Obj.h"
 #include "hw/HWAbstraction.h"
 #include "hw/IDs.h"
 #include "op/IDs.h"
@@ -39,6 +40,28 @@ public:
       : Printer(str, dialectIs.data(), tyIs.data(), opcodeIs.data()) {
     setDefaultDialects({DialectID{DIALECT_CORE}, DialectID{DIALECT_OP},
                         DialectID{DIALECT_RTL}});
+    interfaces.registerVal<type::print_fn>(
+        DIALECT_RTL, static_cast<type::print_fn>(&HWPrinter::printHWType));
+  }
+
+  bool printHWType(FatDynObjRef<> ref, bool def) {
+    switch (ref.getTyID()) {
+    case RTL_WIRE: {
+      WireRef asWire = ref.as<WireRef>();
+      str << "wire";
+      if (asWire->bitSize)
+        str << "(" << *asWire->bitSize << ")";
+      break;
+    }
+    case RTL_MODULE: {
+      ModuleRef asModule = ref.as<ModuleRef>();
+      str << "module(\"" << asModule->name << "\")";
+      break;
+    }
+    default:
+      return false;
+    }
+    return true;
   }
 
   void printCtx(HWContext &ctx) {

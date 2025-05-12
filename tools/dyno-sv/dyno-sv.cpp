@@ -43,7 +43,7 @@ public:
 
   struct Value {
     bool is_signed;
-    FatDynObjRef<> value;
+    HWValue value;
   };
 
   void handle(const slang::ast::InstanceSymbol &node) {
@@ -81,6 +81,11 @@ public:
 
       case slang::ast::SymbolKind::ProceduralBlock: {
         handle_proc(member.as<slang::ast::ProceduralBlockSymbol>());
+        break;
+      }
+
+      case slang::ast::SymbolKind::Instance: {
+        // todo
         break;
       }
 
@@ -229,13 +234,11 @@ public:
         instr = build.buildMul(lhs.value, rhs.value);
         break;
       case slang::ast::BinaryOperator::Divide:
-        switch (binop.getEffectiveSign(false)) {
-        case slang::ast::Expression::EffectiveSign::Unsigned:
-        case slang::ast::Expression::EffectiveSign::Either:
-          // todo: Either?
+        switch (expr.type->isSigned()) {
+        case false:
           instr = build.buildUDiv(lhs.value, rhs.value);
           break;
-        case slang::ast::Expression::EffectiveSign::Signed:
+        case true:
           instr = build.buildSDiv(lhs.value, rhs.value);
           break;
         }
@@ -263,7 +266,10 @@ public:
         abort();
       }
 
-      return Value{false, instr.defW()};
+      if (auto w = binop.type->getBitWidth())
+        instr.defW().setBitSize(w);
+
+      return Value{expr.type->isSigned(), instr.defW()};
       break;
     }
     case slang::ast::ExpressionKind::UnaryOp: {
@@ -278,24 +284,29 @@ public:
       auto sig = vars.find(nval.symbol.name);
       assert(sig != vars.end());
 
-      return Value{(bool)expr.getEffectiveSign(false),
-                   build.buildLoad(sig->second).defW()};
+      return Value{expr.type->isSigned(), build.buildLoad(sig->second).defW()};
       break;
     }
     case slang::ast::ExpressionKind::IntegerLiteral: {
       const auto &asLit = expr.as<slang::ast::IntegerLiteral>();
-      return Value{(bool)asLit.getEffectiveSign(false),
-                   toDynoConstant(asLit.getValue())};
+      return Value{expr.type->isSigned(), toDynoConstant(asLit.getValue())};
     }
     case slang::ast::ExpressionKind::UnbasedUnsizedIntegerLiteral: {
       const auto &asLit = expr.as<slang::ast::UnbasedUnsizedIntegerLiteral>();
-      return Value{(bool)asLit.getEffectiveSign(false),
-                   toDynoConstant(asLit.getValue())};
+      return Value{expr.type->isSigned(), toDynoConstant(asLit.getValue())};
     }
 
     case slang::ast::ExpressionKind::Conversion: {
       const auto &asConv = expr.as<slang::ast::ConversionExpression>();
-      return handle_expr(asConv.operand());
+      auto src = handle_expr(asConv.operand());
+      HWValue val = src.value;
+      uint32_t newWidth = asConv.type->getBitstreamWidth();
+      if (newWidth > src.value.numBits())
+        val = build.buildExt(newWidth, src.value, src.is_signed).defW();
+      else if (newWidth < src.value.numBits())
+        val = build.buildTrunc(newWidth, src.value).defW();
+
+      return Value{src.is_signed, val};
     }
 
     case slang::ast::ExpressionKind::Invalid:
