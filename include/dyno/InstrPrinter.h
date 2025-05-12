@@ -188,7 +188,7 @@ public:
         DIALECT_CORE, static_cast<type::print_fn>(&Printer::printTypeCore));
   }
 
-  bool printTypeCore(FatDynObjRef<> ref, bool def) {
+  virtual bool printTypeCore(FatDynObjRef<> ref, bool def) {
     switch (ref.getTyID()) {
     case CORE_CONSTANT: {
       str << '#' << ref.as<ConstantRef>();

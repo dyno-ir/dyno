@@ -1,4 +1,5 @@
 #include "hw/HWAbstraction.h"
+#include "hw/HWPrinter.h"
 
 using namespace dyno;
 
@@ -52,7 +53,7 @@ int main() {
   auto sub2 =
       build.buildSub(whileInstr.getYieldValue(0), build.buildConst(32, 1));
   build.buildYield(sub2.defW(),
-                      /*todo: convert to bool*/ sub2.defW());
+                   /*todo: convert to bool*/ sub2.defW());
   build.setInsertPoint(whileInstr.getBodyBlock().begin());
   build.buildStore(reg, whileInstr.getYieldValue(0));
   build.buildYield(whileInstr.getYieldValue(0));
@@ -69,7 +70,7 @@ int main() {
                             .bitAND(-2)
                             .get());
 
-  HWPrinter print;
+  HWPrinter print{std::cout};
 
   print.printCtx(ctx);
 

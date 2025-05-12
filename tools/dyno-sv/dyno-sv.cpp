@@ -1,6 +1,7 @@
 
 #include "dyno/Obj.h"
 #include "hw/HWAbstraction.h"
+#include "hw/HWPrinter.h"
 #include "hw/Module.h"
 #include "hw/Register.h"
 #include "slang/ast/ASTVisitor.h"
@@ -161,7 +162,7 @@ public:
     switch (expr.kind) {
     case slang::ast::ExpressionKind::Assignment: {
       const auto &assign = expr.as<slang::ast::AssignmentExpression>();
-      //std::cout << assign.kind << "\n";
+      // std::cout << assign.kind << "\n";
 
       auto val = handle_expr(assign.right());
 
@@ -178,7 +179,7 @@ public:
     }
     case slang::ast::ExpressionKind::BinaryOp: {
       const auto &binop = expr.as<slang::ast::BinaryExpression>();
-      //std::cout << binop.kind << "\n";
+      // std::cout << binop.kind << "\n";
 
       auto lhs = handle_expr(binop.left());
       auto rhs = handle_expr(binop.right());
@@ -250,8 +251,8 @@ public:
       break;
     }
     case slang::ast::ExpressionKind::IntegerLiteral: {
-      const auto& asLit = expr.as<slang::ast::IntegerLiteral>();
-      //asLit.getValue()[0];
+      const auto &asLit = expr.as<slang::ast::IntegerLiteral>();
+      asLit.getValue();
     }
 
     case slang::ast::ExpressionKind::Invalid:
@@ -424,6 +425,6 @@ int main(int argc, char **argv) {
 
   std::cout << "\n\n\n";
 
-  HWPrinter print{};
+  HWPrinter print{std::cout};
   print.printCtx(ctx);
 }

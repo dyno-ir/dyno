@@ -312,8 +312,6 @@ public:
   using ConstantRef::ConstantRef;
 };
 
-
-
 class HWConstantBuilder : public ConstantBuilderBase<HWBigInt> {
 public:
   using ConstantBuilderBase<HWBigInt>::ConstantBuilderBase;
@@ -329,14 +327,7 @@ public:
     return *this;
   }
 
-  //operator HWConstantRef() { return HWConstantRef{get()}; }
+  operator HWConstantRef() { return HWConstantRef{get()}; }
 };
-
-// inline void CorePrint::printConstant(std::ostream &os, FatDynObjRef<> ref,
-//                                      bool printConstruct) {
-//   assert(!printConstruct && "constant can't be def'd");
-//   os << '#';
-//   ref.as<HWConstantRef>().toStream(os, 10);
-// }
 
 } // namespace dyno

@@ -289,50 +289,6 @@ public:
   }
 
   void setInsertPoint(BlockRef_iterator<true> it) { insert = it; }
-}; // namespace dyno
-
-class HWPrinter {
-  static constexpr std::array<const DialectInfo *, NUM_DIALECTS> dialectIs{
-#define HEADER
-#define FOOTER
-#define LAST
-#define ADD_OP(x) &DialectTraits<x>::info
-#include "dyno/DialectIDs.inc"
-  };
-  static constexpr std::array<const TyInfo *, NUM_DIALECTS> tyIs{
-#define HEADER
-#define FOOTER
-#define LAST
-#define ADD_OP(x) DialectTraits<x>::tyInfo
-#include "dyno/DialectIDs.inc"
-  };
-  static constexpr std::array<const OpcodeInfo *, NUM_DIALECTS> opcodeIs{
-#define HEADER
-#define FOOTER
-#define LAST
-#define ADD_OP(x) DialectTraits<x>::opcInfo
-#include "dyno/DialectIDs.inc"
-  };
-
-  Interface<DialectInfo> dialectI{dialectIs.data()};
-  Interface<TyInfo> tyI{tyIs.data()};
-  Interface<OpcodeInfo> opcI{opcodeIs.data()};
-
-  Printer printer{std::cout, dialectI, tyI, opcI};
-
-public:
-  HWPrinter() {
-    printer.setDefaultDialects({DialectID{DIALECT_CORE},
-                                     DialectID{DIALECT_OP},
-                                     DialectID{DIALECT_RTL}});
-  }
-
-  void printCtx(HWContext &ctx) {
-    for (auto instr : ctx.getInstrs()) {
-      if (InstrRef{instr}.isOpc(DialectID{DIALECT_RTL},
-                                OpcodeID{HW_MODULE_INSTR}))
-        printer.printInstr(InstrRef{instr});
-    }
-  }
 };
+
 }; // namespace dyno
