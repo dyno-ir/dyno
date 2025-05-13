@@ -30,12 +30,12 @@ module Test3(
   input logic IN_a,
   input logic IN_b,
   output logic[1:0] OUT_sum,
-  output logic OUT_d,
+  output logic[1:0] OUT_d,
 );
 
 Test#(2 + 1) test(IN_a, IN_b, OUT_sum);
 
-always_comb begin
-  OUT_d = 1;
-end
+//generate for(genvar i = 0; i < 2; i++)
+//  always_comb OUT_d[i] = i;
+//endgenerate
 endmodule

@@ -107,6 +107,11 @@ public:
   }
 
   void printRefOrUse(FatDynObjRef<> ref) {
+    if (ref.getObjID() == ObjID::INVALID) {
+      str << "nullref";
+      return;
+    }
+
     DynObjRef noCustom = ref;
     noCustom.clearCustom();
     auto it = introduced.find(noCustom);

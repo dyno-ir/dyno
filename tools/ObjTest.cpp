@@ -32,10 +32,10 @@ int main() {
   NewDeleteObjStore<Wire> wires;
   NewDeleteObjStore<Instr> instrs;
 
-  auto instr1 = instrs.create(2, DialectID{DIALECT_RTL}, OpcodeID{0});
-  auto instr2 = instrs.create(2, DialectID{DIALECT_RTL}, OpcodeID{1});
+  auto instr1 = instrs.create(2, DialectID{DIALECT_HW}, OpcodeID{0});
+  auto instr2 = instrs.create(2, DialectID{DIALECT_HW}, OpcodeID{1});
   auto instr3 = instrs.create(1, DialectID{DIALECT_CORE}, OpcodeID{0});
-  auto instr4 = instrs.create(1, DialectID{DIALECT_RTL}, OpcodeID{3});
+  auto instr4 = instrs.create(1, DialectID{DIALECT_HW}, OpcodeID{3});
   auto wire1 = wires.create();
   auto wire2 = wires.create();
 

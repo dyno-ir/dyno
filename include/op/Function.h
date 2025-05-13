@@ -56,7 +56,7 @@ public:
 
   auto blocks() {
     return func()->defUse.uses().filter([](OperandRef ref) {
-      return ref.instr().getDialect() == DIALECT_RTL &&
+      return ref.instr().getDialect() == DIALECT_HW &&
              ref.instr().getOpcode() == HW_BLOCK_INSTR;
     });
   }

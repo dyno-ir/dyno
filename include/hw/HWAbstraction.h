@@ -2,11 +2,10 @@
 #include "dyno/CFG.h"
 #include "dyno/Constant.h"
 #include "dyno/DialectInfo.h"
-#include "dyno/IDs.h"
 #include "dyno/Instr.h"
-#include "dyno/InstrPrinter.h"
 #include "dyno/Obj.h"
-#include "dyno/RefUnion.h"
+#include "hw/BitRange.h"
+#include "hw/HWValue.h"
 #include "hw/IDs.h"
 #include "hw/Module.h"
 #include "hw/Process.h"
@@ -17,25 +16,9 @@
 #include "op/StructuredControlFlow.h"
 #include "support/Utility.h"
 #include <dyno/NewDeleteObjStore.h>
-#include <iostream>
+#include <ranges>
 
 namespace dyno {
-
-class HWValue : public FatRefUnion<WireRef, ConstantRef> {
-public:
-  std::optional<uint32_t> numBits() const {
-    switch (getDialectID() << 8 | getTyID()) {
-    case (DIALECT_CORE << 8) | CORE_CONSTANT:
-      return this->as<ConstantRef>().getNumBits();
-    case (DIALECT_RTL << 8) | RTL_WIRE:
-      return this->as<WireRef>().getBitSize();
-    default:
-      dyno_unreachable("invalid value");
-    }
-  }
-
-  using FatRefUnion::operator=;
-};
 
 class HWContext {
 
@@ -61,7 +44,7 @@ public:
   ModuleIRef createModule(std::string_view name) {
     auto moduleRef = modules.create(std::string(name));
     auto moduleInstr = InstrRef{
-        instrs.create(2, DialectID{DIALECT_RTL}, OpcodeID{HW_MODULE_INSTR})};
+        instrs.create(2, DialectID{DIALECT_HW}, OpcodeID{HW_MODULE_INSTR})};
 
     InstrBuilder{moduleInstr}.addRef(moduleRef).addRef(createBlock());
     return moduleInstr;
@@ -71,7 +54,7 @@ public:
     auto regRef = RegisterRef{regs.create()};
     // in order for the reg to use anything it must be an instr as well
     auto regInstr = InstrRef{
-        instrs.create(1, DialectID{DIALECT_RTL}, OpcodeID{HW_REGISTER_INSTR})};
+        instrs.create(1, DialectID{DIALECT_HW}, OpcodeID{HW_REGISTER_INSTR})};
     InstrBuilder{regInstr}.addRef(regRef);
     parent.block().end().insertPrev(regInstr);
     return regRef;
@@ -81,7 +64,7 @@ public:
     auto blockRef = cfg.blocks.create(cfg);
     // auto blockInstrRef =
     //     InstrRef{instrs.create(1 + sizeof...(parents),
-    //     DialectID{DIALECT_RTL},
+    //     DialectID{DIALECT_HW},
     //                            OpcodeID{HW_BLOCK_INSTR})};
     // InstrBuilder build{blockInstrRef};
     // build.addRef(blockRef).other();
@@ -102,7 +85,7 @@ public:
   ProcessIRef createProcess(ModuleIRef parent) {
     auto procRef = procs.create();
     auto procInstRef = ProcessIRef{
-        instrs.create(2, DialectID{DIALECT_RTL}, OpcodeID{HW_PROCESS_INSTR})};
+        instrs.create(2, DialectID{DIALECT_HW}, OpcodeID{HW_PROCESS_INSTR})};
     InstrBuilder{procInstRef}.addRef(procRef).addRef(createBlock());
     parent.block().end().insertPrev(procInstRef);
     return procInstRef;
@@ -151,14 +134,39 @@ public:
       build.addRef(defWire);
     }
     build.other();
-    ([&] { build.addRef(operands); }(), ...);
+    (
+        // Compile-time edge cases for adding special types like BitRange
+        [&] {
+          if constexpr (std::is_same_v<BitRange,
+                                       std::decay_t<decltype(operands)>>) {
+            build.addRef(operands.getAddr());
+            build.addRef(operands.getLen());
+          } else {
+            build.addRef(operands);
+          }
+        }(),
+        ...);
+  }
+
+  template <typename... Ts> constexpr unsigned getNumOperands() {
+    unsigned size = 0;
+    (
+        // Special types may need more than one operand slot
+        [&] {
+          if constexpr (std::is_same_v<BitRange, std::decay_t<Ts>>)
+            size += 2;
+          else
+            size += 1;
+        }(),
+        ...);
+    return size;
   }
 
   template <typename... Ts>
   HWInstrRef buildInstr(DialectID dialect, OpcodeID opcode, bool addWireDef,
                         Ts... operands) {
     auto instr = InstrRef{ctx.getInstrs().create(
-        addWireDef + sizeof...(operands), dialect, opcode)};
+        addWireDef + getNumOperands<Ts...>(), dialect, opcode)};
 
     insertInstr(instr);
     addRefs(instr, addWireDef, operands...);
@@ -175,6 +183,58 @@ public:
   COMM_OP(buildOr, OP_OR)
   COMM_OP(buildXor, OP_XOR)
   COMM_OP(buildMul, OP_MUL)
+
+  template <IsHWValue... Ts> HWInstrRef buildAdd2(Ts... operands) {
+
+    // todo: bitmap
+    std::array<bool, sizeof...(operands)> isSameOpc = {};
+    ssize_t operandDelta = 0;
+    bool anyIsSameOpc = 0;
+
+    size_t index = 0;
+    for (HWValue operand : {operands...}) {
+      // todo: via constexpr ifs for direct ConstantRef/WireRef
+      if (auto asWire = operand.template dyn_as<WireRef>();
+          asWire && asWire.hasSingleDef() &&
+          asWire.getSingleDef()->instr().isOpc(DialectID{DIALECT_OP},
+                                               OpcodeID{OP_ADD})) {
+        anyIsSameOpc = 1;
+        isSameOpc[index] = 1;
+        operandDelta = asWire.getSingleDef()->instr().getNumOthers() - 1;
+      }
+      index++;
+    }
+
+    if (!anyIsSameOpc) {
+      return buildInstr(DialectID{DIALECT_OP}, OpcodeID{OP_ADD}, true,
+                        operands...);
+    }
+
+    auto instr = InstrRef{
+        ctx.getInstrs().create(1 + sizeof...(operands) + operandDelta,
+                               DialectID{DIALECT_OP}, OpcodeID{OP_ADD})};
+    insertInstr(instr);
+    InstrBuilder build{instr};
+    // todo: size?
+    build.addRef(ctx.getWires().create());
+    build.other();
+
+    index = 0;
+    for (HWValue operand : {operands...}) {
+      if (isSameOpc[index]) {
+        InstrRef otherInstr = operand.as<WireRef>().getSingleDef()->instr();
+        for (auto subOp : operand.as<WireRef>().getSingleDef()->instr().others())
+          build.addRef(subOp->template as<HWValue>());
+
+        ctx.getCFG()[otherInstr].erase();
+        ctx.getInstrs().destroy(otherInstr);
+      } else
+        build.addRef(operand);
+      index++;
+    }
+
+    return HWInstrRef{instr};
+  }
 
 #define BINOP(ident, opcode)                                                   \
   template <typename LHS, typename RHS> HWInstrRef ident(LHS lhs, RHS rhs) {   \
@@ -212,13 +272,15 @@ public:
     return ref;
   }
 
-  HWInstrRef buildLoad(RegisterRef reg) {
-    return buildInstr(DialectID{DIALECT_RTL}, OpcodeID{HW_LOAD}, true, reg);
+  HWInstrRef buildLoad(RegisterRef reg, BitRange range = BitRange::full()) {
+    return buildInstr(DialectID{DIALECT_HW}, OpcodeID{HW_LOAD}, true, reg,
+                      range);
   }
 
-  HWInstrRef buildStore(RegisterRef reg, FatDynObjRef<> value) {
-    return buildInstr(DialectID{DIALECT_RTL}, OpcodeID{HW_STORE}, false, reg,
-                      value);
+  HWInstrRef buildStore(RegisterRef reg, FatDynObjRef<> value,
+                        BitRange range = BitRange::full()) {
+    return buildInstr(DialectID{DIALECT_HW}, OpcodeID{HW_STORE}, false, value,
+                      reg, range);
   }
 
   IfInstrRef buildIfElse(FatDynObjRef<> cond) {

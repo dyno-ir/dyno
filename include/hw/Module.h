@@ -28,11 +28,11 @@ private:
 
     uint32_t type = (instrRef.getDialect() << 16) | instrRef.getOpcode();
     switch (type) {
-    case (DIALECT_RTL << 16 | HW_MODULE_INSTR):
+    case (DIALECT_HW << 16 | HW_MODULE_INSTR):
       return UC_DEF;
-    case (DIALECT_RTL << 16 | HW_PROCESS_INSTR):
+    case (DIALECT_HW << 16 | HW_PROCESS_INSTR):
       return UC_PROC;
-    case (DIALECT_RTL << 16 | HW_REGISTER_INSTR):
+    case (DIALECT_HW << 16 | HW_REGISTER_INSTR):
       return UC_REG;
     case (DIALECT_OP << 16 | OP_FUNC_INSTR):
       return UC_FUNC;
@@ -57,8 +57,8 @@ public:
 };
 
 template <> struct ObjTraits<Module> {
-  static constexpr DialectID dialect{DIALECT_RTL};
-  static constexpr TyID ty{RTL_MODULE};
+  static constexpr DialectID dialect{DIALECT_HW};
+  static constexpr TyID ty{HW_MODULE};
   using FatRefT = ModuleRef;
 };
 

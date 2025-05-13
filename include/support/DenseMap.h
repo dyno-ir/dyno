@@ -9,13 +9,13 @@
 
 // todo: factor out into Base, Small and Big
 template <typename K, typename V> class DenseMap {
-  // buckets are searched linearly
   using size_type = uint32_t;
   static constexpr size_type entriesPerBucket = 8;
   static constexpr K emptyKey = DenseMapInfo<K>::getEmptyKey();
   static constexpr K tombstoneKey = DenseMapInfo<K>::getTombstoneKey();
 
   struct Bucket {
+    // buckets are searched linearly
     // keys are contiguous for SIMD compare
     // values are still here for better locality though
     std::array<K, entriesPerBucket> keys;
@@ -116,6 +116,8 @@ template <typename K, typename V> class DenseMap {
   size_type sz;
 
   auto findImpl(const K &k) {
+    assert(!DenseMapInfo<K>::isEqual(k, emptyKey) &&
+           !DenseMapInfo<K>::isEqual(k, tombstoneKey));
     size_type bucketIndex = DenseMapInfo<K>::getHashValue(k) & (cap - 1);
     size_type offset = 1;
     while (true) {

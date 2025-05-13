@@ -25,8 +25,8 @@ public:
 };
 
 template <> struct ObjTraits<Process> {
-  static constexpr DialectID dialect{DIALECT_RTL};
-  static constexpr TyID ty{RTL_PROCESS};
+  static constexpr DialectID dialect{DIALECT_HW};
+  static constexpr TyID ty{HW_PROCESS};
   using FatRefT = ProcessRef;
 };
 

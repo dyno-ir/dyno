@@ -1,5 +1,6 @@
 #pragma once
 
+#include "support/Ranges.h"
 #include <algorithm>
 #include <cassert>
 #include <cstddef>
@@ -243,6 +244,15 @@ public:
     T *obj = std::construct_at<T>(end(), std::move(arr[pos]));
     arr[pos] = val;
     ++sz;
+  }
+
+  template <std::input_iterator It> void push_back_range(Range<It> range) {
+    for (auto &item : range) {
+      emplace_back(item);
+    }
+  }
+  template <std::input_iterator It> void push_back_range(It begin, It end) {
+    push_back_range(Range{begin, end});
   }
 
   T &front() {

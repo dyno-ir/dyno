@@ -1250,6 +1250,10 @@ public:
     obj = ObjID{val};
   }
 
+  static ConstantRef fromU32(uint32_t val) {
+    return ConstantRef{32, val, 0, 0};
+  }
+
   std::span<const uint32_t> getWords() const {
     return isInline()
                ? std::span<const uint32_t>{&obj.num, 1}

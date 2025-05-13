@@ -39,21 +39,21 @@ public:
   HWPrinter(std::ostream &str)
       : Printer(str, dialectIs.data(), tyIs.data(), opcodeIs.data()) {
     setDefaultDialects({DialectID{DIALECT_CORE}, DialectID{DIALECT_OP},
-                        DialectID{DIALECT_RTL}});
+                        DialectID{DIALECT_HW}});
     interfaces.registerVal<type::print_fn>(
-        DIALECT_RTL, static_cast<type::print_fn>(&HWPrinter::printHWType));
+        DIALECT_HW, static_cast<type::print_fn>(&HWPrinter::printHWType));
   }
 
   bool printHWType(FatDynObjRef<> ref, bool def) {
     switch (ref.getTyID()) {
-    case RTL_WIRE: {
+    case HW_WIRE: {
       WireRef asWire = ref.as<WireRef>();
       str << "wire";
       if (asWire->bitSize)
         str << "(" << *asWire->bitSize << ")";
       break;
     }
-    case RTL_MODULE: {
+    case HW_MODULE: {
       ModuleRef asModule = ref.as<ModuleRef>();
       str << "module(\"" << asModule->name << "\")";
       break;
@@ -66,7 +66,7 @@ public:
 
   void printCtx(HWContext &ctx) {
     for (auto instr : ctx.getInstrs()) {
-      if (InstrRef{instr}.isOpc(DialectID{DIALECT_RTL},
+      if (InstrRef{instr}.isOpc(DialectID{DIALECT_HW},
                                 OpcodeID{HW_MODULE_INSTR}))
         printInstr(InstrRef{instr});
     }

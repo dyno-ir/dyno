@@ -71,7 +71,13 @@ public:
       vars[port->name] = reg;
     }
 
-    for (auto &member : node.body.Scope::members()) {
+    handle_member_list(node.body.Scope::members());
+    visitDefault(node);
+  }
+
+  void handle_member_list(
+      std::ranges::subrange<slang::ast::Scope::iterator> members) {
+    for (auto &member : members) {
       switch (member.kind) {
       case slang::ast::SymbolKind::Parameter:
       case slang::ast::SymbolKind::Port:
@@ -89,12 +95,22 @@ public:
         break;
       }
 
+      case slang::ast::SymbolKind::GenerateBlockArray: {
+        // todo
+        auto &asGenBA = member.as<slang::ast::GenerateBlockArraySymbol>();
+        for (auto submember : asGenBA.entries) {
+          std::cout << submember->name << "\n";
+          handle_member_list(submember->members());
+        }
+        // asGenBA.entries
+        std::cout << asGenBA.name << "\n";
+        break;
+      }
+
       default:
         abort();
       }
     }
-
-    visitDefault(node);
   }
 
   void handle_proc(const slang::ast::ProceduralBlockSymbol &block) {
@@ -225,7 +241,7 @@ public:
 
       switch (binop.op) {
       case slang::ast::BinaryOperator::Add:
-        instr = build.buildAdd(lhs.value, rhs.value);
+        instr = build.buildAdd2(lhs.value, rhs.value);
         break;
       case slang::ast::BinaryOperator::Subtract:
         instr = build.buildSub(lhs.value, rhs.value);

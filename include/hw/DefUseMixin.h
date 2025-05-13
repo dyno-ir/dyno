@@ -5,7 +5,7 @@ namespace dyno {
 template <typename Derived> class InstrDefUseMixin {
 
   InstrDefUse &self() { return (*static_cast<Derived *>(this))->defUse; }
-  const InstrDefUse &cself() {
+  const InstrDefUse &cself() const {
     return (*static_cast<const Derived *>(this))->defUse;
   }
 
