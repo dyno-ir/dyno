@@ -1,4 +1,3 @@
-
 module Test#(parameter WIDTH)
 (
   input logic IN_a,
@@ -30,12 +29,10 @@ module Test3(
   input logic IN_a,
   input logic IN_b,
   output logic[1:0] OUT_sum,
-  output logic[1:0] OUT_d,
+  output logic[2:0] OUT_d,
 );
 
-Test#(2 + 1) test(IN_a, IN_b, OUT_sum);
+Test#(2) test(IN_a, IN_b, OUT_sum);
 
-//generate for(genvar i = 0; i < 2; i++)
-//  always_comb OUT_d[i] = i;
-//endgenerate
+always_comb OUT_d[1:0] = (OUT_sum + 1)[1:0];
 endmodule

@@ -1,4 +1,6 @@
 #pragma once
+#include "BitRange.h"
+#include "HWValue.h"
 #include "dyno/CFG.h"
 #include "dyno/Constant.h"
 #include "dyno/DialectInfo.h"
@@ -16,7 +18,6 @@
 #include "op/StructuredControlFlow.h"
 #include "support/Utility.h"
 #include <dyno/NewDeleteObjStore.h>
-#include <ranges>
 
 namespace dyno {
 
@@ -50,16 +51,6 @@ public:
     return moduleInstr;
   }
 
-  RegisterRef createRegister(ModuleIRef parent) {
-    auto regRef = RegisterRef{regs.create()};
-    // in order for the reg to use anything it must be an instr as well
-    auto regInstr = InstrRef{
-        instrs.create(1, DialectID{DIALECT_HW}, OpcodeID{HW_REGISTER_INSTR})};
-    InstrBuilder{regInstr}.addRef(regRef);
-    parent.block().end().insertPrev(regInstr);
-    return regRef;
-  }
-
   BlockRef createBlock() {
     auto blockRef = cfg.blocks.create(cfg);
     // auto blockInstrRef =
@@ -90,6 +81,8 @@ public:
     parent.block().end().insertPrev(procInstRef);
     return procInstRef;
   }
+
+  ConstantBuilder constBuild() { return ConstantBuilder{constants}; }
 };
 
 class HWInstrRef : public InstrRef {
@@ -186,6 +179,9 @@ public:
 
   template <IsHWValue... Ts> HWInstrRef buildAdd2(Ts... operands) {
 
+    // canonicalize further by having constants rightmost, possible even
+    // sort wires by def opcode?
+
     // todo: bitmap
     std::array<bool, sizeof...(operands)> isSameOpc = {};
     ssize_t operandDelta = 0;
@@ -223,7 +219,8 @@ public:
     for (HWValue operand : {operands...}) {
       if (isSameOpc[index]) {
         InstrRef otherInstr = operand.as<WireRef>().getSingleDef()->instr();
-        for (auto subOp : operand.as<WireRef>().getSingleDef()->instr().others())
+        for (auto subOp :
+             operand.as<WireRef>().getSingleDef()->instr().others())
           build.addRef(subOp->template as<HWValue>());
 
         ctx.getCFG()[otherInstr].erase();
@@ -272,6 +269,13 @@ public:
     return ref;
   }
 
+  template <typename... Ts> HWInstrRef buildSplice(Ts... operands) {
+    static_assert(sizeof...(operands) % 2 == 0 &&
+                  "operands must be pairs of HWValue & BitRange");
+    return buildInstr(DialectID{DIALECT_HW}, OpcodeID{HW_SPLICE}, true,
+                      operands...);
+  }
+
   HWInstrRef buildLoad(RegisterRef reg, BitRange range = BitRange::full()) {
     return buildInstr(DialectID{DIALECT_HW}, OpcodeID{HW_LOAD}, true, reg,
                       range);
@@ -281,6 +285,34 @@ public:
                         BitRange range = BitRange::full()) {
     return buildInstr(DialectID{DIALECT_HW}, OpcodeID{HW_STORE}, false, value,
                       reg, range);
+  }
+
+  RegisterRef createRegister() {
+    auto regRef = RegisterRef{ctx.getRegs().create()};
+    // in order for the reg to use anything it must be an instr as well
+    auto regInstr = InstrRef{ctx.getInstrs().create(
+        1, DialectID{DIALECT_HW}, OpcodeID{HW_REGISTER_INSTR})};
+    InstrBuilder{regInstr}.addRef(regRef);
+    insertInstr(regInstr);
+    return regRef;
+  }
+
+  HWInstrRef buildInstance(ModuleRef module) {
+
+    auto instr = InstrRef{ctx.getInstrs().create(
+        1 + module->ports.size(), DialectID{DIALECT_HW}, OpcodeID{HW_INSTANCE})};
+
+    InstrBuilder build{instr};
+
+    for (size_t i = 0; i < module->ports.size(); i++)
+      build.addRef(ctx.getRegs().create());
+    build.other();
+
+    build.addRef(module);
+
+    insertInstr(instr);
+
+    return instr;
   }
 
   IfInstrRef buildIfElse(FatDynObjRef<> cond) {

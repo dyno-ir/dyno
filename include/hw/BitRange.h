@@ -6,9 +6,18 @@ namespace dyno {
 
 template <typename Derived> class BitRangeMixin {
   Derived &self() { return *static_cast<Derived *>(this); }
+  const Derived &cself() const { return *static_cast<const Derived *>(this); }
+
   bool isFull() {
     return self().getAddr() == ConstantRef::fromU32(0) &&
            self().getLen() == nullref;
+  }
+
+  template <typename Derived2>
+  friend bool operator==(const BitRangeMixin<Derived> &lhs,
+                         const BitRangeMixin<Derived2> &rhs) {
+    return lhs.cself().getAddr() == rhs.cself().getAddr() &&
+           lhs.cself().getLen() == rhs.cself().getLen();
   }
 };
 
@@ -20,8 +29,8 @@ public:
   HWValue addr;
   HWValue len;
 
-  HWValue getAddr() { return addr; }
-  HWValue getLen() { return len; }
+  HWValue getAddr() const { return addr; }
+  HWValue getLen() const { return len; }
 
   BitRange() = default;
   BitRange(BitRangeOperand);
@@ -35,8 +44,8 @@ public:
 class BitRangeOperand : public BitRangeMixin<BitRange> {
 public:
   OperandRef base;
-  HWValue getAddr() { return base->as<HWValue>(); }
-  HWValue getLen() {
+  HWValue getAddr() const { return base->as<HWValue>(); }
+  HWValue getLen() const {
     auto it = base;
     ++it;
     assert(it != base.instr().end());

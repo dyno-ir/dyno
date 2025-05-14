@@ -3,6 +3,7 @@
 #include "dyno/Obj.h"
 #include "hw/HWAbstraction.h"
 #include "hw/HWPrinter.h"
+#include "hw/HWValue.h"
 #include "hw/Module.h"
 #include "hw/Register.h"
 #include "slang/ast/ASTVisitor.h"
@@ -15,10 +16,12 @@
 #include "slang/ast/expressions/MiscExpressions.h"
 #include "slang/ast/expressions/Operator.h"
 #include "slang/ast/expressions/OperatorExpressions.h"
+#include "slang/ast/expressions/SelectExpressions.h"
 #include "slang/ast/symbols/BlockSymbols.h"
 #include "slang/ast/symbols/CompilationUnitSymbols.h"
 #include "slang/ast/symbols/InstanceSymbols.h"
 #include "slang/ast/symbols/PortSymbols.h"
+#include "slang/ast/symbols/VariableSymbols.h"
 #include "slang/diagnostics/DiagnosticEngine.h"
 #include "slang/diagnostics/Diagnostics.h"
 #include "slang/driver/Driver.h"
@@ -27,6 +30,7 @@
 #include "support/SmallVec.h"
 #include <iostream>
 #include <ostream>
+#include <ranges>
 #include <slang/syntax/SyntaxNode.h>
 
 using namespace dyno;
@@ -37,18 +41,84 @@ public:
   ModuleIRef mod;
   ProcessIRef proc;
   BlockRef blockRef;
-  std::unordered_map<std::string_view, RegisterRef> vars;
+
+  DenseMap<const slang::ast::Symbol *, RegisterRef> vars;
+  DenseMap<const slang::ast::InstanceBodySymbol *, ObjRef<Module>> moduleMap;
 
   VisitorAST(HWContext &ctx) : ctx(ctx) {}
 
   struct Value {
-    bool is_signed;
-    HWValue value;
+    const slang::ast::Type *type;
+    const bool isLValue;
+
+  private:
+    union {
+      HWValue value;
+      struct {
+        RegisterRef lvReg;
+        BitRange lvBitRange;
+      };
+    };
+    Value(HWValue value, const slang::ast::Type *type)
+        : type(type), isLValue(false), value(value) {}
+    Value(RegisterRef reg, const slang::ast::Type *type, BitRange bitRange)
+        : type(type), isLValue(true), lvReg(reg), lvBitRange(bitRange) {}
+
+  public:
+    HWValue getValue() {
+      assert(!isLValue);
+      return value;
+    }
+    HWValue proGetValue(HWInstrBuilder &build) {
+      if (!isLValue)
+        return getValue();
+
+      return build.buildLoad(getLVReg(), getLVBitRange()).defW();
+    }
+    RegisterRef getLVReg() {
+      assert(isLValue);
+      return lvReg;
+    }
+    BitRange getLVBitRange() {
+      assert(isLValue);
+      return lvBitRange;
+    }
+    static Value rvalue(HWValue value, const slang::ast::Type *type) {
+      return Value{value, type};
+    }
+    static Value lvalue(RegisterRef reg, const slang::ast::Type *type,
+                        BitRange range = BitRange::full()) {
+      return Value{reg, type, range};
+    }
+    static Value lvalueSlice(HWInstrBuilder &build, Value lv,
+                             const slang::ast::Type *type, BitRange range) {
+      assert(lv.isLValue);
+      if (lv.getLVBitRange() == BitRange::full())
+        return lvalue(lv.getLVReg(), type, range);
+
+      auto newAddr =
+          build.buildAdd(lv.getLVBitRange().getAddr(), range.getAddr());
+      auto newLen = range.getLen();
+
+      return lvalue(lv.getLVReg(), type, BitRange{newAddr, newLen});
+    }
   };
 
   void handle(const slang::ast::InstanceSymbol &node) {
-    mod = ctx.createModule(node.name);
-    for (const auto &port : node.body.getPortList()) {
+
+    assert(node.isModule() && "only module supported rn");
+    auto &body = *(node.getCanonicalBody() ?: &node.body);
+    auto [found, it] = moduleMap.findOrInsert(&body, [&] {
+      return ctx.createModule(node.name).def()->as<ObjRef<Module>>();
+    });
+
+    if (found)
+      return;
+
+    ModuleIRef module =
+        ModuleRef{it.val(), ctx.getModules()[it.val()]}.getSingleDef()->instr();
+
+    for (const auto &port : body.getPortList()) {
       auto &ps = port->as<slang::ast::PortSymbol>();
       Register::PortType ptype;
       switch (ps.direction) {
@@ -66,23 +136,44 @@ public:
         break;
       }
 
-      auto reg = ctx.createRegister(mod);
-      mod.addPort(reg, ptype);
-      vars[port->name] = reg;
+      auto reg = HWInstrBuilder{ctx, module.block().begin()}.createRegister();
+      module.addPort(reg, ptype);
     }
 
-    handle_member_list(node.body.Scope::members());
     visitDefault(node);
+  }
+
+  void handle_modules() {
+    // can probably do this in parallel
+    for (auto [slangMod, dynoMod] : moduleMap) {
+      ModuleRef fDynoMod{dynoMod, ctx.getModules()[dynoMod]};
+      mod = fDynoMod.getSingleDef()->instr();
+      vars.clear();
+
+      for (auto [i, port] :
+           slangMod->getPortList() | std::ranges::views::enumerate) {
+        vars.insert(port->as<slang::ast::PortSymbol>().internalSymbol,
+                    fDynoMod->ports[i]);
+        // std::cout << "inserted " << port << ", " << port->name << "\n";
+      }
+      blockRef = mod.block();
+      handle_member_list(slangMod->Scope::members());
+    }
   }
 
   void handle_member_list(
       std::ranges::subrange<slang::ast::Scope::iterator> members) {
     for (auto &member : members) {
       switch (member.kind) {
-      case slang::ast::SymbolKind::Parameter:
       case slang::ast::SymbolKind::Port:
+        // std::cout << "port " << &member << ", "
+        //           << member.as<slang::ast::PortSymbol>().name << "\n";
+        break;
+      case slang::ast::SymbolKind::Parameter:
+        break;
       case slang::ast::SymbolKind::Variable:
-        // todo: support var defs
+        // std::cout << "var " << &member << ", "
+        //           << member.as<slang::ast::VariableSymbol>().name << "\n";
         break;
 
       case slang::ast::SymbolKind::ProceduralBlock: {
@@ -91,7 +182,14 @@ public:
       }
 
       case slang::ast::SymbolKind::Instance: {
-        // todo
+        auto &asInst = member.as<slang::ast::InstanceSymbol>();
+        auto &body = *(asInst.getCanonicalBody() ?: &asInst.body);
+        auto it = moduleMap.find(&body);
+        if (!it)
+          abort();
+
+        HWInstrBuilder build{ctx, blockRef.begin()};
+        build.buildInstance(ModuleRef{it.val(), ctx.getModules()[it.val()]});
         break;
       }
 
@@ -116,8 +214,10 @@ public:
   void handle_proc(const slang::ast::ProceduralBlockSymbol &block) {
     assert(mod);
     proc = ctx.createProcess(mod);
+    auto blockRefS = blockRef;
     blockRef = proc.block();
     handle_stmt(block.getBody());
+    blockRef = blockRefS;
   }
 
   void handle_stmt(const slang::ast::Statement &stmt) {
@@ -215,20 +315,18 @@ public:
     switch (expr.kind) {
     case slang::ast::ExpressionKind::Assignment: {
       const auto &assign = expr.as<slang::ast::AssignmentExpression>();
-      // std::cout << assign.kind << "\n";
 
-      auto val = handle_expr(assign.right());
+      // todo: assign.isBlocking()
 
-      if (assign.left().kind != slang::ast::ExpressionKind::NamedValue)
+      auto rhs = handle_expr(assign.right());
+      auto lhs = handle_expr(assign.left());
+
+      if (!lhs.isLValue)
         abort();
-      const auto &left = assign.left().as<slang::ast::NamedValueExpression>();
-      auto sig = vars.find(left.symbol.name);
-      assert(sig != vars.end());
 
-      build.buildStore(sig->second, val.value);
-
-      return val;
-      break;
+      build.buildStore(lhs.getLVReg(), rhs.proGetValue(build),
+                       lhs.getLVBitRange());
+      return rhs;
     }
     case slang::ast::ExpressionKind::BinaryOp: {
       const auto &binop = expr.as<slang::ast::BinaryExpression>();
@@ -239,44 +337,43 @@ public:
 
       HWInstrRef instr;
 
+      auto lhsVal = lhs.proGetValue(build);
+      auto rhsVal = rhs.proGetValue(build);
+
       switch (binop.op) {
       case slang::ast::BinaryOperator::Add:
-        instr = build.buildAdd2(lhs.value, rhs.value);
+        instr = build.buildAdd2(lhsVal, rhsVal);
         break;
       case slang::ast::BinaryOperator::Subtract:
-        instr = build.buildSub(lhs.value, rhs.value);
+        instr = build.buildSub(lhsVal, rhsVal);
         break;
       case slang::ast::BinaryOperator::Multiply:
-        instr = build.buildMul(lhs.value, rhs.value);
+        instr = build.buildMul(lhsVal, rhsVal);
         break;
       case slang::ast::BinaryOperator::Divide:
-        switch (expr.type->isSigned()) {
-        case false:
-          instr = build.buildUDiv(lhs.value, rhs.value);
-          break;
-        case true:
-          instr = build.buildSDiv(lhs.value, rhs.value);
-          break;
-        }
+        if (expr.type->isSigned())
+          instr = build.buildSDiv(lhsVal, rhsVal);
+        else
+          instr = build.buildUDiv(lhsVal, rhsVal);
         break;
       case slang::ast::BinaryOperator::ArithmeticShiftLeft:
       case slang::ast::BinaryOperator::LogicalShiftLeft:
-        instr = build.buildSLL(lhs.value, rhs.value);
+        instr = build.buildSLL(lhsVal, rhsVal);
         break;
       case slang::ast::BinaryOperator::ArithmeticShiftRight:
-        instr = build.buildSRA(lhs.value, rhs.value);
+        instr = build.buildSRA(lhsVal, rhsVal);
         break;
       case slang::ast::BinaryOperator::LogicalShiftRight:
-        instr = build.buildSRL(lhs.value, rhs.value);
+        instr = build.buildSRL(lhsVal, rhsVal);
         break;
       case slang::ast::BinaryOperator::BinaryAnd:
-        instr = build.buildAnd(lhs.value, rhs.value);
+        instr = build.buildAnd(lhsVal, rhsVal);
         break;
       case slang::ast::BinaryOperator::BinaryOr:
-        instr = build.buildOr(lhs.value, rhs.value);
+        instr = build.buildOr(lhsVal, rhsVal);
         break;
       case slang::ast::BinaryOperator::BinaryXor:
-        instr = build.buildXor(lhs.value, rhs.value);
+        instr = build.buildXor(lhsVal, rhsVal);
         break;
       default:
         abort();
@@ -285,7 +382,7 @@ public:
       if (auto w = binop.type->getBitWidth())
         instr.defW().setBitSize(w);
 
-      return Value{expr.type->isSigned(), instr.defW()};
+      return Value::rvalue(instr.defW(), expr.type.get());
       break;
     }
     case slang::ast::ExpressionKind::UnaryOp: {
@@ -297,33 +394,87 @@ public:
 
     case slang::ast::ExpressionKind::NamedValue: {
       auto const &nval = expr.as<slang::ast::NamedValueExpression>();
-      auto sig = vars.find(nval.symbol.name);
+      auto sig = vars.find(&nval.symbol);
       assert(sig != vars.end());
 
-      return Value{expr.type->isSigned(), build.buildLoad(sig->second).defW()};
+      return Value::lvalue(sig.val(), expr.type);
       break;
     }
     case slang::ast::ExpressionKind::IntegerLiteral: {
       const auto &asLit = expr.as<slang::ast::IntegerLiteral>();
-      return Value{expr.type->isSigned(), toDynoConstant(asLit.getValue())};
+      return Value::rvalue(toDynoConstant(asLit.getValue()), expr.type);
     }
     case slang::ast::ExpressionKind::UnbasedUnsizedIntegerLiteral: {
       const auto &asLit = expr.as<slang::ast::UnbasedUnsizedIntegerLiteral>();
-      return Value{expr.type->isSigned(), toDynoConstant(asLit.getValue())};
+      return Value::rvalue(toDynoConstant(asLit.getValue()), expr.type);
     }
 
     case slang::ast::ExpressionKind::Conversion: {
       const auto &asConv = expr.as<slang::ast::ConversionExpression>();
       auto src = handle_expr(asConv.operand());
-      HWValue val = src.value;
+      HWValue val = src.proGetValue(build);
       uint32_t newWidth = asConv.type->getBitstreamWidth();
-      if (newWidth > src.value.numBits())
-        val = build.buildExt(newWidth, src.value, src.is_signed).defW();
-      else if (newWidth < src.value.numBits())
-        val = build.buildTrunc(newWidth, src.value).defW();
+      if (newWidth > val.numBits())
+        val = build.buildExt(newWidth, val, src.type->isSigned()).defW();
+      else if (newWidth < val.numBits())
+        val = build.buildTrunc(newWidth, val).defW();
 
-      return Value{src.is_signed, val};
+      return Value::rvalue(val, expr.type);
     }
+
+    case slang::ast::ExpressionKind::RangeSelect: {
+      auto &asElemS = expr.as<slang::ast::RangeSelectExpression>();
+      auto value = handle_expr(asElemS.value());
+
+      auto rangeLeft = handle_expr(asElemS.left()).proGetValue(build);
+      auto rangeRight = handle_expr(asElemS.right()).proGetValue(build);
+
+      HWValue offs;
+      HWValue len;
+
+      switch (asElemS.getSelectionKind()) {
+      case slang::ast::RangeSelectionKind::Simple: {
+        offs = rangeRight;
+        len = build
+                  .buildAdd(
+                      build.buildSub(rangeLeft, rangeRight).defW(),
+                      ctx.constBuild()
+                          .val(std::max(
+                                   asElemS.left().type->getBitstreamWidth(),
+                                   asElemS.right().type->getBitstreamWidth()),
+                               1)
+                          .get())
+                  .defW();
+        break;
+      }
+      case slang::ast::RangeSelectionKind::IndexedUp: {
+        offs = rangeLeft;
+        len = rangeRight;
+        break;
+      }
+      case slang::ast::RangeSelectionKind::IndexedDown:
+        len = rangeRight;
+        offs = build
+                   .buildAdd(
+                       build.buildSub(rangeLeft, rangeRight).defW(),
+                       ctx.constBuild()
+                           .val(std::max(
+                                    asElemS.left().type->getBitstreamWidth(),
+                                    asElemS.right().type->getBitstreamWidth()),
+                                1)
+                           .get())
+                   .defW();
+        break;
+      }
+      if (value.isLValue) {
+        return Value::lvalueSlice(build, value, expr.type, BitRange{offs, len});
+      }
+
+      auto splice = build.buildSplice(value.getValue(), BitRange{offs, len});
+      return Value::rvalue(splice.defW(), expr.type);
+    }
+
+    case slang::ast::ExpressionKind::ElementSelect:
 
     case slang::ast::ExpressionKind::Invalid:
     case slang::ast::ExpressionKind::RealLiteral:
@@ -338,8 +489,7 @@ public:
     case slang::ast::ExpressionKind::Concatenation:
     case slang::ast::ExpressionKind::Replication:
     case slang::ast::ExpressionKind::Streaming:
-    case slang::ast::ExpressionKind::ElementSelect:
-    case slang::ast::ExpressionKind::RangeSelect:
+
     case slang::ast::ExpressionKind::MemberAccess:
     case slang::ast::ExpressionKind::Call:
     case slang::ast::ExpressionKind::DataType:
@@ -364,104 +514,6 @@ public:
     }
 
     abort();
-  }
-};
-
-/*
-class IRPrinter {
-public:
-  void print_module(std::ostream &os, ModuleRef mod) {
-    os << "module %" << mod->name << " {\n";
-    for (SignalRef signal : mod->signals) {
-      if (signal->stype != Signal::INTERNAL) {
-        os << Signal::signal_type_names[signal->stype] << " bit("
-           << signal->range.len << ") %" << signal->name << "\n";
-      }
-    }
-    os << "\n";
-
-    for (auto proc : mod->procs) {
-      print_proc(os, proc);
-    }
-    os << "}\n";
-  }
-
-  void print_proc(std::ostream &os, ProcessRef proc) {
-    os << "proc {\n";
-    print_block(os, &proc->body);
-    os << "}\n";
-  }
-
-  void print_block(std::ostream &os, BlockInstrRef block) {
-    for (auto &inst : block->members) {
-      print_inst(os, inst);
-    }
-  }
-
-  size_t count = 0;
-  std::unordered_map<InstrRef, size_t> idx_map;
-
-  void print_inst(std::ostream &os, InstrRef inst) {
-    switch (inst->opcode) {
-    case Opcode::LOAD: {
-      std::cout << "%" << count << " = load \""
-                << ((LoadInstr *)inst)->base->name << "\"\n";
-      idx_map[inst] = count++;
-      break;
-    }
-    case Opcode::STORE_NB:
-    case Opcode::STORE: {
-      auto store = inst->opcode == Opcode::STORE_NB ? "store_nb" : "store";
-      std::cout << "%" << count << " = " << store << " \""
-                << ((StoreInstr *)inst)->base->name << "\" " << "%"
-                << idx_map[((StoreInstr *)inst)->data] << "\n";
-      idx_map[inst] = count++;
-      break;
-    }
-    case Opcode::BINOP: {
-      const char *binop;
-      switch (((BinopInstr *)inst)->op) {
-      case BinOpcode::ADD:
-        binop = "add";
-        break;
-      case BinOpcode::SUB:
-        binop = "sub";
-        break;
-      case BinOpcode::AND:
-        binop = "and";
-        break;
-      case BinOpcode::OR:
-        binop = "or";
-        break;
-      case BinOpcode::XOR:
-        binop = "xor";
-        break;
-      }
-      std::cout << "%" << count << " = " << binop << " %"
-                << idx_map[((BinopInstr *)inst)->lhs] << " " << "%"
-                << idx_map[((BinopInstr *)inst)->rhs] << "\n";
-      idx_map[inst] = count++;
-      break;
-    }
-    case Opcode::BLOCK: {
-      print_block(os, ((BlockInstrRef)inst));
-      break;
-    }
-    default:
-      break;
-    }
-  }
-};
-*/
-
-struct Visitor : public slang::ast::ASTVisitor<Visitor, true, true> {
-  int count = 0;
-  template <typename T> void handle(const T &t) {
-    if constexpr (std::is_base_of_v<slang::ast::Statement, T>) {
-      ;
-    }
-    visitDefault(t);
-    printf("visit\n");
   }
 };
 
@@ -491,6 +543,7 @@ int main(int argc, char **argv) {
 
   VisitorAST visitor{ctx};
   compilation->getRoot().visit(visitor);
+  visitor.handle_modules();
 
   std::cout << "\n\n\n";
 

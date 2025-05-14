@@ -7,13 +7,15 @@ int main() {
   HWContext ctx;
 
   auto mod = ctx.createModule("test");
-  auto portIn = ctx.createRegister(mod);
+  HWInstrBuilder buildTop{ctx, mod.block().begin()};
+
+  auto portIn = buildTop.createRegister();
   mod.addPort(portIn, Register::PORT_IN);
 
-  auto portOut = ctx.createRegister(mod);
+  auto portOut = buildTop.createRegister();
   mod.addPort(portOut, Register::PORT_OUT);
 
-  auto reg = ctx.createRegister(mod);
+  auto reg = buildTop.createRegister();
 
   auto proc = ctx.createProcess(mod);
   auto block = proc.block();

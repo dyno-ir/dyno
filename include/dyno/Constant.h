@@ -1276,6 +1276,11 @@ public:
     assert(isInline());
     return obj.num;
   }
+
+  // todo: make ConstantRef a FatObjRef instead by exposing custom in FatObjRef
+  // static bool is_impl(DynObjRef ref) {
+  //   return FatObjRef<Constant>::is_impl(ref);
+  // }
 };
 
 class ConstantStore {

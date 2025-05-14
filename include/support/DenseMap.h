@@ -11,8 +11,6 @@
 template <typename K, typename V> class DenseMap {
   using size_type = uint32_t;
   static constexpr size_type entriesPerBucket = 8;
-  static constexpr K emptyKey = DenseMapInfo<K>::getEmptyKey();
-  static constexpr K tombstoneKey = DenseMapInfo<K>::getTombstoneKey();
 
   struct Bucket {
     // buckets are searched linearly
@@ -24,7 +22,8 @@ template <typename K, typename V> class DenseMap {
     size_type getNextValid(size_type cur) {
       // todo: vectorize manually
       for (size_type i = cur + 1; i < keys.size(); i++) {
-        if (keys[i] != emptyKey && keys[i] != tombstoneKey)
+        if (keys[i] != DenseMapInfo<K>::getEmptyKey() &&
+            keys[i] != DenseMapInfo<K>::getTombstoneKey())
           return i;
       }
       // invalid
@@ -40,7 +39,11 @@ template <typename K, typename V> class DenseMap {
       return entriesPerBucket;
     }
 
-    Bucket() { std::fill(keys.begin(), keys.end(), emptyKey); }
+    void setKeysEmpty() {
+      std::fill(keys.begin(), keys.end(), DenseMapInfo<K>::getEmptyKey());
+    }
+
+    Bucket() { setKeysEmpty(); }
   };
 
   struct iterator {
@@ -58,7 +61,8 @@ template <typename K, typename V> class DenseMap {
 
       while (rem != 0) {
         bucket++;
-        rem--;
+        if (--rem == 0)
+          break;
 
         if (size_type next = bucket->getNextValid(~0);
             next != entriesPerBucket) {
@@ -74,10 +78,12 @@ template <typename K, typename V> class DenseMap {
     using iterator_category = std::forward_iterator_tag;
     using value_type = std::pair<K &, V &>;
 
+    static_assert(std::is_trivially_destructible_v<K>);
+
     iterator erase() {
       bucket->values[idx].~V();
       bucket->keys[idx].~K();
-      bucket->keys[idx] = tombstoneKey;
+      bucket->keys[idx] = DenseMapInfo<K>::getTombstoneKey();
 
       iterator rv{*this};
       rv.next();
@@ -109,6 +115,8 @@ template <typename K, typename V> class DenseMap {
 
     const K &key() { return (**this).first; }
     V &val() { return (**this).second; }
+
+    explicit operator bool() { return rem != 0; }
   };
 
   Bucket *buckets;
@@ -116,8 +124,8 @@ template <typename K, typename V> class DenseMap {
   size_type sz;
 
   auto findImpl(const K &k) {
-    assert(!DenseMapInfo<K>::isEqual(k, emptyKey) &&
-           !DenseMapInfo<K>::isEqual(k, tombstoneKey));
+    assert(!DenseMapInfo<K>::isEqual(k, DenseMapInfo<K>::getEmptyKey()) &&
+           !DenseMapInfo<K>::isEqual(k, DenseMapInfo<K>::getTombstoneKey()));
     size_type bucketIndex = DenseMapInfo<K>::getHashValue(k) & (cap - 1);
     size_type offset = 1;
     while (true) {
@@ -126,7 +134,8 @@ template <typename K, typename V> class DenseMap {
         return std::make_pair(true, iterator{&buckets[bucketIndex],
                                              cap - bucketIndex, entryIndex});
       }
-      if (auto emptyIndex = buckets[bucketIndex].find(emptyKey);
+      if (auto emptyIndex =
+              buckets[bucketIndex].find(DenseMapInfo<K>::getEmptyKey());
           emptyIndex != entriesPerBucket) {
         return std::make_pair(false, iterator{&buckets[bucketIndex],
                                               cap - bucketIndex, emptyIndex});
@@ -168,7 +177,10 @@ template <typename K, typename V> class DenseMap {
 public:
   // todo: copy/move construct
   DenseMap() : cap(1), sz(0) { buckets = new Bucket[1](); }
-  ~DenseMap() { delete[] buckets; }
+  ~DenseMap() {
+    clearDelete();
+    ::operator delete[](buckets);
+  }
 
   iterator begin() {
     // maybe cache the ptr
@@ -192,6 +204,7 @@ public:
       return end();
 
     if (growIfOversized())
+      // iterator invalid after growing so re-run
       return insert(k, std::move(v));
 
     sz++;
@@ -218,6 +231,28 @@ public:
     return insertOrAssign(k, V{v});
   }
 
+  template <std::invocable T> auto findOrInsert(const K &k, T &&func) {
+    auto [found, iter] = findImpl(k);
+    if (found)
+      return std::make_pair(true, iter);
+
+    if (growIfOversized())
+      return std::make_pair(false, insert(k, func()));
+
+    sz++;
+    (*iter).first = k;
+    (*iter).second = func();
+    return std::make_pair(false, iter);
+  }
+
+  auto findOrInsert(const K &k, const V &&newVal) {
+    return findOrInsert(k, [&] { return std::move(newVal); });
+  }
+
+  auto findOrInsert(const K &k, const V &newVal) {
+    return findOrInsert(k, V{newVal});
+  }
+
   V &operator[](const K &k) {
     auto [found, it] = findImpl(k);
     if (!found) {
@@ -233,11 +268,29 @@ public:
   }
 
   void clear() {
+    if constexpr (std::is_trivially_destructible_v<V>) {
+      for (size_t i = 0; i < cap; i++)
+        buckets[i].setKeysEmpty();
+      return;
+    }
+
     auto it = begin();
     while (it != end()) {
       it = it.erase();
     }
   }
 
+private:
+  void clearDelete() {
+    if constexpr (std::is_trivially_destructible_v<V>)
+      return;
+
+    auto it = begin();
+    while (it != end()) {
+      it = it.erase();
+    }
+  }
+
+public:
   size_t size() const { return sz; }
 };
