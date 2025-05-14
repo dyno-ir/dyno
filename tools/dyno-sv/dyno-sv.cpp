@@ -131,7 +131,6 @@ public:
   };
 
   void handle(const slang::ast::InstanceSymbol &node) {
-
     assert(node.isModule() && "only module supported rn");
     auto &body = *(node.getCanonicalBody() ?: &node.body);
     auto [found, it] = moduleMap.findOrInsert(&body, [&] {
@@ -217,11 +216,12 @@ public:
 
         auto instance = build.buildInstance(
             ModuleRef{it.val(), ctx.getModules()[it.val()]});
-        auto proc = build.buildProcess();
 
-        build.pushInsertPoint(proc.block().end());
         for (auto [i, conn] :
              asInst.getPortConnections() | std::ranges::views::enumerate) {
+
+          auto proc = build.buildProcess();
+          build.pushInsertPoint(proc.block().end());
 
           Value val;
 
@@ -234,10 +234,12 @@ public:
             val = handle_expr(*conn->getExpression());
 
           auto ireg = instance.other(i + 1)->as<RegisterRef>();
-          ireg->numBits = conn->port.as<slang::ast::PortSymbol>().getType().getBitstreamWidth();
+          ireg->numBits = conn->port.as<slang::ast::PortSymbol>()
+                              .getType()
+                              .getBitstreamWidth();
           build.buildStore(ireg, val.proGetValue(build));
+          build.popInsertPoint();
         }
-        build.popInsertPoint();
         break;
       }
 
