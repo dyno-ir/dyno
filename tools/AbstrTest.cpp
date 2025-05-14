@@ -1,5 +1,6 @@
 #include "hw/HWAbstraction.h"
 #include "hw/HWPrinter.h"
+#include "hw/HWValue.h"
 
 using namespace dyno;
 
@@ -9,15 +10,12 @@ int main() {
   auto mod = ctx.createModule("test");
   HWInstrBuilder buildTop{ctx, mod.block().begin()};
 
-  auto portIn = buildTop.createRegister();
-  mod.addPort(portIn, Register::PORT_IN);
+  buildTop.buildInputPort(mod);
+  buildTop.buildOutputPort(mod);
 
-  auto portOut = buildTop.createRegister();
-  mod.addPort(portOut, Register::PORT_OUT);
+  auto reg = buildTop.buildRegister();
 
-  auto reg = buildTop.createRegister();
-
-  auto proc = ctx.createProcess(mod);
+  auto proc = buildTop.buildProcess();
   auto block = proc.block();
   HWInstrBuilder build{ctx, block.begin()};
   auto add1 =
@@ -26,7 +24,7 @@ int main() {
   auto sub = build.buildSub(add2.defW(), add1.defW());
   auto store = build.buildStore(reg, sub.defW());
 
-  auto proc2 = ctx.createProcess(mod);
+  auto proc2 = buildTop.buildProcess();
   auto block2 = proc2.block();
 
   build.setInsertPoint(block2.begin());
@@ -48,12 +46,12 @@ int main() {
   // ctx.getInstrs().destroy(endIt.instr());
   // endIt.erase();
 
-  auto block3 = ctx.createProcess(mod).block();
+  auto block3 = buildTop.buildProcess().block();
   build.setInsertPoint(block3.begin());
   auto whileInstr = build.buildWhile(build.buildConst(32, 128));
   build.setInsertPoint(whileInstr.getCondBlock().begin());
   auto sub2 =
-      build.buildSub(whileInstr.getYieldValue(0), build.buildConst(32, 1));
+      build.buildSub(whileInstr.getYieldValue(0).as<HWValue>(), build.buildConst(32, 1));
   build.buildYield(sub2.defW(),
                    /*todo: convert to bool*/ sub2.defW());
   build.setInsertPoint(whileInstr.getBodyBlock().begin());

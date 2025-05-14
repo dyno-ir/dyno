@@ -116,6 +116,14 @@ public:
       return UINT32_MAX;
     return self().getWords()[0];
   }
+  uint32_t getExactVal() const {
+    assert(!self().getCustom());
+    if (self().getNumWords() > 1)
+      dyno_unreachable("would truncate");
+    if (self().getExtNumWords() > 1 && self().getExtend() != 0)
+      dyno_unreachable("would truncate");
+    return self().getWords()[0];
+  }
 };
 
 class PatBigInt : public BigIntMixin<PatBigInt> {

@@ -1,6 +1,7 @@
 #pragma once
 #include <cstdint>
 #include <functional>
+#include <limits>
 
 template <typename T>
 concept Pointer = std::is_pointer_v<T>;
@@ -20,8 +21,15 @@ template <Pointer T> struct DenseMapInfo<T> {
 };
 
 template <std::integral T> struct DenseMapInfo<T> {
-  static constexpr T getEmptyKey() { return ~T(0); }
-  static constexpr T getTombstoneKey() { getEmptyKey() - 1; }
+  static constexpr T getEmptyKey() {
+    return std::numeric_limits<T>::is_signed ? std::numeric_limits<T>::min()
+                                             : std::numeric_limits<T>::max();
+  }
+  static constexpr T getTombstoneKey() {
+    return std::numeric_limits<T>::is_signed
+               ? std::numeric_limits<T>::min() + 1
+               : std::numeric_limits<T>::max() - 1;
+  }
   static unsigned getHashValue(const T &k) { return std::hash<T>()(k); }
   static unsigned isEqual(const T &lhs, const T &rhs) { return lhs == rhs; }
 };

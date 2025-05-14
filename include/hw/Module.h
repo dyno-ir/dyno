@@ -21,7 +21,7 @@ public:
   InstrDefUse defUse;
   std::string name;
 
-  SmallVec<FatObjRef<Register>, 8> ports;
+  SmallVec<RegisterRef, 8> ports;
 
   Module(DynObjRef, std::string name) : name(name) {}
 };
@@ -46,11 +46,11 @@ public:
   ModuleRef mod() { return def(0)->as<ModuleRef>(); }
   BlockRef block() { return def(1)->as<BlockRef>(); }
 
-  void addPort(RegisterRef ref, Register::PortType portType) {
-    ref.getPtr()->portIndex = mod()->ports.size();
-    ref.getPtr()->portType = portType;
-    mod()->ports.emplace_back(ref);
-  }
+  // void addPort(RegisterRef ref, Register::PortType portType) {
+  //   ref.getPtr()->portIndex = mod()->ports.size();
+  //   ref.getPtr()->portType = portType;
+  //   mod()->ports.emplace_back(ref);
+  // }
 };
 
 }; // namespace dyno

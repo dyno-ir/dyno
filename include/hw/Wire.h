@@ -1,5 +1,6 @@
 #pragma once
 
+#include "support/Optional.h"
 #include <dyno/Instr.h>
 #include <dyno/Obj.h>
 #include <hw/DefUseMixin.h>
@@ -10,9 +11,8 @@ namespace dyno {
 class Wire {
 public:
   InstrDefUse defUse;
-  std::optional<uint32_t> bitSize;
-  Wire(DynObjRef, std::optional<uint32_t> bitSize = std::nullopt)
-      : bitSize(bitSize) {}
+  Optional<uint32_t> numBits;
+  Wire(DynObjRef, Optional<uint32_t> numBits = nullopt) : numBits(numBits) {}
 };
 
 class WireRef : public FatObjRef<Wire>, public InstrDefUseMixin<WireRef> {
@@ -20,8 +20,7 @@ public:
   using FatObjRef<Wire>::FatObjRef;
   WireRef(FatObjRef<Wire> ref) : FatObjRef<Wire>(ref) {}
 
-  std::optional<uint32_t> getBitSize() { return ptr->bitSize; }
-  void setBitSize(uint32_t bitSize) { ptr->bitSize = bitSize; }
+  Optional<uint32_t> getNumBits() { return ptr->numBits; }
 
   auto getDefI() { return getDef().instr(); }
 };

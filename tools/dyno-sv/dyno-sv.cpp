@@ -1,5 +1,6 @@
 
 #include "dyno/Constant.h"
+#include "dyno/Instr.h"
 #include "dyno/Obj.h"
 #include "hw/HWAbstraction.h"
 #include "hw/HWPrinter.h"
@@ -40,16 +41,17 @@ public:
   HWContext &ctx;
   ModuleIRef mod;
   ProcessIRef proc;
-  BlockRef blockRef;
+  // BlockRef blockRef;
+  HWInstrBuilderStack build;
 
   DenseMap<const slang::ast::Symbol *, RegisterRef> vars;
   DenseMap<const slang::ast::InstanceBodySymbol *, ObjRef<Module>> moduleMap;
 
-  VisitorAST(HWContext &ctx) : ctx(ctx) {}
+  VisitorAST(HWContext &ctx) : ctx(ctx), build(ctx) {}
 
   struct Value {
     const slang::ast::Type *type;
-    const bool isLValue;
+    bool isLValue;
 
   private:
     union {
@@ -65,6 +67,7 @@ public:
         : type(type), isLValue(true), lvReg(reg), lvBitRange(bitRange) {}
 
   public:
+    Value() : isLValue(false) {}
     HWValue getValue() {
       assert(!isLValue);
       return value;
@@ -73,7 +76,12 @@ public:
       if (!isLValue)
         return getValue();
 
-      return build.buildLoad(getLVReg(), getLVBitRange()).defW();
+      auto ldVal = build.buildLoad(getLVReg(), getLVBitRange()).defW();
+      if (ldVal->numBits < type->getBitstreamWidth())
+        ldVal =
+            build.buildExt(type->getBitstreamWidth(), ldVal, type->isSigned())
+                .defW();
+      return ldVal;
     }
     RegisterRef getLVReg() {
       assert(isLValue);
@@ -96,11 +104,29 @@ public:
       if (lv.getLVBitRange() == BitRange::full())
         return lvalue(lv.getLVReg(), type, range);
 
+      // fixme: can you ever sign extend here?
       auto newAddr =
-          build.buildAdd(lv.getLVBitRange().getAddr(), range.getAddr());
+          build
+              .buildAdd(build.buildUpsize(lv.getLVBitRange().getAddr(), 32),
+                        build.buildUpsize(range.getAddr(), 32))
+              .defW();
+      newAddr->numBits = 32;
       auto newLen = range.getLen();
 
       return lvalue(lv.getLVReg(), type, BitRange{newAddr, newLen});
+    }
+
+    Value(const Value &rhs) { *this = rhs; }
+    Value &operator=(const Value &rhs) {
+      this->type = rhs.type;
+      isLValue = rhs.isLValue;
+      if (isLValue) {
+        this->lvBitRange = rhs.lvBitRange;
+        this->lvReg = rhs.lvReg;
+      } else {
+        this->value = rhs.value;
+      }
+      return *this;
     }
   };
 
@@ -120,24 +146,25 @@ public:
 
     for (const auto &port : body.getPortList()) {
       auto &ps = port->as<slang::ast::PortSymbol>();
-      Register::PortType ptype;
+      OpcodeID ptype;
       switch (ps.direction) {
       case slang::ast::ArgumentDirection::In:
-        ptype = Register::PORT_IN;
+        ptype = OpcodeID{HW_INPUT_REGISTER_INSTR};
         break;
       case slang::ast::ArgumentDirection::Out:
-        ptype = Register::PORT_OUT;
+        ptype = OpcodeID{HW_OUTPUT_REGISTER_INSTR};
         break;
       case slang::ast::ArgumentDirection::InOut:
-        ptype = Register::PORT_INOUT;
+        ptype = OpcodeID{HW_INOUT_REGISTER_INSTR};
         break;
       case slang::ast::ArgumentDirection::Ref:
-        ptype = Register::PORT_REF;
+        ptype = OpcodeID{HW_REF_REGISTER_INSTR};
         break;
       }
-
-      auto reg = HWInstrBuilder{ctx, module.block().begin()}.createRegister();
-      module.addPort(reg, ptype);
+      build.setInsertPoint(module.block().end());
+      auto reg = build.buildPort(module, ptype);
+      if (auto width = ps.getType().getBitstreamWidth())
+        reg->numBits = width;
     }
 
     visitDefault(node);
@@ -156,7 +183,7 @@ public:
                     fDynoMod->ports[i]);
         // std::cout << "inserted " << port << ", " << port->name << "\n";
       }
-      blockRef = mod.block();
+      build.setInsertPoint(mod.block().end());
       handle_member_list(slangMod->Scope::members());
     }
   }
@@ -188,8 +215,29 @@ public:
         if (!it)
           abort();
 
-        HWInstrBuilder build{ctx, blockRef.begin()};
-        build.buildInstance(ModuleRef{it.val(), ctx.getModules()[it.val()]});
+        auto instance = build.buildInstance(
+            ModuleRef{it.val(), ctx.getModules()[it.val()]});
+        auto proc = build.buildProcess();
+
+        build.pushInsertPoint(proc.block().end());
+        for (auto [i, conn] :
+             asInst.getPortConnections() | std::ranges::views::enumerate) {
+
+          Value val;
+
+          if (auto asAssign = conn->getExpression()
+                                  ->as_if<slang::ast::AssignmentExpression>()) {
+            assert(asAssign->right().kind ==
+                   slang::ast::ExpressionKind::EmptyArgument);
+            val = handle_expr(asAssign->left());
+          } else
+            val = handle_expr(*conn->getExpression());
+
+          auto ireg = instance.other(i + 1)->as<RegisterRef>();
+          ireg->numBits = conn->port.as<slang::ast::PortSymbol>().getType().getBitstreamWidth();
+          build.buildStore(ireg, val.proGetValue(build));
+        }
+        build.popInsertPoint();
         break;
       }
 
@@ -213,15 +261,13 @@ public:
 
   void handle_proc(const slang::ast::ProceduralBlockSymbol &block) {
     assert(mod);
-    proc = ctx.createProcess(mod);
-    auto blockRefS = blockRef;
-    blockRef = proc.block();
+    proc = build.buildProcess();
+    build.pushInsertPoint(proc.block().end());
     handle_stmt(block.getBody());
-    blockRef = blockRefS;
+    build.popInsertPoint();
   }
 
   void handle_stmt(const slang::ast::Statement &stmt) {
-    assert(blockRef);
 
     switch (stmt.kind) {
     case slang::ast::StatementKind::Empty:
@@ -308,9 +354,6 @@ public:
   }
 
   Value handle_expr(const slang::ast::Expression &expr) {
-    assert(blockRef);
-
-    HWInstrBuilder build{ctx, blockRef.begin()};
 
     switch (expr.kind) {
     case slang::ast::ExpressionKind::Assignment: {
@@ -339,6 +382,10 @@ public:
 
       auto lhsVal = lhs.proGetValue(build);
       auto rhsVal = rhs.proGetValue(build);
+
+      // for some reason Slang sometimes omits implicit conversions (?)
+      lhsVal = build.buildUpsize(lhsVal, expr.type->getBitstreamWidth());
+      rhsVal = build.buildUpsize(rhsVal, expr.type->getBitstreamWidth());
 
       switch (binop.op) {
       case slang::ast::BinaryOperator::Add:
@@ -380,7 +427,7 @@ public:
       }
 
       if (auto w = binop.type->getBitWidth())
-        instr.defW().setBitSize(w);
+        instr.defW()->numBits = w;
 
       return Value::rvalue(instr.defW(), expr.type.get());
       break;
@@ -414,9 +461,9 @@ public:
       auto src = handle_expr(asConv.operand());
       HWValue val = src.proGetValue(build);
       uint32_t newWidth = asConv.type->getBitstreamWidth();
-      if (newWidth > val.numBits())
+      if (newWidth > val.getNumBits())
         val = build.buildExt(newWidth, val, src.type->isSigned()).defW();
-      else if (newWidth < val.numBits())
+      else if (newWidth < val.getNumBits())
         val = build.buildTrunc(newWidth, val).defW();
 
       return Value::rvalue(val, expr.type);
@@ -426,8 +473,12 @@ public:
       auto &asElemS = expr.as<slang::ast::RangeSelectExpression>();
       auto value = handle_expr(asElemS.value());
 
-      auto rangeLeft = handle_expr(asElemS.left()).proGetValue(build);
-      auto rangeRight = handle_expr(asElemS.right()).proGetValue(build);
+      auto rangeLeft =
+          build.buildUpsize(handle_expr(asElemS.left()).proGetValue(build), 32,
+                            asElemS.left().type->isSigned());
+      auto rangeRight =
+          build.buildUpsize(handle_expr(asElemS.right()).proGetValue(build), 32,
+                            asElemS.right().type->isSigned());
 
       HWValue offs;
       HWValue len;
@@ -435,16 +486,12 @@ public:
       switch (asElemS.getSelectionKind()) {
       case slang::ast::RangeSelectionKind::Simple: {
         offs = rangeRight;
-        len = build
-                  .buildAdd(
-                      build.buildSub(rangeLeft, rangeRight).defW(),
-                      ctx.constBuild()
-                          .val(std::max(
-                                   asElemS.left().type->getBitstreamWidth(),
-                                   asElemS.right().type->getBitstreamWidth()),
-                               1)
-                          .get())
-                  .defW();
+        auto sub = build.buildSub(rangeLeft, rangeRight).defW();
+        sub->numBits = 32;
+        auto add =
+            build.buildAdd(sub, ctx.constBuild().val(32, 1).get()).defW();
+        add->numBits = 32;
+        len = add;
         break;
       }
       case slang::ast::RangeSelectionKind::IndexedUp: {
@@ -454,16 +501,13 @@ public:
       }
       case slang::ast::RangeSelectionKind::IndexedDown:
         len = rangeRight;
-        offs = build
-                   .buildAdd(
-                       build.buildSub(rangeLeft, rangeRight).defW(),
-                       ctx.constBuild()
-                           .val(std::max(
-                                    asElemS.left().type->getBitstreamWidth(),
-                                    asElemS.right().type->getBitstreamWidth()),
-                                1)
-                           .get())
-                   .defW();
+
+        auto sub = build.buildSub(rangeLeft, rangeRight).defW();
+        sub->numBits = 32;
+        auto add =
+            build.buildAdd(sub, ctx.constBuild().val(32, 1).get()).defW();
+        add->numBits = 32;
+        offs = add;
         break;
       }
       if (value.isLValue) {
@@ -471,6 +515,7 @@ public:
       }
 
       auto splice = build.buildSplice(value.getValue(), BitRange{offs, len});
+      splice.defW()->numBits = expr.type->getBitstreamWidth();
       return Value::rvalue(splice.defW(), expr.type);
     }
 

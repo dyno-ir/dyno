@@ -49,13 +49,21 @@ public:
     case HW_WIRE: {
       WireRef asWire = ref.as<WireRef>();
       str << "wire";
-      if (asWire->bitSize)
-        str << "(" << *asWire->bitSize << ")";
+      if (asWire->numBits)
+        str << "(" << *asWire->numBits << ")";
       break;
     }
     case HW_MODULE: {
       ModuleRef asModule = ref.as<ModuleRef>();
       str << "module(\"" << asModule->name << "\")";
+      break;
+    }
+    case HW_REGISTER: {
+      RegisterRef asReg = ref.as<RegisterRef>();
+      str << "register";
+      if (asReg->numBits) {
+        str << "(" << *asReg->numBits << ")";
+      }
       break;
     }
     default:

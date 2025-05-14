@@ -4,6 +4,7 @@
 #include "dyno/Instr.h"
 #include "dyno/Obj.h"
 #include "hw/IDs.h"
+#include "support/Optional.h"
 #include "support/SmallVec.h"
 
 namespace dyno {
@@ -13,22 +14,19 @@ class Register {
   friend class ModuleIRef;
 
 public:
-  enum PortType : uint8_t {
-    PORT_NONE,
-    PORT_IN,
-    PORT_OUT,
-    PORT_INOUT,
-    PORT_REF,
-    PORT_PARAM_IN
-  };
-
+  // enum PortType : uint8_t {
+  //   PORT_NONE,
+  //   PORT_IN,
+  //   PORT_OUT,
+  //   PORT_INOUT,
+  //   PORT_REF,
+  //   PORT_PARAM_IN
+  // };
   InstrDefUse defUse;
-  Register(DynObjRef) {}
+  Optional<uint32_t> numBits;
 
-  // could also put this in Instr customStorage
-private:
-  uint16_t portIndex;
-  PortType portType = PORT_NONE;
+  Register(DynObjRef, Optional<uint32_t> numBits = nullopt)
+      : numBits(numBits) {}
 };
 
 class RegisterRef : public FatObjRef<Register> {
@@ -36,8 +34,7 @@ public:
   using FatObjRef<Register>::FatObjRef;
   RegisterRef(FatObjRef<Register> ref) : FatObjRef<Register>(ref) {}
 
-  auto getPortType() { return ptr->portType; }
-  auto isPort() { return ptr->portType != Register::PORT_NONE; }
+  auto &getBitSize() { return ptr->numBits; }
 };
 
 template <> struct ObjTraits<Register> {

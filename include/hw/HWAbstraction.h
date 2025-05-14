@@ -16,6 +16,7 @@
 #include "op/Function.h"
 #include "op/IDs.h"
 #include "op/StructuredControlFlow.h"
+#include "support/TemplateUtil.h"
 #include "support/Utility.h"
 #include <dyno/NewDeleteObjStore.h>
 
@@ -73,15 +74,6 @@ public:
     return funcInstr;
   }
 
-  ProcessIRef createProcess(ModuleIRef parent) {
-    auto procRef = procs.create();
-    auto procInstRef = ProcessIRef{
-        instrs.create(2, DialectID{DIALECT_HW}, OpcodeID{HW_PROCESS_INSTR})};
-    InstrBuilder{procInstRef}.addRef(procRef).addRef(createBlock());
-    parent.block().end().insertPrev(procInstRef);
-    return procInstRef;
-  }
-
   ConstantBuilder constBuild() { return ConstantBuilder{constants}; }
 };
 
@@ -110,12 +102,14 @@ public:
 };
 
 class HWInstrBuilder {
+public:
   HWContext &ctx;
   BlockRef_iterator<true> insert;
 
-public:
   HWInstrBuilder(HWContext &ctx, BlockRef_iterator<true> insert)
       : ctx(ctx), insert(insert) {}
+
+  HWInstrBuilder(HWContext &ctx) : ctx(ctx), insert() {}
 
   void insertInstr(InstrRef instr) { insert.insertPrev(instr); }
 
@@ -167,9 +161,11 @@ public:
   }
 
 #define COMM_OP(ident, opcode)                                                 \
-  template <typename... Ts> HWInstrRef ident(Ts... operands) {                 \
-    return buildInstr(DialectID{DIALECT_OP}, OpcodeID{opcode}, true,           \
-                      operands...);                                            \
+  template <IsAnyHWValue... Ts> HWInstrRef ident(Ts... operands) {             \
+    auto rv = buildInstr(DialectID{DIALECT_OP}, OpcodeID{opcode}, true,        \
+                         operands...);                                         \
+    rv.defW()->numBits = getFirst(operands...).getNumBits();                   \
+    return rv;                                                                 \
   }
   COMM_OP(buildAdd, OP_ADD)
   COMM_OP(buildAnd, OP_AND)
@@ -234,9 +230,12 @@ public:
   }
 
 #define BINOP(ident, opcode)                                                   \
-  template <typename LHS, typename RHS> HWInstrRef ident(LHS lhs, RHS rhs) {   \
-    return buildInstr(DialectID{DIALECT_OP}, OpcodeID{opcode}, true, lhs,      \
-                      rhs);                                                    \
+  template <IsAnyHWValue LHS, IsAnyHWValue RHS>                                \
+  HWInstrRef ident(LHS lhs, RHS rhs) {                                         \
+    auto rv =                                                                  \
+        buildInstr(DialectID{DIALECT_OP}, OpcodeID{opcode}, true, lhs, rhs);   \
+    rv.defW()->numBits = lhs.getNumBits();                                     \
+    return rv;                                                                 \
   }
 
   BINOP(buildSub, OP_SUB)
@@ -250,8 +249,8 @@ public:
     auto ref = buildInstr(DialectID{DIALECT_OP},
                           OpcodeID{sign ? OP_SEXT : OP_ZEXT}, true, value);
 
-    assert(ref.defW().getBitSize().value_or(0) < newSize);
-    ref.defW().setBitSize(newSize);
+    assert(ref.defW().getNumBits().value_or(0) < newSize);
+    ref.defW()->numBits = newSize;
     return ref;
   }
   HWInstrRef buildZExt(uint32_t newSize, FatDynObjRef<> value) {
@@ -264,9 +263,26 @@ public:
     auto ref =
         buildInstr(DialectID{DIALECT_OP}, OpcodeID{OP_TRUNC}, true, value);
 
-    assert(ref.defW().getBitSize().value_or(UINT32_MAX) > newSize);
-    ref.defW().setBitSize(newSize);
+    assert(ref.defW().getNumBits().value_or(UINT32_MAX) > newSize);
+    ref.defW()->numBits = newSize;
     return ref;
+  }
+
+  HWValue buildResize(HWValue val, uint32_t newSize, bool sign = false) {
+    assert(val.getNumBits());
+
+    if (val.getNumBits() < newSize)
+      return buildExt(newSize, val, sign).defW();
+    else if (val.getNumBits() > newSize)
+      return buildTrunc(newSize, val);
+    return val;
+  }
+  HWValue buildUpsize(HWValue val, uint32_t newSize, bool sign = false) {
+    assert(val.getNumBits());
+    if (val.getNumBits() < newSize)
+      return buildExt(newSize, val, sign).defW();
+    assert(val.getNumBits() == newSize);
+    return val;
   }
 
   template <typename... Ts> HWInstrRef buildSplice(Ts... operands) {
@@ -277,17 +293,29 @@ public:
   }
 
   HWInstrRef buildLoad(RegisterRef reg, BitRange range = BitRange::full()) {
-    return buildInstr(DialectID{DIALECT_HW}, OpcodeID{HW_LOAD}, true, reg,
-                      range);
+    HWInstrRef ref;
+    if (range == BitRange::full())
+      ref = buildInstr(DialectID{DIALECT_HW}, OpcodeID{HW_LOAD}, true, reg);
+    else
+      ref = buildInstr(DialectID{DIALECT_HW}, OpcodeID{HW_LOAD}, true, reg,
+                       range);
+    if (range == BitRange::full())
+      ref.defW()->numBits = reg->numBits;
+    else if (auto asCRef = range.len.dyn_as<ConstantRef>())
+      ref.defW()->numBits = asCRef.getExactVal();
+    return ref;
   }
 
   HWInstrRef buildStore(RegisterRef reg, FatDynObjRef<> value,
                         BitRange range = BitRange::full()) {
+    if (range == BitRange::full())
+      return buildInstr(DialectID{DIALECT_HW}, OpcodeID{HW_STORE}, false, value,
+                        reg);
     return buildInstr(DialectID{DIALECT_HW}, OpcodeID{HW_STORE}, false, value,
                       reg, range);
   }
 
-  RegisterRef createRegister() {
+  RegisterRef buildRegister() {
     auto regRef = RegisterRef{ctx.getRegs().create()};
     // in order for the reg to use anything it must be an instr as well
     auto regInstr = InstrRef{ctx.getInstrs().create(
@@ -297,18 +325,51 @@ public:
     return regRef;
   }
 
+  RegisterRef buildPort(ModuleIRef module, OpcodeID opcode) {
+    auto regRef = RegisterRef{ctx.getRegs().create()};
+    auto regInstr =
+        InstrRef{ctx.getInstrs().create(1, DialectID{DIALECT_HW}, opcode)};
+    InstrBuilder{regInstr}.addRef(regRef);
+    insertInstr(regInstr);
+
+    module.mod()->ports.emplace_back(regRef);
+    return regRef;
+  }
+
+  RegisterRef buildInputPort(ModuleIRef module) {
+    return buildPort(module, OpcodeID{HW_INPUT_REGISTER_INSTR});
+  }
+  RegisterRef buildOutputPort(ModuleIRef module) {
+    return buildPort(module, OpcodeID{HW_OUTPUT_REGISTER_INSTR});
+  }
+  RegisterRef buildInoutPort(ModuleIRef module) {
+    return buildPort(module, OpcodeID{HW_INOUT_REGISTER_INSTR});
+  }
+  RegisterRef buildRefPort(ModuleIRef module) {
+    return buildPort(module, OpcodeID{HW_REF_REGISTER_INSTR});
+  }
+
+  ProcessIRef buildProcess() {
+    auto procRef = ctx.getProcs().create();
+    auto procInstRef = ProcessIRef{ctx.getInstrs().create(
+        2, DialectID{DIALECT_HW}, OpcodeID{HW_PROCESS_INSTR})};
+    InstrBuilder{procInstRef}.addRef(procRef).addRef(ctx.createBlock());
+    insertInstr(procInstRef);
+    return procInstRef;
+  }
+
   HWInstrRef buildInstance(ModuleRef module) {
 
-    auto instr = InstrRef{ctx.getInstrs().create(
-        1 + module->ports.size(), DialectID{DIALECT_HW}, OpcodeID{HW_INSTANCE})};
+    auto instr = InstrRef{ctx.getInstrs().create(1 + module->ports.size(),
+                                                 DialectID{DIALECT_HW},
+                                                 OpcodeID{HW_INSTANCE})};
 
     InstrBuilder build{instr};
+    build.other();
+    build.addRef(module);
 
     for (size_t i = 0; i < module->ports.size(); i++)
-      build.addRef(ctx.getRegs().create());
-    build.other();
-
-    build.addRef(module);
+      build.addRef(buildRegister());
 
     insertInstr(instr);
 
@@ -422,6 +483,17 @@ public:
   }
 
   void setInsertPoint(BlockRef_iterator<true> it) { insert = it; }
-};
+}; // namespace dyno
 
+class HWInstrBuilderStack : public HWInstrBuilder {
+  SmallVec<BlockRef_iterator<true>, 4> stack;
+
+public:
+  using HWInstrBuilder::HWInstrBuilder;
+  void pushInsertPoint(BlockRef_iterator_base newInsertPoint) {
+    stack.emplace_back(insert);
+    setInsertPoint(newInsertPoint);
+  }
+  void popInsertPoint() { setInsertPoint(stack.pop_back_val()); }
+};
 }; // namespace dyno
