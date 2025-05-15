@@ -44,7 +44,7 @@ concept BigIntAPI = std::is_base_of<BigIntMixin<T>, T>::value;
 template <typename Derived> class BigIntMixin {
   friend class BigInt;
 
-  // Base API for BigInt is getNumBits, getNumWords, getExtend, getCustom and
+  // Base API for BigInt is getRawNumBits, getNumWords, getExtend, getCustom and
   // getWords. This is for utility functions using that API that may be shared
   // by all implementing BigInt API.
   Derived &self() { return *static_cast<Derived *>(this); }
@@ -57,9 +57,11 @@ protected:
   static constexpr unsigned repeatExtend(uint32_t num) {
     return repeatBits(num, BigIntExtendBits);
   }
-  uint32_t getExtNumWords() const { return bitsToWords(self().getNumBits()); }
+  uint32_t getExtNumWords() const {
+    return bitsToWords(self().getRawNumBits());
+  }
   uint32_t getWord(uint32_t i) const {
-    if (i > bitsToWords(self().getNumBits()))
+    if (i > bitsToWords(self().getRawNumBits()))
       dyno_unreachable("out of bounds");
 
     if (i >= self().getNumWords())
@@ -67,22 +69,44 @@ protected:
     return self().getWords()[i];
   }
 
+  uint8_t getRawBit(uint32_t i) const {
+    assert(i <= self().getRawNumBits());
+    return !!(getWord(i / WordBits) & (1 << (i % WordBits)));
+  }
+
+  uint8_t getRawSignBit() const {
+    return getRawBit(self().getRawNumBits() - 1);
+  }
+  bool isExtended() const { return self().getNumWords() != getExtNumWords(); }
+
+  uint8_t getExtendPatFromSignBit() const {
+    if (self().getCustom()) {
+      return getSignBit();
+    } else
+      return getSignBit() ? 0b11 : 0;
+  }
+
+public:
   uint8_t getBit(uint32_t i) const {
+    assert(i <= getNumBits());
     if (!self().getCustom())
       return !!(getWord(i / WordBits) & (1 << (i % WordBits)));
     i *= 2;
+    assert(i <= self().getRawNumBits());
     return (getWord(i / WordBits) >> (i % WordBits)) &
            bit_mask_ones<uint32_t>(BigIntExtendBits);
   }
-  uint8_t getSignBit() const { return getBit(self().getNumBits()); }
-  bool isExtended() const { return self().getNumWords() != getExtNumWords(); }
+  uint8_t getSignBit() const { return getBit(self().getNumBits() - 1); }
+  uint32_t getNumBits() const {
+    return self().getCustom() ? self().getRawNumBits() / 2
+                              : self().getRawNumBits();
+  }
 
-public:
   void toStream(std::ostream &os, int base = 16, bool unsized = false) const;
   friend std::ostream &operator<<(std::ostream &os, const Derived &self) {
     int base = 16;
 
-    if (self.getCustom() && self.getNumBits() < 16)
+    if (self.getCustom() && self.getRawNumBits() < 16)
       base = 2;
     else if (!self.getCustom() && (self.getLimitedVal() <= 255 ||
                                    (self.getLimitedVal() < UINT32_MAX &&
@@ -96,7 +120,7 @@ public:
 
   template <BigIntAPI T>
   friend bool operator==(const Derived &lhs, const T &rhs) {
-    if (!(lhs.getNumBits() == rhs.getNumBits() &&
+    if (!(lhs.getRawNumBits() == rhs.getRawNumBits() &&
           lhs.getNumWords() == rhs.getNumWords() &&
           lhs.getExtend() == rhs.getExtend() &&
           lhs.getCustom() == rhs.getCustom()))
@@ -141,7 +165,7 @@ class PatBigInt : public BigIntMixin<PatBigInt> {
 
 public:
   uint32_t getNumWords() const { return 0; }
-  uint32_t getNumBits() const { return bits; }
+  uint32_t getRawNumBits() const { return bits; }
   uint8_t getExtend() const { return Extend{field}; }
   uint8_t getCustom() const { return Custom{field}; }
   std::span<uint32_t> getWords() const { return std::span<uint32_t>(); };
@@ -184,13 +208,14 @@ private:
 public:
   void setExtend(uint8_t val) {
     Extend{field} = val & bit_mask_ones<uint8_t>(BigIntExtendBits);
+    normalizeExtend();
   }
   void setCustom(uint8_t val) {
     Custom{field} = val & bit_mask_ones<uint8_t>(BigIntCustomBits);
   }
 
   template <BigIntAPI T> BigInt &operator=(const T &other) {
-    this->numBits = other.getNumBits();
+    this->numBits = other.getRawNumBits();
     Extend{field} = other.getExtend();
     Custom{field} = other.getCustom();
     this->words.resize(other.getNumWords());
@@ -254,14 +279,15 @@ public:
   LINEAR_OP(xorOp, lhs ^ rhs)
 
   template <typename T> static void negateOp(BigInt &out, const T &lhs) {
-    subOp(out, PatBigInt(lhs.getNumBits(), 0), lhs);
+    subOp(out, PatBigInt(lhs.getRawNumBits(), 0), lhs);
   }
 
-  void setRepeating(uint32_t val, unsigned bits) {
+  void setRepeating(uint32_t val, unsigned bits, uint8_t custom = 0) {
     words.resize(1);
     words[0] = val;
     numBits = bits;
     Extend{field} = val & bit_mask_ones<uint32_t>(BigIntExtendBits);
+    Custom{field} = custom;
   }
   void set(uint64_t val, unsigned bits) {
     if (bits <= WordBits)
@@ -287,14 +313,14 @@ public:
       normalize();
     }
   }
-  uint32_t getNumBits() const { return numBits; }
+  uint32_t getRawNumBits() const { return numBits; }
 
   template <bool Left, bool Arith = false, typename T0>
   static void shiftOp(BigInt &out, const T0 &lhs, uint32_t rhs) {
     uint32_t shamtWords = rhs / WordBits;
     uint32_t shamtRem = rhs % WordBits;
     uint8_t oldExtend = lhs.getExtend();
-    out.numBits = lhs.getNumBits();
+    out.numBits = lhs.getRawNumBits();
     if ((rhs & 1) && (Extend{out.field} == 1 || Extend{out.field} == 2))
       Extend{out.field} =
           (~oldExtend) & bit_mask_ones<uint8_t>(BigIntExtendBits);
@@ -306,10 +332,10 @@ public:
     if constexpr (Left)
       out.words.resize(
           std::min(originalNumWords + (round_up_div(rhs, WordBits)),
-                   round_up_div(lhs.getNumBits(), WordBits)));
+                   round_up_div(lhs.getRawNumBits(), WordBits)));
     else {
       if (!Arith && Extend{out.field} != 0) {
-        out.words.resize(round_up_div(lhs.getNumBits(), WordBits));
+        out.words.resize(round_up_div(lhs.getRawNumBits(), WordBits));
         Extend{out.field} = 0;
       }
     }
@@ -343,7 +369,7 @@ public:
           if (idxLow >= out.words.size())
             low = 0;
           else if (idxLow == out.words.size() - 1)
-            low &= ((1 << (lhs.getNumBits()) % 32)) - 1;
+            low &= ((1 << (lhs.getRawNumBits()) % 32)) - 1;
         }
       } else
         low = lhs.getWords()[idxLow];
@@ -357,7 +383,7 @@ public:
           if (idxHigh >= out.words.size())
             high = 0;
           else if (idxHigh == out.words.size() - 1)
-            high &= (1 << (lhs.getNumBits() % 32)) - 1;
+            high &= (1 << (lhs.getRawNumBits() % 32)) - 1;
         }
       } else
         high = lhs.getWords()[idxHigh];
@@ -379,12 +405,12 @@ public:
     size_t resultBits;
     switch (Mode) {
     case 0: // trunc
-      resultBits = std::max(lhs.getNumBits(), rhs.getNumBits());
+      resultBits = std::max(lhs.getRawNumBits(), rhs.getRawNumBits());
       break;
     case 1: // extending, unsigned
       [[fallthrough]];
     case 2: // extending, signed
-      resultBits = lhs.getNumBits() + rhs.getNumBits();
+      resultBits = lhs.getRawNumBits() + rhs.getRawNumBits();
       break;
     }
     auto out = BigInt::ofLen(resultBits);
@@ -414,7 +440,7 @@ public:
 
     // correct result for signed multiply
     if constexpr (Mode == 2) {
-      if (lhs.getSignBit()) {
+      if (lhs.getRawSignBit()) {
         uint32_t b = 0;
         for (size_t i = 0; i < rhs.getExtNumWords() &&
                            i + lhs.getExtNumWords() < out.getNumWords();
@@ -423,7 +449,7 @@ public:
               out.getWords()[i + lhs.getExtNumWords()], rhs.getWord(i), b, &b);
         }
       }
-      if (rhs.getSignBit()) {
+      if (rhs.getRawSignBit()) {
         uint32_t b = 0;
         for (size_t i = 0; i < lhs.getExtNumWords() &&
                            i + rhs.getExtNumWords() < out.getNumWords();
@@ -438,8 +464,9 @@ public:
     return out;
   }
 
-  template <int Mode, typename T>
-  static void resizeOp(BigInt &out, const T &lhs, uint32_t newSize) {
+  template <typename T>
+  static void resizeOp(BigInt &out, const T &lhs, uint32_t newSize,
+                       uint8_t extendPat = 0) {
 
     auto copyIfDifferent = [&]() {
       if (lhs.getWords().begin().base() != out.getWords().begin().base())
@@ -449,7 +476,7 @@ public:
     };
 
     // truncate
-    if (newSize < lhs.getNumBits()) {
+    if (newSize < lhs.getRawNumBits()) {
       out.words.resize(
           std::min(lhs.getNumWords(), round_up_div(newSize, WordBits)));
       copyIfDifferent();
@@ -460,22 +487,18 @@ public:
       return;
     }
 
-    uint8_t newExtend;
-    if constexpr (Mode == 0)
-      newExtend = 0;
-    else if constexpr (Mode == 1)
-      newExtend = lhs.getSignBit() ? 0b11 : 0;
-    else
-      static_assert(false);
+    if ((extendPat == lhs.getExtend() || !lhs.isExtended())) {
 
-    if ((newExtend == lhs.getExtend() || !lhs.isExtended())) {
+      if (extendPat != lhs.getExtend())
+        out.setExtend(extendPat);
+
       // as long as extend stays the same (or is freely assignable) we can
       // extend by just changing numBits
       out.words.resize(lhs.getNumWords());
       copyIfDifferent();
 
       out.numBits = newSize;
-      Extend{out.field} = newExtend;
+      Extend{out.field} = extendPat;
 
       // no need to normalize here
       return;
@@ -487,15 +510,15 @@ public:
       out.getWords()[i] = lhs.getWord(i);
 
     out.numBits = newSize;
-    Extend{out.field} = newExtend;
+    Extend{out.field} = extendPat;
   }
 
   template <typename T0, typename T1>
   static auto udivmodOp(const T0 &lhs, const T1 &rhs) {
     const uint64_t base = 1UL << 32;
 
-    BigInt quot = BigInt::ofLen(lhs.getNumBits());
-    BigInt rem = BigInt::ofLen(rhs.getNumBits());
+    BigInt quot = BigInt::ofLen(lhs.getRawNumBits());
+    BigInt rem = BigInt::ofLen(rhs.getRawNumBits());
 
     // todo: 64 and maybe 128 bit division fast paths.
 
@@ -533,10 +556,10 @@ public:
 
     // Find most significant 1 bit.
     uint32_t shamt = __builtin_clz(rhs.getWord(highWordIdx));
-    vn.resizeOp<0>(vn, rhs, (highWordIdx + 1) * 32 - shamt);
+    vn.resizeOp(vn, rhs, (highWordIdx + 1) * 32 - shamt);
     BigInt::shlOp(vn, vn, shamt);
 
-    BigInt::resizeOp<0>(un, lhs, lhs.getNumBits() + shamt);
+    BigInt::resizeOp(un, lhs, lhs.getRawNumBits() + shamt);
     BigInt::shlOp(un, un, shamt);
     un.expand();
 
@@ -585,7 +608,7 @@ public:
     }
 
     BigInt::lshrOp(rem, un, shamt);
-    BigInt::resizeOp<0>(rem, rem, rhs.getNumBits());
+    BigInt::resizeOp(rem, rem, rhs.getRawNumBits());
 
     quot.normalize();
     return std::make_pair(std::move(quot), std::move(rem));
@@ -741,19 +764,18 @@ public:
   }
   template <BigIntAPI T0, BigIntAPI T1>
   static void andOp4S(BigInt &out, const T0 &lhs, const T1 &rhs) {
-    return bitwiseOp4S<and_4state, BigInt::addOp<T0, T1>, T0, T1>(out, lhs,
-                                                                  rhs);
+    return bitwiseOp4S<and_4state, addOp<T0, T1>, T0, T1>(out, lhs, rhs);
   }
   template <BigIntAPI T0, BigIntAPI T1>
   static void orOp4S(BigInt &out, const T0 &lhs, const T1 &rhs) {
-    return bitwiseOp4S<or_4state, BigInt::orOp, T0, T1>(out, lhs, rhs);
+    return bitwiseOp4S<or_4state, orOp<T0, T1>, T0, T1>(out, lhs, rhs);
   }
   template <BigIntAPI T0, BigIntAPI T1>
   static void xorOp4S(BigInt &out, const T0 &lhs, const T1 &rhs) {
-    return bitwiseOp4S<xor_4state, BigInt::xorOp, T0, T1>(out, lhs, rhs);
+    return bitwiseOp4S<xor_4state, xorOp<T0, T1>, T0, T1>(out, lhs, rhs);
   }
   template <BigIntAPI T0> static void notOp4S(BigInt &out, const T0 &lhs) {
-    return xorOp4S(out, lhs, PatBigInt{lhs.getNumBits(), 0b11});
+    return xorOp4S(out, lhs, PatBigInt{lhs.getRawNumBits(), 0b11});
   }
 
 #define LINEAR_OP_4S(ident, func2s)                                            \
@@ -761,13 +783,21 @@ public:
   static void ident(BigInt &out, const T0 &lhs, const T1 &rhs) {               \
     if (lhs.getCustom() || rhs.getCustom()) {                                  \
       out.setRepeating(EXTX_MASK,                                              \
-                       std::max(lhs.getNumBits(), rhs.getNumBits()));          \
+                       std::max(lhs.getRawNumBits(), rhs.getRawNumBits()), 1); \
       return;                                                                  \
     }                                                                          \
     func2s(out, lhs, rhs);                                                     \
   }
 
-  LINEAR_OP_4S(addOp4S, addOp)
+  template <BigIntAPI T0, BigIntAPI T1>
+  static void addOp4S(BigInt &out, const T0 &lhs, const T1 &rhs) {
+    if (lhs.getCustom() || rhs.getCustom()) {
+      out.setRepeating(EXTX_MASK,
+                       std ::max(lhs.getRawNumBits(), rhs.getRawNumBits()), 1);
+      return;
+    }
+    addOp(out, lhs, rhs);
+  }
   LINEAR_OP_4S(subOp4S, subOp)
 
   template <BigIntAPI T0>
@@ -786,20 +816,24 @@ public:
     out.conv4To2StateIfPossible();
   }
 
-  template <int Mode, BigIntAPI T>
-  static void resizeOp4S(BigInt &out, const T &lhs, uint32_t newSize) {
+  template <BigIntAPI T>
+  static void resizeOp4S(BigInt &out, const T &lhs, uint32_t newSize,
+                         bool sign = false) {
     if (lhs.getCustom()) {
-      BigInt::resizeOp<Mode>(out, lhs, 2 * newSize);
+      BigInt::resizeOp(out, lhs, 2 * newSize,
+                       sign ? lhs.getExtendPatFromSignBit() : 0);
       out.conv4To2StateIfPossible();
-    }
+    } else
+      BigInt::resizeOp(out, lhs, newSize,
+                       sign ? lhs.getExtendPatFromSignBit() : 0);
   }
   template <BigIntAPI T0, BigIntAPI T1>
   static auto udivmodOp4S(const T0 &lhs, const T1 &rhs) {
     if (lhs.getCustom() || rhs.getCustom()) {
       BigInt outA;
       BigInt outB;
-      outA.setRepeating(EXTX_MASK, lhs.getNumBits());
-      outB.setRepeating(EXTX_MASK, lhs.getNumBits());
+      outA.setRepeating(EXTX_MASK, lhs.getRawNumBits(), 1);
+      outB.setRepeating(EXTX_MASK, lhs.getRawNumBits(), 1);
       return std::make_pair(std::move(outA), std::move(outB));
     }
     auto [div, rem] = BigInt::udivmodOp(lhs, rhs);
@@ -810,14 +844,16 @@ public:
     if (lhs.getCustom() || rhs.getCustom()) {
       BigInt out;
       out.setRepeating(EXTX_MASK,
-                       Mode == 0 ? std::max(lhs.getNumBits(), rhs.getNumBits())
-                                 : lhs.getNumBits() + rhs.getNumBits());
+                       Mode == 0
+                           ? std::max(lhs.getRawNumBits(), rhs.getRawNumBits())
+                           : lhs.getRawNumBits() + rhs.getRawNumBits(),
+                       1);
       return out;
     }
     return BigInt{BigInt::mulOp<Mode>(lhs, rhs)};
   }
   template <BigIntAPI T> static void negateOp4S(BigInt &out, const T &lhs) {
-    subOp4S(out, PatBigInt(lhs.getNumBits(), 0), lhs);
+    subOp4S(out, PatBigInt(lhs.getRawNumBits(), 0), lhs);
   }
 
   // String Ops
@@ -864,7 +900,7 @@ public:
 
   template <typename T>
   static void stream_hex(std::ostream &os, const T &self) {
-    ssize_t hexDigits = (self.getNumBits() + 3) / 4;
+    ssize_t hexDigits = (self.getRawNumBits() + 3) / 4;
     ssize_t wordHexDigits = self.getNumWords() * 8;
 
     uint32_t extend = repeatExtend(self.getExtend()) & 0xF;
@@ -876,8 +912,8 @@ public:
     ssize_t extendDigits = hexDigits - wordHexDigits;
     for (ssize_t i = 0; i < extendDigits; i++) {
       size_t digit = hexDigits - i - 1;
-      if (i == 0 && self.getNumBits() % 4 != 0)
-        os << toHex(extend & ((1 << (self.getNumBits() % 4)) - 1));
+      if (i == 0 && self.getRawNumBits() % 4 != 0)
+        os << toHex(extend & ((1 << (self.getRawNumBits() % 4)) - 1));
       else
         os << toHex(extend);
       if (digit % 8 == 0)
@@ -891,7 +927,7 @@ public:
 
       if (i == self.getNumWords() - 1 && extendDigits < 0) {
         width = (hexDigits % 8);
-        word &= (1 << (self.getNumBits() % 32)) - 1;
+        word &= (1 << (self.getRawNumBits() % 32)) - 1;
       }
 
       os << std::hex << std::setfill('0') << std::setw(width) << word;
@@ -908,7 +944,7 @@ public:
     constexpr size_t digits_per_word = 4;
     constexpr size_t separator_per = 8;
 
-    size_t realBits = self.getNumBits() / 2;
+    size_t realBits = self.getRawNumBits() / 2;
     size_t hexDigits = (realBits + 3) / 4;
     size_t wordHexDigits =
         std::min(self.getNumWords() * digits_per_word, hexDigits);
@@ -955,9 +991,9 @@ public:
 
   template <typename T>
   static void stream_bin(std::ostream &os, const T &self) {
-    for (ssize_t i = self.getNumBits() - 1; i >= 0; i--) {
+    for (ssize_t i = self.getRawNumBits() - 1; i >= 0; i--) {
       os << (self.getBit(i) ? '1' : '0');
-      size_t digit = self.getNumBits() - 1 - i;
+      size_t digit = self.getRawNumBits() - 1 - i;
       if (digit != 0 && (digit % 8) == 0)
         os << "\'";
     }
@@ -966,9 +1002,9 @@ public:
   template <typename T>
   static void stream_bin_4s_vlog(std::ostream &os, const T &self) {
     std::array<char, 4> bitToStr = {'0', '1', 'z', 'x'};
-    for (ssize_t i = (self.getNumBits() / 2) - 1; i >= 0; i--) {
+    for (ssize_t i = (self.getRawNumBits() / 2) - 1; i >= 0; i--) {
       os << bitToStr[self.getBit(i)];
-      size_t digit = (self.getNumBits() / 2) - 1 - i;
+      size_t digit = (self.getRawNumBits() / 2) - 1 - i;
       if (digit != 0 && (digit % 8) == 0)
         os << "\'";
     }
@@ -977,7 +1013,7 @@ public:
   template <typename T>
   static void stream_dec(std::ostream &os, const T &self,
                          bool isSigned = false) {
-    if (self.getSignBit() && isSigned) {
+    if (self.getRawSignBit() && isSigned) {
       BigInt temp;
       BigInt::negateOp(temp, self);
       os << "-";
@@ -993,7 +1029,7 @@ public:
     do {
       std::tie(n, r) = BigInt::udivmodOp(n, q);
       str.emplace_back(r.getWord(0));
-    } while (n != BigInt{0, n.getNumBits()});
+    } while (n != BigInt{0, n.getRawNumBits()});
 
     for (ssize_t i = str.size() - 1; i >= 0; i--)
       os << uint32_t(str[i]);
@@ -1007,6 +1043,15 @@ public:
   }
 
 private:
+  void normalizeExtend() {
+    // truncate last word and fill with extend.
+    if (getRawNumBits() % 32 != 0) {
+      auto mask = (1 << (getRawNumBits() % 32)) - 1;
+      words.back() &= mask;
+      words.back() |= (~mask & repeatExtend(Extend{field}));
+    }
+  }
+
   void normalize() {
     if (getNumWords() * bit_mask_sz<uint32_t> < numBits)
       prune();
@@ -1014,12 +1059,7 @@ private:
       Extend{field} =
           (words.back() & bit_mask_ms_nbits<uint32_t>(BigIntExtendBits)) >>
           (bit_mask_sz<uint32_t> - BigIntExtendBits);
-      // truncate last word and fill with extend.
-      if (getNumBits() % 32 != 0) {
-        auto mask = (1 << (getNumBits() % 32)) - 1;
-        words.back() &= mask;
-        words.back() |= (~mask & repeatExtend(Extend{field}));
-      }
+      normalizeExtend();
       prune();
     }
   }
@@ -1035,8 +1075,8 @@ private:
   template <auto OpFunc, typename T0, typename T1>
   static void linearOp(BigInt &out, const T0 &lhs, const T1 &rhs) {
 
-    // assert(lhs.getNumBits() == rhs.getNumBits());
-    unsigned maxNumBits = std::max(lhs.getNumBits(), rhs.getNumBits());
+    // assert(lhs.getRawNumBits() == rhs.getRawNumBits());
+    unsigned maxNumBits = std::max(lhs.getRawNumBits(), rhs.getRawNumBits());
     unsigned numWords = std::max(lhs.getNumWords(), rhs.getNumWords());
     unsigned minNumWords = std::min(lhs.getNumWords(), rhs.getNumWords());
 
@@ -1165,7 +1205,7 @@ void BigIntMixin<Derived>::toStream(std::ostream &os, int base,
   const char *baseStr = (base == 16 ? "h" : (base == 10 ? "d" : "b"));
   if (self().getCustom()) {
     if (!unsized)
-      os << self().getNumBits() / 2 << "'" << baseStr;
+      os << self().getRawNumBits() / 2 << "'" << baseStr;
 
     if (base == 2) {
       BigInt::stream_bin_4s_vlog(os, self());
@@ -1180,7 +1220,7 @@ void BigIntMixin<Derived>::toStream(std::ostream &os, int base,
     unk.toStream(os, base, true);
   } else {
     if (!unsized)
-      os << self().getNumBits() << "'" << baseStr;
+      os << self().getRawNumBits() << "'" << baseStr;
     if (base == 16) {
       BigInt::stream_hex(os, self());
     } else if (base == 10) {
@@ -1212,7 +1252,7 @@ class alignas(uint64_t) Constant : public TrailingObjArr<Constant, uint32_t> {
 
 public:
   Constant(DynObjRef ref, size_t sz, const BigInt &bigInt)
-      : numBits(bigInt.getNumBits()) {
+      : numBits(bigInt.getRawNumBits()) {
 
     AddrField{field}.set(bigInt.getNumWords());
     ExtendField{field}.set(bigInt.getExtend());
@@ -1233,24 +1273,23 @@ private:
 };
 static_assert(TrailingObj<Constant>);
 
-class ConstantRef : public FatDynObjRef<Constant>,
+class ConstantRef : public FatObjRef<Constant>,
                     public BigIntMixin<ConstantRef> {
 protected:
   using Custom =
-      DynObjRef::CustomField<BigIntCustomBits, 16 - BigIntCustomBits>;
+      FatObjRef::CustomField<BigIntCustomBits, 16 - BigIntCustomBits>;
 
 public:
-  using IsInline = DynObjRef::CustomField<1, 0>;
-  using ExtPattern = DynObjRef::CustomField<BigIntExtendBits, 1>;
-  using NBits = DynObjRef::CustomField<15 - BigIntExtendBits - BigIntCustomBits,
+  using IsInline = FatObjRef::CustomField<1, 0>;
+  using ExtPattern = FatObjRef::CustomField<BigIntExtendBits, 1>;
+  using NBits = FatObjRef::CustomField<15 - BigIntExtendBits - BigIntCustomBits,
                                        1 + BigIntExtendBits>;
-  using FatDynObjRef<Constant>::FatDynObjRef;
+  using FatObjRef<Constant>::FatObjRef;
 
-  explicit ConstantRef(FatDynObjRef<Constant> ref)
-      : FatDynObjRef<Constant>(ref) {}
+  ConstantRef(FatObjRef<Constant> ref) : FatObjRef<Constant>(ref) {}
 
   ConstantRef(unsigned n, uint32_t val, uint8_t extPattern, uint8_t custom)
-      : FatDynObjRef<Constant>(DynObjRef::ofTy<Constant>(), nullptr) {
+      : FatObjRef<Constant>() {
     customField<IsInline>() = true;
     customField<NBits>() = n;
     customField<ExtPattern>() = extPattern;
@@ -1275,7 +1314,7 @@ public:
   }
   unsigned getNumWords() const { return isInline() ? 1 : ptr->getNumWords(); };
 
-  uint getNumBits() const {
+  uint getRawNumBits() const {
     return customField<IsInline>() ? customField<NBits>() : ptr->numBits;
   };
 
@@ -1284,11 +1323,6 @@ public:
     assert(isInline());
     return obj.num;
   }
-
-  // todo: make ConstantRef a FatObjRef instead by exposing custom in FatObjRef
-  // static bool is_impl(DynObjRef ref) {
-  //   return FatObjRef<Constant>::is_impl(ref);
-  // }
 };
 
 class ConstantStore {
@@ -1313,7 +1347,7 @@ public:
     uint32_t acc = 0;
     acc ^= hash(constant.getCustom());
     acc ^= hash(constant.getExtend());
-    acc ^= hash(constant.getNumBits());
+    acc ^= hash(constant.getRawNumBits());
     acc ^= hash(constant.getNumWords());
     for (const auto word : constant.getWords())
       acc ^= hash(word);
@@ -1362,8 +1396,12 @@ public:
     cur = BigInt::fromRaw(std::move(data), bits, extend, custom);
     return *this;
   }
+  template <BigIntAPI U> ConstantBuilderBase &val(const U &val) {
+    cur = val;
+    return *this;
+  }
   ConstantBuilderBase &undef(unsigned bits) {
-    cur.setRepeating(BigInt::EXTX_MASK, bits);
+    cur.setRepeating(BigInt::EXTX_MASK, bits, 1);
     return *this;
   }
   ConstantBuilderBase &fourState() {
@@ -1391,8 +1429,13 @@ public:
   SIMPLE_OP(bitXOR, xorOp4S)
 
 #define INT_RHS_OP(ident, impl)                                                \
-  ConstantBuilderBase &ident(uint64_t rhs) {                                   \
+  ConstantBuilderBase &ident(uint32_t rhs) {                                   \
     BigInt::impl(cur, cur, rhs);                                               \
+    return *this;                                                              \
+  }                                                                            \
+  template <BigIntAPI U> ConstantBuilderBase &ident(const U &rhs) {            \
+    BigInt::impl(cur, cur, rhs.getExactVal());                                 \
+                                                                               \
     return *this;                                                              \
   }
 
@@ -1417,11 +1460,16 @@ public:
     return *this;
   }
 
+  ConstantBuilderBase &resize(uint32_t size, bool sign = false) {
+    BigInt::resizeOp4S(cur, cur, size, sign);
+    return *this;
+  }
+
   ConstantRef get() {
     if (cur.getNumWords() == 1 &&
-        cur.getNumBits() < (1ULL << ConstantRef::NBits::size))
-      return ConstantRef{cur.getNumBits(), cur.getWords()[0], cur.getExtend(),
-                         cur.getCustom()};
+        cur.getRawNumBits() < (1ULL << ConstantRef::NBits::size))
+      return ConstantRef{cur.getRawNumBits(), cur.getWords()[0],
+                         cur.getExtend(), cur.getCustom()};
 
     return store.findOrInsert(cur);
   }

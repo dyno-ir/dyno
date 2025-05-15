@@ -5,7 +5,7 @@ module Test#(parameter WIDTH)
   output logic[WIDTH-1:0] OUT_sum
 );
 always_comb begin
-  OUT_sum = IN_a + 5'bxzzzz + 64'hdeadbeefdeadbeef + 2000;
+  OUT_sum = IN_a + 5'sbzxxxx + 64'hdeadbeefdeadbeef + 2000;
 end
 endmodule
 

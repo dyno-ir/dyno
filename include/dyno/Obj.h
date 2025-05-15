@@ -1,12 +1,12 @@
 #pragma once
 
+#include "support/Bits.h"
+#include "support/DenseMapInfo.h"
+#include "support/RTTI.h"
 #include <bit>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
-#include <support/Bits.h>
-#include <support/DenseMapInfo.h>
-#include <support/RTTI.h>
 #include <type_traits>
 namespace dyno {
 
@@ -20,7 +20,7 @@ public:
   using num_t = NumT;
   num_t num;
 
-  constexpr IDImpl() {};
+  constexpr IDImpl() = default;
   constexpr explicit IDImpl(num_t num) : num(num) {}
 
   operator num_t() { return num; }
@@ -124,15 +124,15 @@ protected:
   }
 
 public:
-  template <typename T> static DynObjRef ofTy() {
-    return {ObjTraits<T>::dialect, ObjTraits<T>::ty, ObjID::INVALID, 0};
+  template <typename T> static DynObjRef ofTy(uint16_t custom = 0) {
+    return {ObjTraits<T>::dialect, ObjTraits<T>::ty, ObjID::INVALID, custom};
   }
 
-  template <typename T> static DynObjRef ofObj(ObjID obj) {
-    return {ObjTraits<T>::dialect, ObjTraits<T>::ty, obj, 0};
+  template <typename T> static DynObjRef ofObj(ObjID obj, uint16_t custom = 0) {
+    return {ObjTraits<T>::dialect, ObjTraits<T>::ty, obj, custom};
   }
 
-  DynObjRef() {}
+  DynObjRef() = default;
   constexpr DynObjRef(nullref_t)
       : dialect(0), ty(0), custom(0), obj(ObjID::invalid()) {}
 
@@ -181,22 +181,50 @@ static_assert(sizeof(DynObjRef) == 8);
 template <typename T>
   requires(!std::is_void_v<T>)
 class FatObjRef : public ObjRef<T>, public RTTIUtilMixin<FatObjRef<T>> {
+public:
+  template <unsigned N, unsigned Pos>
+  using CustomField = BitField<uint16_t, N, Pos>;
+  template <unsigned N, unsigned Pos>
+  using SpecialField = BitField<uint16_t, N, Pos>;
+
 protected:
+  uint16_t custom;
+  uint16_t special;
   T *ptr;
+
+  template <typename FieldT> FieldT customField() { return FieldT{custom}; }
+  template <typename FieldT> const FieldT customField() const {
+    return FieldT{const_cast<uint16_t &>(custom)};
+  }
 
 public:
   using value_type = T;
   using RTTIUtilMixin<FatObjRef<T>>::as;
   using RTTIUtilMixin<FatObjRef<T>>::dyn_as;
   using RTTIUtilMixin<FatObjRef<T>>::is;
-  FatObjRef() {}
-  FatObjRef(nullref_t) : ObjRef<T>(nullref), ptr(nullptr) {}
-  FatObjRef(ObjRef<T> ref, T *ptr) : ObjRef<T>(ref), ptr(ptr) {}
-  FatObjRef(ObjRef<T> ref, T &ptr) : ObjRef<T>(ref), ptr(&ptr) {}
-  FatObjRef(ObjID obj, T *ptr) : ObjRef<T>(obj), ptr(ptr) {}
-  FatObjRef(ObjID obj, T &ptr) : ObjRef<T>(obj), ptr(&ptr) {}
-  FatObjRef(ObjID obj, void *ptr)
-      : ObjRef<T>(obj), ptr(reinterpret_cast<T *>(ptr)) {}
+  FatObjRef() = default;
+  FatObjRef(nullref_t)
+      : ObjRef<T>(nullref), custom(0), special(0), ptr(nullptr) {}
+  // FatObjRef(const FatObjRef &other) = default;
+  // FatObjRef& operator=(const FatObjRef& rhs) {
+  //   this->obj = rhs.obj;
+  //   this->custom = rhs.custom;
+  //   this->special = rhs.special;
+  //   this->ptr = rhs.ptr;
+  //   return *this;
+  // }
+
+  FatObjRef(ObjRef<T> ref, T *ptr, uint16_t custom = 0)
+      : ObjRef<T>(ref), custom(custom), special(0), ptr(ptr) {}
+  FatObjRef(ObjRef<T> ref, T &ptr, uint16_t custom = 0)
+      : ObjRef<T>(ref), custom(custom), special(0), ptr(&ptr) {}
+  FatObjRef(ObjID obj, T *ptr, uint16_t custom = 0)
+      : ObjRef<T>(obj), custom(custom), special(0), ptr(ptr) {}
+  FatObjRef(ObjID obj, T &ptr, uint16_t custom = 0)
+      : ObjRef<T>(obj), custom(custom), special(0), ptr(&ptr) {}
+  FatObjRef(ObjID obj, void *ptr, uint16_t custom = 0)
+      : ObjRef<T>(obj), custom(custom), special(0),
+        ptr(reinterpret_cast<T *>(ptr)) {}
 
   static bool is_impl(const DynObjRef &Ref);
 
@@ -209,10 +237,11 @@ public:
     assert(ptr && "ptr uninitialized");
     return ptr;
   }
+  uint16_t getCustom() const { return custom; }
 
   template <IsFatDynObjRef U> explicit operator U() const {
     assert((::is<U, FatObjRef>(*this)));
-    return U{DynObjRef::ofObj<typename U::value_type>(this->obj),
+    return U{DynObjRef::ofObj<typename U::value_type>(this->obj, custom),
              reinterpret_cast<U::value_type *>(ptr)};
   }
 };
@@ -228,13 +257,15 @@ public:
   using RTTIUtilMixin<FatDynObjRef<T>>::as;
   using RTTIUtilMixin<FatDynObjRef<T>>::dyn_as;
   using RTTIUtilMixin<FatDynObjRef<T>>::is;
-  FatDynObjRef() {}
+  FatDynObjRef() = default;
   FatDynObjRef(nullref_t) : DynObjRef(nullref), ptr(nullptr) {}
   FatDynObjRef(DynObjRef ref, T *ptr) : DynObjRef(ref), ptr(ptr) {}
   template <typename U = T, typename = std::enable_if_t<!std::is_void_v<U>>>
   FatDynObjRef(DynObjRef ref, U &ptr) : DynObjRef(ref), ptr(&ptr) {}
   template <typename U = T, typename = std::enable_if_t<!std::is_void_v<U>>>
-  FatDynObjRef(FatObjRef<U> ref) : DynObjRef(ref), ptr(ref.getPtr()) {}
+  FatDynObjRef(FatObjRef<U> ref)
+      : DynObjRef(DynObjRef::ofObj<U>(ref.getObjID(), ref.getCustom())),
+        ptr(reinterpret_cast<T *>(ref.getPtr())) {}
 
   template <typename V, typename U = T,
             typename = std::enable_if_t<std::is_void_v<U>>>
@@ -261,7 +292,7 @@ public:
 
   template <IsFatObjRef U> explicit operator U() const {
     assert((::is<U, FatDynObjRef>(*this)));
-    return U{obj, ptr};
+    return U{obj, ptr, custom};
   }
   template <IsFatDynObjRef U> explicit operator U() const {
     assert((::is<U, FatDynObjRef>(*this)));

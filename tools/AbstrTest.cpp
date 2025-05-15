@@ -20,17 +20,17 @@ int main() {
   HWInstrBuilder build{ctx, block.begin()};
   auto add1 =
       build.buildAdd(build.buildConst(32, 20), build.buildConst(32, 21));
-  auto add2 = build.buildAdd(add1.defW(), build.buildConst(32, 1));
-  auto sub = build.buildSub(add2.defW(), add1.defW());
-  auto store = build.buildStore(reg, sub.defW());
+  auto add2 = build.buildAdd(add1, build.buildConst(32, 1));
+  auto sub = build.buildSub(add2, add1);
+  auto store = build.buildStore(reg, sub);
 
   auto proc2 = buildTop.buildProcess();
   auto block2 = proc2.block();
 
   build.setInsertPoint(block2.begin());
   auto load = build.buildLoad(reg);
-  auto add3 = build.buildAdd(load.defW(), build.buildConst(32, 1));
-  auto ifelse = build.buildIfElse(add3.defW());
+  auto add3 = build.buildAdd(load, build.buildConst(32, 1));
+  auto ifelse = build.buildIfElse(add3);
 
   build.setInsertPoint(ifelse.getTrueBlock().begin());
   ifelse = build.buildYield(build.buildConst(32, 42)).second;
@@ -52,8 +52,8 @@ int main() {
   build.setInsertPoint(whileInstr.getCondBlock().begin());
   auto sub2 =
       build.buildSub(whileInstr.getYieldValue(0).as<HWValue>(), build.buildConst(32, 1));
-  build.buildYield(sub2.defW(),
-                   /*todo: convert to bool*/ sub2.defW());
+  build.buildYield(sub2,
+                   /*todo: convert to bool*/ sub2);
   build.setInsertPoint(whileInstr.getBodyBlock().begin());
   build.buildStore(reg, whileInstr.getYieldValue(0));
   build.buildYield(whileInstr.getYieldValue(0));
@@ -61,9 +61,9 @@ int main() {
   auto func = ctx.buildFunc(mod);
   build.setInsertPoint(func.getBlock().begin());
   auto param = build.buildFuncParam(func.func());
-  auto ret = build.buildFuncReturn(func.func(), param.defW(),
+  auto ret = build.buildFuncReturn(func.func(), param,
                                    build.buildConst(64, 1UL << 40));
-  build.buildFuncReturn(func.func(), param.defW(),
+  build.buildFuncReturn(func.func(), param,
                         ConstantBuilder{ctx.getConstants()}
                             .add(ret.operand(2)->as<ConstantRef>())
                             .add(1)
@@ -74,9 +74,8 @@ int main() {
 
   print.printCtx(ctx);
 
-  auto pblock = add3.parentBlock(ctx);
-  assert(pblock.as<FatDynObjRef<>>() == block2.as<FatDynObjRef<>>());
-
-  auto pproc = add3.parentProc(ctx);
-  assert(pproc.as<FatDynObjRef<>>() == proc2.as<FatDynObjRef<>>());
+  //auto pblock = add3.parentBlock(ctx);
+  //assert(pblock.as<FatDynObjRef<>>() == block2.as<FatDynObjRef<>>());
+  //auto pproc = add3.parentProc(ctx);
+  //assert(pproc.as<FatDynObjRef<>>() == proc2.as<FatDynObjRef<>>());
 }

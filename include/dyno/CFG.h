@@ -174,16 +174,8 @@ public:
   using iterator_unordered = BlockRef_iterator<false>;
 
 public:
-  BlockRef(ObjRef<Block> obj, Block *block) : FatObjRef<Block>(obj, block) {}
-  BlockRef(ObjRef<Block> obj, Block &block) : FatObjRef<Block>(obj, block) {}
-  BlockRef(const FatObjRef<Block> &ref) : FatObjRef<Block>(ref) {}
-  BlockRef() : FatObjRef<Block>() {}
-  // BlockRef(iterator ref) : FatObjRef<Block>(ref->getPtr()) {}
-
-  // these constructors are needed for casting impl (maybe we can somehow get
-  // rid of them...)
-  BlockRef(ObjID obj, void *ptr) : FatObjRef<Block>(obj, ptr) {}
-  BlockRef(nullref_t) : FatObjRef<Block>(nullref) {}
+  using FatObjRef::FatObjRef;
+  BlockRef(FatObjRef<Block> ref) : FatObjRef<Block>(ref) {}
 
   size_t size() { return ptr->instrs.size() - 1; }
 

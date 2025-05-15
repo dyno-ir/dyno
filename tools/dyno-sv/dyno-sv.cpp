@@ -76,11 +76,10 @@ public:
       if (!isLValue)
         return getValue();
 
-      auto ldVal = build.buildLoad(getLVReg(), getLVBitRange()).defW();
+      auto ldVal = build.buildLoad(getLVReg(), getLVBitRange());
       if (ldVal->numBits < type->getBitstreamWidth())
-        ldVal =
-            build.buildExt(type->getBitstreamWidth(), ldVal, type->isSigned())
-                .defW();
+        return build.buildExt(type->getBitstreamWidth(), ldVal,
+                              type->isSigned());
       return ldVal;
     }
     RegisterRef getLVReg() {
@@ -106,11 +105,8 @@ public:
 
       // fixme: can you ever sign extend here?
       auto newAddr =
-          build
-              .buildAdd(build.buildUpsize(lv.getLVBitRange().getAddr(), 32),
-                        build.buildUpsize(range.getAddr(), 32))
-              .defW();
-      newAddr->numBits = 32;
+          build.buildAdd(build.buildUpsize(lv.getLVBitRange().getAddr(), 32),
+                         build.buildUpsize(range.getAddr(), 32));
       auto newLen = range.getLen();
 
       return lvalue(lv.getLVReg(), type, BitRange{newAddr, newLen});
@@ -380,58 +376,61 @@ public:
       auto lhs = handle_expr(binop.left());
       auto rhs = handle_expr(binop.right());
 
-      HWInstrRef instr;
+      HWValue val;
 
       auto lhsVal = lhs.proGetValue(build);
       auto rhsVal = rhs.proGetValue(build);
 
       // for some reason Slang sometimes omits implicit conversions (?)
-      lhsVal = build.buildUpsize(lhsVal, expr.type->getBitstreamWidth());
-      rhsVal = build.buildUpsize(rhsVal, expr.type->getBitstreamWidth());
+      if (auto width = expr.type->getBitstreamWidth()) {
+        lhsVal = build.buildUpsize(lhsVal, width);
+        rhsVal = build.buildUpsize(rhsVal, width);
+      }
 
       switch (binop.op) {
       case slang::ast::BinaryOperator::Add:
-        instr = build.buildAdd2(lhsVal, rhsVal);
+        val = build.buildAdd(lhsVal, rhsVal);
         break;
       case slang::ast::BinaryOperator::Subtract:
-        instr = build.buildSub(lhsVal, rhsVal);
+        val = build.buildSub(lhsVal, rhsVal);
         break;
       case slang::ast::BinaryOperator::Multiply:
-        instr = build.buildMul(lhsVal, rhsVal);
+        val = build.buildMul(lhsVal, rhsVal);
         break;
       case slang::ast::BinaryOperator::Divide:
         if (expr.type->isSigned())
-          instr = build.buildSDiv(lhsVal, rhsVal);
+          val = build.buildSDiv(lhsVal, rhsVal);
         else
-          instr = build.buildUDiv(lhsVal, rhsVal);
+          val = build.buildUDiv(lhsVal, rhsVal);
         break;
       case slang::ast::BinaryOperator::ArithmeticShiftLeft:
       case slang::ast::BinaryOperator::LogicalShiftLeft:
-        instr = build.buildSLL(lhsVal, rhsVal);
+        val = build.buildSLL(lhsVal, rhsVal);
         break;
       case slang::ast::BinaryOperator::ArithmeticShiftRight:
-        instr = build.buildSRA(lhsVal, rhsVal);
+        val = build.buildSRA(lhsVal, rhsVal);
         break;
       case slang::ast::BinaryOperator::LogicalShiftRight:
-        instr = build.buildSRL(lhsVal, rhsVal);
+        val = build.buildSRL(lhsVal, rhsVal);
         break;
       case slang::ast::BinaryOperator::BinaryAnd:
-        instr = build.buildAnd(lhsVal, rhsVal);
+        val = build.buildAnd(lhsVal, rhsVal);
         break;
       case slang::ast::BinaryOperator::BinaryOr:
-        instr = build.buildOr(lhsVal, rhsVal);
+        val = build.buildOr(lhsVal, rhsVal);
         break;
       case slang::ast::BinaryOperator::BinaryXor:
-        instr = build.buildXor(lhsVal, rhsVal);
+        val = build.buildXor(lhsVal, rhsVal);
         break;
       default:
         abort();
       }
 
-      if (auto w = binop.type->getBitWidth())
-        instr.defW()->numBits = w;
+      if (auto wire = val.dyn_as<WireRef>())
+        if (auto width = binop.type->getBitstreamWidth())
+          wire->numBits = width;
 
-      return Value::rvalue(instr.defW(), expr.type.get());
+      return Value::rvalue(val, expr.type.get());
       break;
     }
     case slang::ast::ExpressionKind::UnaryOp: {
@@ -464,9 +463,9 @@ public:
       HWValue val = src.proGetValue(build);
       uint32_t newWidth = asConv.type->getBitstreamWidth();
       if (newWidth > val.getNumBits())
-        val = build.buildExt(newWidth, val, src.type->isSigned()).defW();
+        val = build.buildExt(newWidth, val, src.type->isSigned());
       else if (newWidth < val.getNumBits())
-        val = build.buildTrunc(newWidth, val).defW();
+        val = build.buildTrunc(newWidth, val);
 
       return Value::rvalue(val, expr.type);
     }
@@ -488,11 +487,8 @@ public:
       switch (asElemS.getSelectionKind()) {
       case slang::ast::RangeSelectionKind::Simple: {
         offs = rangeRight;
-        auto sub = build.buildSub(rangeLeft, rangeRight).defW();
-        sub->numBits = 32;
-        auto add =
-            build.buildAdd(sub, ctx.constBuild().val(32, 1).get()).defW();
-        add->numBits = 32;
+        auto sub = build.buildSub(rangeLeft, rangeRight);
+        auto add = build.buildAdd(sub, ctx.constBuild().val(32, 1).get());
         len = add;
         break;
       }
@@ -503,12 +499,8 @@ public:
       }
       case slang::ast::RangeSelectionKind::IndexedDown:
         len = rangeRight;
-
-        auto sub = build.buildSub(rangeLeft, rangeRight).defW();
-        sub->numBits = 32;
-        auto add =
-            build.buildAdd(sub, ctx.constBuild().val(32, 1).get()).defW();
-        add->numBits = 32;
+        auto sub = build.buildSub(rangeLeft, rangeRight);
+        auto add = build.buildAdd(sub, ctx.constBuild().val(32, 1).get());
         offs = add;
         break;
       }

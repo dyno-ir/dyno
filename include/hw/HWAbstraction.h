@@ -19,6 +19,7 @@
 #include "support/TemplateUtil.h"
 #include "support/Utility.h"
 #include <dyno/NewDeleteObjStore.h>
+#include <type_traits>
 
 namespace dyno {
 
@@ -160,20 +161,37 @@ public:
     return HWInstrRef{instr};
   }
 
-#define COMM_OP(ident, opcode)                                                 \
-  template <IsAnyHWValue... Ts> HWInstrRef ident(Ts... operands) {             \
-    auto rv = buildInstr(DialectID{DIALECT_OP}, OpcodeID{opcode}, true,        \
-                         operands...);                                         \
-    rv.defW()->numBits = getFirst(operands...).getNumBits();                   \
+#define COMM_OP(ident, opcode, constFunc)                                      \
+  template <IsAnyHWValue... Ts> HWValue ident(Ts... operands) {                \
+    if constexpr (!(std::is_same_v<Ts, WireRef> || ...))                       \
+      if ((operands.template is<ConstantRef>() && ...)) {                      \
+        ConstantBuilder build{ctx.getConstants()};                             \
+        build.val(getFirst(operands...).getNumBits());                         \
+        ([&] { build.constFunc(operands.template as<ConstantRef>()); }(),      \
+         ...);                                                                 \
+        return build.get();                                                    \
+      }                                                                        \
+    auto rv =                                                                  \
+        buildInstr(DialectID{DIALECT_OP}, OpcodeID{OP_ADD}, true, operands...) \
+            .defW();                                                           \
+    rv->numBits = getFirst(operands...).getNumBits();                          \
     return rv;                                                                 \
   }
-  COMM_OP(buildAdd, OP_ADD)
-  COMM_OP(buildAnd, OP_AND)
-  COMM_OP(buildOr, OP_OR)
-  COMM_OP(buildXor, OP_XOR)
-  COMM_OP(buildMul, OP_MUL)
 
-  template <IsHWValue... Ts> HWInstrRef buildAdd2(Ts... operands) {
+  //#define COMM_OP(ident, opcode)                                                 \
+//  template <IsAnyHWValue... Ts> HWInstrRef ident(Ts... operands) {             \
+//    auto rv = buildInstr(DialectID{DIALECT_OP}, OpcodeID{opcode}, true,        \
+//                         operands...);                                         \
+//    rv.defW()->numBits = getFirst(operands...).getNumBits();                   \
+//    return rv;                                                                 \
+//  }
+  COMM_OP(buildAdd, OP_ADD, add)
+  COMM_OP(buildAnd, OP_AND, bitAND)
+  COMM_OP(buildOr, OP_OR, bitOR)
+  COMM_OP(buildXor, OP_XOR, bitXOR)
+  COMM_OP(buildMul, OP_MUL, mul)
+
+  template <IsAnyHWValue... Ts> HWInstrRef buildAdd2(Ts... operands) {
 
     // canonicalize further by having constants rightmost, possible even
     // sort wires by def opcode?
@@ -229,50 +247,74 @@ public:
     return HWInstrRef{instr};
   }
 
-#define BINOP(ident, opcode)                                                   \
+#define BINOP(ident, opcode, constFunc)                                        \
   template <IsAnyHWValue LHS, IsAnyHWValue RHS>                                \
-  HWInstrRef ident(LHS lhs, RHS rhs) {                                         \
+  HWValue ident(LHS lhs, RHS rhs) {                                            \
+    if (lhs.template is<ConstantRef>() && rhs.template is<ConstantRef>()) {    \
+      return ConstantBuilder{ctx.getConstants()}                               \
+          .val(lhs.template as<ConstantRef>())                                 \
+          .constFunc(rhs.template as<ConstantRef>())                           \
+          .get();                                                              \
+    }                                                                          \
     auto rv =                                                                  \
-        buildInstr(DialectID{DIALECT_OP}, OpcodeID{opcode}, true, lhs, rhs);   \
-    rv.defW()->numBits = lhs.getNumBits();                                     \
+        buildInstr(DialectID{DIALECT_OP}, OpcodeID{OP_ADD}, true, lhs, rhs)    \
+            .defW();                                                           \
+    rv->numBits = rhs.getNumBits();                                            \
     return rv;                                                                 \
   }
 
-  BINOP(buildSub, OP_SUB)
-  BINOP(buildSDiv, OP_SDIV)
-  BINOP(buildUDiv, OP_UDIV)
-  BINOP(buildSLL, OP_SLL)
-  BINOP(buildSRL, OP_SRL)
-  BINOP(buildSRA, OP_SRA)
+  BINOP(buildSub, OP_SUB, sub)
+  BINOP(buildSDiv, OP_UDIV, udiv)
+  BINOP(buildUDiv, OP_UMOD, umod)
+  BINOP(buildSLL, OP_SLL, shl)
+  BINOP(buildSRL, OP_SRL, lshr)
+  BINOP(buildSRA, OP_SRA, ashr)
 
-  HWInstrRef buildExt(uint32_t newSize, FatDynObjRef<> value, bool sign) {
+  HWValue buildExt(uint32_t newSize, HWValue value, bool sign) {
+    if (auto asConst = value.dyn_as<ConstantRef>()) {
+      assert(asConst.getNumBits() <= newSize);
+      return ctx.constBuild()
+          .val(value.as<ConstantRef>())
+          .resize(newSize, sign)
+          .get();
+    }
+
     auto ref = buildInstr(DialectID{DIALECT_OP},
                           OpcodeID{sign ? OP_SEXT : OP_ZEXT}, true, value);
 
     assert(ref.defW().getNumBits().value_or(0) < newSize);
     ref.defW()->numBits = newSize;
-    return ref;
+    return ref.defW();
   }
-  HWInstrRef buildZExt(uint32_t newSize, FatDynObjRef<> value) {
+  HWValue buildZExt(uint32_t newSize, HWValue value) {
     return buildExt(newSize, value, false);
   }
-  HWInstrRef buildSExt(uint32_t newSize, FatDynObjRef<> value) {
+  HWValue buildSExt(uint32_t newSize, HWValue value) {
     return buildExt(newSize, value, true);
   }
-  HWInstrRef buildTrunc(uint32_t newSize, FatDynObjRef<> value) {
+  HWValue buildTrunc(uint32_t newSize, HWValue value) {
+
+    if (auto asConst = value.dyn_as<ConstantRef>()) {
+      assert(asConst.getNumBits() >= newSize);
+      return ctx.constBuild()
+          .val(value.as<ConstantRef>())
+          .resize(newSize)
+          .get();
+    }
+
     auto ref =
         buildInstr(DialectID{DIALECT_OP}, OpcodeID{OP_TRUNC}, true, value);
 
     assert(ref.defW().getNumBits().value_or(UINT32_MAX) > newSize);
     ref.defW()->numBits = newSize;
-    return ref;
+    return ref.defW();
   }
 
   HWValue buildResize(HWValue val, uint32_t newSize, bool sign = false) {
     assert(val.getNumBits());
 
     if (val.getNumBits() < newSize)
-      return buildExt(newSize, val, sign).defW();
+      return buildExt(newSize, val, sign);
     else if (val.getNumBits() > newSize)
       return buildTrunc(newSize, val);
     return val;
@@ -280,7 +322,7 @@ public:
   HWValue buildUpsize(HWValue val, uint32_t newSize, bool sign = false) {
     assert(val.getNumBits());
     if (val.getNumBits() < newSize)
-      return buildExt(newSize, val, sign).defW();
+      return buildExt(newSize, val, sign);
     assert(val.getNumBits() == newSize);
     return val;
   }
@@ -292,7 +334,7 @@ public:
                       operands...);
   }
 
-  HWInstrRef buildLoad(RegisterRef reg, BitRange range = BitRange::full()) {
+  WireRef buildLoad(RegisterRef reg, BitRange range = BitRange::full()) {
     HWInstrRef ref;
     if (range == BitRange::full())
       ref = buildInstr(DialectID{DIALECT_HW}, OpcodeID{HW_LOAD}, true, reg);
@@ -303,7 +345,7 @@ public:
       ref.defW()->numBits = reg->numBits;
     else if (auto asCRef = range.len.dyn_as<ConstantRef>())
       ref.defW()->numBits = asCRef.getExactVal();
-    return ref;
+    return ref.defW();
   }
 
   HWInstrRef buildStore(RegisterRef reg, FatDynObjRef<> value,
