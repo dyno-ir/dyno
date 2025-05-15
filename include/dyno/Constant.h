@@ -1,6 +1,7 @@
 #pragma once
 
 #include "support/Bits.h"
+#include "support/Optional.h"
 #include "support/SmallVec.h"
 #include "support/Utility.h"
 #include <algorithm>
@@ -41,6 +42,23 @@ template <typename Derived> class BigIntMixin;
 template <typename T>
 concept BigIntAPI = std::is_base_of<BigIntMixin<T>, T>::value;
 
+struct FourState {
+  enum {
+    S0,
+    S1,
+    SZ,
+    SX,
+  };
+  uint8_t val;
+  FourState(uint8_t i) : val(i) { assert(i <= 4); }
+  operator uint8_t() { return val; }
+
+  bool isUnk() { return val == SZ || val == SX; }
+
+  FourState operator!() { return isUnk() ? SX : !val; }
+  FourState operator~() { return !*this; }
+};
+
 template <typename Derived> class BigIntMixin {
   friend class BigInt;
 
@@ -68,7 +86,10 @@ protected:
       return repeatExtend(self().getExtend());
     return self().getWords()[i];
   }
-
+  uint32_t getWord4S(uint32_t i) const {
+    return self().getCustom() ? getWord(i)
+                              : unpack_bits(getWord(i / 2) >> ((i % 2) * 16));
+  }
   uint8_t getRawBit(uint32_t i) const {
     assert(i <= self().getRawNumBits());
     return !!(getWord(i / WordBits) & (1 << (i % WordBits)));
@@ -87,7 +108,7 @@ protected:
   }
 
 public:
-  uint8_t getBit(uint32_t i) const {
+  FourState getBit(uint32_t i) const {
     assert(i <= getNumBits());
     if (!self().getCustom())
       return !!(getWord(i / WordBits) & (1 << (i % WordBits)));
@@ -108,9 +129,9 @@ public:
 
     if (self.getCustom() && self.getRawNumBits() < 16)
       base = 2;
-    else if (!self.getCustom() && (self.getLimitedVal() <= 255 ||
-                                   (self.getLimitedVal() < UINT32_MAX &&
-                                    ((self.getLimitedVal() + 1) % 100) <= 1))) {
+    else if (!self.getCustom() && self.getLimitedVal() &&
+             (self.getLimitedVal() <= 255 ||
+              ((self.getLimitedVal() + 1) % 100) <= 1)) {
       base = 10;
     }
 
@@ -132,21 +153,24 @@ public:
     return true;
   }
 
-  uint32_t getLimitedVal() const {
+  bool valueEquals(uint32_t val) const {
+    if (auto val2 = getLimitedVal())
+      return val == *val2;
+    return false;
+  }
+
+  Optional<uint32_t> getLimitedVal() const {
     assert(!self().getCustom());
     if (self().getNumWords() > 1)
-      return UINT32_MAX;
+      return nullopt;
     if (self().getExtNumWords() > 1 && self().getExtend() != 0)
-      return UINT32_MAX;
+      return nullopt;
     return self().getWords()[0];
   }
   uint32_t getExactVal() const {
-    assert(!self().getCustom());
-    if (self().getNumWords() > 1)
-      dyno_unreachable("would truncate");
-    if (self().getExtNumWords() > 1 && self().getExtend() != 0)
-      dyno_unreachable("would truncate");
-    return self().getWords()[0];
+    auto rv = getLimitedVal();
+    assert(rv && "would truncate");
+    return *rv;
   }
 };
 
@@ -267,9 +291,9 @@ public:
 #define LINEAR_OP(ident, code)                                                 \
   template <typename T0, typename T1>                                          \
   static void ident(BigInt &out, const T0 &lhs, const T1 &rhs) {               \
-    return linearOp<[](unsigned lhs, unsigned rhs,                             \
-                       [[maybe_unused]] unsigned cin,                          \
-                       [[maybe_unused]] unsigned *cout) { return code; }>(     \
+    return carryPropOp<[](unsigned lhs, unsigned rhs,                          \
+                          [[maybe_unused]] unsigned cin,                       \
+                          [[maybe_unused]] unsigned *cout) { return code; }>(  \
         out, lhs, rhs);                                                        \
   }
   LINEAR_OP(addOp, __builtin_addc(lhs, rhs, cin, cout))
@@ -533,7 +557,7 @@ public:
       int32_t k = 0;
       for (ssize_t i = quot.getNumWords() - 1; i >= 0; i--) {
         // pull down one digit
-        auto t = (k * base + lhs.getWord(i));
+        uint64_t t = (k * base + lhs.getWord(i));
         // do single digit division
         quot.words[i] = t / rhs.getWord(0);
         // correct back
@@ -612,6 +636,239 @@ public:
 
     quot.normalize();
     return std::make_pair(std::move(quot), std::move(rem));
+  }
+
+  template <BigIntAPI T0, BigIntAPI T1>
+  static bool icmpEqualOp(const T0 &lhs, const T1 &rhs) {
+    if (lhs.getNumWords() != rhs.getNumWords())
+      return false;
+    if (lhs.getRawNumBits() != rhs.getRawNumBits())
+      return false;
+    if (lhs.getExtend() != rhs.getExtend())
+      return false;
+
+    for (size_t i = 0; i < lhs.getNumWords(); i++)
+      if (lhs.getWord(i) != rhs.getWord(i))
+        return false;
+
+    return true;
+  }
+
+  template <BigIntAPI T0, BigIntAPI T1>
+  static FourState icmpWildcardEqualOp4S(const T0 &lhs, const T1 &rhs) {
+
+    if (!lhs.getCustom() && !rhs.getCustom())
+      return icmpEqualOp(lhs, rhs) ? FourState::S1 : FourState::S0;
+    if (lhs.getNumBits() != rhs.getNumBits())
+      return false;
+
+    size_t n = std::max(lhs.getExtNumWords(), rhs.getExtNumWords());
+
+    bool notEqual = 0;
+
+    for (size_t i = 0; i < n; i++) {
+      uint32_t lhsV = lhs.getWord4S(i);
+      uint32_t rhsV = rhs.getWord4S(i);
+
+      uint32_t mask = (rhsV & REP10);
+      mask |= mask >> 1;
+
+      uint32_t neq = (lhsV ^ rhsV) & ~mask;
+
+      if (neq)
+        notEqual = 1;
+
+      if ((neq & REP10) != 0)
+        return FourState::SX;
+    }
+
+    return (!notEqual) ? FourState::S1 : FourState::S0;
+  }
+
+  template <auto MaskFunc, BigIntAPI T0, BigIntAPI T1>
+  static FourState icmpCaseXZEqualOp4S(const T0 &lhs, const T1 &rhs) {
+    if (!lhs.getCustom() && !rhs.getCustom())
+      return icmpEqualOp(lhs, rhs) ? FourState::S1 : FourState::S0;
+    if (lhs.getNumBits() != rhs.getNumBits())
+      return false;
+
+    size_t n = std::max(lhs.getExtNumWords(), rhs.getExtNumWords());
+
+    for (size_t i = 0; i < n; i++) {
+      uint32_t lhsV = lhs.getWord4S(i);
+      uint32_t rhsV = rhs.getWord4S(i);
+
+      uint32_t mask = MaskFunc(lhsV, rhsV);
+      mask |= mask >> 1;
+
+      uint32_t neq = (lhsV ^ rhsV) & ~mask;
+
+      if (neq)
+        return FourState::S0;
+    }
+    return FourState::S1;
+  }
+
+  template <BigIntAPI T0, BigIntAPI T1>
+  static FourState icmpCaseZEqualOp4S(const T0 &lhs, const T1 &rhs) {
+    return icmpCaseXZEqualOp4S<[](uint32_t lhsV, uint32_t rhsV) -> uint32_t {
+      return n_equal_mask<2>(rhsV, EXTZ_MASK) |
+             n_equal_mask<2>(lhsV, EXTZ_MASK);
+    }>(lhs, rhs);
+  }
+  template <BigIntAPI T0, BigIntAPI T1>
+  static FourState icmpCaseXEqualOp4S(const T0 &lhs, const T1 &rhs) {
+    return icmpCaseXZEqualOp4S<[](uint32_t lhsV, uint32_t rhsV) -> uint32_t {
+      return (rhsV & REP10) | (lhsV & REP10);
+    }>(lhs, rhs);
+  }
+
+  template <BigIntAPI T0, BigIntAPI T1>
+  static bool icmpUnsignedLessOp(const T0 &lhs, const T1 &rhs,
+                                 bool onEqual = false) {
+    assert(lhs.getNumWords() == rhs.getNumWords());
+    assert(lhs.getRawNumBits() == rhs.getRawNumBits());
+
+    if (lhs.getExtend() < rhs.getExtend())
+      return true;
+
+    for (size_t i = lhs.getNumWords(); i-- > 0;) {
+      auto lw = lhs.getWord(i);
+      auto rw = rhs.getWord(i);
+      if (lw < rw)
+        return true;
+      if (lw > rw)
+        return false;
+    }
+
+    return onEqual;
+  }
+  template <BigIntAPI T0, BigIntAPI T1>
+  static bool icmpSignedLessOp(const T0 &lhs, const T1 &rhs,
+                               bool onEqual = false) {
+    assert(lhs.getNumWords() == rhs.getNumWords());
+    assert(lhs.getRawNumBits() == rhs.getRawNumBits());
+
+    bool sL = lhs.getSignBit();
+    bool sR = rhs.getSignBit();
+
+    if (sL != sR)
+      return sL;
+
+    for (size_t i = lhs.getNumWords(); i-- > 0;) {
+      auto lw = lhs.getWord(i);
+      auto rw = rhs.getWord(i);
+      if (lw == rw)
+        continue;
+
+      if (!sL) // both >= 0
+        return lw < rw;
+      else // both < 0, more negative means less
+        return lw > rw;
+    }
+
+    return onEqual;
+  }
+
+  enum ICmpPred {
+    ICMP_EQ,
+    ICMP_NE,
+    // case equality, compares x/z by value
+    ICMP_CEQ,
+    ICMP_CNE,
+    // wildcard equality
+    ICMP_WEQ,
+    ICMP_WNE,
+
+    // casez equality
+    ICMP_CZEQ,
+    ICMP_CZNE,
+
+    // casex equality
+    ICMP_CXEQ,
+    ICMP_CXNE,
+
+    ICMP_ULT,
+    ICMP_SLT,
+    ICMP_ULE,
+    ICMP_SLE,
+    ICMP_UGT,
+    ICMP_SGT,
+    ICMP_UGE,
+    ICMP_SGE,
+  };
+
+  template <BigIntAPI T0, BigIntAPI T1>
+  static bool icmpOp(const T0 &lhs, const T1 &rhs, ICmpPred pred) {
+    switch (pred) {
+    case ICMP_EQ:
+      return icmpEqualOp(lhs, rhs);
+    case ICMP_NE:
+      return !icmpEqualOp(lhs, rhs);
+    case ICMP_ULT:
+      return icmpUnsignedLessOp(lhs, rhs, false);
+    case ICMP_SLT:
+      return icmpSignedLessOp(lhs, rhs, false);
+    case ICMP_ULE:
+      return icmpUnsignedLessOp(lhs, rhs, true);
+    case ICMP_SLE:
+      return icmpSignedLessOp(lhs, rhs, true);
+    case ICMP_UGT:
+      return icmpUnsignedLessOp(rhs, lhs, false);
+    case ICMP_SGT:
+      return icmpSignedLessOp(rhs, lhs, false);
+    case ICMP_UGE:
+      return icmpUnsignedLessOp(rhs, lhs, true);
+    case ICMP_SGE:
+      return icmpSignedLessOp(rhs, lhs, true);
+    default:
+      dyno_unreachable("invalid predicate");
+    }
+  }
+
+  template <BigIntAPI T0, BigIntAPI T1>
+  static FourState icmpOp4S(const T0 &lhs, const T1 &rhs, ICmpPred pred) {
+    switch (pred) {
+    case ICMP_CEQ:
+      return icmpEqualOp(lhs, rhs);
+    case ICMP_CNE:
+      return !icmpEqualOp(lhs, rhs);
+    case ICMP_WEQ:
+      return icmpWildcardEqualOp4S(lhs, rhs);
+    case ICMP_WNE:
+      return !icmpWildcardEqualOp4S(lhs, rhs);
+    case ICMP_CZEQ:
+      return icmpCaseZEqualOp4S(lhs, rhs);
+    case ICMP_CZNE:
+      return !icmpCaseZEqualOp4S(lhs, rhs);
+    case ICMP_CXEQ:
+      return icmpCaseXEqualOp4S(lhs, rhs);
+    case ICMP_CXNE:
+      return !icmpCaseXEqualOp4S(lhs, rhs);
+    default: {
+      if (lhs.getCustom() || rhs.getCustom())
+        return FourState::SX;
+      return icmpOp(lhs, rhs, pred);
+    }
+    }
+  }
+
+  template <typename T0, typename T1>
+  static auto sdivmodOp(const T0 &lhs, const T1 &rhs) {
+    bool lhsSign = lhs.getRawSignBit();
+    bool rhsSign = rhs.getRawSignBit();
+
+    BigInt lhsAbs = lhs.getRawSignBit() ? -lhs : lhs;
+    BigInt rhsAbs = rhs.getRawSignBit() ? -rhs : rhs;
+
+    auto [div, mod] = udivmodOp(lhsAbs, rhsAbs);
+
+    if (lhsSign ^ rhsSign)
+      negateOp(div, div);
+    if (lhsSign)
+      negateOp(mod, mod);
+
+    return std::make_pair(std::move(div), std::move(mod));
   }
 
   template <typename T0>
@@ -740,12 +997,8 @@ public:
     uint32_t hasUnk = 0;
 
     for (size_t i = 0; i < out.getNumWords(); i++) {
-      uint32_t lhsV = lhs.getCustom()
-                          ? lhs.getWord(i)
-                          : unpack_bits(lhs.getWord(i / 2) >> ((i % 2) * 16));
-      uint32_t rhsV = rhs.getCustom()
-                          ? rhs.getWord(i)
-                          : unpack_bits(rhs.getWord(i / 2) >> ((i % 2) * 16));
+      uint32_t lhsV = lhs.getWord4S(i);
+      uint32_t rhsV = rhs.getWord4S(i);
       uint32_t outV = Func4S(lhsV, rhsV);
       out.words[i] = outV;
       hasUnk |= outV & REP10;
@@ -837,6 +1090,18 @@ public:
       return std::make_pair(std::move(outA), std::move(outB));
     }
     auto [div, rem] = BigInt::udivmodOp(lhs, rhs);
+    return std::make_pair(BigInt{div}, BigInt{rem});
+  }
+  template <BigIntAPI T0, BigIntAPI T1>
+  static auto sdivmodOp4S(const T0 &lhs, const T1 &rhs) {
+    if (lhs.getCustom() || rhs.getCustom() || rhs.valueEquals(0)) {
+      BigInt outA;
+      BigInt outB;
+      outA.setRepeating(EXTX_MASK, lhs.getRawNumBits(), 1);
+      outB.setRepeating(EXTX_MASK, lhs.getRawNumBits(), 1);
+      return std::make_pair(std::move(outA), std::move(outB));
+    }
+    auto [div, rem] = BigInt::sdivmodOp(lhs, rhs);
     return std::make_pair(BigInt{div}, BigInt{rem});
   }
   template <int Mode = 0, BigIntAPI T0, BigIntAPI T1>
@@ -1044,8 +1309,10 @@ public:
 
 private:
   void normalizeExtend() {
+    if (!isExtended())
+      Extend{field} = 0;
     // truncate last word and fill with extend.
-    if (getRawNumBits() % 32 != 0) {
+    else if (getRawNumBits() % 32 != 0) {
       auto mask = (1 << (getRawNumBits() % 32)) - 1;
       words.back() &= mask;
       words.back() |= (~mask & repeatExtend(Extend{field}));
@@ -1073,24 +1340,12 @@ private:
   }
 
   template <auto OpFunc, typename T0, typename T1>
-  static void linearOp(BigInt &out, const T0 &lhs, const T1 &rhs) {
+  static void carryPropOp(BigInt &out, const T0 &lhs, const T1 &rhs) {
 
     // assert(lhs.getRawNumBits() == rhs.getRawNumBits());
     unsigned maxNumBits = std::max(lhs.getRawNumBits(), rhs.getRawNumBits());
     unsigned numWords = std::max(lhs.getNumWords(), rhs.getNumWords());
     unsigned minNumWords = std::min(lhs.getNumWords(), rhs.getNumWords());
-
-    unsigned _unused = 0;
-
-    // zext/sext is purely an optimization in the container, so sext of result
-    // is simply what those bits would add up to. Signed/unsigned is layer
-    // above.
-    unsigned extend =
-        OpFunc(lhs.getExtend(), rhs.getExtend(), _unused, &_unused);
-    if ((extend & ~3)) {
-      // fall back to full calculation on overflow or underflow.
-      numWords = std::max(lhs.getExtNumWords(), rhs.getExtNumWords());
-    }
 
     // out might be lhs or rhs so this must not erase data
     out.words.resize(numWords);
@@ -1118,6 +1373,11 @@ private:
 
       out.words[i] = OpFunc(lhsVal, rhsVal, carry, &carry);
     }
+
+    // zext/sext is purely an optimization in the container, so sext of result
+    // is simply what those bits would add up to. Signed/unsigned is layer
+    // above.
+    unsigned extend = OpFunc(lhs.getExtend(), rhs.getExtend(), carry, &carry);
 
     Extend{out.field} = extend & bit_mask_ones<uint8_t>(BigIntExtendBits);
     out.numBits = maxNumBits;
@@ -1300,6 +1560,11 @@ public:
   static ConstantRef fromU32(uint32_t val) {
     return ConstantRef{32, val, 0, 0};
   }
+  static ConstantRef fromFourState(FourState f) {
+    if (f.isUnk())
+      return ConstantRef{2, f, 0, 1};
+    return ConstantRef{1, !!f, 0, 0};
+  }
 
   std::span<const uint32_t> getWords() const {
     return isInline()
@@ -1396,6 +1661,33 @@ public:
     cur = BigInt::fromRaw(std::move(data), bits, extend, custom);
     return *this;
   }
+  ConstantBuilderBase &ones(unsigned bits) {
+    cur.set(~0ULL, bits);
+    cur.setExtend(bit_mask_ones<uint8_t>(BigIntExtendBits));
+    return *this;
+  }
+  ConstantBuilderBase &zero(unsigned bits) {
+    cur.set(0, bits);
+    return *this;
+  }
+  ConstantBuilderBase &one(unsigned bits) {
+    cur.set(1, bits);
+    return *this;
+  }
+  template <typename U> ConstantBuilderBase &onesLike(U like) {
+    cur.set(uint32_t(~0ULL), like.getNumBits());
+    cur.setExtend(bit_mask_ones<uint8_t>(BigIntExtendBits));
+    return *this;
+  }
+  template <typename U> ConstantBuilderBase &zeroLike(U like) {
+    cur.set(uint32_t(0), like.getNumBits());
+    return *this;
+  }
+  template <typename U> ConstantBuilderBase &oneLike(U like) {
+    cur.set(uint32_t(1), like.getNumBits());
+    return *this;
+  }
+
   template <BigIntAPI U> ConstantBuilderBase &val(const U &val) {
     cur = val;
     return *this;
@@ -1457,6 +1749,14 @@ public:
   }
   template <BigIntAPI U> ConstantBuilderBase &umod(const U &rhs) {
     cur = BigInt::udivmodOp4S(cur, rhs).second;
+    return *this;
+  }
+  template <BigIntAPI U> ConstantBuilderBase &sdiv(const U &rhs) {
+    cur = BigInt::sdivmodOp4S(cur, rhs).first;
+    return *this;
+  }
+  template <BigIntAPI U> ConstantBuilderBase &smod(const U &rhs) {
+    cur = BigInt::sdivmodOp4S(cur, rhs).second;
     return *this;
   }
 

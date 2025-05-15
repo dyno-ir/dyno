@@ -162,29 +162,24 @@ public:
   }
 
 #define COMM_OP(ident, opcode, constFunc)                                      \
-  template <IsAnyHWValue... Ts> HWValue ident(Ts... operands) {                \
-    if constexpr (!(std::is_same_v<Ts, WireRef> || ...))                       \
-      if ((operands.template is<ConstantRef>() && ...)) {                      \
+  template <IsAnyHWValue T, IsAnyHWValue... Ts>                                \
+  HWValue ident(T first, Ts... rest) {                                         \
+    if constexpr (!(std::is_same_v<T, WireRef> ||                              \
+                    (std::is_same_v<Ts, WireRef> || ...)))                     \
+      if (first.template is<ConstantRef>() &&                                  \
+          (rest.template is<ConstantRef>() && ...)) {                          \
         ConstantBuilder build{ctx.getConstants()};                             \
-        build.val(getFirst(operands...).getNumBits());                         \
-        ([&] { build.constFunc(operands.template as<ConstantRef>()); }(),      \
-         ...);                                                                 \
+        build.val(first.template as<ConstantRef>());                           \
+        ([&] { build.constFunc(rest.template as<ConstantRef>()); }(), ...);    \
         return build.get();                                                    \
       }                                                                        \
-    auto rv =                                                                  \
-        buildInstr(DialectID{DIALECT_OP}, OpcodeID{OP_ADD}, true, operands...) \
-            .defW();                                                           \
-    rv->numBits = getFirst(operands...).getNumBits();                          \
+    auto rv = buildInstr(DialectID{DIALECT_OP}, OpcodeID{OP_ADD}, true, first, \
+                         rest...)                                              \
+                  .defW();                                                     \
+    rv->numBits = first.getNumBits();                                          \
     return rv;                                                                 \
   }
 
-  //#define COMM_OP(ident, opcode)                                                 \
-//  template <IsAnyHWValue... Ts> HWInstrRef ident(Ts... operands) {             \
-//    auto rv = buildInstr(DialectID{DIALECT_OP}, OpcodeID{opcode}, true,        \
-//                         operands...);                                         \
-//    rv.defW()->numBits = getFirst(operands...).getNumBits();                   \
-//    return rv;                                                                 \
-//  }
   COMM_OP(buildAdd, OP_ADD, add)
   COMM_OP(buildAnd, OP_AND, bitAND)
   COMM_OP(buildOr, OP_OR, bitOR)
@@ -264,11 +259,28 @@ public:
   }
 
   BINOP(buildSub, OP_SUB, sub)
-  BINOP(buildSDiv, OP_UDIV, udiv)
-  BINOP(buildUDiv, OP_UMOD, umod)
+  BINOP(buildUDiv, OP_UDIV, udiv)
+  BINOP(buildUMod, OP_UMOD, umod)
+  BINOP(buildSDiv, OP_SDIV, sdiv)
+  BINOP(buildSMod, OP_SMOD, smod)
   BINOP(buildSLL, OP_SLL, shl)
   BINOP(buildSRL, OP_SRL, lshr)
   BINOP(buildSRA, OP_SRA, ashr)
+
+  template <IsAnyHWValue LHS, IsAnyHWValue RHS>
+  HWValue buildICmp(LHS lhs, RHS rhs, BigInt::ICmpPred pred) {
+    if (lhs.template is<ConstantRef>() && rhs.template is<ConstantRef>()) {
+      auto equal = BigInt::icmpOp4S(lhs.template as<ConstantRef>(),
+                                    rhs.template as<ConstantRef>(), pred);
+      return ConstantRef::fromFourState(equal);
+    }
+    auto rv = buildInstr(DialectID{DIALECT_OP},
+                         OpcodeID{OpcodeID::num_t(int(OP_ICMP_EQ) + int(pred))},
+                         true, lhs, rhs)
+                  .defW();
+    rv->numBits = 1;
+    return rv;
+  }
 
   HWValue buildExt(uint32_t newSize, HWValue value, bool sign) {
     if (auto asConst = value.dyn_as<ConstantRef>()) {

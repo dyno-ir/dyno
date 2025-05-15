@@ -382,7 +382,7 @@ public:
       auto rhsVal = rhs.proGetValue(build);
 
       // for some reason Slang sometimes omits implicit conversions (?)
-      if (auto width = expr.type->getBitstreamWidth()) {
+      if (auto width = expr.type->getBitstreamWidth(); width && width != 1) {
         lhsVal = build.buildUpsize(lhsVal, width);
         rhsVal = build.buildUpsize(rhsVal, width);
       }
@@ -403,6 +403,12 @@ public:
         else
           val = build.buildUDiv(lhsVal, rhsVal);
         break;
+      case slang::ast::BinaryOperator::Mod:
+        if (expr.type->isSigned())
+          val = build.buildSMod(lhsVal, rhsVal);
+        else
+          val = build.buildUMod(lhsVal, rhsVal);
+        break;
       case slang::ast::BinaryOperator::ArithmeticShiftLeft:
       case slang::ast::BinaryOperator::LogicalShiftLeft:
         val = build.buildSLL(lhsVal, rhsVal);
@@ -422,8 +428,59 @@ public:
       case slang::ast::BinaryOperator::BinaryXor:
         val = build.buildXor(lhsVal, rhsVal);
         break;
-      default:
+      case slang::ast::BinaryOperator::BinaryXnor:
         abort();
+
+      case slang::ast::BinaryOperator::Equality:
+        val = build.buildICmp(lhsVal, rhsVal, dyno::BigInt::ICMP_EQ);
+        break;
+      case slang::ast::BinaryOperator::Inequality:
+        val = build.buildICmp(lhsVal, rhsVal, dyno::BigInt::ICMP_NE);
+        break;
+      case slang::ast::BinaryOperator::CaseEquality:
+        val = build.buildICmp(lhsVal, rhsVal, dyno::BigInt::ICMP_CEQ);
+        break;
+      case slang::ast::BinaryOperator::CaseInequality:
+        val = build.buildICmp(lhsVal, rhsVal, dyno::BigInt::ICMP_CNE);
+        break;
+      case slang::ast::BinaryOperator::GreaterThanEqual:
+        if (lhs.type->isSigned() && rhs.type->isSigned())
+          val = build.buildICmp(lhsVal, rhsVal, dyno::BigInt::ICMP_SGE);
+        else
+          val = build.buildICmp(lhsVal, rhsVal, dyno::BigInt::ICMP_UGE);
+        break;
+      case slang::ast::BinaryOperator::GreaterThan:
+        if (lhs.type->isSigned() && rhs.type->isSigned())
+          val = build.buildICmp(lhsVal, rhsVal, dyno::BigInt::ICMP_SGT);
+        else
+          val = build.buildICmp(lhsVal, rhsVal, dyno::BigInt::ICMP_UGT);
+        break;
+      case slang::ast::BinaryOperator::LessThanEqual:
+        if (lhs.type->isSigned() && rhs.type->isSigned())
+          val = build.buildICmp(lhsVal, rhsVal, dyno::BigInt::ICMP_SLE);
+        else
+          val = build.buildICmp(lhsVal, rhsVal, dyno::BigInt::ICMP_ULE);
+        break;
+      case slang::ast::BinaryOperator::LessThan:
+        if (lhs.type->isSigned() && rhs.type->isSigned())
+          val = build.buildICmp(lhsVal, rhsVal, dyno::BigInt::ICMP_SLT);
+        else
+          val = build.buildICmp(lhsVal, rhsVal, dyno::BigInt::ICMP_ULT);
+        break;
+      case slang::ast::BinaryOperator::WildcardEquality:
+        val = build.buildICmp(lhsVal, rhsVal, dyno::BigInt::ICMP_WEQ);
+        break;
+      case slang::ast::BinaryOperator::WildcardInequality:
+        val = build.buildICmp(lhsVal, rhsVal, dyno::BigInt::ICMP_WNE);
+        break;
+
+      case slang::ast::BinaryOperator::LogicalAnd:
+      case slang::ast::BinaryOperator::LogicalOr:
+      case slang::ast::BinaryOperator::LogicalImplication:
+      case slang::ast::BinaryOperator::LogicalEquivalence:
+      case slang::ast::BinaryOperator::Power:
+        abort();
+        break;
       }
 
       if (auto wire = val.dyn_as<WireRef>())
@@ -434,10 +491,45 @@ public:
       break;
     }
     case slang::ast::ExpressionKind::UnaryOp: {
-
       const auto &unop = expr.as<slang::ast::UnaryExpression>();
-      std::cout << unop.kind << "\n";
-      break;
+
+      auto operand = handle_expr(unop.operand());
+      auto operandVal = operand.proGetValue(build);
+
+      assert(operandVal.getNumBits() == unop.type->getBitstreamWidth());
+
+      switch (unop.op) {
+      case slang::ast::UnaryOperator::Plus:
+        return operand;
+      case slang::ast::UnaryOperator::Minus:
+        return Value::rvalue(
+            build.buildSub(ctx.constBuild().zeroLike(operandVal).get(),
+                           operandVal),
+            unop.type);
+      case slang::ast::UnaryOperator::BitwiseNot:
+        return Value::rvalue(
+            build.buildXor(ctx.constBuild().onesLike(operandVal).get(),
+                           operandVal),
+            unop.type);
+
+      case slang::ast::UnaryOperator::BitwiseAnd:
+      case slang::ast::UnaryOperator::BitwiseOr:
+      case slang::ast::UnaryOperator::BitwiseXor:
+      case slang::ast::UnaryOperator::BitwiseNand:
+      case slang::ast::UnaryOperator::BitwiseNor:
+      case slang::ast::UnaryOperator::BitwiseXnor:
+        abort();
+
+      case slang::ast::UnaryOperator::LogicalNot:
+        abort();
+
+      case slang::ast::UnaryOperator::Preincrement:
+      case slang::ast::UnaryOperator::Predecrement:
+      case slang::ast::UnaryOperator::Postincrement:
+      case slang::ast::UnaryOperator::Postdecrement:
+        abort();
+        break;
+      }
     }
 
     case slang::ast::ExpressionKind::NamedValue: {

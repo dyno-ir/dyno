@@ -46,18 +46,23 @@ ADD_OP(ZEXT),
 ADD_OP(ANYEXT),
 ADD_OP(TRUNC),
 
+// must be same order as ICmpPred. maybe predicate in custom field?
 ADD_OP(ICMP_EQ),
 ADD_OP(ICMP_NE),
-
+ADD_OP(ICMP_CEQ), // verilog case equality
+ADD_OP(ICMP_CNE),
+ADD_OP(ICMP_WEQ), // verilog wildcard equality
+ADD_OP(ICMP_WNE),
+ADD_OP(ICMP_CZEQ), // verilog wildcard casez equality
+ADD_OP(ICMP_CZNE),
+ADD_OP(ICMP_CXEQ), // verilog wildcard casex equality
+ADD_OP(ICMP_CXNE),
 ADD_OP(ICMP_ULT),
 ADD_OP(ICMP_SLT),
-
 ADD_OP(ICMP_ULE),
 ADD_OP(ICMP_SLE),
-
 ADD_OP(ICMP_UGT),
 ADD_OP(ICMP_SGT),
-
 ADD_OP(ICMP_UGE),
 ADD_OP(ICMP_SGE),
 
