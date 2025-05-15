@@ -165,6 +165,8 @@ public:
       return nullopt;
     if (self().getExtNumWords() > 1 && self().getExtend() != 0)
       return nullopt;
+    if (self().getWords()[0] == UINT32_MAX)
+      return nullopt;
     return self().getWords()[0];
   }
   uint32_t getExactVal() const {
@@ -301,6 +303,7 @@ public:
   LINEAR_OP(andOp, lhs &rhs)
   LINEAR_OP(orOp, lhs | rhs)
   LINEAR_OP(xorOp, lhs ^ rhs)
+  LINEAR_OP(xnorOp, ~(lhs ^ rhs))
 
   template <typename T> static void negateOp(BigInt &out, const T &lhs) {
     subOp(out, PatBigInt(lhs.getRawNumBits(), 0), lhs);
@@ -886,6 +889,29 @@ public:
     shiftOp<false, true>(out, lhs, rhs);
   }
 
+  template <typename T0> static bool reductionXOROp(const T0 &val) {
+    uint32_t acc = 0;
+
+    ssize_t words = val.getExtNumWords();
+
+    if (val.getNumBits() % 32 != 0) {
+      acc ^= val.getWord(val.getExtNumWords() - 1) &
+             bit_mask_ones<uint32_t>(val.getNumBits() % 32);
+      words--;
+    }
+
+    if (auto extWords = words - ssize_t(val.getNumWords()); extWords > 0) {
+      if (extWords & 1)
+        acc ^= repeatExtend(val.getExtend());
+    }
+
+    for (size_t i = 0; i < std::min(val.getNumWords(), uint32_t(words)); i++) {
+      acc ^= val.getWords()[i];
+    }
+
+    return __builtin_parity(acc);
+  }
+
   // 4 State
   static constexpr uint32_t REP00 = repeatBits(0b00U, 2);
   static constexpr uint32_t REP01 = repeatBits(0b01U, 2);
@@ -921,6 +947,9 @@ public:
     rhsX |= rhsX >> 1;
 
     return ((lhs ^ rhs) | lhsX | rhsX);
+  }
+  static constexpr uint32_t xnor_4state(uint32_t lhs, uint32_t rhs) {
+    return ~xor_4state(lhs, rhs);
   }
   static constexpr uint32_t or_4state(uint32_t lhs, uint32_t rhs) {
     uint32_t lhsSC = n_equal_mask<2>(lhs, REP01);
@@ -1027,6 +1056,10 @@ public:
   static void xorOp4S(BigInt &out, const T0 &lhs, const T1 &rhs) {
     return bitwiseOp4S<xor_4state, xorOp<T0, T1>, T0, T1>(out, lhs, rhs);
   }
+  template <BigIntAPI T0, BigIntAPI T1>
+  static void xnorOp4S(BigInt &out, const T0 &lhs, const T1 &rhs) {
+    return bitwiseOp4S<xnor_4state, xnorOp<T0, T1>, T0, T1>(out, lhs, rhs);
+  }
   template <BigIntAPI T0> static void notOp4S(BigInt &out, const T0 &lhs) {
     return xorOp4S(out, lhs, PatBigInt{lhs.getRawNumBits(), 0b11});
   }
@@ -1119,6 +1152,12 @@ public:
   }
   template <BigIntAPI T> static void negateOp4S(BigInt &out, const T &lhs) {
     subOp4S(out, PatBigInt(lhs.getRawNumBits(), 0), lhs);
+  }
+
+  template <BigIntAPI T> static FourState reductionXOROp4S(const T &val) {
+    if (val.getCustom())
+      return FourState::SX;
+    return reductionXOROp(val);
   }
 
   // String Ops
@@ -1312,7 +1351,7 @@ private:
     if (!isExtended())
       Extend{field} = 0;
     // truncate last word and fill with extend.
-    else if (getRawNumBits() % 32 != 0) {
+    if (getRawNumBits() % 32 != 0) {
       auto mask = (1 << (getRawNumBits() % 32)) - 1;
       words.back() &= mask;
       words.back() |= (~mask & repeatExtend(Extend{field}));
@@ -1565,6 +1604,23 @@ public:
       return ConstantRef{2, f, 0, 1};
     return ConstantRef{1, (bool)f, 0, 0};
   }
+  // static ConstantRef zero(uint32_t bits) { return ConstantRef{bits, 0, 0, 0}; }
+  // template <typename T> static ConstantRef zeroLike(const T &t) {
+  //   return zero(t.getNumBits());
+  // }
+  // static ConstantRef one(uint32_t bits) { return ConstantRef{bits, 1, 0, 0}; }
+  // template <typename T> static ConstantRef oneLike(const T &t) {
+  //   return zero(t.getNumBits());
+  // }
+  // static ConstantRef ones(uint32_t bits) {
+  //   if (bits < WordBits)
+  //     return ConstantRef{bits, bit_mask_ones<uint32_t>(bits), 0, 0};
+  //   else
+  //     return ConstantRef{bits, ~0U, 0b11, 0};
+  // }
+  // template <typename T> static ConstantRef onesLike(const T &t) {
+  //   return zero(t.getNumBits());
+  // }
 
   std::span<const uint32_t> getWords() const {
     return isInline()
@@ -1719,6 +1775,7 @@ public:
   SIMPLE_OP(bitAND, andOp4S)
   SIMPLE_OP(bitOR, orOp4S)
   SIMPLE_OP(bitXOR, xorOp4S)
+  SIMPLE_OP(bitXNOR, xnorOp4S)
 
 #define INT_RHS_OP(ident, impl)                                                \
   ConstantBuilderBase &ident(uint32_t rhs) {                                   \

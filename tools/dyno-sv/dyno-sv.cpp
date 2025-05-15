@@ -29,6 +29,7 @@
 #include "slang/numeric/SVInt.h"
 #include "support/Bits.h"
 #include "support/SmallVec.h"
+#include "support/Utility.h"
 #include <iostream>
 #include <ostream>
 #include <ranges>
@@ -373,6 +374,39 @@ public:
       const auto &binop = expr.as<slang::ast::BinaryExpression>();
       // std::cout << binop.kind << "\n";
 
+      switch (binop.op) {
+      case slang::ast::BinaryOperator::LogicalAnd: {
+        auto lhs = handle_expr(binop.left());
+        auto lhsVal = lhs.proGetValue(build);
+
+        auto zero = ctx.constBuild().zeroLike(lhsVal).get();
+        auto lhsBool = build.buildICmp(lhsVal, zero, BigInt::ICMP_NE);
+
+        auto ifElse = build.buildIfElse(lhsBool);
+        build.pushInsertPoint(ifElse.getTrueBlock().end());
+
+        auto rhs = handle_expr(binop.right());
+        auto rhsVal = rhs.proGetValue(build);
+
+        auto rhsBool = build.buildICmp(rhsVal, zero, BigInt::ICMP_NE);
+        ifElse = build.buildYield(rhsBool).second;
+
+        build.popInsertPoint();
+        build.pushInsertPoint(ifElse.getFalseBlock().end());
+        ifElse =
+            build.buildYield(ConstantRef::fromFourState(FourState::S0)).second;
+        build.popInsertPoint();
+
+        return Value::rvalue(ifElse.getYieldValue(0).as<WireRef>(), expr.type);
+      };
+      case slang::ast::BinaryOperator::LogicalOr:
+      case slang::ast::BinaryOperator::LogicalImplication:
+      case slang::ast::BinaryOperator::LogicalEquivalence:
+
+      default:
+        break;
+      }
+
       auto lhs = handle_expr(binop.left());
       auto rhs = handle_expr(binop.right());
 
@@ -429,58 +463,57 @@ public:
         val = build.buildXor(lhsVal, rhsVal);
         break;
       case slang::ast::BinaryOperator::BinaryXnor:
-        abort();
-
+        val = build.buildXNor(lhsVal, rhsVal);
+        break;
       case slang::ast::BinaryOperator::Equality:
-        val = build.buildICmp(lhsVal, rhsVal, dyno::BigInt::ICMP_EQ);
+        val = build.buildICmp(lhsVal, rhsVal, BigInt::ICMP_EQ);
         break;
       case slang::ast::BinaryOperator::Inequality:
-        val = build.buildICmp(lhsVal, rhsVal, dyno::BigInt::ICMP_NE);
+        val = build.buildICmp(lhsVal, rhsVal, BigInt::ICMP_NE);
         break;
       case slang::ast::BinaryOperator::CaseEquality:
-        val = build.buildICmp(lhsVal, rhsVal, dyno::BigInt::ICMP_CEQ);
+        val = build.buildICmp(lhsVal, rhsVal, BigInt::ICMP_CEQ);
         break;
       case slang::ast::BinaryOperator::CaseInequality:
-        val = build.buildICmp(lhsVal, rhsVal, dyno::BigInt::ICMP_CNE);
+        val = build.buildICmp(lhsVal, rhsVal, BigInt::ICMP_CNE);
         break;
       case slang::ast::BinaryOperator::GreaterThanEqual:
         if (lhs.type->isSigned() && rhs.type->isSigned())
-          val = build.buildICmp(lhsVal, rhsVal, dyno::BigInt::ICMP_SGE);
+          val = build.buildICmp(lhsVal, rhsVal, BigInt::ICMP_SGE);
         else
-          val = build.buildICmp(lhsVal, rhsVal, dyno::BigInt::ICMP_UGE);
+          val = build.buildICmp(lhsVal, rhsVal, BigInt::ICMP_UGE);
         break;
       case slang::ast::BinaryOperator::GreaterThan:
         if (lhs.type->isSigned() && rhs.type->isSigned())
-          val = build.buildICmp(lhsVal, rhsVal, dyno::BigInt::ICMP_SGT);
+          val = build.buildICmp(lhsVal, rhsVal, BigInt::ICMP_SGT);
         else
-          val = build.buildICmp(lhsVal, rhsVal, dyno::BigInt::ICMP_UGT);
+          val = build.buildICmp(lhsVal, rhsVal, BigInt::ICMP_UGT);
         break;
       case slang::ast::BinaryOperator::LessThanEqual:
         if (lhs.type->isSigned() && rhs.type->isSigned())
-          val = build.buildICmp(lhsVal, rhsVal, dyno::BigInt::ICMP_SLE);
+          val = build.buildICmp(lhsVal, rhsVal, BigInt::ICMP_SLE);
         else
-          val = build.buildICmp(lhsVal, rhsVal, dyno::BigInt::ICMP_ULE);
+          val = build.buildICmp(lhsVal, rhsVal, BigInt::ICMP_ULE);
         break;
       case slang::ast::BinaryOperator::LessThan:
         if (lhs.type->isSigned() && rhs.type->isSigned())
-          val = build.buildICmp(lhsVal, rhsVal, dyno::BigInt::ICMP_SLT);
+          val = build.buildICmp(lhsVal, rhsVal, BigInt::ICMP_SLT);
         else
-          val = build.buildICmp(lhsVal, rhsVal, dyno::BigInt::ICMP_ULT);
+          val = build.buildICmp(lhsVal, rhsVal, BigInt::ICMP_ULT);
         break;
       case slang::ast::BinaryOperator::WildcardEquality:
-        val = build.buildICmp(lhsVal, rhsVal, dyno::BigInt::ICMP_WEQ);
+        val = build.buildICmp(lhsVal, rhsVal, BigInt::ICMP_WEQ);
         break;
       case slang::ast::BinaryOperator::WildcardInequality:
-        val = build.buildICmp(lhsVal, rhsVal, dyno::BigInt::ICMP_WNE);
+        val = build.buildICmp(lhsVal, rhsVal, BigInt::ICMP_WNE);
         break;
 
-      case slang::ast::BinaryOperator::LogicalAnd:
-      case slang::ast::BinaryOperator::LogicalOr:
-      case slang::ast::BinaryOperator::LogicalImplication:
-      case slang::ast::BinaryOperator::LogicalEquivalence:
       case slang::ast::BinaryOperator::Power:
         abort();
         break;
+
+      default:
+        dyno_unreachable("");
       }
 
       if (auto wire = val.dyn_as<WireRef>())
@@ -496,40 +529,78 @@ public:
       auto operand = handle_expr(unop.operand());
       auto operandVal = operand.proGetValue(build);
 
-      assert(operandVal.getNumBits() == unop.type->getBitstreamWidth());
+      // assert(operandVal.getNumBits() == unop.type->getBitstreamWidth());
+
+      HWValue val;
 
       switch (unop.op) {
       case slang::ast::UnaryOperator::Plus:
         return operand;
+        break;
       case slang::ast::UnaryOperator::Minus:
-        return Value::rvalue(
-            build.buildSub(ctx.constBuild().zeroLike(operandVal).get(),
-                           operandVal),
-            unop.type);
+        val = build.buildSub(ctx.constBuild().zeroLike(operandVal).get(),
+                             operandVal);
+        break;
       case slang::ast::UnaryOperator::BitwiseNot:
-        return Value::rvalue(
-            build.buildXor(ctx.constBuild().onesLike(operandVal).get(),
-                           operandVal),
-            unop.type);
-
+        val = build.buildXor(ctx.constBuild().onesLike(operandVal).get(),
+                             operandVal);
+        break;
       case slang::ast::UnaryOperator::BitwiseAnd:
+        val = build.buildICmp(operandVal,
+                              ctx.constBuild().onesLike(operandVal).get(),
+                              BigInt::ICMP_EQ);
+        break;
       case slang::ast::UnaryOperator::BitwiseOr:
+        val = build.buildICmp(operandVal,
+                              ctx.constBuild().zeroLike(operandVal).get(),
+                              BigInt::ICMP_NE);
+        break;
       case slang::ast::UnaryOperator::BitwiseXor:
+        val = build.buildRedXor(operandVal);
+        break;
       case slang::ast::UnaryOperator::BitwiseNand:
+        val = build.buildICmp(operandVal,
+                              ctx.constBuild().onesLike(operandVal).get(),
+                              BigInt::ICMP_NE);
+        break;
       case slang::ast::UnaryOperator::BitwiseNor:
+        val = build.buildICmp(operandVal,
+                              ctx.constBuild().zeroLike(operandVal).get(),
+                              BigInt::ICMP_EQ);
       case slang::ast::UnaryOperator::BitwiseXnor:
-        abort();
+        val = build.buildXor(build.buildRedXor(operandVal),
+                             ConstantRef::fromFourState(FourState::S1));
 
       case slang::ast::UnaryOperator::LogicalNot:
-        abort();
+        val = build.buildICmp(operandVal,
+                              ctx.constBuild().zeroLike(operandVal).get(),
+                              BigInt::ICMP_EQ);
+        break;
 
       case slang::ast::UnaryOperator::Preincrement:
       case slang::ast::UnaryOperator::Predecrement:
       case slang::ast::UnaryOperator::Postincrement:
-      case slang::ast::UnaryOperator::Postdecrement:
-        abort();
+      case slang::ast::UnaryOperator::Postdecrement: {
+        assert(operand.isLValue);
+
+        bool incr = unop.op == slang::ast::UnaryOperator::Preincrement ||
+                    unop.op == slang::ast::UnaryOperator::Postincrement;
+
+        auto one = ctx.constBuild().oneLike(operandVal).get();
+        auto nextV = incr ? build.buildAdd(operandVal, one)
+                          : build.buildSub(operandVal, one);
+
+        build.buildStore(operand.getLVReg(), nextV, operand.getLVBitRange());
+
+        bool post = unop.op == slang::ast::UnaryOperator::Postdecrement ||
+                    unop.op == slang::ast::UnaryOperator::Postincrement;
+
+        val = post ? operandVal : nextV;
         break;
       }
+      }
+
+      return Value::rvalue(val, expr.type);
     }
 
     case slang::ast::ExpressionKind::NamedValue: {

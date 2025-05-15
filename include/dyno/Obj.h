@@ -228,6 +228,13 @@ public:
 
   static bool is_impl(const DynObjRef &Ref);
 
+  bool isCustom() const { return custom != 0; }
+
+  void setCustom(uint16_t custom) { this->custom = custom; }
+  void clearCustom() { custom = 0; }
+
+  explicit operator bool() const { return isCustom() || bool(this->obj); }
+
   T *getPtr() const { return ptr; }
   T &operator*() const {
     assert(ptr && "ptr uninitialized");

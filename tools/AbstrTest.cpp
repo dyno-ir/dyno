@@ -56,7 +56,7 @@ int main() {
                    /*todo: convert to bool*/ sub2);
   build.setInsertPoint(whileInstr.getBodyBlock().begin());
   build.buildStore(reg, whileInstr.getYieldValue(0));
-  build.buildYield(whileInstr.getYieldValue(0));
+  //build.buildYield(whileInstr.getYieldValue(0));
 
   auto func = ctx.buildFunc(mod);
   build.setInsertPoint(func.getBlock().begin());

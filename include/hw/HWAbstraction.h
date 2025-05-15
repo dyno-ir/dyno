@@ -173,7 +173,7 @@ public:
         ([&] { build.constFunc(rest.template as<ConstantRef>()); }(), ...);    \
         return build.get();                                                    \
       }                                                                        \
-    auto rv = buildInstr(DialectID{DIALECT_OP}, OpcodeID{OP_ADD}, true, first, \
+    auto rv = buildInstr(DialectID{DIALECT_OP}, OpcodeID{opcode}, true, first, \
                          rest...)                                              \
                   .defW();                                                     \
     rv->numBits = first.getNumBits();                                          \
@@ -184,63 +184,64 @@ public:
   COMM_OP(buildAnd, OP_AND, bitAND)
   COMM_OP(buildOr, OP_OR, bitOR)
   COMM_OP(buildXor, OP_XOR, bitXOR)
+  COMM_OP(buildXNor, OP_XNOR, bitXNOR)
   COMM_OP(buildMul, OP_MUL, mul)
 
-  template <IsAnyHWValue... Ts> HWInstrRef buildAdd2(Ts... operands) {
+  // template <IsAnyHWValue... Ts> HWInstrRef buildAdd2(Ts... operands) {
 
-    // canonicalize further by having constants rightmost, possible even
-    // sort wires by def opcode?
+  //   // canonicalize further by having constants rightmost, possible even
+  //   // sort wires by def opcode?
 
-    // todo: bitmap
-    std::array<bool, sizeof...(operands)> isSameOpc = {};
-    ssize_t operandDelta = 0;
-    bool anyIsSameOpc = 0;
+  //   // todo: bitmap
+  //   std::array<bool, sizeof...(operands)> isSameOpc = {};
+  //   ssize_t operandDelta = 0;
+  //   bool anyIsSameOpc = 0;
 
-    size_t index = 0;
-    for (HWValue operand : {operands...}) {
-      // todo: via constexpr ifs for direct ConstantRef/WireRef
-      if (auto asWire = operand.template dyn_as<WireRef>();
-          asWire && asWire.hasSingleDef() &&
-          asWire.getSingleDef()->instr().isOpc(DialectID{DIALECT_OP},
-                                               OpcodeID{OP_ADD})) {
-        anyIsSameOpc = 1;
-        isSameOpc[index] = 1;
-        operandDelta = asWire.getSingleDef()->instr().getNumOthers() - 1;
-      }
-      index++;
-    }
+  //   size_t index = 0;
+  //   for (HWValue operand : {operands...}) {
+  //     // todo: via constexpr ifs for direct ConstantRef/WireRef
+  //     if (auto asWire = operand.template dyn_as<WireRef>();
+  //         asWire && asWire.hasSingleDef() &&
+  //         asWire.getSingleDef()->instr().isOpc(DialectID{DIALECT_OP},
+  //                                              OpcodeID{OP_ADD})) {
+  //       anyIsSameOpc = 1;
+  //       isSameOpc[index] = 1;
+  //       operandDelta = asWire.getSingleDef()->instr().getNumOthers() - 1;
+  //     }
+  //     index++;
+  //   }
 
-    if (!anyIsSameOpc) {
-      return buildInstr(DialectID{DIALECT_OP}, OpcodeID{OP_ADD}, true,
-                        operands...);
-    }
+  //   if (!anyIsSameOpc) {
+  //     return buildInstr(DialectID{DIALECT_OP}, OpcodeID{OP_ADD}, true,
+  //                       operands...);
+  //   }
 
-    auto instr = InstrRef{
-        ctx.getInstrs().create(1 + sizeof...(operands) + operandDelta,
-                               DialectID{DIALECT_OP}, OpcodeID{OP_ADD})};
-    insertInstr(instr);
-    InstrBuilder build{instr};
-    // todo: size?
-    build.addRef(ctx.getWires().create());
-    build.other();
+  //   auto instr = InstrRef{
+  //       ctx.getInstrs().create(1 + sizeof...(operands) + operandDelta,
+  //                              DialectID{DIALECT_OP}, OpcodeID{OP_ADD})};
+  //   insertInstr(instr);
+  //   InstrBuilder build{instr};
+  //   // todo: size?
+  //   build.addRef(ctx.getWires().create());
+  //   build.other();
 
-    index = 0;
-    for (HWValue operand : {operands...}) {
-      if (isSameOpc[index]) {
-        InstrRef otherInstr = operand.as<WireRef>().getSingleDef()->instr();
-        for (auto subOp :
-             operand.as<WireRef>().getSingleDef()->instr().others())
-          build.addRef(subOp->template as<HWValue>());
+  //   index = 0;
+  //   for (HWValue operand : {operands...}) {
+  //     if (isSameOpc[index]) {
+  //       InstrRef otherInstr = operand.as<WireRef>().getSingleDef()->instr();
+  //       for (auto subOp :
+  //            operand.as<WireRef>().getSingleDef()->instr().others())
+  //         build.addRef(subOp->template as<HWValue>());
 
-        ctx.getCFG()[otherInstr].erase();
-        ctx.getInstrs().destroy(otherInstr);
-      } else
-        build.addRef(operand);
-      index++;
-    }
+  //       ctx.getCFG()[otherInstr].erase();
+  //       ctx.getInstrs().destroy(otherInstr);
+  //     } else
+  //       build.addRef(operand);
+  //     index++;
+  //   }
 
-    return HWInstrRef{instr};
-  }
+  //   return HWInstrRef{instr};
+  // }
 
 #define BINOP(ident, opcode, constFunc)                                        \
   template <IsAnyHWValue LHS, IsAnyHWValue RHS>                                \
@@ -252,7 +253,7 @@ public:
           .get();                                                              \
     }                                                                          \
     auto rv =                                                                  \
-        buildInstr(DialectID{DIALECT_OP}, OpcodeID{OP_ADD}, true, lhs, rhs)    \
+        buildInstr(DialectID{DIALECT_OP}, OpcodeID{opcode}, true, lhs, rhs)    \
             .defW();                                                           \
     rv->numBits = rhs.getNumBits();                                            \
     return rv;                                                                 \
@@ -277,6 +278,17 @@ public:
     auto rv = buildInstr(DialectID{DIALECT_OP},
                          OpcodeID{OpcodeID::num_t(int(OP_ICMP_EQ) + int(pred))},
                          true, lhs, rhs)
+                  .defW();
+    rv->numBits = 1;
+    return rv;
+  }
+
+  template <IsAnyHWValue T> HWValue buildRedXor(T val) {
+    if (val.template is<ConstantRef>()) {
+      return ConstantRef::fromFourState(
+          BigInt::reductionXOROp4S(val.template as<ConstantRef>()));
+    }
+    auto rv = buildInstr(DialectID{DIALECT_HW}, OpcodeID{HW_RED_XOR}, true, val)
                   .defW();
     rv->numBits = 1;
     return rv;
@@ -441,7 +453,7 @@ public:
     return IfInstrRef{instrRef};
   }
 
-  template <typename... Ts> auto buildYield(Ts... value) {
+  template <IsAnyHWValue... Ts> auto buildYield(Ts... value) {
     // todo: ideally this would dynamically add Wires to the associated
     // IfInstrRef. Alternative is a GET_YIELD instr or something. For now naive
     // implementation as reference, just delete old instr and rebuild
@@ -476,6 +488,18 @@ public:
         HWInstrRef{instr}.iter(ctx).replace(newInstr);
         ctx.getInstrs().destroy(instr);
         instr = newInstr;
+        asIf = newInstr;
+
+        size_t idx = 0;
+        for (auto val : {value...}) {
+          WireRef yieldVal = asIf.getYieldValue(idx).template as<WireRef>();
+          if (val.getNumBits()) {
+            if (!yieldVal->numBits)
+              yieldVal->numBits = val.getNumBits();
+            assert(yieldVal->numBits == val.getNumBits());
+          }
+          idx++;
+        }
       }
       break;
     }
@@ -531,8 +555,6 @@ public:
 
   // todo: full constant support
   ConstantRef buildConst(uint bits, uint64_t value) {
-    // still quite problematic, this constant is never deleted.
-    // Could do unique_ptr or shared_ptr style implementation for safety.
     return ConstantBuilder{ctx.getConstants()}.val(bits, value);
   }
 
