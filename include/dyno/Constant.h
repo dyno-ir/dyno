@@ -1563,7 +1563,7 @@ public:
   static ConstantRef fromFourState(FourState f) {
     if (f.isUnk())
       return ConstantRef{2, f, 0, 1};
-    return ConstantRef{1, !!f, 0, 0};
+    return ConstantRef{1, (bool)f, 0, 0};
   }
 
   std::span<const uint32_t> getWords() const {
