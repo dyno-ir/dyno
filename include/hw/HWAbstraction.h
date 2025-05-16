@@ -243,7 +243,7 @@ public:
   //   return HWInstrRef{instr};
   // }
 
-#define BINOP(ident, opcode, constFunc)                                        \
+#define BINOP(ident, dialect, opcode, constFunc)                                        \
   template <IsAnyHWValue LHS, IsAnyHWValue RHS>                                \
   HWValue ident(LHS lhs, RHS rhs) {                                            \
     if (lhs.template is<ConstantRef>() && rhs.template is<ConstantRef>()) {    \
@@ -253,20 +253,22 @@ public:
           .get();                                                              \
     }                                                                          \
     auto rv =                                                                  \
-        buildInstr(DialectID{DIALECT_OP}, OpcodeID{opcode}, true, lhs, rhs)    \
+        buildInstr(DialectID{dialect}, OpcodeID{opcode}, true, lhs, rhs)    \
             .defW();                                                           \
     rv->numBits = rhs.getNumBits();                                            \
     return rv;                                                                 \
   }
 
-  BINOP(buildSub, OP_SUB, sub)
-  BINOP(buildUDiv, OP_UDIV, udiv)
-  BINOP(buildUMod, OP_UMOD, umod)
-  BINOP(buildSDiv, OP_SDIV, sdiv)
-  BINOP(buildSMod, OP_SMOD, smod)
-  BINOP(buildSLL, OP_SLL, shl)
-  BINOP(buildSRL, OP_SRL, lshr)
-  BINOP(buildSRA, OP_SRA, ashr)
+  BINOP(buildSub, DIALECT_OP, OP_SUB, sub)
+  BINOP(buildUDiv, DIALECT_OP, OP_UDIV, udiv)
+  BINOP(buildUMod, DIALECT_OP, OP_UMOD, umod)
+  BINOP(buildSDiv, DIALECT_OP, OP_SDIV, sdiv)
+  BINOP(buildSMod, DIALECT_OP, OP_SMOD, smod)
+  BINOP(buildSLL, DIALECT_OP, OP_SLL, shl)
+  BINOP(buildSRL, DIALECT_OP, OP_SRL, lshr)
+  BINOP(buildSRA, DIALECT_OP, OP_SRA, ashr)
+  BINOP(buildUPow, DIALECT_HW, HW_UPOW, upow)
+  BINOP(buildSPow, DIALECT_HW, HW_SPOW, spow)
 
   template <IsAnyHWValue LHS, IsAnyHWValue RHS>
   HWValue buildICmp(LHS lhs, RHS rhs, BigInt::ICmpPred pred) {

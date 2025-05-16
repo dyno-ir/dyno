@@ -375,12 +375,19 @@ public:
       // std::cout << binop.kind << "\n";
 
       switch (binop.op) {
+      case slang::ast::BinaryOperator::LogicalOr:
+      case slang::ast::BinaryOperator::LogicalImplication:
       case slang::ast::BinaryOperator::LogicalAnd: {
         auto lhs = handle_expr(binop.left());
         auto lhsVal = lhs.proGetValue(build);
 
         auto zero = ctx.constBuild().zeroLike(lhsVal).get();
-        auto lhsBool = build.buildICmp(lhsVal, zero, BigInt::ICMP_NE);
+
+        auto lhsBool =
+            build.buildICmp(lhsVal, zero,
+                            binop.op == slang::ast::BinaryOperator::LogicalOr
+                                ? BigInt::ICMP_EQ
+                                : BigInt::ICMP_NE);
 
         auto ifElse = build.buildIfElse(lhsBool);
         build.pushInsertPoint(ifElse.getTrueBlock().end());
@@ -393,16 +400,14 @@ public:
 
         build.popInsertPoint();
         build.pushInsertPoint(ifElse.getFalseBlock().end());
-        ifElse =
-            build.buildYield(ConstantRef::fromFourState(FourState::S0)).second;
+        ifElse = build
+                     .buildYield(ConstantRef::fromBool(
+                         binop.op != slang::ast::BinaryOperator::LogicalAnd))
+                     .second;
         build.popInsertPoint();
 
         return Value::rvalue(ifElse.getYieldValue(0).as<WireRef>(), expr.type);
       };
-      case slang::ast::BinaryOperator::LogicalOr:
-      case slang::ast::BinaryOperator::LogicalImplication:
-      case slang::ast::BinaryOperator::LogicalEquivalence:
-
       default:
         break;
       }
@@ -416,9 +421,10 @@ public:
       auto rhsVal = rhs.proGetValue(build);
 
       // for some reason Slang sometimes omits implicit conversions (?)
+      // maybe just for self-determined operands?
       if (auto width = expr.type->getBitstreamWidth(); width && width != 1) {
-        lhsVal = build.buildUpsize(lhsVal, width);
-        rhsVal = build.buildUpsize(rhsVal, width);
+        lhsVal = build.buildUpsize(lhsVal, width, lhs.type->isSigned());
+        rhsVal = build.buildUpsize(rhsVal, width, rhs.type->isSigned());
       }
 
       switch (binop.op) {
@@ -432,13 +438,13 @@ public:
         val = build.buildMul(lhsVal, rhsVal);
         break;
       case slang::ast::BinaryOperator::Divide:
-        if (expr.type->isSigned())
+        if (lhs.type->isSigned() && rhs.type->isSigned())
           val = build.buildSDiv(lhsVal, rhsVal);
         else
           val = build.buildUDiv(lhsVal, rhsVal);
         break;
       case slang::ast::BinaryOperator::Mod:
-        if (expr.type->isSigned())
+        if (lhs.type->isSigned() && rhs.type->isSigned())
           val = build.buildSMod(lhsVal, rhsVal);
         else
           val = build.buildUMod(lhsVal, rhsVal);
@@ -507,10 +513,21 @@ public:
       case slang::ast::BinaryOperator::WildcardInequality:
         val = build.buildICmp(lhsVal, rhsVal, BigInt::ICMP_WNE);
         break;
-
-      case slang::ast::BinaryOperator::Power:
-        abort();
+      case slang::ast::BinaryOperator::LogicalEquivalence: {
+        auto zero = ctx.constBuild().zeroLike(lhsVal).get();
+        val = build.buildICmp(build.buildICmp(lhsVal, zero, BigInt::ICMP_NE),
+                              build.buildICmp(rhsVal, zero, BigInt::ICMP_NE),
+                              BigInt::ICMP_EQ);
         break;
+      }
+      case slang::ast::BinaryOperator::Power: {
+        // signedness of pow only depends on RHS
+        if (rhs.type->isSigned())
+          val = build.buildSPow(lhsVal, rhsVal);
+        else
+          val = build.buildUPow(lhsVal, rhsVal);
+        break;
+      }
 
       default:
         dyno_unreachable("");
@@ -740,6 +757,9 @@ int main(int argc, char **argv) {
     printf("slang-reflect: errors found during compilation\n");
     return 1;
   }
+
+  if (!driver.reportDiagnostics(false))
+    return 1;
 
   HWContext ctx;
 
