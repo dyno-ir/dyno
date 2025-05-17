@@ -258,7 +258,9 @@ template <typename It> class Range {
 public:
   using iterator = It;
 
+  template <typename U> Range(const U &u) : Range(u.begin(), u.end()) {}
   template <typename U> Range(U &u) : Range(u.begin(), u.end()) {}
+
   Range(It beginIt, It endIt) : beginIt(beginIt), endIt(endIt) {}
 
   It begin() const { return beginIt; }
@@ -296,3 +298,4 @@ private:
 };
 
 template <typename U> Range(U &u) -> Range<decltype(u.begin())>;
+template <typename U> Range(const U &u) -> Range<decltype(u.begin())>;

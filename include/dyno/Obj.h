@@ -85,7 +85,8 @@ concept IsAnyObjRef =
     IsDynObjRef<T> || IsFatDynObjRef<T> || IsObjRef<T> || IsFatObjRef<T>;
 
 /// Note: Can be uninitialized!
-template <typename T> class ObjRef : public RTTIUtilMixin<ObjRef<T>> {
+template <typename T>
+class ObjRef : public ByValueRTTIUtilMixin<ObjRef<T>>, ByValueRTTITag {
 protected:
   ObjID obj;
 
@@ -107,7 +108,8 @@ public:
 };
 
 /// Note: Can be uninitialized!
-class alignas(uint64_t) DynObjRef : public RTTIUtilMixin<DynObjRef> {
+class alignas(uint64_t) DynObjRef : public ByValueRTTIUtilMixin<DynObjRef>,
+                                    ByValueRTTITag {
 public:
   template <unsigned N, unsigned Pos>
   using CustomField = BitField<uint16_t, N, Pos>;
@@ -175,12 +177,11 @@ public:
 
   // FatDynObjRef<> fat();
 };
-static_assert(sizeof(DynObjRef) == 8);
 
 /// Note: Can be uninitialized!
 template <typename T>
   requires(!std::is_void_v<T>)
-class FatObjRef : public ObjRef<T>, public RTTIUtilMixin<FatObjRef<T>> {
+class FatObjRef : public ObjRef<T>, public ByValueRTTIUtilMixin<FatObjRef<T>> {
 public:
   template <unsigned N, unsigned Pos>
   using CustomField = BitField<uint16_t, N, Pos>;
@@ -199,9 +200,9 @@ protected:
 
 public:
   using value_type = T;
-  using RTTIUtilMixin<FatObjRef<T>>::as;
-  using RTTIUtilMixin<FatObjRef<T>>::dyn_as;
-  using RTTIUtilMixin<FatObjRef<T>>::is;
+  using ByValueRTTIUtilMixin<FatObjRef<T>>::as;
+  using ByValueRTTIUtilMixin<FatObjRef<T>>::dyn_as;
+  using ByValueRTTIUtilMixin<FatObjRef<T>>::is;
   FatObjRef() = default;
   FatObjRef(nullref_t)
       : ObjRef<T>(nullref), custom(0), special(0), ptr(nullptr) {}
@@ -252,18 +253,19 @@ public:
              reinterpret_cast<U::value_type *>(ptr)};
   }
 };
+static_assert(sizeof(FatObjRef<int>) == 16);
 
 /// Note: Can be uninitialized!
 template <typename T>
-class FatDynObjRef : public DynObjRef, public RTTIUtilMixin<FatDynObjRef<T>> {
+class FatDynObjRef : public DynObjRef, public ByValueRTTIUtilMixin<FatDynObjRef<T>> {
 protected:
   T *ptr;
 
 public:
   using value_type = T;
-  using RTTIUtilMixin<FatDynObjRef<T>>::as;
-  using RTTIUtilMixin<FatDynObjRef<T>>::dyn_as;
-  using RTTIUtilMixin<FatDynObjRef<T>>::is;
+  using ByValueRTTIUtilMixin<FatDynObjRef<T>>::as;
+  using ByValueRTTIUtilMixin<FatDynObjRef<T>>::dyn_as;
+  using ByValueRTTIUtilMixin<FatDynObjRef<T>>::is;
   FatDynObjRef() = default;
   FatDynObjRef(nullref_t) : DynObjRef(nullref), ptr(nullptr) {}
   FatDynObjRef(DynObjRef ref, T *ptr) : DynObjRef(ref), ptr(ptr) {}
@@ -346,6 +348,7 @@ public:
 
   size_t getAllocSize() { return getAllocSize(derived().getNumTrailing()); }
 };
+static_assert(sizeof(FatDynObjRef<>) == 16);
 
 template <typename T>
 concept TrailingObj = requires(T x) {
@@ -394,13 +397,3 @@ template <> struct DenseMapInfo<dyno::DynObjRef> {
     return std::bit_cast<uint64_t>(lhs) == std::bit_cast<uint64_t>(rhs);
   }
 };
-
-template <typename T> struct IsByValueRTTI<dyno::ObjRef<T>> : std::true_type {};
-
-template <typename T>
-struct IsByValueRTTI<dyno::FatObjRef<T>> : std::true_type {};
-
-template <> struct IsByValueRTTI<dyno::DynObjRef> : std::true_type {};
-
-template <typename T>
-struct IsByValueRTTI<dyno::FatDynObjRef<T>> : std::true_type {};

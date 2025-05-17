@@ -34,6 +34,7 @@
 #include <ostream>
 #include <ranges>
 #include <slang/syntax/SyntaxNode.h>
+#include <type_traits>
 
 using namespace dyno;
 
@@ -50,81 +51,130 @@ public:
 
   VisitorAST(HWContext &ctx) : ctx(ctx), build(ctx) {}
 
-  struct Value {
+  struct Value : public RTTIUtilMixin<Value> {
     const slang::ast::Type *type;
-    bool isLValue;
-
-  private:
-    union {
-      HWValue value;
-      struct {
-        RegisterRef lvReg;
-        BitRange lvBitRange;
-      };
+    enum ValueKind : uint8_t {
+      VK_R,
+      VK_L,
+      VK_CCL,
     };
-    Value(HWValue value, const slang::ast::Type *type)
-        : type(type), isLValue(false), value(value) {}
-    Value(RegisterRef reg, const slang::ast::Type *type, BitRange bitRange)
-        : type(type), isLValue(true), lvReg(reg), lvBitRange(bitRange) {}
+
+    ValueKind kind;
+    bool isLValue() { return kind != VK_R; }
+
+  protected:
+    Value(ValueKind kind, const slang::ast::Type *type)
+        : type(type), kind(kind) {}
 
   public:
-    Value() : isLValue(false) {}
+    Value() : kind(VK_R) {}
+
     HWValue getValue() {
-      assert(!isLValue);
-      return value;
+      assert(!isLValue());
+      return (*this).as<RValue>().value;
     }
     HWValue proGetValue(HWInstrBuilder &build) {
-      if (!isLValue)
-        return getValue();
 
-      auto ldVal = build.buildLoad(getLVReg(), getLVBitRange());
-      if (ldVal->numBits < type->getBitstreamWidth())
-        return build.buildExt(type->getBitstreamWidth(), ldVal,
-                              type->isSigned());
-      return ldVal;
+      switch (kind) {
+      case VK_R:
+        return getValue();
+      case VK_L: {
+        auto &asLVal = this->as<RegLValue>();
+        auto ldVal = build.buildLoad(asLVal.lvReg, asLVal.lvBitRange);
+        if (ldVal->numBits < type->getBitstreamWidth())
+          return build.buildExt(type->getBitstreamWidth(), ldVal,
+                                type->isSigned());
+        return ldVal;
+      }
+
+      case VK_CCL:
+        abort();
+      }
     }
-    RegisterRef getLVReg() {
-      assert(isLValue);
-      return lvReg;
+
+    virtual ~Value() = default;
+
+    // RegisterRef getLVReg() {
+    //   assert(kind == VK_L);
+    //   return lvReg;
+    // }
+    // BitRange getLVBitRange() {
+    //   assert(kind == VK_L);
+    //   return lvBitRange;
+    // }
+    // static Value rvalue(HWValue value, const slang::ast::Type *type) {
+    //   return Value{value, type};
+    // }
+    // static Value lvalue(RegisterRef reg, const slang::ast::Type *type,
+    //                     BitRange range = BitRange::full()) {
+    //   return Value{reg, type, range};
+    // }
+  };
+
+  struct RValue : public Value {
+    HWValue value;
+
+    RValue(HWValue value, const slang::ast::Type *type)
+        : Value(VK_R, type), value(value) {}
+
+    static bool is_impl(const Value &v) { return v.kind == VK_R; }
+  };
+
+  struct LValue : public Value {
+    static bool is_impl(const Value &v) {
+      return v.kind == VK_L || v.kind == VK_CCL;
     }
-    BitRange getLVBitRange() {
-      assert(isLValue);
-      return lvBitRange;
+
+  protected:
+    LValue(ValueKind kind, const slang::ast::Type *type) : Value(kind, type) {
+      assert(is_impl(*this));
     }
-    static Value rvalue(HWValue value, const slang::ast::Type *type) {
-      return Value{value, type};
-    }
-    static Value lvalue(RegisterRef reg, const slang::ast::Type *type,
-                        BitRange range = BitRange::full()) {
-      return Value{reg, type, range};
-    }
-    static Value lvalueSlice(HWInstrBuilder &build, Value lv,
-                             const slang::ast::Type *type, BitRange range) {
-      assert(lv.isLValue);
-      if (lv.getLVBitRange() == BitRange::full())
-        return lvalue(lv.getLVReg(), type, range);
+  };
+
+  struct RegLValue : public LValue {
+    RegisterRef lvReg;
+    BitRange lvBitRange;
+
+    RegLValue(RegisterRef reg, const slang::ast::Type *type,
+              BitRange range = BitRange::full())
+        : LValue(VK_L, type), lvReg(reg), lvBitRange(range) {}
+
+    static bool is_impl(const Value &v) { return v.kind == VK_L; }
+
+    static std::unique_ptr<Value> slice(HWInstrBuilder &build, RegLValue lv,
+                                        const slang::ast::Type *type,
+                                        BitRange range) {
+      if (lv.lvBitRange == BitRange::full())
+        return std::make_unique<RegLValue>(lv.lvReg, type, range);
 
       // fixme: can you ever sign extend here?
       auto newAddr =
-          build.buildAdd(build.buildUpsize(lv.getLVBitRange().getAddr(), 32),
+          build.buildAdd(build.buildUpsize(lv.lvBitRange.getAddr(), 32),
                          build.buildUpsize(range.getAddr(), 32));
       auto newLen = range.getLen();
 
-      return lvalue(lv.getLVReg(), type, BitRange{newAddr, newLen});
+      return std::make_unique<RegLValue>(lv.lvReg, type,
+                                         BitRange{newAddr, newLen});
+    }
+  };
+  struct ConcatLValue : public LValue {
+    SmallVec<std::pair<RegisterRef, BitRange>, 4> lvValues;
+
+    ConcatLValue(std::span<std::unique_ptr<Value>> lvals,
+                 const slang::ast::Type *type)
+        : LValue(VK_CCL, type), lvValues() {
+      lvValues.reserve(lvals.size());
+      for (auto &val : lvals) {
+        if (auto asLV = val->dyn_as<RegLValue>())
+          lvValues.emplace_back(std::make_pair(asLV->lvReg, asLV->lvBitRange));
+        else if (auto asCCLV = val->dyn_as<ConcatLValue>()) {
+          lvValues.push_back_range(Range{asCCLV->lvValues});
+        } else
+          dyno_unreachable("expected lvalue");
+      }
     }
 
-    Value(const Value &rhs) { *this = rhs; }
-    Value &operator=(const Value &rhs) {
-      this->type = rhs.type;
-      isLValue = rhs.isLValue;
-      if (isLValue) {
-        this->lvBitRange = rhs.lvBitRange;
-        this->lvReg = rhs.lvReg;
-      } else {
-        this->value = rhs.value;
-      }
-      return *this;
-    }
+    static bool is_impl(const Value &v) { return v.kind == VK_CCL; }
   };
 
   void handle(const slang::ast::InstanceSymbol &node) {
@@ -220,7 +270,7 @@ public:
           auto proc = build.buildProcess();
           build.pushInsertPoint(proc.block().end());
 
-          Value val;
+          std::unique_ptr<Value> val;
 
           if (auto asAssign = conn->getExpression()
                                   ->as_if<slang::ast::AssignmentExpression>()) {
@@ -234,7 +284,7 @@ public:
           ireg->numBits = conn->port.as<slang::ast::PortSymbol>()
                               .getType()
                               .getBitstreamWidth();
-          build.buildStore(ireg, val.proGetValue(build));
+          build.buildStore(ireg, val->proGetValue(build));
           build.popInsertPoint();
         }
         break;
@@ -352,7 +402,7 @@ public:
     return ref;
   }
 
-  Value handle_expr(const slang::ast::Expression &expr) {
+  std::unique_ptr<Value> handle_expr(const slang::ast::Expression &expr) {
 
     switch (expr.kind) {
     case slang::ast::ExpressionKind::Assignment: {
@@ -363,11 +413,11 @@ public:
       auto rhs = handle_expr(assign.right());
       auto lhs = handle_expr(assign.left());
 
-      if (!lhs.isLValue)
+      if (!lhs->is<LValue>())
         abort();
 
-      build.buildStore(lhs.getLVReg(), rhs.proGetValue(build),
-                       lhs.getLVBitRange());
+      build.buildStore(lhs->as<RegLValue>().lvReg, rhs->proGetValue(build),
+                       lhs->as<RegLValue>().lvBitRange);
       return rhs;
     }
     case slang::ast::ExpressionKind::BinaryOp: {
@@ -379,7 +429,7 @@ public:
       case slang::ast::BinaryOperator::LogicalImplication:
       case slang::ast::BinaryOperator::LogicalAnd: {
         auto lhs = handle_expr(binop.left());
-        auto lhsVal = lhs.proGetValue(build);
+        auto lhsVal = lhs->proGetValue(build);
 
         auto zero = ctx.constBuild().zeroLike(lhsVal).get();
 
@@ -393,7 +443,7 @@ public:
         build.pushInsertPoint(ifElse.getTrueBlock().end());
 
         auto rhs = handle_expr(binop.right());
-        auto rhsVal = rhs.proGetValue(build);
+        auto rhsVal = rhs->proGetValue(build);
 
         auto rhsBool = build.buildICmp(rhsVal, zero, BigInt::ICMP_NE);
         ifElse = build.buildYield(rhsBool).second;
@@ -406,7 +456,8 @@ public:
                      .second;
         build.popInsertPoint();
 
-        return Value::rvalue(ifElse.getYieldValue(0).as<WireRef>(), expr.type);
+        return std::make_unique<RValue>(ifElse.getYieldValue(0).as<WireRef>(),
+                                        expr.type);
       };
       default:
         break;
@@ -417,14 +468,14 @@ public:
 
       HWValue val;
 
-      auto lhsVal = lhs.proGetValue(build);
-      auto rhsVal = rhs.proGetValue(build);
+      auto lhsVal = lhs->proGetValue(build);
+      auto rhsVal = rhs->proGetValue(build);
 
       // for some reason Slang sometimes omits implicit conversions (?)
       // maybe just for self-determined operands?
       if (auto width = expr.type->getBitstreamWidth(); width && width != 1) {
-        lhsVal = build.buildUpsize(lhsVal, width, lhs.type->isSigned());
-        rhsVal = build.buildUpsize(rhsVal, width, rhs.type->isSigned());
+        lhsVal = build.buildUpsize(lhsVal, width, lhs->type->isSigned());
+        rhsVal = build.buildUpsize(rhsVal, width, rhs->type->isSigned());
       }
 
       switch (binop.op) {
@@ -438,13 +489,13 @@ public:
         val = build.buildMul(lhsVal, rhsVal);
         break;
       case slang::ast::BinaryOperator::Divide:
-        if (lhs.type->isSigned() && rhs.type->isSigned())
+        if (lhs->type->isSigned() && rhs->type->isSigned())
           val = build.buildSDiv(lhsVal, rhsVal);
         else
           val = build.buildUDiv(lhsVal, rhsVal);
         break;
       case slang::ast::BinaryOperator::Mod:
-        if (lhs.type->isSigned() && rhs.type->isSigned())
+        if (lhs->type->isSigned() && rhs->type->isSigned())
           val = build.buildSMod(lhsVal, rhsVal);
         else
           val = build.buildUMod(lhsVal, rhsVal);
@@ -484,25 +535,25 @@ public:
         val = build.buildICmp(lhsVal, rhsVal, BigInt::ICMP_CNE);
         break;
       case slang::ast::BinaryOperator::GreaterThanEqual:
-        if (lhs.type->isSigned() && rhs.type->isSigned())
+        if (lhs->type->isSigned() && rhs->type->isSigned())
           val = build.buildICmp(lhsVal, rhsVal, BigInt::ICMP_SGE);
         else
           val = build.buildICmp(lhsVal, rhsVal, BigInt::ICMP_UGE);
         break;
       case slang::ast::BinaryOperator::GreaterThan:
-        if (lhs.type->isSigned() && rhs.type->isSigned())
+        if (lhs->type->isSigned() && rhs->type->isSigned())
           val = build.buildICmp(lhsVal, rhsVal, BigInt::ICMP_SGT);
         else
           val = build.buildICmp(lhsVal, rhsVal, BigInt::ICMP_UGT);
         break;
       case slang::ast::BinaryOperator::LessThanEqual:
-        if (lhs.type->isSigned() && rhs.type->isSigned())
+        if (lhs->type->isSigned() && rhs->type->isSigned())
           val = build.buildICmp(lhsVal, rhsVal, BigInt::ICMP_SLE);
         else
           val = build.buildICmp(lhsVal, rhsVal, BigInt::ICMP_ULE);
         break;
       case slang::ast::BinaryOperator::LessThan:
-        if (lhs.type->isSigned() && rhs.type->isSigned())
+        if (lhs->type->isSigned() && rhs->type->isSigned())
           val = build.buildICmp(lhsVal, rhsVal, BigInt::ICMP_SLT);
         else
           val = build.buildICmp(lhsVal, rhsVal, BigInt::ICMP_ULT);
@@ -522,7 +573,7 @@ public:
       }
       case slang::ast::BinaryOperator::Power: {
         // signedness of pow only depends on RHS
-        if (rhs.type->isSigned())
+        if (rhs->type->isSigned())
           val = build.buildSPow(lhsVal, rhsVal);
         else
           val = build.buildUPow(lhsVal, rhsVal);
@@ -537,14 +588,14 @@ public:
         if (auto width = binop.type->getBitstreamWidth())
           wire->numBits = width;
 
-      return Value::rvalue(val, expr.type.get());
+      return std::make_unique<RValue>(val, expr.type.get());
       break;
     }
     case slang::ast::ExpressionKind::UnaryOp: {
       const auto &unop = expr.as<slang::ast::UnaryExpression>();
 
       auto operand = handle_expr(unop.operand());
-      auto operandVal = operand.proGetValue(build);
+      auto operandVal = operand->proGetValue(build);
 
       // assert(operandVal.getNumBits() == unop.type->getBitstreamWidth());
 
@@ -598,7 +649,7 @@ public:
       case slang::ast::UnaryOperator::Predecrement:
       case slang::ast::UnaryOperator::Postincrement:
       case slang::ast::UnaryOperator::Postdecrement: {
-        assert(operand.isLValue);
+        assert(operand->isLValue());
 
         bool incr = unop.op == slang::ast::UnaryOperator::Preincrement ||
                     unop.op == slang::ast::UnaryOperator::Postincrement;
@@ -607,7 +658,8 @@ public:
         auto nextV = incr ? build.buildAdd(operandVal, one)
                           : build.buildSub(operandVal, one);
 
-        build.buildStore(operand.getLVReg(), nextV, operand.getLVBitRange());
+        build.buildStore(operand->as<RegLValue>().lvReg, nextV,
+                         operand->as<RegLValue>().lvBitRange);
 
         bool post = unop.op == slang::ast::UnaryOperator::Postdecrement ||
                     unop.op == slang::ast::UnaryOperator::Postincrement;
@@ -617,7 +669,7 @@ public:
       }
       }
 
-      return Value::rvalue(val, expr.type);
+      return std::make_unique<RValue>(val, expr.type);
     }
 
     case slang::ast::ExpressionKind::NamedValue: {
@@ -625,46 +677,47 @@ public:
       auto sig = vars.find(&nval.symbol);
       assert(sig != vars.end());
 
-      return Value::lvalue(sig.val(), expr.type);
-      break;
+      return std::make_unique<RegLValue>(sig.val(), expr.type);
     }
     case slang::ast::ExpressionKind::IntegerLiteral: {
       const auto &asLit = expr.as<slang::ast::IntegerLiteral>();
-      return Value::rvalue(toDynoConstant(asLit.getValue()), expr.type);
+      return std::make_unique<RValue>(toDynoConstant(asLit.getValue()),
+                                      expr.type);
     }
     case slang::ast::ExpressionKind::UnbasedUnsizedIntegerLiteral: {
       const auto &asLit = expr.as<slang::ast::UnbasedUnsizedIntegerLiteral>();
-      return Value::rvalue(toDynoConstant(asLit.getValue()), expr.type);
+      return std::make_unique<RValue>(toDynoConstant(asLit.getValue()),
+                                      expr.type);
     }
 
     case slang::ast::ExpressionKind::Conversion: {
       const auto &asConv = expr.as<slang::ast::ConversionExpression>();
       auto src = handle_expr(asConv.operand());
-      HWValue val = src.proGetValue(build);
+      HWValue val = src->proGetValue(build);
       uint32_t newWidth = asConv.type->getBitstreamWidth();
       if (newWidth > val.getNumBits())
-        val = build.buildExt(newWidth, val, src.type->isSigned());
+        val = build.buildExt(newWidth, val, src->type->isSigned());
       else if (newWidth < val.getNumBits())
         val = build.buildTrunc(newWidth, val);
 
-      return Value::rvalue(val, expr.type);
+      return std::make_unique<RValue>(val, expr.type);
     }
 
     case slang::ast::ExpressionKind::RangeSelect: {
-      auto &asElemS = expr.as<slang::ast::RangeSelectExpression>();
-      auto value = handle_expr(asElemS.value());
+      auto &asRangeS = expr.as<slang::ast::RangeSelectExpression>();
+      auto value = handle_expr(asRangeS.value());
 
       auto rangeLeft =
-          build.buildUpsize(handle_expr(asElemS.left()).proGetValue(build), 32,
-                            asElemS.left().type->isSigned());
+          build.buildUpsize(handle_expr(asRangeS.left())->proGetValue(build),
+                            32, asRangeS.left().type->isSigned());
       auto rangeRight =
-          build.buildUpsize(handle_expr(asElemS.right()).proGetValue(build), 32,
-                            asElemS.right().type->isSigned());
+          build.buildUpsize(handle_expr(asRangeS.right())->proGetValue(build),
+                            32, asRangeS.right().type->isSigned());
 
       HWValue offs;
       HWValue len;
 
-      switch (asElemS.getSelectionKind()) {
+      switch (asRangeS.getSelectionKind()) {
       case slang::ast::RangeSelectionKind::Simple: {
         offs = rangeRight;
         auto sub = build.buildSub(rangeLeft, rangeRight);
@@ -684,16 +737,26 @@ public:
         offs = add;
         break;
       }
-      if (value.isLValue) {
-        return Value::lvalueSlice(build, value, expr.type, BitRange{offs, len});
+      if (value->is<LValue>()) {
+        return RegLValue::slice(build, value->as<RegLValue>(), expr.type,
+                                BitRange{offs, len});
       }
 
-      auto splice = build.buildSplice(value.getValue(), BitRange{offs, len});
+      auto splice = build.buildSplice(value->getValue(), BitRange{offs, len});
       splice.defW()->numBits = expr.type->getBitstreamWidth();
-      return Value::rvalue(splice.defW(), expr.type);
+      return std::make_unique<RValue>(splice.defW(), expr.type);
     }
 
-    case slang::ast::ExpressionKind::ElementSelect:
+    case slang::ast::ExpressionKind::ElementSelect: {
+      auto &asElemS = expr.as<slang::ast::ElementSelectExpression>();
+
+      auto value = handle_expr(asElemS.value());
+      auto index = build.buildUpsize(
+          handle_expr(asElemS.selector())->proGetValue(build), 32);
+
+      return RegLValue::slice(build, value->as<RegLValue>(), expr.type,
+                              BitRange{index, ConstantRef::fromU32(1)});
+    }
 
     case slang::ast::ExpressionKind::Invalid:
     case slang::ast::ExpressionKind::RealLiteral:
@@ -705,7 +768,26 @@ public:
     case slang::ast::ExpressionKind::HierarchicalValue:
     case slang::ast::ExpressionKind::ConditionalOp:
     case slang::ast::ExpressionKind::Inside:
-    case slang::ast::ExpressionKind::Concatenation:
+    case slang::ast::ExpressionKind::Concatenation: {
+      auto &asConcat = expr.as<slang::ast::ConcatenationExpression>();
+      SmallVec<std::unique_ptr<Value>, 4> values{asConcat.operands().size()};
+
+      bool lvalue = true;
+      for (auto [idx, expr] : Range{asConcat.operands()}.enumerate()) {
+        values[idx] = handle_expr(*expr);
+        lvalue &= values[idx]->isLValue();
+      }
+      if (lvalue)
+        return std::make_unique<ConcatLValue>(values, expr.type);
+
+      SmallVec<std::pair<HWValue, BitRange>, 4> buf{values.size()};
+      for (auto [idx, val] : Range{values}.enumerate()) {
+        buf[idx].first = val->proGetValue(build);
+        buf[idx].second = BitRange::full();
+      }
+      auto val = build.buildSplice(ArrayRef{buf.begin(), buf.end()});
+      return std::make_unique<RValue>(val, expr.type);
+    }
     case slang::ast::ExpressionKind::Replication:
     case slang::ast::ExpressionKind::Streaming:
 

@@ -16,6 +16,8 @@
 #include "op/Function.h"
 #include "op/IDs.h"
 #include "op/StructuredControlFlow.h"
+#include "support/ArrayRef.h"
+#include "support/RTTI.h"
 #include "support/TemplateUtil.h"
 #include "support/Utility.h"
 #include <dyno/NewDeleteObjStore.h>
@@ -114,6 +116,20 @@ public:
 
   void insertInstr(InstrRef instr) { insert.insertPrev(instr); }
 
+protected:
+  // Compile-time edge cases for adding special types like BitRange
+  // todo: rename this and put this in new HWInstrBuilder deriving from instr
+  // build
+  template <typename T> void addSpecialRef(InstrBuilder &build, const T &ref) {
+    if constexpr (std::is_same_v<BitRange, T>) {
+      build.addRef(ref.getAddr());
+      build.addRef(ref.getLen());
+    } else {
+      build.addRef(ref);
+    }
+  }
+
+public:
   template <typename... Ts>
   void addRefs(InstrRef instr, bool addWireDef, Ts... operands) {
     InstrBuilder build{instr};
@@ -122,18 +138,7 @@ public:
       build.addRef(defWire);
     }
     build.other();
-    (
-        // Compile-time edge cases for adding special types like BitRange
-        [&] {
-          if constexpr (std::is_same_v<BitRange,
-                                       std::decay_t<decltype(operands)>>) {
-            build.addRef(operands.getAddr());
-            build.addRef(operands.getLen());
-          } else {
-            build.addRef(operands);
-          }
-        }(),
-        ...);
+    ([&] { addSpecialRef(build, operands); }(), ...);
   }
 
   template <typename... Ts> constexpr unsigned getNumOperands() {
@@ -243,7 +248,7 @@ public:
   //   return HWInstrRef{instr};
   // }
 
-#define BINOP(ident, dialect, opcode, constFunc)                                        \
+#define BINOP(ident, dialect, opcode, constFunc)                               \
   template <IsAnyHWValue LHS, IsAnyHWValue RHS>                                \
   HWValue ident(LHS lhs, RHS rhs) {                                            \
     if (lhs.template is<ConstantRef>() && rhs.template is<ConstantRef>()) {    \
@@ -252,9 +257,8 @@ public:
           .constFunc(rhs.template as<ConstantRef>())                           \
           .get();                                                              \
     }                                                                          \
-    auto rv =                                                                  \
-        buildInstr(DialectID{dialect}, OpcodeID{opcode}, true, lhs, rhs)    \
-            .defW();                                                           \
+    auto rv = buildInstr(DialectID{dialect}, OpcodeID{opcode}, true, lhs, rhs) \
+                  .defW();                                                     \
     rv->numBits = rhs.getNumBits();                                            \
     return rv;                                                                 \
   }
@@ -358,6 +362,24 @@ public:
                   "operands must be pairs of HWValue & BitRange");
     return buildInstr(DialectID{DIALECT_HW}, OpcodeID{HW_SPLICE}, true,
                       operands...);
+  }
+
+  HWValue buildSplice(ArrayRef<std::pair<HWValue, BitRange>> values) {
+    auto instr = InstrRef{ctx.getInstrs().create(
+        1 + values.size() * 3, DialectID{DIALECT_HW}, OpcodeID{HW_SPLICE})};
+
+    insertInstr(instr);
+    InstrBuilder build{instr};
+
+    build.addRef(ctx.getWires().create());
+    build.other();
+
+    for (auto [value, range] : values) {
+      build.addRef(value);
+      addSpecialRef(build, range);
+    }
+
+    return HWInstrRef{instr}.defW();
   }
 
   WireRef buildLoad(RegisterRef reg, BitRange range = BitRange::full()) {

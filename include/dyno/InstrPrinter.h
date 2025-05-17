@@ -107,7 +107,7 @@ public:
   }
 
   void printRefOrUse(FatDynObjRef<> ref) {
-    if (ref == nullref) {
+    if (ref.getObjID() == ObjID::invalid() && !ref.getCustom()) {
       str << "nullref";
       return;
     }

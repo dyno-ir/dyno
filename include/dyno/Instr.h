@@ -24,7 +24,7 @@ class OperandRef;
 class InstrDefUse;
 class InsrBuilder;
 
-class Operand : public RTTIUtilMixin<Operand> {
+class Operand : public ByValueRTTIUtilMixin<Operand>, ByValueRTTITag2 {
   friend class Instr;
   friend class InstrRef;
   friend class OperandRef;
@@ -636,4 +636,3 @@ inline void Operand::destroy() {
 }
 
 } // namespace dyno
-template <> struct IsByValueRTTI<dyno::Operand> : std::true_type {};
