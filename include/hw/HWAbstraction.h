@@ -20,6 +20,7 @@
 #include "support/RTTI.h"
 #include "support/TemplateUtil.h"
 #include "support/Utility.h"
+#include <algorithm>
 #include <dyno/NewDeleteObjStore.h>
 #include <type_traits>
 
@@ -357,11 +358,43 @@ public:
     return val;
   }
 
-  template <typename... Ts> HWInstrRef buildSplice(Ts... operands) {
+private:
+  Optional<uint32_t> spliceSingleNumBits(HWValue value, BitRange range) {
+    if ((range.hasLen() && range.getLen().as<ConstantRef>())) {
+      return range.getLen().as<ConstantRef>().getExactVal();
+    }
+    if (!range.hasLen() && value.getNumBits()) {
+      assert(range == BitRange::full());
+      return value.getNumBits();
+    }
+    return nullopt;
+  }
+  template <typename... Rest>
+  Optional<uint32_t> spliceNumBits(HWValue value, BitRange range,
+                                   Rest... rest) {
+    auto lhs = spliceSingleNumBits(value, range);
+    if (!lhs)
+      return nullopt;
+
+    auto rhs = spliceNumBits(rest...);
+    if (!rhs)
+      return nullopt;
+
+    return *lhs + *rhs;
+  }
+  Optional<uint32_t> spliceNumBits() { return 0; }
+
+public:
+  template <typename... Ts> HWValue buildSplice(Ts... operands) {
     static_assert(sizeof...(operands) % 2 == 0 &&
                   "operands must be pairs of HWValue & BitRange");
-    return buildInstr(DialectID{DIALECT_HW}, OpcodeID{HW_SPLICE}, true,
-                      operands...);
+    Optional<uint32_t> len = spliceNumBits(operands...);
+
+    auto rv = buildInstr(DialectID{DIALECT_HW}, OpcodeID{HW_SPLICE}, true,
+                         operands...)
+                  .defW();
+    rv->numBits = len;
+    return rv;
   }
 
   HWValue buildSplice(ArrayRef<std::pair<HWValue, BitRange>> values) {
@@ -374,12 +407,86 @@ public:
     build.addRef(ctx.getWires().create());
     build.other();
 
+    Optional<uint32_t> numBits;
+
     for (auto [value, range] : values) {
       build.addRef(value);
       addSpecialRef(build, range);
+
+      if (numBits) {
+        auto val = spliceSingleNumBits(value, range);
+        if (!val)
+          numBits = nullopt;
+        else
+          *numBits += *val;
+      }
     }
 
-    return HWInstrRef{instr}.defW();
+    auto rv = HWInstrRef{instr}.defW();
+    rv->numBits = numBits;
+    return rv;
+  }
+
+  HWValue buildConcat(ArrayRef<HWValue> values) {
+
+    if (values.size() == 1)
+      return values[0];
+
+    if (std::all_of(values.begin(), values.end(),
+                    [](const HWValue &val) { return val.is<ConstantRef>(); })) {
+      auto cbuild = ctx.constBuild();
+      if (values.size() == 0)
+        return cbuild.val(0, 0).get();
+      cbuild.val(values.back().as<ConstantRef>());
+      for (size_t i = values.size() - 1; i-- > 0;)
+        cbuild.concat(values[i].as<ConstantRef>());
+
+      return cbuild.get();
+    }
+
+    auto instr = InstrRef{ctx.getInstrs().create(
+        1 + values.size(), DialectID{DIALECT_HW}, OpcodeID{HW_CONCAT})};
+
+    insertInstr(instr);
+    InstrBuilder build{instr};
+
+    build.addRef(ctx.getWires().create());
+    build.other();
+
+    Optional<uint32_t> numBits;
+    for (auto value : values) {
+      build.addRef(value);
+      if (auto val = value.getNumBits(); val && numBits)
+        *numBits = *numBits + *val;
+      else
+        numBits = nullopt;
+    }
+    auto rv = HWInstrRef{instr}.defW();
+    rv->numBits = numBits;
+    return rv;
+  }
+
+  HWValue buildRepeat(HWValue value, HWValue count) {
+    if (value.is<ConstantRef>() && count.is<ConstantRef>()) {
+      return ctx.constBuild()
+          .val(value.as<ConstantRef>())
+          .repeat(count.as<ConstantRef>().getExactVal())
+          .get();
+    }
+
+    auto rv = buildInstr(DialectID{DIALECT_HW}, OpcodeID{HW_REPEAT}, true,
+                         value, count)
+                  .defW();
+
+    if (value.getNumBits() && count.is<ConstantRef>()) {
+      uint32_t out;
+      if (__builtin_umul_overflow(*value.getNumBits(),
+                                  count.as<ConstantRef>().getExactVal(), &out))
+        abort(); // todo: what type of error should this throw?
+      rv->numBits = out;
+    }
+
+    return rv;
   }
 
   WireRef buildLoad(RegisterRef reg, BitRange range = BitRange::full()) {
@@ -396,7 +503,7 @@ public:
     return ref.defW();
   }
 
-  HWInstrRef buildStore(RegisterRef reg, FatDynObjRef<> value,
+  HWInstrRef buildStore(RegisterRef reg, HWValue value,
                         BitRange range = BitRange::full()) {
     if (range == BitRange::full())
       return buildInstr(DialectID{DIALECT_HW}, OpcodeID{HW_STORE}, false, value,

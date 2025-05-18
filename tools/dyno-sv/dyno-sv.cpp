@@ -34,6 +34,7 @@
 #include <ostream>
 #include <ranges>
 #include <slang/syntax/SyntaxNode.h>
+#include <tuple>
 #include <type_traits>
 
 using namespace dyno;
@@ -74,21 +75,27 @@ public:
       return (*this).as<RValue>().value;
     }
     HWValue proGetValue(HWInstrBuilder &build) {
-
       switch (kind) {
       case VK_R:
         return getValue();
       case VK_L: {
         auto &asLVal = this->as<RegLValue>();
         auto ldVal = build.buildLoad(asLVal.lvReg, asLVal.lvBitRange);
-        if (ldVal->numBits < type->getBitstreamWidth())
-          return build.buildExt(type->getBitstreamWidth(), ldVal,
-                                type->isSigned());
+        assert(ldVal->numBits == type->getBitstreamWidth());
+        // if (ldVal->numBits < type->getBitstreamWidth())
+        //   return build.buildExt(type->getBitstreamWidth(), ldVal,
+        //                         type->isSigned());
         return ldVal;
       }
 
-      case VK_CCL:
-        abort();
+      case VK_CCL: {
+        auto &asCCLV = this->as<ConcatLValue>();
+        SmallVec<HWValue, 4> buf{asCCLV.lvValues.size()};
+        for (auto [idx, val] : Range{asCCLV.lvValues}.reverse().enumerate()) {
+          buf[idx] = build.buildLoad(val.first, val.second);
+        }
+        return build.buildConcat(ArrayRef{buf.begin(), buf.end()});
+      }
       }
     }
 
@@ -129,6 +136,35 @@ public:
     LValue(ValueKind kind, const slang::ast::Type *type) : Value(kind, type) {
       assert(is_impl(*this));
     }
+
+  public:
+    void storeVal(HWInstrBuilder build, HWValue val) {
+      switch (kind) {
+      case Value::VK_L: {
+        build.buildStore(this->as<RegLValue>().lvReg, val,
+                         this->as<RegLValue>().lvBitRange);
+        break;
+      }
+      case Value::VK_CCL: {
+        auto &asCCLV = this->as<ConcatLValue>();
+
+        HWValue offs = ConstantRef::fromU32(0);
+
+        for (auto &[reg, range] : Range{asCCLV.lvValues}) {
+          HWValue len = range.hasLen() ? range.getLen()
+                                       : ConstantRef::fromU32(*reg->numBits);
+          assert(range.hasLen() ||
+                 range.addr.as<ConstantRef>().getExactVal() == 0);
+          build.buildStore(reg, build.buildSplice(val, BitRange{offs, len}),
+                           range);
+          offs = build.buildAdd(offs, len);
+        }
+        break;
+      }
+      default:
+        dyno_unreachable("expected lval");
+      }
+    }
   };
 
   struct RegLValue : public LValue {
@@ -164,7 +200,7 @@ public:
                  const slang::ast::Type *type)
         : LValue(VK_CCL, type), lvValues() {
       lvValues.reserve(lvals.size());
-      for (auto &val : lvals) {
+      for (auto &val : Range{lvals}.reverse()) {
         if (auto asLV = val->dyn_as<RegLValue>())
           lvValues.emplace_back(std::make_pair(asLV->lvReg, asLV->lvBitRange));
         else if (auto asCCLV = val->dyn_as<ConcatLValue>()) {
@@ -409,15 +445,10 @@ public:
       const auto &assign = expr.as<slang::ast::AssignmentExpression>();
 
       // todo: assign.isBlocking()
-
       auto rhs = handle_expr(assign.right());
       auto lhs = handle_expr(assign.left());
 
-      if (!lhs->is<LValue>())
-        abort();
-
-      build.buildStore(lhs->as<RegLValue>().lvReg, rhs->proGetValue(build),
-                       lhs->as<RegLValue>().lvBitRange);
+      lhs->as<LValue>().storeVal(build, rhs->proGetValue(build));
       return rhs;
     }
     case slang::ast::ExpressionKind::BinaryOp: {
@@ -658,8 +689,7 @@ public:
         auto nextV = incr ? build.buildAdd(operandVal, one)
                           : build.buildSub(operandVal, one);
 
-        build.buildStore(operand->as<RegLValue>().lvReg, nextV,
-                         operand->as<RegLValue>().lvBitRange);
+        operand->as<LValue>().storeVal(build, nextV);
 
         bool post = unop.op == slang::ast::UnaryOperator::Postdecrement ||
                     unop.op == slang::ast::UnaryOperator::Postincrement;
@@ -743,8 +773,8 @@ public:
       }
 
       auto splice = build.buildSplice(value->getValue(), BitRange{offs, len});
-      splice.defW()->numBits = expr.type->getBitstreamWidth();
-      return std::make_unique<RValue>(splice.defW(), expr.type);
+      splice.as<WireRef>()->numBits = expr.type->getBitstreamWidth();
+      return std::make_unique<RValue>(splice.as<WireRef>(), expr.type);
     }
 
     case slang::ast::ExpressionKind::ElementSelect: {
@@ -768,6 +798,8 @@ public:
     case slang::ast::ExpressionKind::HierarchicalValue:
     case slang::ast::ExpressionKind::ConditionalOp:
     case slang::ast::ExpressionKind::Inside:
+      break;
+
     case slang::ast::ExpressionKind::Concatenation: {
       auto &asConcat = expr.as<slang::ast::ConcatenationExpression>();
       SmallVec<std::unique_ptr<Value>, 4> values{asConcat.operands().size()};
@@ -780,15 +812,22 @@ public:
       if (lvalue)
         return std::make_unique<ConcatLValue>(values, expr.type);
 
-      SmallVec<std::pair<HWValue, BitRange>, 4> buf{values.size()};
+      SmallVec<HWValue, 4> buf{values.size()};
       for (auto [idx, val] : Range{values}.enumerate()) {
-        buf[idx].first = val->proGetValue(build);
-        buf[idx].second = BitRange::full();
+        buf[idx] = val->proGetValue(build);
       }
-      auto val = build.buildSplice(ArrayRef{buf.begin(), buf.end()});
+      auto val = build.buildConcat(ArrayRef{buf.begin(), buf.end()});
       return std::make_unique<RValue>(val, expr.type);
     }
-    case slang::ast::ExpressionKind::Replication:
+    case slang::ast::ExpressionKind::Replication: {
+      auto &asRepl = expr.as<slang::ast::ReplicationExpression>();
+
+      auto val = handle_expr(asRepl.concat())->proGetValue(build);
+      auto cnt = handle_expr(asRepl.count())->proGetValue(build);
+
+      return std::make_unique<RValue>(build.buildRepeat(val, cnt), expr.type);
+    }
+
     case slang::ast::ExpressionKind::Streaming:
 
     case slang::ast::ExpressionKind::MemberAccess:

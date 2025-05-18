@@ -105,7 +105,7 @@ public:
   }
 
   transform_iterator operator++(int) {
-    deref_iterator tmp(*this);
+    transform_iterator tmp(*this);
     ++(*this);
     return tmp;
   }
@@ -144,7 +144,7 @@ public:
   }
 
   enumerate_iterator operator++(int) {
-    deref_iterator tmp(*this);
+    enumerate_iterator tmp(*this);
     ++(*this);
     return tmp;
   }
@@ -281,6 +281,11 @@ public:
   auto discard_optional() {
     return ::Range{discard_optional_iterator{beginIt, endIt},
                    discard_optional_iterator{endIt}};
+  }
+
+  auto reverse() {
+    return ::Range{std::reverse_iterator<It>{end()},
+                   std::reverse_iterator<It>{begin()}};
   }
 
   template <typename TransformT> auto transform(TransformT transformF) {

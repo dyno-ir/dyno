@@ -79,7 +79,7 @@ protected:
     return bitsToWords(self().getRawNumBits());
   }
   uint32_t getWord(uint32_t i) const {
-    if (i > bitsToWords(self().getRawNumBits()))
+    if (i >= bitsToWords(self().getRawNumBits()))
       dyno_unreachable("out of bounds");
 
     if (i >= self().getNumWords())
@@ -266,6 +266,10 @@ public:
   }
 
   template <BigIntAPI T> BigInt &operator=(const T &other) {
+    if constexpr (std::is_same_v<T, BigInt>)
+      if (&other == this)
+        return *this;
+
     this->numBits = other.getRawNumBits();
     Extend{field} = other.getExtend();
     Custom{field} = other.getCustom();
@@ -1008,9 +1012,9 @@ public:
 
     ssize_t words = val.getExtNumWords();
 
-    if (val.getNumBits() % 32 != 0) {
+    if (val.getRawNumBits() % 32 != 0) {
       acc ^= val.getWord(val.getExtNumWords() - 1) &
-             bit_mask_ones<uint32_t>(val.getNumBits() % 32);
+             bit_mask_ones<uint32_t>(val.getRawNumBits() % 32);
       words--;
     }
 
@@ -1024,6 +1028,84 @@ public:
     }
 
     return __builtin_parity(acc);
+  }
+
+  template <BigIntAPI T0, BigIntAPI T1>
+  static void concatOp(BigInt &out, const T0 &lhs, const T1 &rhs) {
+    size_t rhsWords = rhs.getNumWords();
+    size_t rhsExtWords = rhs.getExtNumWords();
+    size_t rhsBits = rhs.getRawNumBits();
+
+    size_t outNumWords = rhsExtWords + lhs.getNumWords();
+    if ((rhsBits % 32) && (lhs.getRawNumBits() % 32) &&
+        (rhsBits % 32) + (lhs.getRawNumBits() % 32) <= 32)
+      outNumWords--;
+
+    out.words.resize(outNumWords);
+    out.numBits = lhs.getRawNumBits() + rhsBits;
+
+    do {
+      // edge case rhs == out.
+      if constexpr (std::is_same_v<T1, BigInt>) {
+        if (&rhs == &out)
+          break;
+      }
+      // regular case, copy into out
+      std::copy_n(rhs.getWords().begin(), rhsWords, out.words.begin());
+    } while (false);
+
+    // copy RHS extend into out
+    for (size_t i = rhsWords; i < rhsExtWords; i++)
+      out.words[i] = rhs.getWord(i);
+
+    size_t lhsOffs = rhsBits / WordBits;
+    size_t lhsShamt = rhsBits % WordBits;
+
+    out.words[lhsOffs] &= bit_mask_ones<uint32_t>(lhsShamt);
+    out.words[lhsOffs] |= lhs.getWord(0) << lhsShamt;
+
+    for (size_t i = lhsOffs + 1; i < out.words.size(); i++) {
+      size_t lowI = i - lhsOffs - 1;
+      size_t highI = i - lhsOffs;
+
+      out.words[i] =
+          (lhsShamt == 0 ? 0 : (lhs.getWord(lowI) >> (32 - lhsShamt))) |
+          (lhs.getWord(highI) << lhsShamt);
+    }
+
+    Extend{out.field} = lhs.getExtend();
+    out.normalize();
+  }
+
+  template <BigIntAPI T0>
+  static void repeatOp(BigInt &out, const T0 &val, uint32_t count) {
+    if (count == 0) {
+      out.set(0U, 0);
+      return;
+    } else if (count == 1) {
+      out = val;
+      return;
+    } else if (count == 2) {
+      concatOp(out, val, out);
+      return;
+    }
+
+    // out might alias val so do this first
+    BigInt pow;
+    concatOp(pow, val, val);
+
+    if (!(count & 1))
+      out.set(0U, 0);
+    count &= bit_mask_zeros<decltype(count)>(1);
+
+    for (size_t i = 1; i < bit_mask_sz<decltype(count)> && count; i++) {
+      if (count & (1ULL << i)) {
+        concatOp(out, pow, out);
+        count &= ~(1ULL << i);
+      }
+
+      concatOp(pow, pow, pow);
+    }
   }
 
   // 4 State
@@ -1115,7 +1197,6 @@ public:
     numBits /= 2;
     setCustom(0);
   }
-
   void conv4To2StateIfPossible() {
     if (!getCustom())
       return;
@@ -1128,6 +1209,23 @@ public:
 
     conv4To2State();
     normalize();
+  }
+  void conv2To4State() {
+    size_t outNumWords = round_up_div(2 * getNumBits(), WordBits);
+    SmallVec<uint32_t, 4> buf{outNumWords};
+
+    for (size_t i = 0; i < getNumWords() - 1; i++) {
+      buf[2 * i + 0] = unpack_bits(words[i]);
+      buf[2 * i + 1] = unpack_bits(words[i] >> 16);
+    }
+    buf[2 * (getNumWords() - 1) + 0] = unpack_bits(words.back());
+    if (auto idx = 2 * (getNumWords() - 1) + 1; idx < buf.size())
+      buf[idx] = unpack_bits(words.back() >> 16);
+
+    words = std::move(buf);
+    numBits *= 2;
+    Extend{field} = (Extend{field} & 1);
+    Custom{field} = 1;
   }
   template <auto Func4S, auto Func2S, typename T0, typename T1>
   static void bitwiseOp4S(BigInt &out, const T0 &lhs, const T1 &rhs) {
@@ -1274,6 +1372,27 @@ public:
     return reductionXOROp(val);
   }
 
+  template <BigIntAPI T0, BigIntAPI T1>
+  static void concatOp4S(BigInt &out, const T0 &lhs, const T1 &rhs) {
+    if (lhs.getCustom() && !rhs.getCustom()) {
+      BigInt rhsCopy{rhs};
+      rhsCopy.conv2To4State();
+      concatOp(out, lhs, rhsCopy);
+    } else if (!lhs.getCustom() && rhs.getCustom()) {
+      BigInt lhsCopy{lhs};
+      lhsCopy.conv2To4State();
+      concatOp(out, lhsCopy, rhs);
+    } else
+      concatOp(out, lhs, rhs);
+    out.setCustom(rhs.getCustom() || lhs.getCustom());
+  }
+
+  template <BigIntAPI T0>
+  static void repeatOp4S(BigInt &out, const T0 &val, uint32_t count) {
+    repeatOp(out, val, count);
+    out.setCustom(val.getCustom());
+  }
+
   // String Ops
   static std::optional<BigInt> parseHex(std::span<const char> digits) {
     BigInt out = BigInt::ofLen(digits.size() * 4);
@@ -1335,7 +1454,7 @@ public:
       else
         os << toHex(extend);
       if (digit % 8 == 0)
-        os << '\'';
+        os << '_';
     }
 
     auto flags = os.flags();
@@ -1350,7 +1469,7 @@ public:
 
       os << std::hex << std::setfill('0') << std::setw(width) << word;
       if (i != 0)
-        os << '\'';
+        os << '_';
     }
     os.flags(flags);
   }
@@ -1391,7 +1510,7 @@ public:
       else
         os << toHex4S(extend);
       if (digit % separator_per == 0)
-        os << '\'';
+        os << '_';
     }
 
     for (ssize_t i = 0; i < (ssize_t)wordHexDigits; i++) {
@@ -1403,7 +1522,7 @@ public:
       os << toHex4S(val);
 
       if (digit != 0 && digit % separator_per == 0)
-        os << "\'";
+        os << "_";
     }
   }
 
@@ -1413,7 +1532,7 @@ public:
       os << (self.getBit(i) ? '1' : '0');
       size_t digit = self.getRawNumBits() - 1 - i;
       if (digit != 0 && (digit % 8) == 0)
-        os << "\'";
+        os << "_";
     }
   }
 
@@ -1424,7 +1543,7 @@ public:
       os << bitToStr[self.getBit(i)];
       size_t digit = (self.getRawNumBits() / 2) - 1 - i;
       if (digit != 0 && (digit % 8) == 0)
-        os << "\'";
+        os << "_";
     }
   }
 
@@ -1646,7 +1765,8 @@ void BigIntMixin<Derived>::toStream(std::ostream &os, int base,
 }
 
 class alignas(uint64_t) Constant : public TrailingObjArr<Constant, uint32_t> {
-  // we store u32's here st inline storage can use the same API with numWords =
+  // we store u32's here st inline storage can use the same API with numWords
+  // =
   // 1
   friend class ConstantRef;
   // num bits is detached from actual storage words bc we can sign/zext.
@@ -1719,12 +1839,12 @@ public:
     return ConstantRef{1, (bool)f, 0, 0};
   }
   static ConstantRef fromBool(bool b) { return ConstantRef{1, b, 0, 0}; }
-  // static ConstantRef zero(uint32_t bits) { return ConstantRef{bits, 0, 0, 0};
-  // } template <typename T> static ConstantRef zeroLike(const T &t) {
+  // static ConstantRef zero(uint32_t bits) { return ConstantRef{bits, 0, 0,
+  // 0}; } template <typename T> static ConstantRef zeroLike(const T &t) {
   //   return zero(t.getNumBits());
   // }
-  // static ConstantRef one(uint32_t bits) { return ConstantRef{bits, 1, 0, 0};
-  // } template <typename T> static ConstantRef oneLike(const T &t) {
+  // static ConstantRef one(uint32_t bits) { return ConstantRef{bits, 1, 0,
+  // 0}; } template <typename T> static ConstantRef oneLike(const T &t) {
   //   return zero(t.getNumBits());
   // }
   // static ConstantRef ones(uint32_t bits) {
@@ -1764,9 +1884,9 @@ public:
 class ConstantStore {
   NewDeleteObjStore<Constant> store;
 
-  // Just using hash as a key rather than the Constant itself. We want to do the
-  // full key compare part manually so that we can compare with BigInt rather
-  // than Constant.
+  // Just using hash as a key rather than the Constant itself. We want to do
+  // the full key compare part manually so that we can compare with BigInt
+  // rather than Constant.
   std::unordered_multimap<uint32_t, ObjRef<Constant>> map;
 
 public:
@@ -1943,6 +2063,16 @@ public:
 
   ConstantBuilderBase &resize(uint32_t size, bool sign = false) {
     BigInt::resizeOp4S(cur, cur, size, sign);
+    return *this;
+  }
+
+  ConstantBuilderBase &repeat(uint32_t count) {
+    BigInt::repeatOp4S(cur, cur, count);
+    return *this;
+  }
+
+  template <BigIntAPI U> ConstantBuilderBase &concat(const U &other) {
+    BigInt::concatOp4S(cur, other, cur);
     return *this;
   }
 

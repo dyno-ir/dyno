@@ -383,11 +383,11 @@ template <> struct DenseMapInfo<dyno::DynObjRef> {
   // we don't want to use nullref here, otherwise we can't store nullref in map.
   static constexpr dyno::DynObjRef getEmptyKey() {
     return dyno::DynObjRef{dyno::DialectID::invalid(), dyno::TyID::invalid(),
-                           dyno::ObjID::invalid(), 2};
+                           dyno::ObjID::invalid(), 0};
   }
   static constexpr dyno::DynObjRef getTombstoneKey() {
-    return dyno::DynObjRef{dyno::DialectID::invalid(), dyno::TyID::invalid(),
-                           dyno::ObjID::invalid(), 1};
+    return dyno::DynObjRef{dyno::DialectID::invalid(), dyno::TyID{0},
+                           dyno::ObjID::invalid(), 0};
   }
   static unsigned getHashValue(const dyno::DynObjRef &k) {
     return std::hash<dyno::DynObjRef>()(k);

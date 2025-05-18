@@ -39,6 +39,7 @@ public:
       : addr(HWValue{addr}), len(HWValue{len}) {}
 
   static BitRange full() { return BitRange(ConstantRef::fromU32(0), nullref); }
+  bool hasLen() { return !!len; }
 };
 
 class BitRangeOperand : public BitRangeMixin<BitRange> {

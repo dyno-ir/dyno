@@ -13,37 +13,37 @@ class Optional {
   T val;
 
 public:
-  Optional() : val(Invalid) {}
-  Optional(const T &val) : val(val) { assert(val != Invalid); }
-  Optional(T &&val) : val(std::move(val)) { assert(val != Invalid); }
-  Optional &operator=(const T &rhs) {
+  constexpr Optional() : val(Invalid) {}
+  constexpr Optional(const T &val) : val(val) { assert(val != Invalid); }
+  constexpr Optional(T &&val) : val(std::move(val)) { assert(val != Invalid); }
+  constexpr Optional &operator=(const T &rhs) {
     assert(rhs != Invalid);
     val = rhs;
     return *this;
   }
-  Optional &operator=(T &&rhs) {
+  constexpr Optional &operator=(T &&rhs) {
     assert(rhs != Invalid);
     val = std::move(rhs);
     return *this;
   };
 
-  Optional(const Optional &) = default;
-  Optional(Optional &&) = default;
-  Optional &operator=(const Optional &) = default;
-  Optional &operator=(Optional &&) = default;
+  constexpr Optional(const Optional &) = default;
+  constexpr Optional(Optional &&) = default;
+  constexpr Optional &operator=(const Optional &) = default;
+  constexpr Optional &operator=(Optional &&) = default;
 
-  Optional(nullopt_t) : Optional() {}
-  Optional &operator=(nullopt_t) { val = Invalid; }
+  constexpr Optional(nullopt_t) : Optional() {}
+  constexpr Optional &operator=(nullopt_t) { val = Invalid; return *this; }
 
-  friend bool operator==(const Optional &rhs, nullopt_t) { return !rhs; }
+  constexpr friend bool operator==(const Optional &rhs, nullopt_t) { return !rhs; }
 
   explicit operator bool() { return val != Invalid; }
-  operator T() { return val; };
+  constexpr operator T() { return val; };
 
-  T value() { return val; }
-  T value_or(T &&alt) { return (*this) ? val : alt; }
+  constexpr T value() { return val; }
+  constexpr T value_or(T &&alt) { return (*this) ? val : alt; }
 
-  T &operator*() {
+  constexpr T &operator*() {
     assert(*this);
     return val;
   }

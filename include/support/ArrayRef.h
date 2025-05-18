@@ -33,4 +33,7 @@ public:
   ArrayRef(const_iterator begin, const_iterator end)
       : ptr(begin), sz(end - begin) {}
   ArrayRef(const_iterator begin, size_t size) : ptr(begin), sz(size) {}
+
+  const_reference back() { return ptr[sz - 1]; }
+  const_reference front() { return ptr[0]; }
 };
