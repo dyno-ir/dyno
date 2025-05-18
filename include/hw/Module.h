@@ -1,5 +1,6 @@
 #pragma once
 
+#include "dyno/CFG.h"
 #include "dyno/DialectInfo.h"
 #include "dyno/Instr.h"
 #include "dyno/Obj.h"
@@ -29,7 +30,7 @@ public:
 class ModuleRef : public FatObjRef<Module>, public InstrDefUseMixin<ModuleRef> {
 public:
   using FatObjRef::FatObjRef;
-  //ModuleRef(const FatObjRef<Module> ref) : FatObjRef<Module>(ref) {}
+  // ModuleRef(const FatObjRef<Module> ref) : FatObjRef<Module>(ref) {}
 };
 
 template <> struct ObjTraits<Module> {
@@ -46,11 +47,24 @@ public:
   ModuleRef mod() { return def(0)->as<ModuleRef>(); }
   BlockRef block() { return def(1)->as<BlockRef>(); }
 
-  // void addPort(RegisterRef ref, Register::PortType portType) {
-  //   ref.getPtr()->portIndex = mod()->ports.size();
-  //   ref.getPtr()->portType = portType;
-  //   mod()->ports.emplace_back(ref);
-  // }
+  BlockRef_iterator<true> regs_end() {
+    auto it = block().begin();
+    // todo: decent impl via block defrag
+    while (true) {
+      switch (it.instr().getDialect() << 16 | it.instr().getOpcode()) {
+      case DIALECT_HW << 16 | HW_INPUT_REGISTER_INSTR:
+      case DIALECT_HW << 16 | HW_OUTPUT_REGISTER_INSTR:
+      case DIALECT_HW << 16 | HW_INOUT_REGISTER_INSTR:
+      case DIALECT_HW << 16 | HW_REF_REGISTER_INSTR:
+      case DIALECT_HW << 16 | HW_REGISTER_INSTR:
+        it++;
+        continue;
+      default:
+      }
+      break;
+    }
+    return it;
+  }
 };
 
 }; // namespace dyno

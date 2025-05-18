@@ -18,6 +18,7 @@
 #include "slang/ast/expressions/Operator.h"
 #include "slang/ast/expressions/OperatorExpressions.h"
 #include "slang/ast/expressions/SelectExpressions.h"
+#include "slang/ast/statements/MiscStatements.h"
 #include "slang/ast/symbols/BlockSymbols.h"
 #include "slang/ast/symbols/CompilationUnitSymbols.h"
 #include "slang/ast/symbols/InstanceSymbols.h"
@@ -35,7 +36,6 @@
 #include <ranges>
 #include <slang/syntax/SyntaxNode.h>
 #include <tuple>
-#include <type_traits>
 
 using namespace dyno;
 
@@ -280,13 +280,30 @@ public:
         break;
       case slang::ast::SymbolKind::Parameter:
         break;
-      case slang::ast::SymbolKind::Variable:
-        // std::cout << "var " << &member << ", "
-        //           << member.as<slang::ast::VariableSymbol>().name << "\n";
+      case slang::ast::SymbolKind::Variable: {
+        auto &asVar = member.as<slang::ast::VariableSymbol>();
+        if (asVar.getFirstPortBackref()) {
+          // there's prob a better way to figure out whether a var is a port
+          assert(vars.contains(&asVar) && "port not in vars?");
+          break;
+        }
+
+        auto reg = build.buildRegister();
+        vars.insert(&asVar, reg);
+        reg->numBits = asVar.getType().getBitstreamWidth();
         break;
+      }
 
       case slang::ast::SymbolKind::ProceduralBlock: {
-        handle_proc(member.as<slang::ast::ProceduralBlockSymbol>());
+        auto &proc = member.as<slang::ast::ProceduralBlockSymbol>();
+        handle_proc(proc);
+        break;
+      }
+
+      case slang::ast::SymbolKind::StatementBlock: {
+        // this creates a scope but its members are a copy of a sibling
+        // procedural block. we don't care much about scopes and don't want
+        // duplicate processes so ignore.
         break;
       }
 
@@ -351,6 +368,15 @@ public:
     handle_stmt(block.getBody());
     build.popInsertPoint();
   }
+  void handle_proc(const slang::ast::StatementBlockSymbol &block) {
+    assert(mod);
+    proc = build.buildProcess();
+    build.pushInsertPoint(proc.block().end());
+    auto stmt = block.tryGetStatement();
+    assert(stmt);
+    handle_stmt(*stmt);
+    build.popInsertPoint();
+  }
 
   void handle_stmt(const slang::ast::Statement &stmt) {
 
@@ -380,8 +406,18 @@ public:
       break;
     }
 
+    case slang::ast::StatementKind::VariableDeclaration: {
+      auto &asVarDecl = stmt.as<slang::ast::VariableDeclStatement>();
+      build.pushInsertPoint(mod.regs_end());
+      auto reg = build.buildRegister();
+      build.popInsertPoint();
+
+      vars.findOrInsert(&asVarDecl.symbol, reg);
+      reg->numBits = asVarDecl.symbol.getType().getBitstreamWidth();
+      break;
+    }
+
     case slang::ast::StatementKind::Invalid:
-    case slang::ast::StatementKind::VariableDeclaration:
     case slang::ast::StatementKind::Return:
     case slang::ast::StatementKind::Continue:
     case slang::ast::StatementKind::Break:
@@ -407,7 +443,7 @@ public:
     case slang::ast::StatementKind::RandCase:
     case slang::ast::StatementKind::RandSequence:
     case slang::ast::StatementKind::ProceduralChecker:
-      break;
+      abort();
     }
   }
 
