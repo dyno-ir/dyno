@@ -5,12 +5,15 @@
 #include "hw/HWAbstraction.h"
 #include "hw/HWPrinter.h"
 #include "hw/HWValue.h"
+#include "hw/IDs.h"
 #include "hw/Module.h"
 #include "hw/Register.h"
 #include "slang/ast/ASTVisitor.h"
 #include "slang/ast/Compilation.h"
 #include "slang/ast/Expression.h"
+#include "slang/ast/SemanticFacts.h"
 #include "slang/ast/Symbol.h"
+#include "slang/ast/TimingControl.h"
 #include "slang/ast/expressions/AssignmentExpressions.h"
 #include "slang/ast/expressions/ConversionExpression.h"
 #include "slang/ast/expressions/LiteralExpressions.h"
@@ -138,11 +141,11 @@ public:
     }
 
   public:
-    void storeVal(HWInstrBuilder build, HWValue val) {
+    void storeVal(HWInstrBuilder build, HWValue val, bool defer = false) {
       switch (kind) {
       case Value::VK_L: {
         build.buildStore(this->as<RegLValue>().lvReg, val,
-                         this->as<RegLValue>().lvBitRange);
+                         this->as<RegLValue>().lvBitRange, defer);
         break;
       }
       case Value::VK_CCL: {
@@ -155,8 +158,9 @@ public:
                                        : ConstantRef::fromU32(*reg->numBits);
           assert(range.hasLen() ||
                  range.addr.as<ConstantRef>().getExactVal() == 0);
+
           build.buildStore(reg, build.buildSplice(val, BitRange{offs, len}),
-                           range);
+                           range, defer);
           offs = build.buildAdd(offs, len);
         }
         break;
@@ -291,6 +295,13 @@ public:
         auto reg = build.buildRegister();
         vars.insert(&asVar, reg);
         reg->numBits = asVar.getType().getBitstreamWidth();
+
+        if (auto *init = asVar.getInitializer()) {
+          auto proc = build.buildProcess(OpcodeID{HW_INIT_PROCESS_INSTR});
+          build.pushInsertPoint(proc.block().begin());
+          build.buildStore(reg, handle_expr(*init)->proGetValue(build));
+          build.popInsertPoint();
+        }
         break;
       }
 
@@ -361,19 +372,69 @@ public:
     }
   }
 
+  struct Sensitivity {
+    SmallVec<RegisterRef, 4> list;
+  };
+
+  Sensitivity handle_timing(const slang::ast::TimingControl &timing) {
+    switch (timing.kind) {
+    case slang::ast::TimingControlKind::SignalEvent: {
+      Sensitivity sens;
+      auto &asSigEvt = timing.as<slang::ast::SignalEventControl>();
+      auto &sym = asSigEvt.expr.as<slang::ast::NamedValueExpression>().symbol;
+      auto it = vars.find(&sym);
+      assert(it && "unknown var");
+      sens.list.emplace_back(it.val());
+      return sens;
+    }
+    case slang::ast::TimingControlKind::EventList: {
+      auto &asEvtList = timing.as<slang::ast::EventListControl>();
+      Sensitivity sens;
+      for (auto sub : asEvtList.events) {
+        auto subSens = handle_timing(*sub);
+        sens.list.push_back_range(subSens.list.begin(), subSens.list.end());
+      }
+      return sens;
+    }
+    default:
+      break;
+    }
+    abort();
+  }
+
   void handle_proc(const slang::ast::ProceduralBlockSymbol &block) {
     assert(mod);
-    proc = build.buildProcess();
+
+    OpcodeID opc;
+    switch (block.procedureKind) {
+    case slang::ast::ProceduralBlockKind::Initial:
+      opc = OpcodeID{HW_INIT_PROCESS_INSTR};
+      break;
+    case slang::ast::ProceduralBlockKind::Final:
+      opc = OpcodeID{HW_FINAL_PROCESS_INSTR};
+      break;
+    case slang::ast::ProceduralBlockKind::Always:
+    case slang::ast::ProceduralBlockKind::AlwaysComb:
+      opc = OpcodeID{HW_COMB_PROCESS_INSTR};
+      break;
+    case slang::ast::ProceduralBlockKind::AlwaysLatch:
+      opc = OpcodeID{HW_LATCH_PROCESS_INSTR};
+      break;
+    case slang::ast::ProceduralBlockKind::AlwaysFF:
+      opc = OpcodeID{HW_SEQ_PROCESS_INSTR};
+      break;
+    }
+
+    auto *stmt = &block.getBody();
+    Sensitivity sens;
+
+    if (auto *asTimed = stmt->as_if<slang::ast::TimedStatement>()) {
+      stmt = &asTimed->stmt;
+      sens = handle_timing(asTimed->timing);
+    }
+
+    proc = build.buildProcess(opc, ArrayRef{sens.list});
     build.pushInsertPoint(proc.block().end());
-    handle_stmt(block.getBody());
-    build.popInsertPoint();
-  }
-  void handle_proc(const slang::ast::StatementBlockSymbol &block) {
-    assert(mod);
-    proc = build.buildProcess();
-    build.pushInsertPoint(proc.block().end());
-    auto stmt = block.tryGetStatement();
-    assert(stmt);
     handle_stmt(*stmt);
     build.popInsertPoint();
   }
@@ -393,12 +454,6 @@ public:
       handle_expr(expr_s.expr);
       break;
     }
-    case slang::ast::StatementKind::Timed: {
-      auto &timed_s = stmt.as<slang::ast::TimedStatement>();
-      // todo: ?
-      handle_stmt(timed_s.stmt);
-      break;
-    }
     case slang::ast::StatementKind::List: {
       const auto &list = stmt.as<slang::ast::StatementList>();
       for (const auto &l_stmt : list.list)
@@ -414,6 +469,9 @@ public:
 
       vars.findOrInsert(&asVarDecl.symbol, reg);
       reg->numBits = asVarDecl.symbol.getType().getBitstreamWidth();
+
+      if (auto *init = asVarDecl.symbol.getInitializer())
+        build.buildStore(reg, handle_expr(*init)->proGetValue(build));
       break;
     }
 
@@ -443,7 +501,9 @@ public:
     case slang::ast::StatementKind::RandCase:
     case slang::ast::StatementKind::RandSequence:
     case slang::ast::StatementKind::ProceduralChecker:
+    case slang::ast::StatementKind::Timed:
       abort();
+      break;
     }
   }
 
@@ -480,11 +540,11 @@ public:
     case slang::ast::ExpressionKind::Assignment: {
       const auto &assign = expr.as<slang::ast::AssignmentExpression>();
 
-      // todo: assign.isBlocking()
       auto rhs = handle_expr(assign.right());
       auto lhs = handle_expr(assign.left());
 
-      lhs->as<LValue>().storeVal(build, rhs->proGetValue(build));
+      lhs->as<LValue>().storeVal(build, rhs->proGetValue(build),
+                                 assign.isNonBlocking());
       return rhs;
     }
     case slang::ast::ExpressionKind::BinaryOp: {

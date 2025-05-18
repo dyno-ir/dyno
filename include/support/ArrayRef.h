@@ -9,14 +9,14 @@ template <typename T> class ArrayRef {
   using value_type = T;
   using pointer = T *;
   using reference = T &;
-  using const_pointer = T *;
-  using const_reference = T &;
+  using const_pointer = const T *;
+  using const_reference = const T &;
   using difference_type = uintptr_t;
 
   using iterator = const_pointer;
   using const_iterator = const_pointer;
 
-  T *ptr;
+  const T *ptr;
   size_t sz;
 
 public:
@@ -36,4 +36,10 @@ public:
 
   const_reference back() { return ptr[sz - 1]; }
   const_reference front() { return ptr[0]; }
+
+  static constexpr ArrayRef empty() { return ArrayRef{nullptr, size_t(0)}; }
+
+  template <typename U> ArrayRef(const U &u) : ArrayRef(u.begin(), u.end()) {}
 };
+
+template <typename U> ArrayRef(const U &u) -> ArrayRef<typename U::value_type>;

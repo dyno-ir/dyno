@@ -504,11 +504,13 @@ public:
   }
 
   HWInstrRef buildStore(RegisterRef reg, HWValue value,
-                        BitRange range = BitRange::full()) {
+                        BitRange range = BitRange::full(), bool defer = false) {
     if (range == BitRange::full())
-      return buildInstr(DialectID{DIALECT_HW}, OpcodeID{HW_STORE}, false, value,
-                        reg);
-    return buildInstr(DialectID{DIALECT_HW}, OpcodeID{HW_STORE}, false, value,
+      return buildInstr(DialectID{DIALECT_HW},
+                        OpcodeID{defer ? HW_STORE_DEFER : HW_STORE}, false,
+                        value, reg);
+    return buildInstr(DialectID{DIALECT_HW},
+                      OpcodeID{defer ? HW_STORE_DEFER : HW_STORE}, false, value,
                       reg, range);
   }
 
@@ -546,11 +548,22 @@ public:
     return buildPort(module, OpcodeID{HW_REF_REGISTER_INSTR});
   }
 
-  ProcessIRef buildProcess() {
+  ProcessIRef
+  buildProcess(OpcodeID type = OpcodeID{HW_COMB_PROCESS_INSTR},
+               ArrayRef<RegisterRef> sens = ArrayRef<RegisterRef>::empty()) {
+    assert(type == HW_INIT_PROCESS_INSTR || type == HW_COMB_PROCESS_INSTR ||
+           type == HW_SEQ_PROCESS_INSTR || type == HW_FINAL_PROCESS_INSTR ||
+           type == HW_LATCH_PROCESS_INSTR);
     auto procRef = ctx.getProcs().create();
-    auto procInstRef = ProcessIRef{ctx.getInstrs().create(
-        2, DialectID{DIALECT_HW}, OpcodeID{HW_PROCESS_INSTR})};
-    InstrBuilder{procInstRef}.addRef(procRef).addRef(ctx.createBlock());
+    auto procInstRef = ProcessIRef{
+        ctx.getInstrs().create(2 + sens.size(), DialectID{DIALECT_HW}, type)};
+    InstrBuilder build{procInstRef};
+    build.addRef(procRef).addRef(ctx.createBlock()).other();
+
+    for (size_t i = 0; i < sens.size(); i++) {
+      build.addRef(sens[i]);
+    }
+
     insertInstr(procInstRef);
     return procInstRef;
   }

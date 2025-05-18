@@ -54,6 +54,7 @@ public:
 
 template <typename T> class SmallVecImpl {
 public:
+  using value_type = T;
   using size_type = unsigned;
   using iterator = T *;
   using const_iterator = const T *;
