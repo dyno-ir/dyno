@@ -4,24 +4,37 @@
 #include "dyno/Instr.h"
 #include "dyno/Obj.h"
 #include "hw/IDs.h"
+#include "hw/Register.h"
 
 namespace dyno {
+
+struct ProcSenstv {
+  enum Mode : uint8_t { POSEDGE, NEGEDGE, ANYEDGE, IFF };
+  SmallVec<std::pair<RegisterRef, Mode>, 2> signals;
+
+  static ProcSenstv empty() { return ProcSenstv{}; }
+  explicit operator bool() const { return !signals.empty(); }
+};
 
 class Process {
 public:
   InstrDefUse defUse;
-  // todo: add stuff like edge-triggered, comb, ...
-  Process(DynObjRef) {}
+  SmallVec<ProcSenstv::Mode, 2> modes;
+
+  Process(DynObjRef, const ProcSenstv &sens) : modes(sens.signals.size()) {
+    // we're storing mode here but register refs in the instr. maybe
+    // we can somehow spare a few bits in the DynObjRef?
+    // -> multiple register types all mapping to Register
+    // -> 2 high bits in obj id
+    for (size_t i = 0; i < sens.signals.size(); i++)
+      modes[i] = sens.signals[i].second;
+  }
 };
 
 class ProcessRef : public FatObjRef<Process> {
 public:
   using FatObjRef<Process>::FatObjRef;
   ProcessRef(const FatObjRef<Process> ref) : FatObjRef<Process>(ref) {}
-
-  // BlockRef block() {
-  //   return ptr->defUse.getSingleDef()->instr().def(1)->as<BlockRef>();
-  // }
 };
 
 template <> struct ObjTraits<Process> {

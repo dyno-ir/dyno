@@ -4,6 +4,7 @@
 #include "dyno/Obj.h"
 #include "hw/HWAbstraction.h"
 #include "hw/IDs.h"
+#include "hw/Process.h"
 #include "op/IDs.h"
 
 namespace dyno {
@@ -63,6 +64,21 @@ public:
       str << "register";
       if (asReg->numBits) {
         str << "(" << *asReg->numBits << ")";
+      }
+      break;
+    }
+    case HW_PROCESS: {
+      ProcessRef asProc = ref.as<ProcessRef>();
+      str << "process";
+      if (!asProc->modes.empty()) {
+        str << "(";
+        for (const auto &mode : asProc->modes) {
+          auto arr = std::array<const char *, 4>{"pos", "neg", "any", "iff"};
+          str << arr.at(mode);
+          if (&mode != &asProc->modes.back())
+            str << ", ";
+        }
+        str << ")";
       }
       break;
     }

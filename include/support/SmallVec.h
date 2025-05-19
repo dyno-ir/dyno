@@ -162,6 +162,10 @@ public:
     assert(pos < sz);
     return arr[pos];
   }
+  const T &operator[] (size_type pos) const {
+    assert(pos < sz);
+    return arr[pos];
+  }
 
   template <typename... Args> T &emplace_back(Args &&...args) {
     grow(sz + 1);

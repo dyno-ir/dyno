@@ -548,20 +548,19 @@ public:
     return buildPort(module, OpcodeID{HW_REF_REGISTER_INSTR});
   }
 
-  ProcessIRef
-  buildProcess(OpcodeID type = OpcodeID{HW_COMB_PROCESS_INSTR},
-               ArrayRef<RegisterRef> sens = ArrayRef<RegisterRef>::empty()) {
+  ProcessIRef buildProcess(OpcodeID type = OpcodeID{HW_COMB_PROCESS_INSTR},
+                           ProcSenstv &&sens = ProcSenstv::empty()) {
     assert(type == HW_INIT_PROCESS_INSTR || type == HW_COMB_PROCESS_INSTR ||
            type == HW_SEQ_PROCESS_INSTR || type == HW_FINAL_PROCESS_INSTR ||
            type == HW_LATCH_PROCESS_INSTR);
-    auto procRef = ctx.getProcs().create();
+    auto procRef = ctx.getProcs().create(sens);
     auto procInstRef = ProcessIRef{
-        ctx.getInstrs().create(2 + sens.size(), DialectID{DIALECT_HW}, type)};
+        ctx.getInstrs().create(2 + sens.signals.size(), DialectID{DIALECT_HW}, type)};
     InstrBuilder build{procInstRef};
     build.addRef(procRef).addRef(ctx.createBlock()).other();
 
-    for (size_t i = 0; i < sens.size(); i++) {
-      build.addRef(sens[i]);
+    for (size_t i = 0; i < sens.signals.size(); i++) {
+      build.addRef(sens.signals[i].first);
     }
 
     insertInstr(procInstRef);
