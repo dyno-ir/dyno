@@ -7,6 +7,7 @@
 #include "hw/HWValue.h"
 #include "hw/IDs.h"
 #include "hw/Module.h"
+#include "hw/Process.h"
 #include "hw/Register.h"
 #include "slang/ast/ASTVisitor.h"
 #include "slang/ast/Compilation.h"
@@ -372,27 +373,40 @@ public:
     }
   }
 
-  struct Sensitivity {
-    SmallVec<RegisterRef, 4> list;
-  };
-
-  Sensitivity handle_timing(const slang::ast::TimingControl &timing) {
+  ProcSenstv handle_timing(const slang::ast::TimingControl &timing) {
     switch (timing.kind) {
     case slang::ast::TimingControlKind::SignalEvent: {
-      Sensitivity sens;
+      ProcSenstv sens;
       auto &asSigEvt = timing.as<slang::ast::SignalEventControl>();
       auto &sym = asSigEvt.expr.as<slang::ast::NamedValueExpression>().symbol;
       auto it = vars.find(&sym);
       assert(it && "unknown var");
-      sens.list.emplace_back(it.val());
+
+      ProcSenstv::Mode mode;
+      switch (asSigEvt.edge) {
+      case slang::ast::EdgeKind::None:
+        abort();
+      case slang::ast::EdgeKind::PosEdge:
+        mode = ProcSenstv::POSEDGE;
+        break;
+      case slang::ast::EdgeKind::NegEdge:
+        mode = ProcSenstv::NEGEDGE;
+        break;
+      case slang::ast::EdgeKind::BothEdges:
+        mode = ProcSenstv::ANYEDGE;
+        break;
+      }
+
+      sens.signals.emplace_back(std::make_pair(it.val(), mode));
       return sens;
     }
     case slang::ast::TimingControlKind::EventList: {
       auto &asEvtList = timing.as<slang::ast::EventListControl>();
-      Sensitivity sens;
+      ProcSenstv sens;
       for (auto sub : asEvtList.events) {
         auto subSens = handle_timing(*sub);
-        sens.list.push_back_range(subSens.list.begin(), subSens.list.end());
+        sens.signals.push_back_range(subSens.signals.begin(),
+                                     subSens.signals.end());
       }
       return sens;
     }
@@ -426,14 +440,14 @@ public:
     }
 
     auto *stmt = &block.getBody();
-    Sensitivity sens;
+    ProcSenstv sens;
 
     if (auto *asTimed = stmt->as_if<slang::ast::TimedStatement>()) {
       stmt = &asTimed->stmt;
       sens = handle_timing(asTimed->timing);
     }
 
-    proc = build.buildProcess(opc, ArrayRef{sens.list});
+    proc = build.buildProcess(opc, std::move(sens));
     build.pushInsertPoint(proc.block().end());
     handle_stmt(*stmt);
     build.popInsertPoint();
