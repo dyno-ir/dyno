@@ -55,12 +55,12 @@ public:
     auto it = block().begin();
     // todo: decent impl via block defrag
     while (it != block().end()) {
-      switch (it.instr().getDialect() << 16 | it.instr().getOpcode()) {
-      case DIALECT_HW << 16 | HW_INPUT_REGISTER_INSTR:
-      case DIALECT_HW << 16 | HW_OUTPUT_REGISTER_INSTR:
-      case DIALECT_HW << 16 | HW_INOUT_REGISTER_INSTR:
-      case DIALECT_HW << 16 | HW_REF_REGISTER_INSTR:
-      case DIALECT_HW << 16 | HW_REGISTER_INSTR:
+      switch (it.instr().getDialectOpcode().raw()) {
+      case HW_INPUT_REGISTER_INSTR.raw():
+      case HW_OUTPUT_REGISTER_INSTR.raw():
+      case HW_INOUT_REGISTER_INSTR.raw():
+      case HW_REF_REGISTER_INSTR.raw():
+      case HW_REGISTER_INSTR.raw():
         it++;
         continue;
       default:

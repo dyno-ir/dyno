@@ -90,8 +90,7 @@ public:
 
   void printCtx(HWContext &ctx) {
     for (auto instr : ctx.getInstrs()) {
-      if (InstrRef{instr}.isOpc(DialectID{DIALECT_HW},
-                                OpcodeID{HW_MODULE_INSTR}))
+      if (InstrRef{instr}.isOpc(HW_MODULE_INSTR))
         printInstr(InstrRef{instr});
     }
   }

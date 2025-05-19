@@ -22,18 +22,18 @@ public:
 };
 
 class FunctionRef : public FatObjRef<Function>,
-                   public InstrDefUseMixin<FunctionRef> {
+                    public InstrDefUseMixin<FunctionRef> {
 public:
   using FatObjRef<Function>::FatObjRef;
   FunctionRef(FatObjRef<Function> ref) : FatObjRef<Function>(ref) {}
 
   void addParam(InstrRef ref) {
     // todo: store arg index somewhere in instr.
-    assert(ref.getDialect() == DIALECT_OP && ref.getOpcode() == OP_PARAM);
+    assert(ref.getDialectOpcode() == OP_PARAM);
     ptr->params.emplace_back(ref);
   }
   void addReturn(InstrRef ref) {
-    assert(ref.getDialect() == DIALECT_OP && ref.getOpcode() == OP_RETURN);
+    assert(ref.getDialectOpcode() == OP_RETURN);
     ptr->returns.emplace_back(ref);
   }
 };
@@ -53,12 +53,5 @@ public:
   uint getNumParams() { return func()->params.size(); }
 
   BlockRef getBlock() { return this->operand(1)->as<BlockRef>(); }
-
-  auto blocks() {
-    return func()->defUse.uses().filter([](OperandRef ref) {
-      return ref.instr().getDialect() == DIALECT_HW &&
-             ref.instr().getOpcode() == HW_BLOCK_INSTR;
-    });
-  }
 };
 }; // namespace dyno

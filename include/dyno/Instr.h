@@ -2,6 +2,7 @@
 
 #include "Obj.h"
 #include "dyno/IDs.h"
+#include "dyno/Opcode.h"
 #include "support/Bits.h"
 #include "support/RTTI.h"
 #include "support/SmallVec.h"
@@ -12,7 +13,6 @@
 #include <dyno/Interface.h>
 #include <dyno/Obj.h>
 #include <iterator>
-#include <string_view>
 #include <support/InlineStorage.h>
 #include <support/Ranges.h>
 #include <utility>
@@ -88,17 +88,15 @@ public:
 };
 static_assert(sizeof(Operand) == 16);
 
-using OpcodeID = IDImpl<uint16_t>;
-
 class Instr : public TrailingObjArr<Instr, Operand> {
   friend class TrailingObjArr;
   friend class InstrRef;
   friend class OperandRef;
   friend class InstrBuilder;
 
+  OpcodeID opc;
   DialectID dialect;
   uint8_t _unused; // num extra operands/storage
-  OpcodeID opc;
   uint16_t numOperands;
   uint16_t numDefs;
   InlineStorage<8> customStorage;
@@ -107,7 +105,10 @@ public:
   using iterator = Operand *;
 
   Instr(DynObjRef, uint16_t numOperands, DialectID dialect, OpcodeID opc)
-      : dialect(dialect), opc(opc), numOperands(numOperands) {}
+      : opc(opc), dialect(dialect), numOperands(numOperands) {}
+  Instr(DynObjRef, uint16_t numOperands, DialectOpcode opc)
+      : opc(opc.getOpcodeID()), dialect(opc.getDialectID()),
+        numOperands(numOperands) {}
 
   Instr(const Instr &) = delete;
   Instr(Instr &&) = delete;
@@ -334,6 +335,9 @@ public:
 
   DialectID getDialect() { return (*this)->dialect; }
   OpcodeID getOpcode() { return (*this)->opc; }
+  DialectOpcode getDialectOpcode() {
+    return DialectOpcode{(*this)->dialect, (*this)->opc};
+  }
   DialectID getDialectID() = delete;
 
   unsigned getNumOperands() { return (*this)->numOperands; }
@@ -343,8 +347,10 @@ public:
   Range<iterator> defs() { return {def_begin(), def_end()}; }
   Range<iterator> others() { return {other_begin(), other_end()}; }
 
-  bool isOpc(DialectID dialect, OpcodeID opcode) {
-    return getDialect() == dialect && getOpcode() == opcode;
+  template <IsDialectOpcode... Ts> bool isOpc(Ts... opcs) {
+    return ((getDialect() == opcs.getDialectID() &&
+             getOpcode() == opcs.getOpcodeID()) ||
+            ...);
   }
 };
 

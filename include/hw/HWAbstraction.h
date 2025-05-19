@@ -49,8 +49,7 @@ public:
 
   ModuleIRef createModule(std::string_view name) {
     auto moduleRef = modules.create(std::string(name));
-    auto moduleInstr = InstrRef{
-        instrs.create(2, DialectID{DIALECT_HW}, OpcodeID{HW_MODULE_INSTR})};
+    auto moduleInstr = InstrRef{instrs.create(2, HW_MODULE_INSTR)};
 
     InstrBuilder{moduleInstr}.addRef(moduleRef).addRef(createBlock());
     return moduleInstr;
@@ -70,8 +69,7 @@ public:
 
   auto buildFunc(ModuleIRef parent) {
     auto funcRef = FunctionRef{getFuncs().create()};
-    auto funcInstr = FuncInstrRef{
-        getInstrs().create(2, DialectID{DIALECT_OP}, OpcodeID{OP_FUNC_INSTR})};
+    auto funcInstr = FuncInstrRef{getInstrs().create(2, OP_FUNC_INSTR)};
 
     InstrBuilder{funcInstr}.addRef(funcRef).addRef(createBlock());
     parent.block().end().insertPrev(funcInstr);
@@ -167,6 +165,11 @@ public:
     return HWInstrRef{instr};
   }
 
+  template <typename... Ts>
+  HWInstrRef buildInstr(DialectOpcode opc, bool addWireDef, Ts... operands) {
+    return buildInstr(opc.getDialectID(), opc.getOpcodeID(), addWireDef, operands...);
+  }
+
 #define COMM_OP(ident, opcode, constFunc)                                      \
   template <IsAnyHWValue T, IsAnyHWValue... Ts>                                \
   HWValue ident(T first, Ts... rest) {                                         \
@@ -179,9 +182,7 @@ public:
         ([&] { build.constFunc(rest.template as<ConstantRef>()); }(), ...);    \
         return build.get();                                                    \
       }                                                                        \
-    auto rv = buildInstr(DialectID{DIALECT_OP}, OpcodeID{opcode}, true, first, \
-                         rest...)                                              \
-                  .defW();                                                     \
+    auto rv = buildInstr(opcode, true, first, rest...).defW();                 \
     rv->numBits = first.getNumBits();                                          \
     return rv;                                                                 \
   }
@@ -249,7 +250,7 @@ public:
   //   return HWInstrRef{instr};
   // }
 
-#define BINOP(ident, dialect, opcode, constFunc)                               \
+#define BINOP(ident, opcode, constFunc)                                        \
   template <IsAnyHWValue LHS, IsAnyHWValue RHS>                                \
   HWValue ident(LHS lhs, RHS rhs) {                                            \
     if (lhs.template is<ConstantRef>() && rhs.template is<ConstantRef>()) {    \
@@ -258,22 +259,21 @@ public:
           .constFunc(rhs.template as<ConstantRef>())                           \
           .get();                                                              \
     }                                                                          \
-    auto rv = buildInstr(DialectID{dialect}, OpcodeID{opcode}, true, lhs, rhs) \
-                  .defW();                                                     \
+    auto rv = buildInstr(opcode, true, lhs, rhs).defW();                       \
     rv->numBits = rhs.getNumBits();                                            \
     return rv;                                                                 \
   }
 
-  BINOP(buildSub, DIALECT_OP, OP_SUB, sub)
-  BINOP(buildUDiv, DIALECT_OP, OP_UDIV, udiv)
-  BINOP(buildUMod, DIALECT_OP, OP_UMOD, umod)
-  BINOP(buildSDiv, DIALECT_OP, OP_SDIV, sdiv)
-  BINOP(buildSMod, DIALECT_OP, OP_SMOD, smod)
-  BINOP(buildSLL, DIALECT_OP, OP_SLL, shl)
-  BINOP(buildSRL, DIALECT_OP, OP_SRL, lshr)
-  BINOP(buildSRA, DIALECT_OP, OP_SRA, ashr)
-  BINOP(buildUPow, DIALECT_HW, HW_UPOW, upow)
-  BINOP(buildSPow, DIALECT_HW, HW_SPOW, spow)
+  BINOP(buildSub, OP_SUB, sub)
+  BINOP(buildUDiv, OP_UDIV, udiv)
+  BINOP(buildUMod, OP_UMOD, umod)
+  BINOP(buildSDiv, OP_SDIV, sdiv)
+  BINOP(buildSMod, OP_SMOD, smod)
+  BINOP(buildSLL, OP_SLL, shl)
+  BINOP(buildSRL, OP_SRL, lshr)
+  BINOP(buildSRA, OP_SRA, ashr)
+  BINOP(buildUPow, HW_UPOW, upow)
+  BINOP(buildSPow, HW_SPOW, spow)
 
   template <IsAnyHWValue LHS, IsAnyHWValue RHS>
   HWValue buildICmp(LHS lhs, RHS rhs, BigInt::ICmpPred pred) {
@@ -282,10 +282,9 @@ public:
                                     rhs.template as<ConstantRef>(), pred);
       return ConstantRef::fromFourState(equal);
     }
-    auto rv = buildInstr(DialectID{DIALECT_OP},
-                         OpcodeID{OpcodeID::num_t(int(OP_ICMP_EQ) + int(pred))},
-                         true, lhs, rhs)
-                  .defW();
+    auto rv =
+        buildInstr(OP_ICMP_EQ.indexAdd(uint(pred), OP_ICMP_SGE), true, lhs, rhs)
+            .defW();
     rv->numBits = 1;
     return rv;
   }
@@ -295,8 +294,7 @@ public:
       return ConstantRef::fromFourState(
           BigInt::reductionXOROp4S(val.template as<ConstantRef>()));
     }
-    auto rv = buildInstr(DialectID{DIALECT_HW}, OpcodeID{HW_RED_XOR}, true, val)
-                  .defW();
+    auto rv = buildInstr(HW_RED_XOR, true, val).defW();
     rv->numBits = 1;
     return rv;
   }
@@ -310,8 +308,7 @@ public:
           .get();
     }
 
-    auto ref = buildInstr(DialectID{DIALECT_OP},
-                          OpcodeID{sign ? OP_SEXT : OP_ZEXT}, true, value);
+    auto ref = buildInstr(sign ? OP_SEXT : OP_ZEXT, true, value);
 
     assert(ref.defW().getNumBits().value_or(0) < newSize);
     ref.defW()->numBits = newSize;
@@ -333,8 +330,7 @@ public:
           .get();
     }
 
-    auto ref =
-        buildInstr(DialectID{DIALECT_OP}, OpcodeID{OP_TRUNC}, true, value);
+    auto ref = buildInstr(OP_TRUNC, true, value);
 
     assert(ref.defW().getNumBits().value_or(UINT32_MAX) > newSize);
     ref.defW()->numBits = newSize;
@@ -390,16 +386,14 @@ public:
                   "operands must be pairs of HWValue & BitRange");
     Optional<uint32_t> len = spliceNumBits(operands...);
 
-    auto rv = buildInstr(DialectID{DIALECT_HW}, OpcodeID{HW_SPLICE}, true,
-                         operands...)
-                  .defW();
+    auto rv = buildInstr(HW_SPLICE, true, operands...).defW();
     rv->numBits = len;
     return rv;
   }
 
   HWValue buildSplice(ArrayRef<std::pair<HWValue, BitRange>> values) {
-    auto instr = InstrRef{ctx.getInstrs().create(
-        1 + values.size() * 3, DialectID{DIALECT_HW}, OpcodeID{HW_SPLICE})};
+    auto instr =
+        InstrRef{ctx.getInstrs().create(1 + values.size() * 3, HW_SPLICE)};
 
     insertInstr(instr);
     InstrBuilder build{instr};
@@ -444,8 +438,7 @@ public:
       return cbuild.get();
     }
 
-    auto instr = InstrRef{ctx.getInstrs().create(
-        1 + values.size(), DialectID{DIALECT_HW}, OpcodeID{HW_CONCAT})};
+    auto instr = InstrRef{ctx.getInstrs().create(1 + values.size(), HW_CONCAT)};
 
     insertInstr(instr);
     InstrBuilder build{instr};
@@ -474,9 +467,7 @@ public:
           .get();
     }
 
-    auto rv = buildInstr(DialectID{DIALECT_HW}, OpcodeID{HW_REPEAT}, true,
-                         value, count)
-                  .defW();
+    auto rv = buildInstr(HW_REPEAT, true, value, count).defW();
 
     if (value.getNumBits() && count.is<ConstantRef>()) {
       uint32_t out;
@@ -492,10 +483,9 @@ public:
   WireRef buildLoad(RegisterRef reg, BitRange range = BitRange::full()) {
     HWInstrRef ref;
     if (range == BitRange::full())
-      ref = buildInstr(DialectID{DIALECT_HW}, OpcodeID{HW_LOAD}, true, reg);
+      ref = buildInstr(HW_LOAD, true, reg);
     else
-      ref = buildInstr(DialectID{DIALECT_HW}, OpcodeID{HW_LOAD}, true, reg,
-                       range);
+      ref = buildInstr(HW_LOAD, true, reg, range);
     if (range == BitRange::full())
       ref.defW()->numBits = reg->numBits;
     else if (auto asCRef = range.len.dyn_as<ConstantRef>())
@@ -506,28 +496,23 @@ public:
   HWInstrRef buildStore(RegisterRef reg, HWValue value,
                         BitRange range = BitRange::full(), bool defer = false) {
     if (range == BitRange::full())
-      return buildInstr(DialectID{DIALECT_HW},
-                        OpcodeID{defer ? HW_STORE_DEFER : HW_STORE}, false,
-                        value, reg);
-    return buildInstr(DialectID{DIALECT_HW},
-                      OpcodeID{defer ? HW_STORE_DEFER : HW_STORE}, false, value,
-                      reg, range);
+      return buildInstr(defer ? HW_STORE_DEFER : HW_STORE, false, value, reg);
+    return buildInstr(defer ? HW_STORE_DEFER : HW_STORE, false, value, reg,
+                      range);
   }
 
   RegisterRef buildRegister() {
     auto regRef = RegisterRef{ctx.getRegs().create()};
     // in order for the reg to use anything it must be an instr as well
-    auto regInstr = InstrRef{ctx.getInstrs().create(
-        1, DialectID{DIALECT_HW}, OpcodeID{HW_REGISTER_INSTR})};
+    auto regInstr = InstrRef{ctx.getInstrs().create(1, HW_REGISTER_INSTR)};
     InstrBuilder{regInstr}.addRef(regRef);
     insertInstr(regInstr);
     return regRef;
   }
 
-  RegisterRef buildPort(ModuleIRef module, OpcodeID opcode) {
+  RegisterRef buildPort(ModuleIRef module, HWOpcode opcode) {
     auto regRef = RegisterRef{ctx.getRegs().create()};
-    auto regInstr =
-        InstrRef{ctx.getInstrs().create(1, DialectID{DIALECT_HW}, opcode)};
+    auto regInstr = InstrRef{ctx.getInstrs().create(1, opcode)};
     InstrBuilder{regInstr}.addRef(regRef);
     insertInstr(regInstr);
 
@@ -536,26 +521,26 @@ public:
   }
 
   RegisterRef buildInputPort(ModuleIRef module) {
-    return buildPort(module, OpcodeID{HW_INPUT_REGISTER_INSTR});
+    return buildPort(module, HW_INPUT_REGISTER_INSTR);
   }
   RegisterRef buildOutputPort(ModuleIRef module) {
-    return buildPort(module, OpcodeID{HW_OUTPUT_REGISTER_INSTR});
+    return buildPort(module, HW_OUTPUT_REGISTER_INSTR);
   }
   RegisterRef buildInoutPort(ModuleIRef module) {
-    return buildPort(module, OpcodeID{HW_INOUT_REGISTER_INSTR});
+    return buildPort(module, HW_INOUT_REGISTER_INSTR);
   }
   RegisterRef buildRefPort(ModuleIRef module) {
-    return buildPort(module, OpcodeID{HW_REF_REGISTER_INSTR});
+    return buildPort(module, HW_REF_REGISTER_INSTR);
   }
 
-  ProcessIRef buildProcess(OpcodeID type = OpcodeID{HW_COMB_PROCESS_INSTR},
+  ProcessIRef buildProcess(HWOpcode type = HW_COMB_PROCESS_INSTR,
                            ProcSenstv &&sens = ProcSenstv::empty()) {
     assert(type == HW_INIT_PROCESS_INSTR || type == HW_COMB_PROCESS_INSTR ||
            type == HW_SEQ_PROCESS_INSTR || type == HW_FINAL_PROCESS_INSTR ||
            type == HW_LATCH_PROCESS_INSTR);
     auto procRef = ctx.getProcs().create(sens);
-    auto procInstRef = ProcessIRef{ctx.getInstrs().create(
-        2 + sens.signals.size(), DialectID{DIALECT_HW}, type)};
+    auto procInstRef = ProcessIRef{
+        ctx.getInstrs().create(2 + sens.signals.size(), type)};
     InstrBuilder build{procInstRef};
     build.addRef(procRef).addRef(ctx.createBlock()).other();
 
@@ -569,9 +554,8 @@ public:
 
   HWInstrRef buildInstance(ModuleRef module) {
 
-    auto instr = InstrRef{ctx.getInstrs().create(1 + module->ports.size(),
-                                                 DialectID{DIALECT_HW},
-                                                 OpcodeID{HW_INSTANCE})};
+    auto instr =
+        InstrRef{ctx.getInstrs().create(1 + module->ports.size(), HW_INSTANCE)};
 
     InstrBuilder build{instr};
     build.other();
@@ -586,8 +570,8 @@ public:
   }
 
   IfInstrRef buildIfElse(HWValue cond, uint yieldPrealloc = 0) {
-    InstrRef instrRef = InstrRef{ctx.getInstrs().create(
-        3 + yieldPrealloc, DialectID{DIALECT_OP}, OpcodeID{OP_IF})};
+    InstrRef instrRef =
+        InstrRef{ctx.getInstrs().create(3 + yieldPrealloc, OP_IF)};
     insertInstr(instrRef);
     InstrBuilder build{instrRef};
     auto trueBl = ctx.createBlock();
@@ -603,8 +587,7 @@ public:
   }
 
   IfInstrRef buildIf(HWValue cond) {
-    InstrRef instrRef = InstrRef{
-        ctx.getInstrs().create(2, DialectID{DIALECT_OP}, OpcodeID{OP_IF})};
+    InstrRef instrRef = InstrRef{ctx.getInstrs().create(2, OP_IF)};
     insertInstr(instrRef);
     InstrBuilder build{instrRef};
     auto trueBl = ctx.createBlock();
@@ -614,8 +597,8 @@ public:
   }
 
   SwitchInstrRef buildSwitch(HWValue cond, uint yieldPrealloc = 0) {
-    SwitchInstrRef instrRef = SwitchInstrRef{ctx.getInstrs().create(
-        2 + yieldPrealloc, DialectID{DIALECT_OP}, OpcodeID{OP_SWITCH})};
+    SwitchInstrRef instrRef =
+        SwitchInstrRef{ctx.getInstrs().create(2 + yieldPrealloc, OP_SWITCH)};
     insertInstr(instrRef);
     InstrBuilder build{instrRef};
     build.addRef(ctx.createBlock());
@@ -625,8 +608,8 @@ public:
   }
 
   CaseInstrRef buildCase(ArrayRef<HWValue> conds) {
-    CaseInstrRef instrRef = CaseInstrRef{ctx.getInstrs().create(
-        1 + conds.size(), DialectID{DIALECT_OP}, OpcodeID{OP_CASE})};
+    CaseInstrRef instrRef =
+        CaseInstrRef{ctx.getInstrs().create(1 + conds.size(), OP_CASE)};
     insertInstr(instrRef);
     InstrBuilder build{instrRef};
     build.addRef(ctx.createBlock()).other();
@@ -635,8 +618,8 @@ public:
     return instrRef;
   }
   CaseInstrRef buildDefaultCase() {
-    CaseInstrRef instrRef = CaseInstrRef{ctx.getInstrs().create(
-        1, DialectID{DIALECT_OP}, OpcodeID{OP_CASE_DEFAULT})};
+    CaseInstrRef instrRef =
+        CaseInstrRef{ctx.getInstrs().create(1, OP_CASE_DEFAULT)};
     insertInstr(instrRef);
     InstrBuilder build{instrRef};
     build.addRef(ctx.createBlock());
@@ -648,18 +631,17 @@ public:
     // IfInstrRef. Alternative is a GET_YIELD instr or something. For now naive
     // implementation as reference, just delete old instr and rebuild
 
-    OpcodeID opcode = OpcodeID{OP_YIELD};
+    auto opcode = OP_YIELD;
     auto instr = insert.blockRef().defI();
-    assert(instr.getDialect() == DIALECT_OP &&
-           (instr.getOpcode().anyOf(OP_IF, OP_WHILE)));
+    assert(instr.isOpc(OP_IF, OP_WHILE));
 
-    switch (instr.getOpcode()) {
-    case OP_IF: {
+    switch (instr.getDialectOpcode().raw()) {
+    case OP_IF.raw(): {
       auto asIf = IfInstrRef{instr};
       if (sizeof...(value) >= asIf.getNumYieldValues()) {
 
-        auto newInstr = InstrRef{ctx.getInstrs().create(
-            sizeof...(value) + 3, DialectID{DIALECT_OP}, OpcodeID{OP_IF})};
+        auto newInstr =
+            InstrRef{ctx.getInstrs().create(sizeof...(value) + 3, OP_IF)};
 
         InstrBuilder build{newInstr};
 
@@ -693,11 +675,11 @@ public:
       }
       break;
     }
-    case OP_WHILE: {
+    case OP_WHILE.raw(): {
       WhileInstrRef asWhile{instr};
       // conditional yield is just implicit for now, one more arg
       if (sizeof...(Ts) == asWhile.getNumYieldValues() + 1)
-        opcode = OpcodeID{OP_YIELD};
+        opcode = OP_YIELD;
       else {
         assert(sizeof...(Ts) == asWhile.getNumYieldValues() && "todo resizing");
       }
@@ -707,14 +689,13 @@ public:
       dyno_unreachable("undefined");
     }
 
-    auto yieldInstr =
-        buildInstr(DialectID{DIALECT_OP}, OpcodeID{OP_YIELD}, false, value...);
+    auto yieldInstr = buildInstr(OP_YIELD, false, value...);
     return std::make_pair(yieldInstr, instr);
   }
 
   template <typename... Ts> auto buildWhile(Ts... inputs) {
-    InstrRef instrRef = InstrRef{ctx.getInstrs().create(
-        2 + 2 * sizeof...(inputs), DialectID{DIALECT_OP}, OpcodeID{OP_WHILE})};
+    InstrRef instrRef =
+        InstrRef{ctx.getInstrs().create(2 + 2 * sizeof...(inputs), OP_WHILE)};
     insertInstr(instrRef);
 
     InstrBuilder build{instrRef};
@@ -729,16 +710,14 @@ public:
   }
 
   auto buildFuncParam(FunctionRef func) {
-    auto instr =
-        buildInstr(DialectID{DIALECT_OP}, OpcodeID{OP_PARAM}, true, func);
+    auto instr = buildInstr(OP_PARAM, true, func);
     func.addParam(instr);
     return instr;
   }
 
   template <typename... Ts>
   auto buildFuncReturn(FunctionRef func, Ts... retvals) {
-    auto instr = buildInstr(DialectID{DIALECT_OP}, OpcodeID{OP_RETURN}, false,
-                            func, retvals...);
+    auto instr = buildInstr(OP_RETURN, false, func, retvals...);
     func.addReturn(instr);
     return instr;
   }

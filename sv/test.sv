@@ -37,7 +37,7 @@ Test#(2) test(IN_a, IN_b, OUT_sum);
 always_comb OUT_d[1+:2] = (OUT_sum + 1)[1:0];
 endmodule*/
 
-
+/*
 module Calc(
   input logic clk,
   input logic rst,
@@ -80,6 +80,9 @@ always_ff@(posedge clk, posedge rst) begin
 end
 
 endmodule
+*/
+
+
 
 
 module FIFO#(parameter NUM = 128, parameter WIDTH = 32)
@@ -98,8 +101,7 @@ module FIFO#(parameter NUM = 128, parameter WIDTH = 32)
 logic[$clog2(NUM+1)-1:0] wrPtr = 0;
 logic[$clog2(NUM+1)-1:0] rdPtr = 0;
 
-
-logic[NUM-1:0] memory[WIDTH-1:0];
+logic[WIDTH-1:0] memory[NUM-1:0];
 
 always_ff@(posedge clk, posedge rst) begin
   if (rst) begin

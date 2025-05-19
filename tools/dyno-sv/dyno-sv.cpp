@@ -2,6 +2,7 @@
 #include "dyno/Constant.h"
 #include "dyno/Instr.h"
 #include "dyno/Obj.h"
+#include "dyno/Opcode.h"
 #include "hw/HWAbstraction.h"
 #include "hw/HWPrinter.h"
 #include "hw/HWValue.h"
@@ -237,19 +238,19 @@ public:
 
     for (const auto &port : body.getPortList()) {
       auto &ps = port->as<slang::ast::PortSymbol>();
-      OpcodeID ptype;
+      HWOpcode ptype;
       switch (ps.direction) {
       case slang::ast::ArgumentDirection::In:
-        ptype = OpcodeID{HW_INPUT_REGISTER_INSTR};
+        ptype = HW_INPUT_REGISTER_INSTR;
         break;
       case slang::ast::ArgumentDirection::Out:
-        ptype = OpcodeID{HW_OUTPUT_REGISTER_INSTR};
+        ptype = HW_OUTPUT_REGISTER_INSTR;
         break;
       case slang::ast::ArgumentDirection::InOut:
-        ptype = OpcodeID{HW_INOUT_REGISTER_INSTR};
+        ptype = HW_INOUT_REGISTER_INSTR;
         break;
       case slang::ast::ArgumentDirection::Ref:
-        ptype = OpcodeID{HW_REF_REGISTER_INSTR};
+        ptype = HW_REF_REGISTER_INSTR;
         break;
       }
       build.setInsertPoint(module.block().end());
@@ -273,7 +274,7 @@ public:
         auto &asPS = port->as<slang::ast::PortSymbol>();
         vars.insert(asPS.internalSymbol, fDynoMod->ports[i]);
         if (auto *init = asPS.getInitializer()) {
-          auto proc = build.buildProcess(OpcodeID{HW_INIT_PROCESS_INSTR});
+          auto proc = build.buildProcess(HW_INIT_PROCESS_INSTR);
           build.pushInsertPoint(proc.block().end());
           build.buildStore(fDynoMod->ports[i],
                            handle_expr(*init)->proGetValue(build));
@@ -309,7 +310,7 @@ public:
         reg->numBits = asVar.getType().getBitstreamWidth();
 
         if (auto *init = asVar.getInitializer()) {
-          auto proc = build.buildProcess(OpcodeID{HW_INIT_PROCESS_INSTR});
+          auto proc = build.buildProcess(HW_INIT_PROCESS_INSTR);
           build.pushInsertPoint(proc.block().begin());
           build.buildStore(reg, handle_expr(*init)->proGetValue(build));
           build.popInsertPoint();
@@ -439,23 +440,23 @@ public:
   void handle_proc(const slang::ast::ProceduralBlockSymbol &block) {
     assert(mod);
 
-    OpcodeID opc;
+    HWOpcode opc;
     switch (block.procedureKind) {
     case slang::ast::ProceduralBlockKind::Initial:
-      opc = OpcodeID{HW_INIT_PROCESS_INSTR};
+      opc = HW_INIT_PROCESS_INSTR;
       break;
     case slang::ast::ProceduralBlockKind::Final:
-      opc = OpcodeID{HW_FINAL_PROCESS_INSTR};
+      opc = HW_FINAL_PROCESS_INSTR;
       break;
     case slang::ast::ProceduralBlockKind::Always:
     case slang::ast::ProceduralBlockKind::AlwaysComb:
-      opc = OpcodeID{HW_COMB_PROCESS_INSTR};
+      opc = HW_COMB_PROCESS_INSTR;
       break;
     case slang::ast::ProceduralBlockKind::AlwaysLatch:
-      opc = OpcodeID{HW_LATCH_PROCESS_INSTR};
+      opc = HW_LATCH_PROCESS_INSTR;
       break;
     case slang::ast::ProceduralBlockKind::AlwaysFF:
-      opc = OpcodeID{HW_SEQ_PROCESS_INSTR};
+      opc = HW_SEQ_PROCESS_INSTR;
       break;
     }
 

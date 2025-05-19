@@ -50,9 +50,7 @@ public:
   auto block() { return this->def(0)->as<BlockRef>(); }
   auto labels() { return this->others(); }
   bool hasSingleLabel() { return this->getNumOthers() == 1; }
-  bool isDefault() {
-    return this->isOpc(DialectID{DIALECT_OP}, OpcodeID{OP_CASE_DEFAULT});
-  }
+  bool isDefault() { return this->isOpc(OP_CASE_DEFAULT); }
 };
 
 // defs: (cond_bl, body_bl, vreg...); uses: (cond_vreg, vreg...)
