@@ -554,8 +554,8 @@ public:
            type == HW_SEQ_PROCESS_INSTR || type == HW_FINAL_PROCESS_INSTR ||
            type == HW_LATCH_PROCESS_INSTR);
     auto procRef = ctx.getProcs().create(sens);
-    auto procInstRef = ProcessIRef{
-        ctx.getInstrs().create(2 + sens.signals.size(), DialectID{DIALECT_HW}, type)};
+    auto procInstRef = ProcessIRef{ctx.getInstrs().create(
+        2 + sens.signals.size(), DialectID{DIALECT_HW}, type)};
     InstrBuilder build{procInstRef};
     build.addRef(procRef).addRef(ctx.createBlock()).other();
 
@@ -585,15 +585,62 @@ public:
     return instr;
   }
 
-  IfInstrRef buildIfElse(FatDynObjRef<> cond) {
-    InstrRef instrRef = InstrRef{
-        ctx.getInstrs().create(3, DialectID{DIALECT_OP}, OpcodeID{OP_IF})};
+  IfInstrRef buildIfElse(HWValue cond, uint yieldPrealloc = 0) {
+    InstrRef instrRef = InstrRef{ctx.getInstrs().create(
+        3 + yieldPrealloc, DialectID{DIALECT_OP}, OpcodeID{OP_IF})};
     insertInstr(instrRef);
     InstrBuilder build{instrRef};
     auto trueBl = ctx.createBlock();
     auto falseBl = ctx.createBlock();
-    build.addRef(trueBl).addRef(falseBl).other().addRef(cond);
+    build.addRef(trueBl).addRef(falseBl);
+
+    for (uint i = 0; i < yieldPrealloc; i++)
+      build.addRef(ctx.getWires().create());
+
+    build.other().addRef(cond);
+
     return IfInstrRef{instrRef};
+  }
+
+  IfInstrRef buildIf(HWValue cond) {
+    InstrRef instrRef = InstrRef{
+        ctx.getInstrs().create(2, DialectID{DIALECT_OP}, OpcodeID{OP_IF})};
+    insertInstr(instrRef);
+    InstrBuilder build{instrRef};
+    auto trueBl = ctx.createBlock();
+    build.addRef(trueBl);
+    build.other().addRef(cond);
+    return IfInstrRef{instrRef};
+  }
+
+  SwitchInstrRef buildSwitch(HWValue cond, uint yieldPrealloc = 0) {
+    SwitchInstrRef instrRef = SwitchInstrRef{ctx.getInstrs().create(
+        2 + yieldPrealloc, DialectID{DIALECT_OP}, OpcodeID{OP_SWITCH})};
+    insertInstr(instrRef);
+    InstrBuilder build{instrRef};
+    build.addRef(ctx.createBlock());
+    build.other();
+    build.addRef(cond);
+    return instrRef;
+  }
+
+  CaseInstrRef buildCase(ArrayRef<HWValue> conds) {
+    CaseInstrRef instrRef = CaseInstrRef{ctx.getInstrs().create(
+        1 + conds.size(), DialectID{DIALECT_OP}, OpcodeID{OP_CASE})};
+    insertInstr(instrRef);
+    InstrBuilder build{instrRef};
+    build.addRef(ctx.createBlock()).other();
+    for (auto cond : conds)
+      build.addRef(cond);
+    return instrRef;
+  }
+  CaseInstrRef buildDefaultCase() {
+    CaseInstrRef instrRef = CaseInstrRef{ctx.getInstrs().create(
+        1, DialectID{DIALECT_OP}, OpcodeID{OP_CASE_DEFAULT})};
+    insertInstr(instrRef);
+    InstrBuilder build{instrRef};
+    build.addRef(ctx.createBlock());
+    return instrRef;
   }
 
   template <IsAnyHWValue... Ts> auto buildYield(Ts... value) {
@@ -650,7 +697,7 @@ public:
       WhileInstrRef asWhile{instr};
       // conditional yield is just implicit for now, one more arg
       if (sizeof...(Ts) == asWhile.getNumYieldValues() + 1)
-        opcode = OpcodeID{OP_YIELD_COND};
+        opcode = OpcodeID{OP_YIELD};
       else {
         assert(sizeof...(Ts) == asWhile.getNumYieldValues() && "todo resizing");
       }
@@ -705,7 +752,7 @@ public:
 }; // namespace dyno
 
 class HWInstrBuilderStack : public HWInstrBuilder {
-  SmallVec<BlockRef_iterator<true>, 4> stack;
+  SmallVec<BlockRef_iterator<true>, 16> stack;
 
 public:
   using HWInstrBuilder::HWInstrBuilder;

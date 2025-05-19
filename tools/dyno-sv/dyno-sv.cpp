@@ -22,12 +22,16 @@
 #include "slang/ast/expressions/Operator.h"
 #include "slang/ast/expressions/OperatorExpressions.h"
 #include "slang/ast/expressions/SelectExpressions.h"
+#include "slang/ast/statements/ConditionalStatements.h"
 #include "slang/ast/statements/MiscStatements.h"
 #include "slang/ast/symbols/BlockSymbols.h"
 #include "slang/ast/symbols/CompilationUnitSymbols.h"
 #include "slang/ast/symbols/InstanceSymbols.h"
+#include "slang/ast/symbols/MemberSymbols.h"
 #include "slang/ast/symbols/PortSymbols.h"
 #include "slang/ast/symbols/VariableSymbols.h"
+#include "slang/ast/types/AllTypes.h"
+#include "slang/ast/types/Type.h"
 #include "slang/diagnostics/DiagnosticEngine.h"
 #include "slang/diagnostics/Diagnostics.h"
 #include "slang/driver/Driver.h"
@@ -263,14 +267,19 @@ public:
       ModuleRef fDynoMod{dynoMod, ctx.getModules()[dynoMod]};
       mod = fDynoMod.getSingleDef()->instr();
       vars.clear();
-
-      for (auto [i, port] :
-           slangMod->getPortList() | std::ranges::views::enumerate) {
-        vars.insert(port->as<slang::ast::PortSymbol>().internalSymbol,
-                    fDynoMod->ports[i]);
-        // std::cout << "inserted " << port << ", " << port->name << "\n";
-      }
       build.setInsertPoint(mod.block().end());
+
+      for (auto [i, port] : Range{slangMod->getPortList()}.enumerate()) {
+        auto &asPS = port->as<slang::ast::PortSymbol>();
+        vars.insert(asPS.internalSymbol, fDynoMod->ports[i]);
+        if (auto *init = asPS.getInitializer()) {
+          auto proc = build.buildProcess(OpcodeID{HW_INIT_PROCESS_INSTR});
+          build.pushInsertPoint(proc.block().end());
+          build.buildStore(fDynoMod->ports[i],
+                           handle_expr(*init)->proGetValue(build));
+          build.popInsertPoint();
+        }
+      }
       handle_member_list(slangMod->Scope::members());
     }
   }
@@ -293,7 +302,9 @@ public:
           break;
         }
 
+        build.pushInsertPoint(mod.regs_end());
         auto reg = build.buildRegister();
+        build.popInsertPoint();
         vars.insert(&asVar, reg);
         reg->numBits = asVar.getType().getBitstreamWidth();
 
@@ -364,6 +375,15 @@ public:
         }
         // asGenBA.entries
         std::cout << asGenBA.name << "\n";
+        break;
+      }
+
+      case slang::ast::SymbolKind::ContinuousAssign: {
+        auto &asCAssign = member.as<slang::ast::ContinuousAssignSymbol>();
+        auto proc = build.buildProcess();
+        build.pushInsertPoint(proc.block().begin());
+        handle_expr(asCAssign.getAssignment());
+        build.popInsertPoint();
         break;
       }
 
@@ -494,8 +514,60 @@ public:
     case slang::ast::StatementKind::Continue:
     case slang::ast::StatementKind::Break:
     case slang::ast::StatementKind::Disable:
-    case slang::ast::StatementKind::Conditional:
-    case slang::ast::StatementKind::Case:
+      abort();
+    case slang::ast::StatementKind::Conditional: {
+      auto &asCond = stmt.as<slang::ast::ConditionalStatement>();
+      if (asCond.conditions.size() != 1)
+        abort();
+      auto &cond = asCond.conditions[0];
+      if (cond.pattern)
+        abort();
+
+      auto condVal = handle_expr(*cond.expr)->proGetValue(build);
+      auto condBool = makeBool(condVal);
+
+      if (!asCond.ifFalse) {
+        auto ifInstr = build.buildIf(condBool);
+        build.pushInsertPoint(ifInstr.getTrueBlock().end());
+        handle_stmt(asCond.ifTrue);
+        build.popInsertPoint();
+      } else {
+        auto ifElseInstr = build.buildIfElse(condBool);
+        build.pushInsertPoint(ifElseInstr.getTrueBlock().end());
+        handle_stmt(asCond.ifTrue);
+        build.popInsertPoint();
+
+        build.pushInsertPoint(ifElseInstr.getFalseBlock().end());
+        handle_stmt(*asCond.ifFalse);
+        build.popInsertPoint();
+      }
+      break;
+    }
+    case slang::ast::StatementKind::Case: {
+      auto &asCase = stmt.as<slang::ast::CaseStatement>();
+      auto swInstr =
+          build.buildSwitch(handle_expr(asCase.expr)->proGetValue(build));
+      build.pushInsertPoint(swInstr.block().end());
+
+      SmallVec<HWValue, 8> labels;
+      for (auto &swCase : asCase.items) {
+        labels.resize(swCase.expressions.size());
+        for (auto [idx, expr] : Range{swCase.expressions}.enumerate())
+          labels[idx] = handle_expr(*expr)->proGetValue(build);
+        auto caseInstr = build.buildCase(labels);
+        build.pushInsertPoint(caseInstr.block().end());
+        handle_stmt(*swCase.stmt);
+        build.popInsertPoint();
+      }
+      if (auto defCase = asCase.defaultCase) {
+        auto defInstr = build.buildDefaultCase();
+        build.pushInsertPoint(defInstr.block().end());
+        handle_stmt(*defCase);
+        build.popInsertPoint();
+      }
+      build.popInsertPoint();
+      break;
+    }
     case slang::ast::StatementKind::PatternCase:
     case slang::ast::StatementKind::ForLoop:
     case slang::ast::StatementKind::RepeatLoop:
@@ -510,15 +582,59 @@ public:
     case slang::ast::StatementKind::WaitFork:
     case slang::ast::StatementKind::WaitOrder:
     case slang::ast::StatementKind::EventTrigger:
-    case slang::ast::StatementKind::ProceduralAssign:
+      abort();
+
+    case slang::ast::StatementKind::ProceduralAssign: {
+      // auto &asPAssign = stmt.as<slang::ast::ProceduralAssignStatement>();
+      // if (asPAssign.isForce)
+      //   abort();
+      // handle_expr(asPAssign.assignment);
+      // break;
+    }
+
     case slang::ast::StatementKind::ProceduralDeassign:
     case slang::ast::StatementKind::RandCase:
     case slang::ast::StatementKind::RandSequence:
     case slang::ast::StatementKind::ProceduralChecker:
     case slang::ast::StatementKind::Timed:
       abort();
+    }
+  }
+
+  uint32_t getArrayElemWidth(const slang::ast::Type &type) {
+    switch (type.kind) {
+    case slang::ast::SymbolKind::PackedArrayType: {
+      auto &asPArrT = type.as<slang::ast::PackedArrayType>();
+      return asPArrT.elementType.getBitstreamWidth();
       break;
     }
+    case slang::ast::SymbolKind::FixedSizeUnpackedArrayType: {
+      auto &asUArrT = type.as<slang::ast::FixedSizeUnpackedArrayType>();
+      return asUArrT.elementType.getBitstreamWidth();
+      break;
+    }
+    default:
+      abort();
+    }
+  }
+
+  std::unique_ptr<Value> buildRangeAccess(Value &value, BitRange range,
+                                          const slang::ast::Type *type) {
+    if (value.is<RegLValue>()) {
+      return RegLValue::slice(build, value.as<RegLValue>(), type, range);
+    } else if (value.is<ConcatLValue>()) {
+      abort(); // todo
+    }
+    auto splice = build.buildSplice(value.getValue(), range);
+    splice.as<WireRef>()->numBits = type->getBitstreamWidth();
+    return std::make_unique<RValue>(splice.as<WireRef>(), type);
+  }
+
+  HWValue makeBool(HWValue val, bool inverse = false) {
+    if (val.getNumBits() == 1)
+      return val;
+    return build.buildICmp(val, ctx.constBuild().zeroLike(val).get(),
+                           inverse ? BigInt::ICMP_EQ : BigInt::ICMP_NE);
   }
 
   ConstantRef toDynoConstant(const slang::SVInt &svint) {
@@ -572,21 +688,15 @@ public:
         auto lhs = handle_expr(binop.left());
         auto lhsVal = lhs->proGetValue(build);
 
-        auto zero = ctx.constBuild().zeroLike(lhsVal).get();
-
         auto lhsBool =
-            build.buildICmp(lhsVal, zero,
-                            binop.op == slang::ast::BinaryOperator::LogicalOr
-                                ? BigInt::ICMP_EQ
-                                : BigInt::ICMP_NE);
-
+            makeBool(lhsVal, binop.op == slang::ast::BinaryOperator::LogicalOr);
         auto ifElse = build.buildIfElse(lhsBool);
         build.pushInsertPoint(ifElse.getTrueBlock().end());
 
         auto rhs = handle_expr(binop.right());
         auto rhsVal = rhs->proGetValue(build);
 
-        auto rhsBool = build.buildICmp(rhsVal, zero, BigInt::ICMP_NE);
+        auto rhsBool = makeBool(rhsVal);
         ifElse = build.buildYield(rhsBool).second;
 
         build.popInsertPoint();
@@ -706,9 +816,7 @@ public:
         val = build.buildICmp(lhsVal, rhsVal, BigInt::ICMP_WNE);
         break;
       case slang::ast::BinaryOperator::LogicalEquivalence: {
-        auto zero = ctx.constBuild().zeroLike(lhsVal).get();
-        val = build.buildICmp(build.buildICmp(lhsVal, zero, BigInt::ICMP_NE),
-                              build.buildICmp(rhsVal, zero, BigInt::ICMP_NE),
+        val = build.buildICmp(makeBool(lhsVal), makeBool(rhsVal),
                               BigInt::ICMP_EQ);
         break;
       }
@@ -877,14 +985,12 @@ public:
         offs = add;
         break;
       }
-      if (value->is<LValue>()) {
-        return RegLValue::slice(build, value->as<RegLValue>(), expr.type,
-                                BitRange{offs, len});
+      uint32_t width = getArrayElemWidth(*asRangeS.value().type);
+      if (width != 1) {
+        offs = build.buildMul(offs, ConstantRef::fromU32(width));
+        len = build.buildMul(len, ConstantRef::fromU32(width));
       }
-
-      auto splice = build.buildSplice(value->getValue(), BitRange{offs, len});
-      splice.as<WireRef>()->numBits = expr.type->getBitstreamWidth();
-      return std::make_unique<RValue>(splice.as<WireRef>(), expr.type);
+      return buildRangeAccess(*value, BitRange{offs, len}, expr.type);
     }
 
     case slang::ast::ExpressionKind::ElementSelect: {
@@ -894,8 +1000,12 @@ public:
       auto index = build.buildUpsize(
           handle_expr(asElemS.selector())->proGetValue(build), 32);
 
-      return RegLValue::slice(build, value->as<RegLValue>(), expr.type,
-                              BitRange{index, ConstantRef::fromU32(1)});
+      uint32_t width = getArrayElemWidth(*asElemS.value().type);
+      if (width != 1)
+        index = build.buildMul(index, ConstantRef::fromU32(width));
+
+      return buildRangeAccess(
+          *value, BitRange{index, ConstantRef::fromU32(width)}, expr.type);
     }
 
     case slang::ast::ExpressionKind::Invalid:

@@ -7,9 +7,11 @@
 #include "support/SmallVec.h"
 #include "support/Utility.h"
 #include <cassert>
+#include <compare>
 #include <cstdint>
 #include <dyno/Interface.h>
 #include <dyno/Obj.h>
+#include <iterator>
 #include <string_view>
 #include <support/InlineStorage.h>
 #include <support/Ranges.h>
@@ -137,17 +139,14 @@ private:
 static_assert(sizeof(Instr) == 16);
 static_assert(TrailingObj<Instr>);
 
-// could maybe make this just a ptr to the operand and find parent another way
 class OperandRef {
   friend class InstrBuilder;
-
-  // why do we store dialect + type here if we know it's an instr?
-  FatDynObjRef<Instr> instrRef;
+  FatObjRef<Instr> instrRef;
 
 public:
-  using iterator_category = std::bidirectional_iterator_tag;
+  using iterator_category = std::random_access_iterator_tag;
   using value_type = Operand;
-  using difference_type = std::ptrdiff_t;
+  using difference_type = int;
   using pointer = value_type *;
   using reference = value_type &;
 
@@ -171,10 +170,7 @@ public:
     return *(*this)->customFat<InstrDefUse>();
   }
 
-  OperandRef &operator++() {
-    instrRef.setCustom(instrRef.getCustom() + 1);
-    return *this;
-  }
+  OperandRef &operator++() { return (*this) += 1; }
 
   OperandRef operator++(int) {
     auto tmp(*this);
@@ -182,10 +178,7 @@ public:
     return tmp;
   }
 
-  OperandRef &operator--() {
-    instrRef.setCustom(instrRef.getCustom() - 1);
-    return *this;
-  }
+  OperandRef &operator--() { return (*this) -= 1; }
 
   OperandRef operator--(int) {
     auto tmp(*this);
@@ -193,18 +186,43 @@ public:
     return tmp;
   }
 
+  OperandRef &operator+=(int i) {
+    uint16_t newVal = instrRef.getCustom() + i;
+    assert(newVal <= instrRef->numOperands && "out of bounds");
+    instrRef.setCustom(newVal);
+    return *this;
+  }
+  OperandRef &operator-=(int i) { return (*this) += -i; }
+  friend OperandRef operator+(const OperandRef &lhs, int rhs) {
+    OperandRef tmp{lhs};
+    tmp += (-rhs);
+    return tmp;
+  }
+  friend OperandRef operator+(int lhs, const OperandRef &rhs) {
+    OperandRef tmp{rhs};
+    tmp += lhs;
+    return tmp;
+  }
+  friend int operator-(const OperandRef &lhs, const OperandRef &rhs) {
+    return lhs.instrRef.getCustom() - rhs.instrRef.getCustom();
+  }
+  friend OperandRef operator-(const OperandRef &lhs, int rhs) {
+    return lhs + (-rhs);
+  }
+
   friend bool operator==(const OperandRef &a, const OperandRef &b) {
     return a.instrRef == b.instrRef;
   }
 
+  friend std::strong_ordering operator<=>(const OperandRef &lhs,
+                                          const OperandRef &rhs) {
+    return lhs.instrRef.getCustom() <=> rhs.instrRef.getCustom();
+  }
+
   Operand &operator*() const { return instrRef->operand(getNum()); }
   Operand *operator->() const { return &instrRef->operand(getNum()); }
+  Operand &operator[](int index) const { return *((*this) + index); }
   explicit operator Operand &() const { return instrRef->operand(getNum()); }
-
-  // This works but a little overkill
-  // operator FatDynObjRef<>() const {
-  //  return instrRef->operand(getNum()).fat();
-  //}
 
 private:
   void addToDefUse() const;
@@ -221,9 +239,9 @@ public:
     OperandRef ref;
 
   public:
-    using iterator_category = std::bidirectional_iterator_tag;
+    using iterator_category = std::random_access_iterator_tag;
     using value_type = OperandRef;
-    using difference_type = std::ptrdiff_t;
+    using difference_type = int;
     using pointer = value_type *;
     using reference = value_type &;
 
@@ -252,14 +270,45 @@ public:
       return tmp;
     }
 
+    iterator &operator+=(int i) {
+      ref += i;
+      return *this;
+    }
+    iterator &operator-=(int i) {
+      ref -= i;
+      return *this;
+    }
+    friend iterator operator+(const iterator &lhs, int rhs) {
+      auto tmp{lhs};
+      tmp += rhs;
+      return tmp;
+    }
+    friend iterator operator+(int lhs, const iterator &rhs) {
+      auto tmp{rhs};
+      tmp -= lhs;
+      return tmp;
+    }
+    friend int operator-(const iterator &lhs, const iterator &rhs) {
+      return lhs.ref - rhs.ref;
+    }
+    friend iterator operator-(const iterator &lhs, int rhs) {
+      return lhs.ref - rhs;
+    }
+
     friend bool operator==(const iterator &a, const iterator &b) {
       return a.ref == b.ref;
     }
 
+    friend std::strong_ordering operator<=>(const iterator &lhs,
+                                            const iterator &rhs) {
+      return lhs.ref <=> rhs.ref;
+    }
+
     OperandRef &operator*() const { return const_cast<OperandRef &>(ref); }
     OperandRef *operator->() { return &ref; }
+    OperandRef &operator[](int index) const { return *((*this) + index); }
   };
-  static_assert(std::bidirectional_iterator<iterator>);
+  static_assert(std::random_access_iterator<iterator>);
 
   iterator begin() { return OperandRef{*this, 0}; }
   iterator end() { return OperandRef{*this, (*this)->numOperands}; }

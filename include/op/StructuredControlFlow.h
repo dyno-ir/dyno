@@ -4,6 +4,7 @@
 #include "dyno/Obj.h"
 #include "hw/DefUseMixin.h"
 #include "op/IDs.h"
+#include "support/ArrayRef.h"
 
 namespace dyno {
 
@@ -32,6 +33,28 @@ public:
   }
 };
 
+// defs block, wire... ; uses: cond
+class SwitchInstrRef : public InstrRef {
+public:
+  using InstrRef::InstrRef;
+
+  auto block() { return this->def(0)->as<BlockRef>(); }
+  auto yieldValues() { return Range{this->def_begin() + 1, this->def_end()}; }
+  auto cond() { return this->other(0); }
+};
+
+class CaseInstrRef : public InstrRef {
+public:
+  using InstrRef::InstrRef;
+
+  auto block() { return this->def(0)->as<BlockRef>(); }
+  auto labels() { return this->others(); }
+  bool hasSingleLabel() { return this->getNumOthers() == 1; }
+  bool isDefault() {
+    return this->isOpc(DialectID{DIALECT_OP}, OpcodeID{OP_CASE_DEFAULT});
+  }
+};
+
 // defs: (cond_bl, body_bl, vreg...); uses: (cond_vreg, vreg...)
 class WhileInstrRef : public InstrRef {
 public:
@@ -40,12 +63,8 @@ public:
 
   uint getNumYieldValues() { return (getNumDefs() - 2); }
 
-  BlockRef getCondBlock() {
-    return this->operand(0)->as<BlockRef>();
-  }
-  BlockRef getBodyBlock() {
-    return this->operand(1)->as<BlockRef>();
-  }
+  BlockRef getCondBlock() { return this->operand(0)->as<BlockRef>(); }
+  BlockRef getBodyBlock() { return this->operand(1)->as<BlockRef>(); }
   FatDynObjRef<> getYieldValue(uint n = 0) {
     assert(n < getNumYieldValues());
     return this->operand(2 + n)->as<FatDynObjRef<>>();

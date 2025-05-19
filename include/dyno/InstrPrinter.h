@@ -138,6 +138,10 @@ public:
   void reset() { introduced.clear(); }
 
   void printBlock(BlockRef block) {
+    if (block.empty()) {
+      str << "{}";
+      return;
+    }
     str << "{\n";
     indentPrint.addIndent();
     for (auto it : block) {

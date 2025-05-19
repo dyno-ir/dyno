@@ -236,6 +236,11 @@ public:
 
   explicit operator bool() const { return isCustom() || bool(this->obj); }
 
+  friend bool operator==(const FatObjRef &a, const FatObjRef &b) {
+    // do not test special here.
+    return a.custom == b.custom && a.obj == b.obj;
+  }
+
   T *getPtr() const { return ptr; }
   T &operator*() const {
     assert(ptr && "ptr uninitialized");
@@ -257,7 +262,8 @@ static_assert(sizeof(FatObjRef<int>) == 16);
 
 /// Note: Can be uninitialized!
 template <typename T>
-class FatDynObjRef : public DynObjRef, public ByValueRTTIUtilMixin<FatDynObjRef<T>> {
+class FatDynObjRef : public DynObjRef,
+                     public ByValueRTTIUtilMixin<FatDynObjRef<T>> {
 protected:
   T *ptr;
 

@@ -26,7 +26,8 @@ public:
     // we can somehow spare a few bits in the DynObjRef?
     // -> multiple register types all mapping to Register
     // -> 2 high bits in obj id
-    // -> limit to 2 or 3 signals and store in proc opcode like CLK, CLK_RST, CLK_NRST, ... (prob best)
+    // -> limit to 2 or 3 signals and store in proc opcode like CLK, CLK_RST,
+    // CLK_NRST, ... (prob best)
     for (size_t i = 0; i < sens.signals.size(); i++)
       modes[i] = sens.signals[i].second;
   }

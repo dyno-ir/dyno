@@ -15,15 +15,19 @@
 HEADER
 
 ADD_OP(IF),
+ADD_OP(SWITCH),
+
+ADD_OP(CASE),
+ADD_OP(CASE_DEFAULT),
+
 ADD_OP(WHILE),
+ADD_OP(FOR),
 ADD_OP(YIELD),
-ADD_OP(YIELD_COND), // yield with additional bool continue arg, for while loop
 
 ADD_OP(FUNC_INSTR),
 ADD_OP(PARAM),
 ADD_OP(RETURN),
 ADD_OP(CALL),
-
 
 ADD_OP(ADD),
 ADD_OP(SUB),

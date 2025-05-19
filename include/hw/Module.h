@@ -27,10 +27,14 @@ public:
   Module(DynObjRef, std::string name) : name(name) {}
 };
 
+class ModuleIRef;
+
 class ModuleRef : public FatObjRef<Module>, public InstrDefUseMixin<ModuleRef> {
 public:
   using FatObjRef::FatObjRef;
   // ModuleRef(const FatObjRef<Module> ref) : FatObjRef<Module>(ref) {}
+
+  ModuleIRef iref();
 };
 
 template <> struct ObjTraits<Module> {
@@ -50,7 +54,7 @@ public:
   BlockRef_iterator<true> regs_end() {
     auto it = block().begin();
     // todo: decent impl via block defrag
-    while (true) {
+    while (it != block().end()) {
       switch (it.instr().getDialect() << 16 | it.instr().getOpcode()) {
       case DIALECT_HW << 16 | HW_INPUT_REGISTER_INSTR:
       case DIALECT_HW << 16 | HW_OUTPUT_REGISTER_INSTR:
@@ -66,5 +70,9 @@ public:
     return it;
   }
 };
+
+inline ModuleIRef ModuleRef::iref() {
+  return getSingleDef()->instr().as<ModuleIRef>();
+}
 
 }; // namespace dyno
