@@ -60,6 +60,7 @@ public:
   WhileInstrRef(const InstrRef &ref) : InstrRef(ref) {}
 
   uint getNumYieldValues() { return (getNumDefs() - 2); }
+  auto yieldValues() { return Range{this->def_begin() + 2, this->def_end()}; }
 
   BlockRef getCondBlock() { return this->operand(0)->as<BlockRef>(); }
   BlockRef getBodyBlock() { return this->operand(1)->as<BlockRef>(); }
@@ -71,6 +72,38 @@ public:
     assert(n < getNumYieldValues());
     return this->operand(getNumDefs() + n)->as<FatDynObjRef<>>();
   }
+};
+
+class DoWhileInstrRef : public InstrRef {
+public:
+  using InstrRef::InstrRef;
+  DoWhileInstrRef(const InstrRef &ref) : InstrRef(ref) {}
+
+  uint getNumYieldValues() { return (getNumDefs() - 1); }
+  auto yieldValues() { return Range{this->def_begin() + 1, this->def_end()}; }
+
+  BlockRef getBlock() { return this->operand(0)->as<BlockRef>(); }
+  FatDynObjRef<> getYieldValue(uint n = 0) {
+    assert(n < getNumYieldValues());
+    return this->operand(1 + n)->as<FatDynObjRef<>>();
+  }
+  FatDynObjRef<> getInputValue(uint n = 0) {
+    assert(n < getNumYieldValues());
+    return this->operand(getNumDefs() + n)->as<FatDynObjRef<>>();
+  }
+};
+
+class ForInstrRef : public InstrRef {
+public:
+  using InstrRef::InstrRef;
+
+  uint getNumYieldValues() { return (getNumDefs() - 1); }
+  BlockRef getBlock() { return this->operand(0)->as<BlockRef>(); }
+
+  auto yieldValues() { return Range{this->def_begin() + 1, this->def_end()};}
+  auto getLower() { return this->other(0); }
+  auto getUpper() { return this->other(1); }
+  auto getStep() { return this->other(2); }
 };
 
 }; // namespace dyno

@@ -84,7 +84,6 @@ endmodule
 
 
 
-
 module FIFO#(parameter NUM = 128, parameter WIDTH = 32)
 (
   input logic clk,
@@ -104,8 +103,7 @@ logic[$clog2(NUM+1)-1:0] rdPtr = 0;
 logic[WIDTH-1:0] memory[NUM-1:0];
 
 initial begin
-  integer i;
-  while (i++ < 128)
+  for (int i = 1; i < NUM; i += 1)
     memory[i] = 'x;
 end
 
@@ -145,3 +143,20 @@ always_ff@(posedge clk) begin
 end
 
 endmodule
+
+/*
+typedef struct packed {
+  logic[7:0] a;
+  logic[7:0] b;
+  logic c;
+} Struct;
+
+module Test(
+  input Struct IN_str,
+  output logic[7:0] OUT_b
+);
+
+assign OUT_b = IN_str.c;
+
+endmodule
+*/

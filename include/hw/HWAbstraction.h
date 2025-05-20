@@ -634,7 +634,8 @@ public:
 
     auto opcode = OP_YIELD;
     auto instr = insert.blockRef().defI();
-    assert(instr.isOpc(OP_IF, OP_WHILE, OP_CASE, OP_CASE_DEFAULT));
+    assert(instr.isOpc(OP_IF, OP_WHILE, OP_DO_WHILE, OP_FOR, OP_CASE,
+                       OP_CASE_DEFAULT));
 
     switch (instr.getDialectOpcode().raw()) {
     case OP_IF.raw(): {
@@ -686,6 +687,15 @@ public:
       }
       break;
     }
+    case OP_DO_WHILE.raw(): {
+      DoWhileInstrRef asDoWhile{instr};
+      if (sizeof...(Ts) == asDoWhile.getNumYieldValues() + 1)
+        ;
+      else {
+        abort();
+      }
+      break;
+    }
     default:
       dyno_unreachable("undefined");
     }
@@ -708,6 +718,26 @@ public:
     build.other();
     ([&]() { build.addRef(inputs); }(), ...);
     return WhileInstrRef{instrRef};
+  }
+
+  template <typename... Ts> auto buildDoWhile(Ts... inputs) {
+    InstrRef instrRef = InstrRef{
+        ctx.getInstrs().create(1 + 2 * sizeof...(inputs), OP_DO_WHILE)};
+    insertInstr(instrRef);
+
+    InstrBuilder build{instrRef};
+    build.addRef(ctx.createBlock());
+
+    for (uint i = 0; i < sizeof...(inputs); i++)
+      build.addRef(ctx.getWires().create());
+    build.other();
+
+    ([&]() { build.addRef(inputs); }(), ...);
+    return DoWhileInstrRef{instrRef};
+  }
+
+  auto buildAssert(HWValue value) {
+    return buildInstr(OP_ASSERT, false, value);
   }
 
   auto buildFuncParam(FunctionRef func) {

@@ -5,7 +5,6 @@
 #include <dyno/Obj.h>
 #include <hw/DefUseMixin.h>
 #include <hw/IDs.h>
-#include <optional>
 
 namespace dyno {
 class Wire {

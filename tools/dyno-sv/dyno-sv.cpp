@@ -2,7 +2,8 @@
 #include "dyno/Constant.h"
 #include "dyno/Instr.h"
 #include "dyno/Obj.h"
-#include "dyno/Opcode.h"
+#include "dyno/RefUnion.h"
+#include "hw/BitRange.h"
 #include "hw/HWAbstraction.h"
 #include "hw/HWPrinter.h"
 #include "hw/HWValue.h"
@@ -14,6 +15,7 @@
 #include "slang/ast/Compilation.h"
 #include "slang/ast/Expression.h"
 #include "slang/ast/SemanticFacts.h"
+#include "slang/ast/Statement.h"
 #include "slang/ast/Symbol.h"
 #include "slang/ast/TimingControl.h"
 #include "slang/ast/expressions/AssignmentExpressions.h"
@@ -30,6 +32,7 @@
 #include "slang/ast/symbols/CompilationUnitSymbols.h"
 #include "slang/ast/symbols/InstanceSymbols.h"
 #include "slang/ast/symbols/MemberSymbols.h"
+#include "slang/ast/symbols/ParameterSymbols.h"
 #include "slang/ast/symbols/PortSymbols.h"
 #include "slang/ast/symbols/VariableSymbols.h"
 #include "slang/ast/types/AllTypes.h"
@@ -41,7 +44,10 @@
 #include "support/Bits.h"
 #include "support/SmallVec.h"
 #include "support/Utility.h"
+#include <climits>
+#include <cstdint>
 #include <iostream>
+#include <memory>
 #include <ostream>
 #include <ranges>
 #include <slang/syntax/SyntaxNode.h>
@@ -51,14 +57,20 @@ using namespace dyno;
 
 class VisitorAST : public slang::ast::ASTVisitor<VisitorAST, true, true> {
 public:
+  struct Value;
+
   HWContext &ctx;
   ModuleIRef mod;
   ProcessIRef proc;
   // BlockRef blockRef;
   HWInstrBuilderStack build;
 
-  DenseMap<const slang::ast::Symbol *, RegisterRef> vars;
+  using RegisterOrConstantRef = FatRefUnion<RegisterRef, ConstantRef>;
+
+  DenseMap<const slang::ast::Symbol *, RegisterOrConstantRef> vars;
   DenseMap<const slang::ast::InstanceBodySymbol *, ObjRef<Module>> moduleMap;
+
+  SmallVec<Value *, 4> assignLVStack;
 
   VisitorAST(HWContext &ctx) : ctx(ctx), build(ctx) {}
 
@@ -109,23 +121,35 @@ public:
       }
     }
 
-    virtual ~Value() = default;
+    static std::unique_ptr<Value> slice(HWInstrBuilder build, Value &value,
+                                        BitRange range,
+                                        const slang::ast::Type *type) {
+      switch (value.kind) {
+      case Value::VK_CCL:
+      // concat lvalue slice is no longer an lvalue
+      case Value::VK_R: {
+        auto splice = build.buildSplice(value.proGetValue(build), range);
+        splice.as<WireRef>()->numBits = type->getBitstreamWidth();
+        return std::make_unique<RValue>(splice.as<WireRef>(), type);
+      }
+      case Value::VK_L: {
+        auto &lv = value.as<RegLValue>();
+        if (lv.lvBitRange == BitRange::full())
+          return std::make_unique<RegLValue>(lv.lvReg, type, range);
 
-    // RegisterRef getLVReg() {
-    //   assert(kind == VK_L);
-    //   return lvReg;
-    // }
-    // BitRange getLVBitRange() {
-    //   assert(kind == VK_L);
-    //   return lvBitRange;
-    // }
-    // static Value rvalue(HWValue value, const slang::ast::Type *type) {
-    //   return Value{value, type};
-    // }
-    // static Value lvalue(RegisterRef reg, const slang::ast::Type *type,
-    //                     BitRange range = BitRange::full()) {
-    //   return Value{reg, type, range};
-    // }
+        // fixme: can you ever sign extend here?
+        auto newAddr =
+            build.buildAdd(build.buildUpsize(lv.lvBitRange.getAddr(), 32),
+                           build.buildUpsize(range.getAddr(), 32));
+        auto newLen = range.getLen();
+
+        return std::make_unique<RegLValue>(lv.lvReg, type,
+                                           BitRange{newAddr, newLen});
+      }
+      }
+    }
+
+    virtual ~Value() = default;
   };
 
   struct RValue : public Value {
@@ -187,22 +211,6 @@ public:
         : LValue(VK_L, type), lvReg(reg), lvBitRange(range) {}
 
     static bool is_impl(const Value &v) { return v.kind == VK_L; }
-
-    static std::unique_ptr<Value> slice(HWInstrBuilder &build, RegLValue lv,
-                                        const slang::ast::Type *type,
-                                        BitRange range) {
-      if (lv.lvBitRange == BitRange::full())
-        return std::make_unique<RegLValue>(lv.lvReg, type, range);
-
-      // fixme: can you ever sign extend here?
-      auto newAddr =
-          build.buildAdd(build.buildUpsize(lv.lvBitRange.getAddr(), 32),
-                         build.buildUpsize(range.getAddr(), 32));
-      auto newLen = range.getLen();
-
-      return std::make_unique<RegLValue>(lv.lvReg, type,
-                                         BitRange{newAddr, newLen});
-    }
   };
   struct ConcatLValue : public LValue {
     SmallVec<std::pair<RegisterRef, BitRange>, 4> lvValues;
@@ -286,6 +294,15 @@ public:
     }
   }
 
+  RegisterRef makeVariable(const slang::ast::VariableSymbol &symb) {
+    build.pushInsertPoint(mod.regs_end());
+    auto reg = build.buildRegister();
+    build.popInsertPoint();
+    vars.insert(&symb, reg);
+    reg->numBits = symb.getType().getBitstreamWidth();
+    return reg;
+  }
+
   void handle_member_list(
       std::ranges::subrange<slang::ast::Scope::iterator> members) {
     for (auto &member : members) {
@@ -294,8 +311,15 @@ public:
         // std::cout << "port " << &member << ", "
         //           << member.as<slang::ast::PortSymbol>().name << "\n";
         break;
-      case slang::ast::SymbolKind::Parameter:
+      case slang::ast::SymbolKind::Parameter: {
+        auto &asParam = member.as<slang::ast::ParameterSymbol>();
+        auto *init = asParam.getInitializer();
+        if (init == nullptr)
+          abort();
+        vars.insert(&asParam.symbol,
+                    toDynoConstant(init->getConstant()->integer()));
         break;
+      }
       case slang::ast::SymbolKind::Variable: {
         auto &asVar = member.as<slang::ast::VariableSymbol>();
         if (asVar.getFirstPortBackref()) {
@@ -303,12 +327,7 @@ public:
           assert(vars.contains(&asVar) && "port not in vars?");
           break;
         }
-
-        build.pushInsertPoint(mod.regs_end());
-        auto reg = build.buildRegister();
-        build.popInsertPoint();
-        vars.insert(&asVar, reg);
-        reg->numBits = asVar.getType().getBitstreamWidth();
+        auto reg = makeVariable(asVar);
 
         if (auto *init = asVar.getInitializer()) {
           auto proc = build.buildProcess(HW_INIT_PROCESS_INSTR);
@@ -404,6 +423,9 @@ public:
       auto it = vars.find(&sym);
       assert(it && "unknown var");
 
+      if (!it.val().is<RegisterRef>())
+        abort();
+
       ProcSenstv::Mode mode;
       switch (asSigEvt.edge) {
       case slang::ast::EdgeKind::None:
@@ -419,7 +441,8 @@ public:
         break;
       }
 
-      sens.signals.emplace_back(std::make_pair(it.val(), mode));
+      sens.signals.emplace_back(
+          std::make_pair(it.val().as<RegisterRef>(), mode));
       return sens;
     }
     case slang::ast::TimingControlKind::EventList: {
@@ -585,13 +608,67 @@ public:
       build.popInsertPoint();
       break;
     }
-    case slang::ast::StatementKind::DoWhileLoop:
+    case slang::ast::StatementKind::DoWhileLoop: {
+      auto &asDoWhileLoop = stmt.as<slang::ast::DoWhileLoopStatement>();
+      auto whileInstr = build.buildDoWhile();
+
+      build.pushInsertPoint(whileInstr.getBlock().end());
+      handle_stmt(asDoWhileLoop.body);
+      auto cond = makeBool(handle_expr(asDoWhileLoop.cond)->proGetValue(build));
+      build.buildYield(cond);
+      build.popInsertPoint();
+      break;
+    }
+    case slang::ast::StatementKind::ForLoop: {
+      auto &asForLoop = stmt.as<slang::ast::ForLoopStatement>();
+
+      if (asForLoop.initializers.size() != 0) {
+        assert(asForLoop.loopVars.size() == 0);
+        for (auto *init : asForLoop.initializers)
+          handle_expr(*init);
+      } else {
+        for (auto *var : asForLoop.loopVars) {
+          auto reg = makeVariable(*var);
+          if (auto *init = var->getInitializer()) {
+            build.buildStore(reg, handle_expr(*init)->proGetValue(build));
+          }
+        }
+      }
+
+      // no specialization to for yet, generate as while
+      auto whileInstr = build.buildWhile();
+
+      build.pushInsertPoint(whileInstr.getCondBlock().end());
+      auto cond =
+          makeBool(handle_expr(*asForLoop.stopExpr)->proGetValue(build));
+      build.buildYield(cond);
+      build.popInsertPoint();
+
+      build.pushInsertPoint(whileInstr.getBodyBlock().end());
+      handle_stmt(asForLoop.body);
+      for (auto *step : asForLoop.steps) {
+        handle_expr(*step);
+      }
+      build.buildYield(ConstantRef::fromBool(true));
+      build.popInsertPoint();
+      break;
+    }
+    case slang::ast::StatementKind::ImmediateAssertion: {
+      auto &asAssert = stmt.as<slang::ast::ImmediateAssertionStatement>();
+      if (asAssert.isDeferred ||
+          asAssert.assertionKind != slang::ast::AssertionKind::Assert ||
+          asAssert.isFinal || asAssert.ifFalse ||
+          (asAssert.ifTrue &&
+           asAssert.ifTrue->kind != slang::ast::StatementKind::Empty))
+        abort();
+      build.buildAssert(
+          makeBool(handle_expr(asAssert.cond)->proGetValue(build)));
+      break;
+    }
     case slang::ast::StatementKind::PatternCase:
-    case slang::ast::StatementKind::ForLoop:
     case slang::ast::StatementKind::RepeatLoop:
     case slang::ast::StatementKind::ForeachLoop:
     case slang::ast::StatementKind::ForeverLoop:
-    case slang::ast::StatementKind::ImmediateAssertion:
     case slang::ast::StatementKind::ConcurrentAssertion:
     case slang::ast::StatementKind::DisableFork:
     case slang::ast::StatementKind::Wait:
@@ -634,18 +711,6 @@ public:
     }
   }
 
-  std::unique_ptr<Value> buildRangeAccess(Value &value, BitRange range,
-                                          const slang::ast::Type *type) {
-    if (value.is<RegLValue>()) {
-      return RegLValue::slice(build, value.as<RegLValue>(), type, range);
-    } else if (value.is<ConcatLValue>()) {
-      abort(); // todo
-    }
-    auto splice = build.buildSplice(value.getValue(), range);
-    splice.as<WireRef>()->numBits = type->getBitstreamWidth();
-    return std::make_unique<RValue>(splice.as<WireRef>(), type);
-  }
-
   HWValue makeBool(HWValue val, bool inverse = false) {
     if (val.getNumBits() == 1)
       return val;
@@ -686,13 +751,24 @@ public:
     case slang::ast::ExpressionKind::Assignment: {
       const auto &assign = expr.as<slang::ast::AssignmentExpression>();
 
-      auto rhs = handle_expr(assign.right());
       auto lhs = handle_expr(assign.left());
+      assignLVStack.emplace_back(lhs.get());
+      auto rhs = handle_expr(assign.right());
+      assignLVStack.pop_back();
 
       lhs->as<LValue>().storeVal(build, rhs->proGetValue(build),
                                  assign.isNonBlocking());
       return rhs;
     }
+    case slang::ast::ExpressionKind::LValueReference: {
+      // to implement op-assign, slang uses regular assignment and operators
+      // with this special LValueReference token on one side. The value produced
+      // by an LValueReference is the top of the assignment lvalue stack.
+      assert(!assignLVStack.empty() && "lvalue stack empty?");
+      return std::make_unique<RValue>(assignLVStack.back()->proGetValue(build),
+                                      assignLVStack.back()->type);
+    }
+
     case slang::ast::ExpressionKind::BinaryOp: {
       const auto &binop = expr.as<slang::ast::BinaryExpression>();
       // std::cout << binop.kind << "\n";
@@ -941,7 +1017,10 @@ public:
       auto sig = vars.find(&nval.symbol);
       assert(sig != vars.end());
 
-      return std::make_unique<RegLValue>(sig.val(), expr.type);
+      if (auto reg = sig.val().dyn_as<RegisterRef>())
+        return std::make_unique<RegLValue>(reg, expr.type);
+      else
+        return std::make_unique<RValue>(sig.val().as<ConstantRef>(), expr.type);
     }
     case slang::ast::ExpressionKind::IntegerLiteral: {
       const auto &asLit = expr.as<slang::ast::IntegerLiteral>();
@@ -1006,7 +1085,7 @@ public:
         offs = build.buildMul(offs, ConstantRef::fromU32(width));
         len = build.buildMul(len, ConstantRef::fromU32(width));
       }
-      return buildRangeAccess(*value, BitRange{offs, len}, expr.type);
+      return Value::slice(build, *value, BitRange{offs, len}, expr.type);
     }
 
     case slang::ast::ExpressionKind::ElementSelect: {
@@ -1020,10 +1099,33 @@ public:
       if (width != 1)
         index = build.buildMul(index, ConstantRef::fromU32(width));
 
-      return buildRangeAccess(
-          *value, BitRange{index, ConstantRef::fromU32(width)}, expr.type);
+      return Value::slice(build, *value,
+                          BitRange{index, ConstantRef::fromU32(width)},
+                          expr.type);
     }
+    case slang::ast::ExpressionKind::MemberAccess: {
+      auto &asMemberAcc = expr.as<slang::ast::MemberAccessExpression>();
+      if (!(asMemberAcc.value().type->isStruct() ||
+            (asMemberAcc.value().type->isUnion() &&
+             !asMemberAcc.value().type->isTaggedUnion())))
+        abort();
 
+      if (asMemberAcc.member.kind != slang::ast::SymbolKind::Field)
+        abort();
+
+      auto &asField = asMemberAcc.member.as<slang::ast::FieldSymbol>();
+      if (asField.bitOffset >= UINT32_MAX)
+        abort();
+
+      auto value = handle_expr(asMemberAcc.value());
+      assert(expr.type->getBitstreamWidth() ==
+             asField.getType().getBitstreamWidth());
+      return Value::slice(
+          build, *value,
+          BitRange{ConstantRef::fromU32(asField.bitOffset),
+                   ConstantRef::fromU32(asField.getType().getBitstreamWidth())},
+          expr.type);
+    }
     case slang::ast::ExpressionKind::Invalid:
     case slang::ast::ExpressionKind::RealLiteral:
     case slang::ast::ExpressionKind::TimeLiteral:
@@ -1066,12 +1168,10 @@ public:
 
     case slang::ast::ExpressionKind::Streaming:
 
-    case slang::ast::ExpressionKind::MemberAccess:
     case slang::ast::ExpressionKind::Call:
     case slang::ast::ExpressionKind::DataType:
     case slang::ast::ExpressionKind::TypeReference:
     case slang::ast::ExpressionKind::ArbitrarySymbol:
-    case slang::ast::ExpressionKind::LValueReference:
     case slang::ast::ExpressionKind::SimpleAssignmentPattern:
     case slang::ast::ExpressionKind::StructuredAssignmentPattern:
     case slang::ast::ExpressionKind::ReplicatedAssignmentPattern:
