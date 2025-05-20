@@ -82,7 +82,7 @@ end
 endmodule
 */
 
-
+/*
 
 module FIFO#(parameter NUM = 128, parameter WIDTH = 32)
 (
@@ -143,7 +143,7 @@ always_ff@(posedge clk) begin
 end
 
 endmodule
-
+*/
 /*
 typedef struct packed {
   logic[7:0] a;
@@ -160,3 +160,21 @@ assign OUT_b = IN_str.c;
 
 endmodule
 */
+
+
+module Test(
+  input logic[7:0] IN_b,
+  output logic[7:0] OUT_b
+);
+
+generate for (genvar i = 0; i < 8; i++) begin
+  if (i % 2 == 0) begin
+    assign OUT_b[i] = IN_b[i];
+  end
+  else begin
+    assign OUT_b[i] = !IN_b[i];
+  end
+end
+endgenerate
+
+endmodule

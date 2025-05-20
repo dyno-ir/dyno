@@ -313,11 +313,8 @@ public:
         break;
       case slang::ast::SymbolKind::Parameter: {
         auto &asParam = member.as<slang::ast::ParameterSymbol>();
-        auto *init = asParam.getInitializer();
-        if (init == nullptr)
-          abort();
         vars.insert(&asParam.symbol,
-                    toDynoConstant(init->getConstant()->integer()));
+                    toDynoConstant(asParam.getValue().integer()));
         break;
       }
       case slang::ast::SymbolKind::Variable: {
@@ -388,14 +385,17 @@ public:
       }
 
       case slang::ast::SymbolKind::GenerateBlockArray: {
-        // todo
         auto &asGenBA = member.as<slang::ast::GenerateBlockArraySymbol>();
         for (auto submember : asGenBA.entries) {
-          std::cout << submember->name << "\n";
           handle_member_list(submember->members());
         }
-        // asGenBA.entries
-        std::cout << asGenBA.name << "\n";
+        break;
+      }
+
+      case slang::ast::SymbolKind::GenerateBlock: {
+        auto &asGenBl = member.as<slang::ast::GenerateBlockSymbol>();
+        if (!asGenBl.isUninstantiated)
+          handle_member_list(asGenBl.members());
         break;
       }
 
