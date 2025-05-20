@@ -24,6 +24,7 @@ class Block {
 
     Node(InstrRef ref, ObjID next, ObjID prev)
         : next(next), prev(prev), ref(ref) {}
+    Node() = default;
   };
 
   using iterator = Node *;
@@ -195,6 +196,27 @@ public:
   auto defI() { return ptr->defUse.getSingleDef()->instr(); }
 
   bool empty() { return size() == 0; }
+
+  void sort() {
+    // think copy is faster than in place, just guess though.
+    auto &instrsOld = (*this)->instrs;
+    SmallVec<Block::Node, 16> instrsNew{instrsOld.size()};
+    instrsNew[0] =
+        Block::Node{InstrRef{nullref}, ObjID{instrsNew.size() - 1}, ObjID{1}};
+
+    size_t idx = 1;
+    for (auto instr : *this) {
+      uint32_t &pos = (*this)->cfg->map[instr].blockPos;
+      instrsNew[idx].ref = instrsOld[pos].ref;
+      instrsNew[idx].prev = idx - 1;
+      instrsNew[idx].next = idx + 1;
+      pos = idx;
+      idx++;
+    }
+
+    (*this)->instrs = std::move(instrsNew);
+    //(*this)->sorted = 1;
+  }
 };
 
 template <bool Ordered>
