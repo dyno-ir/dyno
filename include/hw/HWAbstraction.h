@@ -167,7 +167,8 @@ public:
 
   template <typename... Ts>
   HWInstrRef buildInstr(DialectOpcode opc, bool addWireDef, Ts... operands) {
-    return buildInstr(opc.getDialectID(), opc.getOpcodeID(), addWireDef, operands...);
+    return buildInstr(opc.getDialectID(), opc.getOpcodeID(), addWireDef,
+                      operands...);
   }
 
 #define COMM_OP(ident, opcode, constFunc)                                      \
@@ -539,8 +540,8 @@ public:
            type == HW_SEQ_PROCESS_INSTR || type == HW_FINAL_PROCESS_INSTR ||
            type == HW_LATCH_PROCESS_INSTR);
     auto procRef = ctx.getProcs().create(sens);
-    auto procInstRef = ProcessIRef{
-        ctx.getInstrs().create(2 + sens.signals.size(), type)};
+    auto procInstRef =
+        ProcessIRef{ctx.getInstrs().create(2 + sens.signals.size(), type)};
     InstrBuilder build{procInstRef};
     build.addRef(procRef).addRef(ctx.createBlock()).other();
 
@@ -633,7 +634,7 @@ public:
 
     auto opcode = OP_YIELD;
     auto instr = insert.blockRef().defI();
-    assert(instr.isOpc(OP_IF, OP_WHILE));
+    assert(instr.isOpc(OP_IF, OP_WHILE, OP_CASE, OP_CASE_DEFAULT));
 
     switch (instr.getDialectOpcode().raw()) {
     case OP_IF.raw(): {
@@ -677,11 +678,11 @@ public:
     }
     case OP_WHILE.raw(): {
       WhileInstrRef asWhile{instr};
-      // conditional yield is just implicit for now, one more arg
+      // while yield has continue as another arg.
       if (sizeof...(Ts) == asWhile.getNumYieldValues() + 1)
-        opcode = OP_YIELD;
+        ;
       else {
-        assert(sizeof...(Ts) == asWhile.getNumYieldValues() && "todo resizing");
+        abort();
       }
       break;
     }

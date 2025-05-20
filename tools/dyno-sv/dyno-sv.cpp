@@ -24,6 +24,7 @@
 #include "slang/ast/expressions/OperatorExpressions.h"
 #include "slang/ast/expressions/SelectExpressions.h"
 #include "slang/ast/statements/ConditionalStatements.h"
+#include "slang/ast/statements/LoopStatements.h"
 #include "slang/ast/statements/MiscStatements.h"
 #include "slang/ast/symbols/BlockSymbols.h"
 #include "slang/ast/symbols/CompilationUnitSymbols.h"
@@ -569,12 +570,26 @@ public:
       build.popInsertPoint();
       break;
     }
+    case slang::ast::StatementKind::WhileLoop: {
+      auto &asWhileLoop = stmt.as<slang::ast::WhileLoopStatement>();
+      auto whileInstr = build.buildWhile();
+
+      build.pushInsertPoint(whileInstr.getCondBlock().end());
+      auto cond = makeBool(handle_expr(asWhileLoop.cond)->proGetValue(build));
+      build.buildYield(cond);
+      build.popInsertPoint();
+
+      build.pushInsertPoint(whileInstr.getBodyBlock().end());
+      handle_stmt(asWhileLoop.body);
+      build.buildYield(ConstantRef::fromBool(true));
+      build.popInsertPoint();
+      break;
+    }
+    case slang::ast::StatementKind::DoWhileLoop:
     case slang::ast::StatementKind::PatternCase:
     case slang::ast::StatementKind::ForLoop:
     case slang::ast::StatementKind::RepeatLoop:
     case slang::ast::StatementKind::ForeachLoop:
-    case slang::ast::StatementKind::WhileLoop:
-    case slang::ast::StatementKind::DoWhileLoop:
     case slang::ast::StatementKind::ForeverLoop:
     case slang::ast::StatementKind::ImmediateAssertion:
     case slang::ast::StatementKind::ConcurrentAssertion:

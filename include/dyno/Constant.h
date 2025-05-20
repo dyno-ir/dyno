@@ -78,7 +78,7 @@ protected:
   uint32_t getExtNumWords() const {
     return bitsToWords(self().getRawNumBits());
   }
-  uint32_t getWord(uint32_t i) const {
+  uint32_t __attribute__((always_inline)) getWord(uint32_t i) const {
     if (i >= bitsToWords(self().getRawNumBits()))
       dyno_unreachable("out of bounds");
 
@@ -86,7 +86,7 @@ protected:
       return repeatExtend(self().getExtend());
     return self().getWords()[i];
   }
-  uint32_t getWord4S(uint32_t i) const {
+  uint32_t __attribute__((always_inline)) getWord4S(uint32_t i) const  {
     return self().getCustom() ? getWord(i)
                               : unpack_bits(getWord(i / 2) >> ((i % 2) * 16));
   }

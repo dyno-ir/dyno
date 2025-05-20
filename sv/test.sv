@@ -103,6 +103,12 @@ logic[$clog2(NUM+1)-1:0] rdPtr = 0;
 
 logic[WIDTH-1:0] memory[NUM-1:0];
 
+initial begin
+  integer i;
+  while (i++ < 128)
+    memory[i] = 'x;
+end
+
 always_ff@(posedge clk, posedge rst) begin
   if (rst) begin
     wrPtr <= 0;
@@ -129,7 +135,7 @@ always_ff@(posedge clk, posedge rst) begin
   end
 end
 
-always_ff@(posedge clk) begin
+always@(posedge clk) begin
   if (IN_valid)
     memory[wrPtr] <= IN_data;
 end
