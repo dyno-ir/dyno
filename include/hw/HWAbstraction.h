@@ -367,32 +367,93 @@ private:
     return nullopt;
   }
   template <typename... Rest>
-  Optional<uint32_t> spliceNumBits(HWValue value, BitRange range,
-                                   Rest... rest) {
+  std::tuple<Optional<uint32_t>, uint32_t, bool>
+  spliceNumBitsOps(HWValue value, BitRange range, Rest... rest) {
     auto lhs = spliceSingleNumBits(value, range);
-    if (!lhs)
-      return nullopt;
+    auto [rhsB, rhsN, rhsConst] = spliceNumBitsOps(rest...);
 
-    auto rhs = spliceNumBits(rest...);
-    if (!rhs)
-      return nullopt;
-
-    return *lhs + *rhs;
+    return std::make_tuple((!lhs || !rhsB) ? nullopt : Optional(*lhs + *rhsB),
+                           rhsN + (lhs.value_or(1) != 0),
+                           rhsConst && lhs && range.addr.is<ConstantRef>() &&
+                               value.is<ConstantRef>());
   }
-  Optional<uint32_t> spliceNumBits() { return 0; }
+  std::tuple<Optional<uint32_t>, uint32_t, bool> spliceNumBitsOps() {
+    return std::make_tuple(0, 0, true);
+  }
 
 public:
   template <typename... Ts> HWValue buildSplice(Ts... operands) {
-    static_assert(sizeof...(operands) % 2 == 0 &&
-                  "operands must be pairs of HWValue & BitRange");
-    Optional<uint32_t> len = spliceNumBits(operands...);
 
-    auto rv = buildInstr(HW_SPLICE, true, operands...).defW();
-    rv->numBits = len;
-    return rv;
+    auto [len, num, isConst] = spliceNumBitsOps(operands...);
+    if (isConst) {
+      auto cbuild = ctx.constBuild();
+      cbuild.val(0, 0);
+      HWValue last;
+      (
+          [&] {
+            // skip operands with constant zero length range
+            if constexpr (std::is_same_v<decltype(operands), BitRange>) {
+              cbuild.concatRangeLHS(
+                  last.as<ConstantRef>(),
+                  operands.getAddr().template as<ConstantRef>().getExactVal(),
+                  operands.getLen().template as<ConstantRef>().getExactVal());
+
+            } else
+              last = operands;
+          }(),
+          ...);
+      return cbuild.get();
+    }
+
+    auto instr = HWInstrRef{ctx.getInstrs().create(1 + 3 * num, HW_SPLICE)};
+    insertInstr(instr);
+
+    InstrBuilder build{instr};
+    build.addRef(ctx.getWires().create(len)).other();
+
+    HWValue last;
+    (
+        [&] {
+          // skip operands with constant zero length range
+          if constexpr (std::is_same_v<decltype(operands), BitRange>) {
+            if (spliceSingleNumBits(last, operands).value_or(1) == 0)
+              return;
+
+            addSpecialRef(build, last);
+            addSpecialRef(build, operands);
+          } else
+            last = operands;
+        }(),
+        ...);
+
+    return instr.defW();
   }
 
+
   HWValue buildSplice(ArrayRef<std::pair<HWValue, BitRange>> values) {
+
+    if (std::all_of(values.begin(), values.end(), [](const auto &pair) {
+          return pair.first.template is<ConstantRef>() &&
+                 pair.second.isConstant();
+        })) {
+      auto cbuild = ctx.constBuild();
+      if (values.size() == 0)
+        return cbuild.val(0, 0).get();
+
+      cbuild.valRange(
+          values.back().first.as<ConstantRef>(),
+          values.back().second.getAddr().as<ConstantRef>().getExactVal(),
+          values.back().second.getLen().as<ConstantRef>().getExactVal());
+
+      for (size_t i = values.size() - 1; i-- > 0;)
+        cbuild.concatRange(
+            values[i].first.as<ConstantRef>(),
+            values[i].second.getAddr().as<ConstantRef>().getExactVal(),
+            values[i].second.getLen().as<ConstantRef>().getExactVal());
+
+      return cbuild.get();
+    }
+
     auto instr =
         InstrRef{ctx.getInstrs().create(1 + values.size() * 3, HW_SPLICE)};
 
@@ -402,9 +463,13 @@ public:
     build.addRef(ctx.getWires().create());
     build.other();
 
-    Optional<uint32_t> numBits;
+    Optional<uint32_t> numBits = 0;
 
     for (auto [value, range] : values) {
+      if (auto asConst = range.getLen().dyn_as<ConstantRef>();
+          asConst && asConst.valueEquals(0))
+        continue;
+
       build.addRef(value);
       addSpecialRef(build, range);
 
@@ -447,7 +512,7 @@ public:
     build.addRef(ctx.getWires().create());
     build.other();
 
-    Optional<uint32_t> numBits;
+    Optional<uint32_t> numBits = 0;
     for (auto value : values) {
       build.addRef(value);
       if (auto val = value.getNumBits(); val && numBits)
@@ -629,8 +694,8 @@ public:
 
   template <IsAnyHWValue... Ts> auto buildYield(Ts... value) {
     // todo: ideally this would dynamically add Wires to the associated
-    // IfInstrRef. Alternative is a GET_YIELD instr or something. For now naive
-    // implementation as reference, just delete old instr and rebuild
+    // IfInstrRef. Alternative is a GET_YIELD instr or something. For now
+    // naive implementation as reference, just delete old instr and rebuild
 
     auto opcode = OP_YIELD;
     auto instr = insert.blockRef().defI();

@@ -33,14 +33,25 @@ public:
   constexpr Optional &operator=(Optional &&) = default;
 
   constexpr Optional(nullopt_t) : Optional() {}
-  constexpr Optional &operator=(nullopt_t) { val = Invalid; return *this; }
+  constexpr Optional &operator=(nullopt_t) {
+    val = Invalid;
+    return *this;
+  }
 
-  constexpr friend bool operator==(const Optional &rhs, nullopt_t) { return !rhs; }
+  constexpr friend bool operator==(const Optional &rhs, nullopt_t) {
+    return !rhs;
+  }
 
   explicit operator bool() { return val != Invalid; }
-  constexpr operator T() { return val; };
+  constexpr operator T() {
+    assert(*this);
+    return val;
+  };
 
-  constexpr T value() { return val; }
+  constexpr T value() {
+    assert(*this);
+    return val;
+  }
   constexpr T value_or(T &&alt) { return (*this) ? val : alt; }
 
   constexpr T &operator*() {

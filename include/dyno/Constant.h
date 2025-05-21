@@ -86,7 +86,7 @@ protected:
       return repeatExtend(self().getExtend());
     return self().getWords()[i];
   }
-  uint32_t __attribute__((always_inline)) getWord4S(uint32_t i) const  {
+  uint32_t __attribute__((always_inline)) getWord4S(uint32_t i) const {
     return self().getCustom() ? getWord(i)
                               : unpack_bits(getWord(i / 2) >> ((i % 2) * 16));
   }
@@ -345,7 +345,7 @@ public:
   }
   LINEAR_OP(addOp, __builtin_addc(lhs, rhs, cin, cout))
   LINEAR_OP(subOp, __builtin_subc(lhs, rhs, cin, cout))
-  LINEAR_OP(andOp, lhs &rhs)
+  LINEAR_OP(andOp, lhs & rhs)
   LINEAR_OP(orOp, lhs | rhs)
   LINEAR_OP(xorOp, lhs ^ rhs)
   LINEAR_OP(xnorOp, ~(lhs ^ rhs))
@@ -634,16 +634,16 @@ public:
 
     if ((extendPat == lhs.getExtend() || !lhs.isExtended())) {
 
-      if (extendPat != lhs.getExtend())
-        out.setExtend(extendPat);
-
       // as long as extend stays the same (or is freely assignable) we can
       // extend by just changing numBits
       out.words.resize(lhs.getNumWords());
       copyIfDifferent();
 
+      if (extendPat != lhs.getExtend()) {
+        out.setLastWordBitsToPattern(extendPat);
+      }
       out.numBits = newSize;
-      Extend{out.field} = extendPat;
+      out.setExtend(extendPat);
 
       // no need to normalize here
       return;
@@ -656,6 +656,42 @@ public:
 
     out.numBits = newSize;
     Extend{out.field} = extendPat;
+  }
+
+public:
+  template <BigIntAPI T>
+  static void rangeSelectOp(BigInt &out, const T &src, uint32_t bitOffs,
+                            uint32_t bitLen) {
+    if (bitLen == 0) {
+      out = BigInt::fromU64(0, 0);
+      return;
+    }
+
+    uint32_t outWords = round_up_div(bitLen, WordBits);
+    do {
+      if constexpr (std::is_same_v<T, BigInt>) {
+        if (&out == &src)
+          break;
+      }
+      out.words.resize(outWords);
+    } while (false);
+
+    uint32_t offs = bitOffs / WordBits;
+    uint32_t shamt = bitOffs % WordBits;
+
+    for (uint32_t i = 0; i < round_up_div(bitLen, WordBits); i++) {
+      size_t lowI = i + offs;
+      size_t highI = i + offs + 1;
+
+      out.words[i] = (src.getWord(lowI) >> shamt) |
+                     ((highI >= src.getExtNumWords() || shamt == 0)
+                          ? 0
+                          : (src.getWord(highI) << (32 - shamt)));
+    }
+
+    out.words.resize(outWords);
+    out.numBits = bitLen;
+    out.normalize();
   }
 
   template <typename T0, typename T1>
@@ -1036,6 +1072,18 @@ public:
     size_t rhsExtWords = rhs.getExtNumWords();
     size_t rhsBits = rhs.getRawNumBits();
 
+    if constexpr (std::is_same_v<BigInt, T0>)
+      assert(&out != &lhs && "only rhs may alias out");
+
+    if (lhs.getNumBits() == 0) {
+      out = rhs;
+      return;
+    }
+    if (rhs.getNumBits() == 0) {
+      out = lhs;
+      return;
+    }
+
     size_t outNumWords = rhsExtWords + lhs.getNumWords();
     if ((rhsBits % 32) && (lhs.getRawNumBits() % 32) &&
         (rhsBits % 32) + (lhs.getRawNumBits() % 32) <= 32)
@@ -1056,7 +1104,7 @@ public:
 
     // copy RHS extend into out
     for (size_t i = rhsWords; i < rhsExtWords; i++)
-      out.words[i] = rhs.getWord(i);
+      out.words[i] = repeatExtend(rhs.getExtend());
 
     size_t lhsOffs = rhsBits / WordBits;
     size_t lhsShamt = rhsBits % WordBits;
@@ -1070,7 +1118,8 @@ public:
 
       out.words[i] =
           (lhsShamt == 0 ? 0 : (lhs.getWord(lowI) >> (32 - lhsShamt))) |
-          (lhs.getWord(highI) << lhsShamt);
+          ((highI >= lhs.getExtNumWords()) ? 0
+                                           : (lhs.getWord(highI) << lhsShamt));
     }
 
     Extend{out.field} = lhs.getExtend();
@@ -1086,7 +1135,7 @@ public:
       out = val;
       return;
     } else if (count == 2) {
-      concatOp(out, val, out);
+      concatOp(out, BigInt{val}, out);
       return;
     }
 
@@ -1104,7 +1153,8 @@ public:
         count &= ~(1ULL << i);
       }
 
-      concatOp(pow, pow, pow);
+      // todo: edge case concat for repeat
+      concatOp(pow, BigInt{pow}, pow);
     }
   }
 
@@ -1211,6 +1261,8 @@ public:
     normalize();
   }
   void conv2To4State() {
+    if (numBits == 0)
+      return;
     size_t outNumWords = round_up_div(2 * getNumBits(), WordBits);
     SmallVec<uint32_t, 4> buf{outNumWords};
 
@@ -1325,6 +1377,17 @@ public:
       BigInt::resizeOp(out, lhs, newSize,
                        sign ? lhs.getExtendPatFromSignBit() : 0);
   }
+  template <BigIntAPI T>
+  static void rangeSelectOp4S(BigInt &out, const T &src, uint32_t bitOffs,
+                              uint32_t bitLen) {
+    if (src.getCustom()) {
+      BigInt::rangeSelectOp(out, src, bitOffs * 2, bitLen * 2);
+      out.setCustom(1);
+      out.conv4To2StateIfPossible();
+    } else {
+      BigInt::rangeSelectOp(out, src, bitOffs, bitLen);
+    }
+  }
   template <BigIntAPI T0, BigIntAPI T1>
   static auto udivmodOp4S(const T0 &lhs, const T1 &rhs) {
     if (lhs.getCustom() || rhs.getCustom()) {
@@ -1374,6 +1437,7 @@ public:
 
   template <BigIntAPI T0, BigIntAPI T1>
   static void concatOp4S(BigInt &out, const T0 &lhs, const T1 &rhs) {
+    bool custom = rhs.getCustom() || lhs.getCustom();
     if (lhs.getCustom() && !rhs.getCustom()) {
       BigInt rhsCopy{rhs};
       rhsCopy.conv2To4State();
@@ -1384,13 +1448,14 @@ public:
       concatOp(out, lhsCopy, rhs);
     } else
       concatOp(out, lhs, rhs);
-    out.setCustom(rhs.getCustom() || lhs.getCustom());
+    out.setCustom(custom);
   }
 
   template <BigIntAPI T0>
   static void repeatOp4S(BigInt &out, const T0 &val, uint32_t count) {
+    bool custom = val.getCustom();
     repeatOp(out, val, count);
-    out.setCustom(val.getCustom());
+    out.setCustom(custom);
   }
 
   // String Ops
@@ -1583,11 +1648,15 @@ private:
   void normalizeExtend() {
     if (!isExtended())
       Extend{field} = 0;
+    setLastWordBitsToPattern(Extend{field});
+  }
+
+  void setLastWordBitsToPattern(uint8_t pattern) {
     // truncate last word and fill with extend.
     if (getRawNumBits() % 32 != 0) {
       auto mask = (1 << (getRawNumBits() % 32)) - 1;
       words.back() &= mask;
-      words.back() |= (~mask & repeatExtend(Extend{field}));
+      words.back() |= (~mask & repeatExtend(pattern));
     }
   }
 
@@ -1953,16 +2022,16 @@ public:
     return *this;
   }
   ConstantBuilderBase &ones(unsigned bits) {
-    cur.set(~0ULL, bits);
+    cur.set(uint32_t(~0), bits);
     cur.setExtend(bit_mask_ones<uint8_t>(BigIntExtendBits));
     return *this;
   }
   ConstantBuilderBase &zero(unsigned bits) {
-    cur.set(0, bits);
+    cur.set(uint32_t(0), bits);
     return *this;
   }
   ConstantBuilderBase &one(unsigned bits) {
-    cur.set(1, bits);
+    cur.set(uint32_t(1), bits);
     return *this;
   }
   template <typename U> ConstantBuilderBase &onesLike(U like) {
@@ -1984,7 +2053,7 @@ public:
     return *this;
   }
   ConstantBuilderBase &undef(unsigned bits) {
-    cur.setRepeating(BigInt::EXTX_MASK, bits, 1);
+    cur.setRepeating(BigInt::EXTX_MASK, 2 * bits, 1);
     return *this;
   }
   ConstantBuilderBase &fourState() {
@@ -1993,6 +2062,12 @@ public:
   }
   ConstantBuilderBase &twoState() {
     cur.setCustom(0);
+    return *this;
+  }
+  template <BigIntAPI U>
+  ConstantBuilderBase &valRange(const U &src, uint32_t bitOffs,
+                                uint32_t bitLen) {
+    BigInt::rangeSelectOp4S(cur, src, bitOffs, bitLen);
     return *this;
   }
 
@@ -2065,7 +2140,6 @@ public:
     BigInt::resizeOp4S(cur, cur, size, sign);
     return *this;
   }
-
   ConstantBuilderBase &repeat(uint32_t count) {
     BigInt::repeatOp4S(cur, cur, count);
     return *this;
@@ -2073,6 +2147,28 @@ public:
 
   template <BigIntAPI U> ConstantBuilderBase &concat(const U &other) {
     BigInt::concatOp4S(cur, other, cur);
+    return *this;
+  }
+  template <BigIntAPI U> ConstantBuilderBase &concatLHS(const U &other) {
+    BigInt::concatOp4S(cur, BigInt{cur}, other);
+    return *this;
+  }
+
+  template <BigIntAPI U>
+  ConstantBuilderBase &concatRange(const U &src, uint32_t bitOffs,
+                                   uint32_t bitLen) {
+    BigInt tmp;
+    BigInt::rangeSelectOp4S(tmp, src, bitOffs, bitLen);
+    BigInt::concatOp4S(cur, tmp, cur);
+    return *this;
+  }
+
+  template <BigIntAPI U>
+  ConstantBuilderBase &concatRangeLHS(const U &src, uint32_t bitOffs,
+                                      uint32_t bitLen) {
+    BigInt tmp;
+    BigInt::rangeSelectOp4S(tmp, src, bitOffs, bitLen);
+    BigInt::concatOp4S(cur, BigInt{cur}, tmp);
     return *this;
   }
 

@@ -1,4 +1,4 @@
-/*module Test#(parameter WIDTH)
+module Test3#(parameter WIDTH)
 (
   input logic IN_a,
   input logic IN_b,
@@ -10,14 +10,14 @@ end
 endmodule
 
 
-module Test2(
+module Test4(
   input logic IN_a,
   input logic IN_b,
   output logic[1:0] OUT_sum,
   output logic OUT_d
 );
 
-Test#(2) test(.IN_a(IN_a), .IN_b(IN_b), .OUT_sum(OUT_sum));
+Test3#(2) test(.IN_a(IN_a), .IN_b(IN_b), .OUT_sum(OUT_sum));
 
 always_comb begin
   OUT_d = 1;
@@ -25,19 +25,19 @@ end
 endmodule
 
 
-module Test3(
+module Test5(
   input logic IN_a,
   input logic IN_b,
   output logic[1:0] OUT_sum,
   output logic[2:0] OUT_d
 );
 
-Test#(2) test(IN_a, IN_b, OUT_sum);
+Test3#(2) test(IN_a, IN_b, OUT_sum);
 
-always_comb OUT_d[1+:2] = (OUT_sum + 1)[1:0];
-endmodule*/
+always_comb OUT_d[1+:2] = {OUT_sum + 1}[1:0];
+endmodule
 
-/*
+
 module Calc(
   input logic clk,
   input logic rst,
@@ -48,18 +48,16 @@ module Calc(
 
 logic[99:0] variable;// = 100;
 
-//always_comb res = (128'hdeadbeefdeadbeef * 100) / 128'hc0febabec0febabe == 115;
-//always_comb res = -8 % 3;
-//always_comb res = 32'hdeadbeef == (32'hc0febabe + 498009137);
+initial res = (128'hdeadbeefdeadbeef * 100) / 128'hc0febabec0febabe == 115;
+initial res = -8 % 3;
+initial res = 32'hdeadbeef == (32'hc0febabe + 498009137);
+initial res = 1'(1'b1 ~^ 1'b1);
+initial res = !in;
+initial res2 = -2 ** -7;
+initial res2 = {in[31:0] + 32'b1, res[31:0]};
+initial {res, res2[3*32+:32], res2[0*32+:32], res2[1*32+:32], res2[2*32+:32]} = in;
 
-//always_comb res = 1'(1'b1 ~^ 1'b1);
-//always_comb res = !in;
-//always_comb res2 = -2 ** -7;
-
-//always_comb res2 = {in[31:0] + 32'b1, res[31:0]};
-//always_comb {res, res2[3*32+:32], res2[0*32+:32], res2[1*32+:32], res2[2*32+:32]} = in;
-
-always_comb begin
+initial begin
   static logic variable = 1;
   res2 = {4{1'b1, 30'h0000_0000, 1'bx}};
 end
@@ -80,9 +78,9 @@ always_ff@(posedge clk, posedge rst) begin
 end
 
 endmodule
-*/
 
-/*
+
+
 
 module FIFO#(parameter NUM = 128, parameter WIDTH = 32)
 (
@@ -143,26 +141,65 @@ always_ff@(posedge clk) begin
 end
 
 endmodule
-*/
-/*
+
+
 typedef struct packed {
   logic[7:0] a;
   logic[7:0] b;
   logic c;
 } Struct;
 
+typedef struct packed {
+
+  Struct str1;
+  Struct str2;
+  logic[31:0] d;
+} Struct2;
+
 module Test(
   input Struct IN_str,
-  output logic[7:0] OUT_b
+  output logic[7:0] OUT_b,
+  output Struct OUT_str
 );
 
-assign OUT_b = IN_str.c;
+always_comb begin
+  OUT_b = '1;
+  if (IN_str.c) begin
+    OUT_b = IN_str.a;
+  end
+end
+
+
+Struct2 str2;
+always_comb begin
+  str2 = '{str1: Struct'{a:1, b:1, c:1}, str2: Struct'{a:1, b:1, c:1}, default: '0};
+end
+
+ logic[7:0] arr[3:0];
+ always_comb
+   arr = '{1: 1, default: 0};
+
+//always_comb d = 2'b10;
+
+
+typedef struct {
+  logic [7:0] a;
+  bit b;
+  bit signed [31:0] c;
+} sa;
+sa s2;
+initial s2 = '{int:1, default:0};
+initial s2 = '{logic:1, default:0};
+initial s2 = '{bit:1, default:0};
+initial s2 = '{bit signed:1, default:0};
 
 endmodule
-*/
 
 
-module Test(
+
+
+
+module Test2(
   input logic[7:0] IN_b,
   output logic[7:0] OUT_b
 );

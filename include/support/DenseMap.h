@@ -123,7 +123,7 @@ template <typename K, typename V> class DenseMap {
   size_type cap;
   size_type sz;
 
-  auto findImpl(const K &k) {
+  auto findImpl(const K &k) const {
     assert(!DenseMapInfo<K>::isEqual(k, DenseMapInfo<K>::getEmptyKey()) &&
            !DenseMapInfo<K>::isEqual(k, DenseMapInfo<K>::getTombstoneKey()));
     size_type bucketIndex = DenseMapInfo<K>::getHashValue(k) & (cap - 1);
@@ -182,7 +182,7 @@ public:
     ::operator delete[](buckets);
   }
 
-  iterator begin() {
+  iterator begin() const {
     // maybe cache the ptr
     if (sz == 0)
       return end();
@@ -190,9 +190,9 @@ public:
     it.next();
     return it;
   }
-  iterator end() { return iterator{buckets + cap, 0, 0}; }
+  iterator end() const { return iterator{buckets + cap, 0, 0}; }
 
-  iterator find(const K &k) {
+  iterator find(const K &k) const {
     auto [found, iter] = findImpl(k);
     return found ? iter : end();
   }
@@ -293,4 +293,5 @@ private:
 
 public:
   size_t size() const { return sz; }
+  bool empty() const { return sz == 0; }
 };

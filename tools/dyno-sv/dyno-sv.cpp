@@ -44,6 +44,7 @@
 #include "support/Bits.h"
 #include "support/SmallVec.h"
 #include "support/Utility.h"
+#include <algorithm>
 #include <climits>
 #include <cstdint>
 #include <iostream>
@@ -126,7 +127,23 @@ public:
                                         const slang::ast::Type *type) {
       switch (value.kind) {
       case Value::VK_CCL:
-      // concat lvalue slice is no longer an lvalue
+        if (range.isConstant()) {
+          auto &asCCL = value.as<ConcatLValue>();
+          auto cbuild = build.ctx.constBuild();
+          cbuild.val(32, 0);
+          for (auto [reg, lvRange] : asCCL.lvValues) {
+            if (!lvRange.isConstant())
+              break;
+            if (BitRange::equalsWithDefaultSize(
+                    BitRange{cbuild.get(), lvRange.getLen()}, range,
+                    reg->numBits)) {
+              return std::make_unique<RegLValue>(reg, type, range);
+            }
+            cbuild.add(lvRange.hasLen() ? lvRange.getLen().as<ConstantRef>()
+                                        : ConstantRef::fromU32(*reg->numBits));
+          }
+        }
+        [[fallthrough]];
       case Value::VK_R: {
         auto splice = build.buildSplice(value.proGetValue(build), range);
         splice.as<WireRef>()->numBits = type->getBitstreamWidth();
@@ -294,12 +311,20 @@ public:
     }
   }
 
-  RegisterRef makeVariable(const slang::ast::VariableSymbol &symb) {
+  RegisterRef makeVar(uint32_t size) {
     build.pushInsertPoint(mod.regs_end());
     auto reg = build.buildRegister();
+    reg->numBits = size;
     build.popInsertPoint();
-    vars.insert(&symb, reg);
-    reg->numBits = symb.getType().getBitstreamWidth();
+    return reg;
+  }
+
+  RegisterRef makeOrFindReg(const slang::ast::Symbol &symb) {
+    uint32_t numBits = symb.getDeclaredType()->getType().getBitstreamWidth();
+    auto reg = vars.findOrInsert(&symb, [&] { return makeVar(numBits); })
+                   .second.val()
+                   .as<RegisterRef>();
+    assert(symb.getDeclaredType());
     return reg;
   }
 
@@ -324,7 +349,7 @@ public:
           assert(vars.contains(&asVar) && "port not in vars?");
           break;
         }
-        auto reg = makeVariable(asVar);
+        auto reg = makeOrFindReg(asVar);
 
         if (auto *init = asVar.getInitializer()) {
           auto proc = build.buildProcess(HW_INIT_PROCESS_INSTR);
@@ -334,6 +359,18 @@ public:
         }
         break;
       }
+      case slang::ast::SymbolKind::Net: {
+        auto &asNet = member.as<slang::ast::NetSymbol>();
+
+        auto reg = makeOrFindReg(asNet);
+        if (auto *init = asNet.getInitializer()) {
+          auto proc = build.buildProcess(HW_COMB_PROCESS_INSTR);
+          build.pushInsertPoint(proc.block().begin());
+          build.buildStore(reg, handle_expr(*init)->proGetValue(build));
+          build.popInsertPoint();
+        }
+        break;
+      };
 
       case slang::ast::SymbolKind::ProceduralBlock: {
         auto &proc = member.as<slang::ast::ProceduralBlockSymbol>();
@@ -405,6 +442,10 @@ public:
         build.pushInsertPoint(proc.block().begin());
         handle_expr(asCAssign.getAssignment());
         build.popInsertPoint();
+        break;
+      }
+
+      case slang::ast::SymbolKind::TypeAlias: {
         break;
       }
 
@@ -497,6 +538,84 @@ public:
     handle_stmt(*stmt);
     build.popInsertPoint();
   }
+
+  struct DefaultValueTypeWalker {
+    DefaultValueTypeWalker(
+        HWInstrBuilder &build, HWValue defVal, bool sign,
+        ArrayRef<std::pair<const slang::ast::Type *, HWValue>> typeDefaults)
+        : build(build), defVal(defVal), sign(sign), typeDefaults(typeDefaults) {
+    }
+    HWInstrBuilder &build;
+    const HWValue defVal;
+    const bool sign;
+    const ArrayRef<std::pair<const slang::ast::Type *, HWValue>> typeDefaults;
+
+    HWValue operator()(const slang::ast::Type *type) {
+      // if there's a default override for this type, return that
+      auto tryFind = [&](const slang::ast::Type *type) -> HWValue {
+        auto it = std::find_if(
+            typeDefaults.begin(), typeDefaults.end(),
+            [&](const auto &a) { return type->isMatching(*a.first); });
+        if (it != typeDefaults.end())
+          return it->second;
+        return nullref;
+      };
+
+      if (auto val = tryFind(type))
+        return build.buildResize(val, type->getBitstreamWidth(), sign);
+
+      switch (type->kind) {
+      case slang::ast::SymbolKind::EnumType: {
+        auto &asEnum = type->as<slang::ast::EnumType>();
+        return build.buildResize(defVal, asEnum.baseType.getBitstreamWidth(),
+                                 sign);
+      }
+      case slang::ast::SymbolKind::PackedStructType: {
+        auto &asPStr = type->as<slang::ast::PackedStructType>();
+        SmallVec<HWValue, 8> sub{};
+        for (auto &member : asPStr.members())
+          sub.emplace_back((*this)(&member.getDeclaredType()->getType()));
+        return build.buildConcat(sub);
+      }
+      case slang::ast::SymbolKind::UnpackedStructType: {
+        auto &asUStr = type->as<slang::ast::UnpackedStructType>();
+        SmallVec<HWValue, 8> sub{};
+        for (auto &member : asUStr.members())
+          sub.emplace_back((*this)(&member.getDeclaredType()->getType()));
+        std::reverse(sub.begin(), sub.end());
+        return build.buildConcat(sub);
+      }
+      case slang::ast::SymbolKind::PackedArrayType: {
+        auto &asPArr = type->as<slang::ast::PackedArrayType>();
+        if (!asPArr.isSimpleBitVector()) {
+          auto val = (*this)(&asPArr.elementType);
+          return build.buildRepeat(val,
+                                   ConstantRef::fromU32(asPArr.range.width()));
+        }
+        if (auto val = tryFind(&asPArr.elementType))
+          return build.buildResize(val, type->getBitstreamWidth(), sign);
+      }
+        [[fallthrough]];
+      case slang::ast::SymbolKind::PredefinedIntegerType:
+      case slang::ast::SymbolKind::ScalarType: {
+        return build.buildResize(defVal, type->getBitstreamWidth(), sign);
+      }
+      case slang::ast::SymbolKind::FixedSizeUnpackedArrayType: {
+        auto &asUArr = type->as<slang::ast::FixedSizeUnpackedArrayType>();
+        auto val = (*this)(&asUArr.elementType);
+        return build.buildRepeat(val,
+                                 ConstantRef::fromU32(asUArr.range.width()));
+      }
+      case slang::ast::SymbolKind::TypeAlias: {
+        auto &asAlias = type->as<slang::ast::TypeAliasType>();
+        return (*this)(&asAlias.targetType.getType());
+      }
+      // /case slang::ast::SymbolKind::
+      default:
+        abort();
+      }
+    }
+  };
 
   void handle_stmt(const slang::ast::Statement &stmt) {
 
@@ -628,7 +747,7 @@ public:
           handle_expr(*init);
       } else {
         for (auto *var : asForLoop.loopVars) {
-          auto reg = makeVariable(*var);
+          auto reg = makeOrFindReg(*var);
           if (auto *init = var->getInitializer()) {
             build.buildStore(reg, handle_expr(*init)->proGetValue(build));
           }
@@ -1014,8 +1133,9 @@ public:
 
     case slang::ast::ExpressionKind::NamedValue: {
       auto const &nval = expr.as<slang::ast::NamedValueExpression>();
-      auto sig = vars.find(&nval.symbol);
-      assert(sig != vars.end());
+      auto [found, sig] = vars.findOrInsert(&nval.symbol, [&] {
+        return makeVar(nval.type->getBitstreamWidth());
+      });
 
       if (auto reg = sig.val().dyn_as<RegisterRef>())
         return std::make_unique<RegLValue>(reg, expr.type);
@@ -1029,6 +1149,7 @@ public:
     }
     case slang::ast::ExpressionKind::UnbasedUnsizedIntegerLiteral: {
       const auto &asLit = expr.as<slang::ast::UnbasedUnsizedIntegerLiteral>();
+
       return std::make_unique<RValue>(toDynoConstant(asLit.getValue()),
                                       expr.type);
     }
@@ -1138,13 +1259,36 @@ public:
     case slang::ast::ExpressionKind::Inside:
       break;
 
+    case slang::ast::ExpressionKind::SimpleAssignmentPattern:
     case slang::ast::ExpressionKind::Concatenation: {
-      auto &asConcat = expr.as<slang::ast::ConcatenationExpression>();
-      SmallVec<std::unique_ptr<Value>, 4> values{asConcat.operands().size()};
+      bool isAssignPat =
+          expr.kind == slang::ast::ExpressionKind::SimpleAssignmentPattern;
+      bool isAssignPatLHS = false;
+
+      std::span<const slang::ast::Expression *const> operands;
+      if (isAssignPat) {
+        auto &asSimpleAs =
+            expr.as<slang::ast::SimpleAssignmentPatternExpression>();
+        operands = asSimpleAs.elements();
+        isAssignPatLHS = asSimpleAs.isLValue;
+      } else {
+        auto &asCC = expr.as<slang::ast::ConcatenationExpression>();
+        operands = asCC.operands();
+      }
+
+      SmallVec<std::unique_ptr<Value>, 4> values{operands.size()};
 
       bool lvalue = true;
-      for (auto [idx, expr] : Range{asConcat.operands()}.enumerate()) {
-        values[idx] = handle_expr(*expr);
+      for (auto [idx, expr] : Range{operands}.enumerate()) {
+        const slang::ast::Expression *evalExpr = expr;
+        if (isAssignPatLHS) {
+          // in assignment patterns, slang's AST has assignments with empty RHS
+          // for all elements
+          assert(expr->as<slang::ast::AssignmentExpression>().right().kind ==
+                 slang::ast::ExpressionKind::EmptyArgument);
+          evalExpr = &expr->as<slang::ast::AssignmentExpression>().left();
+        }
+        values[idx] = handle_expr(*evalExpr);
         lvalue &= values[idx]->isLValue();
       }
       if (lvalue)
@@ -1165,6 +1309,78 @@ public:
 
       return std::make_unique<RValue>(build.buildRepeat(val, cnt), expr.type);
     }
+    case slang::ast::ExpressionKind::StructuredAssignmentPattern: {
+      auto &asStructAs =
+          expr.as<slang::ast::StructuredAssignmentPatternExpression>();
+
+      uint32_t totalLen = expr.type->getBitstreamWidth();
+
+      HWValue defaultVal;
+      bool defaultSext;
+      if (asStructAs.defaultSetter) {
+        defaultVal = handle_expr(*asStructAs.defaultSetter)->proGetValue(build);
+        defaultSext =
+            asStructAs.defaultSetter->type->isSigned() ||
+            asStructAs.defaultSetter->kind ==
+                slang::ast::ExpressionKind::UnbasedUnsizedIntegerLiteral;
+      } else {
+        defaultVal =
+            std::make_unique<RValue>(
+                ctx.constBuild().zero(expr.type->getBitstreamWidth()).get(),
+                expr.type)
+                ->proGetValue(build);
+        defaultSext = false;
+      }
+
+      SmallVec<std::pair<const slang::ast::Type *, HWValue>, 2> typeDefaults;
+      for (auto &typeSetter : asStructAs.typeSetters) {
+        typeDefaults.emplace_back(
+            typeSetter.type, handle_expr(*typeSetter.expr)->proGetValue(build));
+      }
+
+      HWValue cur;
+
+      if (asStructAs.defaultSetter || !typeDefaults.empty()) {
+        DefaultValueTypeWalker typeWalker{build, defaultVal, defaultSext,
+                                          typeDefaults};
+        cur = typeWalker(expr.type);
+      } else
+        cur = defaultVal;
+
+      auto spliceIn = [&](HWValue newVal, HWValue offs, HWValue len) {
+        BitRange low{ConstantRef::fromU32(0), offs};
+        BitRange mid{ConstantRef::fromU32(0),
+                     len}; // this indexes into the member, not cur, so offs = 0
+
+        auto highOffs = build.buildAdd(offs, len);
+        BitRange high{highOffs,
+                      build.buildSub(ConstantRef::fromU32(totalLen), highOffs)};
+
+        // builder handles len==0 edge cases.
+        cur = build.buildSplice(cur, high, newVal, mid, cur, low);
+      };
+
+      for (auto &indexSetter : asStructAs.indexSetters) {
+        auto idx = handle_expr(*indexSetter.index)->proGetValue(build);
+        size_t len = getArrayElemWidth(*asStructAs.type);
+        idx = build.buildMul(idx, ConstantRef::fromU32(len));
+
+        spliceIn(handle_expr(*indexSetter.expr)->proGetValue(build), idx,
+                 ConstantRef::fromU32(len));
+      }
+
+      for (auto &memberSetter : asStructAs.memberSetters) {
+        auto &asField = memberSetter.member->as<slang::ast::FieldSymbol>();
+
+        uint32_t offs = asField.bitOffset;
+        uint32_t len = asField.getType().getBitstreamWidth();
+
+        HWValue newVal = handle_expr(*memberSetter.expr)->proGetValue(build);
+        spliceIn(newVal, ConstantRef::fromU32(offs), ConstantRef::fromU32(len));
+      }
+
+      return std::make_unique<RValue>(cur, expr.type);
+    }
 
     case slang::ast::ExpressionKind::Streaming:
 
@@ -1172,8 +1388,6 @@ public:
     case slang::ast::ExpressionKind::DataType:
     case slang::ast::ExpressionKind::TypeReference:
     case slang::ast::ExpressionKind::ArbitrarySymbol:
-    case slang::ast::ExpressionKind::SimpleAssignmentPattern:
-    case slang::ast::ExpressionKind::StructuredAssignmentPattern:
     case slang::ast::ExpressionKind::ReplicatedAssignmentPattern:
     case slang::ast::ExpressionKind::EmptyArgument:
     case slang::ast::ExpressionKind::ValueRange:
