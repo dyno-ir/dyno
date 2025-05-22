@@ -6,6 +6,7 @@
 #include "hw/DefUseMixin.h"
 #include "hw/IDs.h"
 #include "op/IDs.h"
+#include "support/Optional.h"
 
 namespace dyno {
 
@@ -16,10 +17,11 @@ public:
   // alternative to maintaining full copies here would be category-ordered
   // defUse.
   SmallVec<FatObjRef<Instr>, 4> params;
-  SmallVec<FatObjRef<Instr>, 2> returns;
 
   Function(DynObjRef) {}
 };
+
+class FunctionIRef;
 
 class FunctionRef : public FatObjRef<Function>,
                     public InstrDefUseMixin<FunctionRef> {
@@ -32,10 +34,8 @@ public:
     assert(ref.getDialectOpcode() == OP_PARAM);
     ptr->params.emplace_back(ref);
   }
-  void addReturn(InstrRef ref) {
-    assert(ref.getDialectOpcode() == OP_RETURN);
-    ptr->returns.emplace_back(ref);
-  }
+
+  FunctionIRef iref() const;
 };
 
 template <> struct ObjTraits<Function> {
@@ -44,14 +44,28 @@ template <> struct ObjTraits<Function> {
   using FatRefT = Function;
 };
 
-class FuncInstrRef : public InstrRef {
+class FunctionIRef : public InstrRef {
 public:
   using InstrRef::InstrRef;
-  FuncInstrRef(const InstrRef &ref) : InstrRef(ref) {}
+  FunctionIRef(const InstrRef &ref) : InstrRef(ref) {}
 
   FunctionRef func() { return this->def()->as<FunctionRef>(); }
   uint getNumParams() { return func()->params.size(); }
+  BlockRef getBlock() { return this->def(1)->as<BlockRef>(); }
+};
 
-  BlockRef getBlock() { return this->operand(1)->as<BlockRef>(); }
+inline FunctionIRef FunctionRef::iref() const {
+  return ptr->defUse.getDef(0)->instr();
+}
+
+class CallInstrRef : public InstrRef {
+public:
+  using InstrRef::InstrRef;
+
+  FunctionRef func() { return this->other(0)->as<FunctionRef>(); }
+  Range<iterator> retvals() { return this->defs(); }
+  Range<iterator> params() {
+    return Range{this->other_begin() + 1, this->other_end()};
+  }
 };
 }; // namespace dyno

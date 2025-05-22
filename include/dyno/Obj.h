@@ -140,8 +140,11 @@ public:
 
   static DynObjRef invalid() { return nullref; };
 
-  template <typename T>
-  DynObjRef(ObjRef<T> ref) : DynObjRef(ofObj<T>(ref.getObjID())) {}
+  template <IsPureObjRef T>
+  DynObjRef(T ref) : DynObjRef(ofObj<typename T::value_type>(ref.getObjID())) {}
+
+  template <IsFatObjRef T>
+  DynObjRef(T ref) : DynObjRef(ofObj<typename T::value_type>(ref.getObjID(), ref.getCustom())) {}
 
   constexpr DynObjRef(DialectID dialect, TyID ty, ObjID obj, uint16_t custom)
       : dialect(dialect), ty(ty), custom(custom), obj(obj) {}
@@ -162,6 +165,13 @@ public:
     return a.custom == b.custom && a.dialect == b.dialect && a.ty == b.ty &&
            a.obj == b.obj;
   }
+  friend bool operator==(const DynObjRef &a, nullref_t) {
+    return !a;
+  }
+  friend bool operator==(nullref_t, const DynObjRef &b) {
+    return !b;
+  }
+
 
   // always true, we can support arbitrary ObjRefs
   template <typename T> static bool is_impl(ObjRef<T>) { return true; }

@@ -19,6 +19,7 @@
 #include "slang/ast/Symbol.h"
 #include "slang/ast/TimingControl.h"
 #include "slang/ast/expressions/AssignmentExpressions.h"
+#include "slang/ast/expressions/CallExpression.h"
 #include "slang/ast/expressions/ConversionExpression.h"
 #include "slang/ast/expressions/LiteralExpressions.h"
 #include "slang/ast/expressions/MiscExpressions.h"
@@ -34,6 +35,7 @@
 #include "slang/ast/symbols/MemberSymbols.h"
 #include "slang/ast/symbols/ParameterSymbols.h"
 #include "slang/ast/symbols/PortSymbols.h"
+#include "slang/ast/symbols/SubroutineSymbols.h"
 #include "slang/ast/symbols/VariableSymbols.h"
 #include "slang/ast/types/AllTypes.h"
 #include "slang/ast/types/Type.h"
@@ -70,6 +72,7 @@ public:
 
   DenseMap<const slang::ast::Symbol *, RegisterOrConstantRef> vars;
   DenseMap<const slang::ast::InstanceBodySymbol *, ObjRef<Module>> moduleMap;
+  DenseMap<const slang::ast::SubroutineSymbol *, ObjRef<Function>> functionMap;
 
   SmallVec<Value *, 4> assignLVStack;
 
@@ -311,7 +314,7 @@ public:
     }
   }
 
-  RegisterRef makeVar(uint32_t size) {
+  RegisterRef makeReg(uint32_t size) {
     build.pushInsertPoint(mod.regs_end());
     auto reg = build.buildRegister();
     reg->numBits = size;
@@ -321,7 +324,7 @@ public:
 
   RegisterRef makeOrFindReg(const slang::ast::Symbol &symb) {
     uint32_t numBits = symb.getDeclaredType()->getType().getBitstreamWidth();
-    auto reg = vars.findOrInsert(&symb, [&] { return makeVar(numBits); })
+    auto reg = vars.findOrInsert(&symb, [&] { return makeReg(numBits); })
                    .second.val()
                    .as<RegisterRef>();
     assert(symb.getDeclaredType());
@@ -446,6 +449,22 @@ public:
       }
 
       case slang::ast::SymbolKind::TypeAlias: {
+        break;
+      }
+
+      case slang::ast::SymbolKind::Subroutine: {
+        auto &asSubr = member.as<slang::ast::SubroutineSymbol>();
+        auto [found, it] = functionMap.findOrInsert(
+            &asSubr, [&] { return build.buildFunc().func(); });
+        auto func = FunctionRef{it.val(), ctx.getFuncs()[it.val()]}.iref();
+
+        build.pushInsertPoint(func.getBlock().begin());
+        for (auto arg : asSubr.getArguments()) {
+          vars.insert(arg,
+                      build.buildFuncParam(arg->getType().getBitstreamWidth()));
+        }
+        handle_stmt(asSubr.getBody());
+        build.popInsertPoint();
         break;
       }
 
@@ -654,7 +673,14 @@ public:
     }
 
     case slang::ast::StatementKind::Invalid:
-    case slang::ast::StatementKind::Return:
+    case slang::ast::StatementKind::Return: {
+      auto &asRet = stmt.as<slang::ast::ReturnStatement>();
+      if (asRet.expr)
+        build.buildFuncReturn(handle_expr(*asRet.expr)->proGetValue(build));
+      else
+        build.buildFuncReturn();
+      break;
+    }
     case slang::ast::StatementKind::Continue:
     case slang::ast::StatementKind::Break:
     case slang::ast::StatementKind::Disable:
@@ -1134,7 +1160,7 @@ public:
     case slang::ast::ExpressionKind::NamedValue: {
       auto const &nval = expr.as<slang::ast::NamedValueExpression>();
       auto [found, sig] = vars.findOrInsert(&nval.symbol, [&] {
-        return makeVar(nval.type->getBitstreamWidth());
+        return makeReg(nval.type->getBitstreamWidth());
       });
 
       if (auto reg = sig.val().dyn_as<RegisterRef>())
@@ -1381,10 +1407,51 @@ public:
 
       return std::make_unique<RValue>(cur, expr.type);
     }
+    case slang::ast::ExpressionKind::Call: {
+      auto &asCall = expr.as<slang::ast::CallExpression>();
+      if (!std::holds_alternative<const slang::ast::SubroutineSymbol *>(
+              asCall.subroutine))
+        abort();
+      auto subr = std::get<0>(asCall.subroutine);
+      SmallVec<HWValueOrReg, 8> args{asCall.arguments().size()};
+      for (auto [idx, arg] : Range{asCall.arguments()}.enumerate()) {
+        HWValueOrReg var;
+        auto bind = handle_expr(*arg);
+
+        if (!bind->isLValue())
+          var = bind->getValue();
+        else if (auto rlv = bind->dyn_as<RegLValue>();
+                 rlv && rlv->lvBitRange.isFull())
+          var = rlv->lvReg;
+        else {
+          if (subr->getArguments()[idx]->direction !=
+              slang::ast::ArgumentDirection::In)
+            // todo: proxy register for passing elements of unpacked struct or
+            // vector. can maybe also do subregister instruction that is a view
+            // into a parent reg.
+            abort();
+
+          var = bind->proGetValue(build);
+        }
+
+        args[idx] = var;
+      }
+
+      auto [found, it] = functionMap.findOrInsert(
+          subr, [&] { return build.buildFunc().func(); });
+      auto func = FunctionRef{it.val(), ctx.getFuncs()[it.val()]}.iref();
+
+      if (subr->returnValVar) {
+        auto rv = build.buildCall(func, args, 1);
+        return std::make_unique<RValue>(rv.retvals().begin()[0]->as<WireRef>(),
+                                        expr.type);
+      }
+      build.buildCall(func, args, 0);
+      return std::make_unique<RValue>(nullref, nullptr);
+    }
 
     case slang::ast::ExpressionKind::Streaming:
 
-    case slang::ast::ExpressionKind::Call:
     case slang::ast::ExpressionKind::DataType:
     case slang::ast::ExpressionKind::TypeReference:
     case slang::ast::ExpressionKind::ArbitrarySymbol:

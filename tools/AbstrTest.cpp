@@ -50,32 +50,30 @@ int main() {
   build.setInsertPoint(block3.begin());
   auto whileInstr = build.buildWhile(build.buildConst(32, 128));
   build.setInsertPoint(whileInstr.getCondBlock().begin());
-  auto sub2 =
-      build.buildSub(whileInstr.getYieldValue(0).as<HWValue>(), build.buildConst(32, 1));
+  auto sub2 = build.buildSub(whileInstr.getYieldValue(0).as<HWValue>(),
+                             build.buildConst(32, 1));
   build.buildYield(sub2,
                    /*todo: convert to bool*/ sub2);
   build.setInsertPoint(whileInstr.getBodyBlock().begin());
   build.buildStore(reg, whileInstr.getYieldValue(0));
-  //build.buildYield(whileInstr.getYieldValue(0));
+  // build.buildYield(whileInstr.getYieldValue(0));
 
-  auto func = ctx.buildFunc(mod);
+  auto func = build.buildFunc();
   build.setInsertPoint(func.getBlock().begin());
-  auto param = build.buildFuncParam(func.func());
-  auto ret = build.buildFuncReturn(func.func(), param,
-                                   build.buildConst(64, 1UL << 40));
-  build.buildFuncReturn(func.func(), param,
-                        ConstantBuilder{ctx.getConstants()}
-                            .add(ret.operand(2)->as<ConstantRef>())
-                            .add(1)
-                            .bitAND(-2)
-                            .get());
+  auto param = build.buildFuncParam();
+  auto ret = build.buildFuncReturn(param, build.buildConst(64, 1UL << 40));
+  build.buildFuncReturn(param, ConstantBuilder{ctx.getConstants()}
+                                   .add(ret.operand(2)->as<ConstantRef>())
+                                   .add(1)
+                                   .bitAND(-2)
+                                   .get());
 
   HWPrinter print{std::cout};
 
   print.printCtx(ctx);
 
-  //auto pblock = add3.parentBlock(ctx);
-  //assert(pblock.as<FatDynObjRef<>>() == block2.as<FatDynObjRef<>>());
-  //auto pproc = add3.parentProc(ctx);
-  //assert(pproc.as<FatDynObjRef<>>() == proc2.as<FatDynObjRef<>>());
+  // auto pblock = add3.parentBlock(ctx);
+  // assert(pblock.as<FatDynObjRef<>>() == block2.as<FatDynObjRef<>>());
+  // auto pproc = add3.parentProc(ctx);
+  // assert(pproc.as<FatDynObjRef<>>() == proc2.as<FatDynObjRef<>>());
 }

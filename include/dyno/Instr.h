@@ -305,9 +305,9 @@ public:
       return lhs.ref <=> rhs.ref;
     }
 
-    OperandRef &operator*() const { return const_cast<OperandRef &>(ref); }
+    OperandRef operator*() const { return ref; }
     OperandRef *operator->() { return &ref; }
-    OperandRef &operator[](int index) const { return *((*this) + index); }
+    OperandRef operator[](int index) const { return *((*this) + index); }
   };
   static_assert(std::random_access_iterator<iterator>);
 

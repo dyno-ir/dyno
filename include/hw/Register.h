@@ -32,7 +32,7 @@ public:
   using FatObjRef<Register>::FatObjRef;
   RegisterRef(FatObjRef<Register> ref) : FatObjRef<Register>(ref) {}
 
-  auto &getBitSize() { return ptr->numBits; }
+  auto &getNumBits() { return ptr->numBits; }
 };
 
 template <> struct ObjTraits<Register> {

@@ -67,15 +67,6 @@ public:
     return blockRef;
   }
 
-  auto buildFunc(ModuleIRef parent) {
-    auto funcRef = FunctionRef{getFuncs().create()};
-    auto funcInstr = FuncInstrRef{getInstrs().create(2, OP_FUNC_INSTR)};
-
-    InstrBuilder{funcInstr}.addRef(funcRef).addRef(createBlock());
-    parent.block().end().insertPrev(funcInstr);
-    return funcInstr;
-  }
-
   ConstantBuilder constBuild() { return ConstantBuilder{constants}; }
 };
 
@@ -429,7 +420,6 @@ public:
     return instr.defW();
   }
 
-
   HWValue buildSplice(ArrayRef<std::pair<HWValue, BitRange>> values) {
 
     if (std::all_of(values.begin(), values.end(), [](const auto &pair) {
@@ -567,9 +557,8 @@ public:
                       range);
   }
 
-  RegisterRef buildRegister() {
-    auto regRef = RegisterRef{ctx.getRegs().create()};
-    // in order for the reg to use anything it must be an instr as well
+  RegisterRef buildRegister(Optional<uint32_t> bitSize = nullopt) {
+    auto regRef = RegisterRef{ctx.getRegs().create(bitSize)};
     auto regInstr = InstrRef{ctx.getInstrs().create(1, HW_REGISTER_INSTR)};
     InstrBuilder{regInstr}.addRef(regRef);
     insertInstr(regInstr);
@@ -805,17 +794,44 @@ public:
     return buildInstr(OP_ASSERT, false, value);
   }
 
-  auto buildFuncParam(FunctionRef func) {
-    auto instr = buildInstr(OP_PARAM, true, func);
-    func.addParam(instr);
+  auto buildFuncParam(Optional<uint32_t> numBits = nullopt) {
+    auto reg = ctx.getRegs().create(numBits);
+    auto instr = buildInstr(OP_PARAM, false, reg);
+    auto func = insert.blockRef().defI().as<FunctionIRef>();
+    func.func()->params.emplace_back(instr);
+    return reg;
+  }
+
+  template <typename... Ts> auto buildFuncReturn(Ts... retvals) {
+    auto instr = buildInstr(OP_RETURN, false, retvals...);
     return instr;
   }
 
-  template <typename... Ts>
-  auto buildFuncReturn(FunctionRef func, Ts... retvals) {
-    auto instr = buildInstr(OP_RETURN, false, func, retvals...);
-    func.addReturn(instr);
-    return instr;
+  auto buildFunc() {
+    auto funcRef = FunctionRef{ctx.getFuncs().create()};
+    auto funcInstr = FunctionIRef{ctx.getInstrs().create(2, OP_FUNC_INSTR)};
+    insertInstr(funcInstr);
+
+    InstrBuilder{funcInstr}.addRef(funcRef).addRef(ctx.createBlock());
+    return funcInstr;
+  }
+
+  auto buildCall(FunctionIRef func, ArrayRef<HWValueOrReg> args,
+                 uint numRetvals = 0) {
+    auto callInstr = CallInstrRef{
+        ctx.getInstrs().create(numRetvals + 1 + args.size(), OP_CALL)};
+    //assert(args.size() == func.func()->params.size() && "param size mismatch");
+    insertInstr(callInstr);
+
+    InstrBuilder build{callInstr};
+    for (uint i = 0; i < numRetvals; i++)
+      build.addRef(ctx.getWires().create());
+    build.other();
+    build.addRef(func.func());
+    for (size_t i = 0; i < args.size(); i++)
+      build.addRef(args[i]);
+
+    return callInstr;
   }
 
   // todo: full constant support

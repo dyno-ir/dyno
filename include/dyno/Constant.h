@@ -62,7 +62,7 @@ struct FourState {
 template <typename Derived> class BigIntMixin {
   friend class BigInt;
 
-  // Base API for BigInt is getRawNumBits, getNumWords, getExtend, getCustom and
+  // Base API for BigInt is getRawNumBits, getNumWords, getExtend, getIs4S and
   // getWords. This is for utility functions using that API that may be shared
   // by all implementing BigInt API.
   Derived &self() { return *static_cast<Derived *>(this); }
@@ -87,7 +87,7 @@ protected:
     return self().getWords()[i];
   }
   uint32_t __attribute__((always_inline)) getWord4S(uint32_t i) const {
-    return self().getCustom() ? getWord(i)
+    return self().getIs4S() ? getWord(i)
                               : unpack_bits(getWord(i / 2) >> ((i % 2) * 16));
   }
   uint8_t getRawBit(uint32_t i) const {
@@ -101,7 +101,7 @@ protected:
   bool isExtended() const { return self().getNumWords() != getExtNumWords(); }
 
   uint8_t getExtendPatFromSignBit() const {
-    if (self().getCustom()) {
+    if (self().getIs4S()) {
       return getSignBit();
     } else
       return getSignBit() ? 0b11 : 0;
@@ -110,7 +110,7 @@ protected:
 public:
   FourState getBit(uint32_t i) const {
     assert(i <= getNumBits());
-    if (!self().getCustom())
+    if (!self().getIs4S())
       return !!(getWord(i / WordBits) & (1 << (i % WordBits)));
     i *= 2;
     assert(i <= self().getRawNumBits());
@@ -119,7 +119,7 @@ public:
   }
   uint8_t getSignBit() const { return getBit(self().getNumBits() - 1); }
   uint32_t getNumBits() const {
-    return self().getCustom() ? self().getRawNumBits() / 2
+    return self().getIs4S() ? self().getRawNumBits() / 2
                               : self().getRawNumBits();
   }
 
@@ -127,9 +127,9 @@ public:
   friend std::ostream &operator<<(std::ostream &os, const Derived &self) {
     int base = 16;
 
-    if (self.getCustom() && self.getRawNumBits() < 16)
+    if (self.getIs4S() && self.getRawNumBits() < 16)
       base = 2;
-    else if (!self.getCustom() && self.getLimitedVal() &&
+    else if (!self.getIs4S() && self.getLimitedVal() &&
              (*self.getLimitedVal() <= 255 ||
               ((*self.getLimitedVal() + 1) % 100) <= 1)) {
       base = 10;
@@ -150,7 +150,7 @@ public:
     if (!(lhs.getRawNumBits() == rhs.getRawNumBits() &&
           lhs.getNumWords() == rhs.getNumWords() &&
           lhs.getExtend() == rhs.getExtend() &&
-          lhs.getCustom() == rhs.getCustom()))
+          lhs.getIs4S() == rhs.getIs4S()))
       return false;
 
     for (size_t i = 0; i < lhs.getNumWords(); i++)
@@ -171,7 +171,7 @@ public:
   }
 
   std::optional<uint32_t> getLimitedVal() const {
-    assert(!self().getCustom());
+    assert(!self().getIs4S());
     if (self().getNumWords() > 1)
       return std::nullopt;
     if (self().getExtNumWords() > 1 && self().getExtend() != 0)
@@ -179,7 +179,7 @@ public:
     return self().getWords()[0];
   }
   std::optional<int32_t> getLimitedValS() const {
-    assert(!self().getCustom());
+    assert(!self().getIs4S());
     if (self().getNumWords() > 1)
       return std::nullopt;
     if (self().getExtNumWords() > 1 &&
@@ -218,7 +218,7 @@ public:
   uint32_t getNumWords() const { return 0; }
   uint32_t getRawNumBits() const { return bits; }
   uint8_t getExtend() const { return Extend{field}; }
-  uint8_t getCustom() const { return Custom{field}; }
+  uint8_t getIs4S() const { return Custom{field}; }
   std::span<uint32_t> getWords() const { return std::span<uint32_t>(); };
   PatBigInt(uint32_t bits, uint8_t pattern, uint8_t custom = 0) : bits(bits) {
     Extend{field} = pattern;
@@ -244,7 +244,7 @@ public:
   // big int API
   unsigned getNumWords() const { return words.size(); }
   uint8_t getExtend() const { return Extend{field}; }
-  uint8_t getCustom() const { return Custom{field}; }
+  uint8_t getIs4S() const { return Custom{field}; }
   std::span<uint32_t> getWords() { return words; }
   std::span<const uint32_t> getWords() const { return words; }
 
@@ -272,7 +272,7 @@ public:
 
     this->numBits = other.getRawNumBits();
     Extend{field} = other.getExtend();
-    Custom{field} = other.getCustom();
+    Custom{field} = other.getIs4S();
     this->words.resize(std::max(other.getNumWords(), 1U));
     if (other.getNumWords() == 0)
       this->words[0] = repeatExtend(other.getExtend());
@@ -318,7 +318,7 @@ public:
     auto rv = BigInt{bits, (uint32_t)data.size(), extend, 0};
     std::copy(data.begin(), data.end(), rv.words.begin());
     rv.normalize();
-    if (rv.getCustom())
+    if (rv.getIs4S())
       rv.conv4To2StateIfPossible();
     return rv;
   }
@@ -330,7 +330,7 @@ public:
     rv.setExtend(extend);
     rv.setCustom(custom);
     rv.normalize();
-    if (rv.getCustom())
+    if (rv.getIs4S())
       rv.conv4To2StateIfPossible();
     return rv;
   }
@@ -596,14 +596,14 @@ public:
 
   template <typename T0, typename T1>
   static BigInt upowOp4S(const T0 &lhs, const T1 &rhs) {
-    if (lhs.getCustom() || rhs.getCustom())
+    if (lhs.getIs4S() || rhs.getIs4S())
       return PatBigInt(lhs.getRawNumBits(), 0b11, 1);
     return BigInt::upowOp(lhs, rhs);
   }
 
   template <typename T0, typename T1>
   static BigInt spowOp4S(const T0 &lhs, const T1 &rhs) {
-    if (lhs.getCustom() || rhs.getCustom() ||
+    if (lhs.getIs4S() || rhs.getIs4S() ||
         (lhs.valueEquals(0) && rhs.getRawSignBit()))
       return PatBigInt(lhs.getRawNumBits(), 0b11, 1);
     return BigInt::spowOp(lhs, rhs);
@@ -814,7 +814,7 @@ public:
   template <BigIntAPI T0, BigIntAPI T1>
   static FourState icmpWildcardEqualOp4S(const T0 &lhs, const T1 &rhs) {
 
-    if (!lhs.getCustom() && !rhs.getCustom())
+    if (!lhs.getIs4S() && !rhs.getIs4S())
       return icmpEqualOp(lhs, rhs) ? FourState::S1 : FourState::S0;
     if (lhs.getNumBits() != rhs.getNumBits())
       return false;
@@ -844,7 +844,7 @@ public:
 
   template <auto MaskFunc, BigIntAPI T0, BigIntAPI T1>
   static FourState icmpCaseXZEqualOp4S(const T0 &lhs, const T1 &rhs) {
-    if (!lhs.getCustom() && !rhs.getCustom())
+    if (!lhs.getIs4S() && !rhs.getIs4S())
       return icmpEqualOp(lhs, rhs) ? FourState::S1 : FourState::S0;
     if (lhs.getNumBits() != rhs.getNumBits())
       return false;
@@ -1003,7 +1003,7 @@ public:
     case ICMP_CXNE:
       return !icmpCaseXEqualOp4S(lhs, rhs);
     default: {
-      if (lhs.getCustom() || rhs.getCustom())
+      if (lhs.getIs4S() || rhs.getIs4S())
         return FourState::SX;
       return icmpOp(lhs, rhs, pred);
     }
@@ -1248,7 +1248,7 @@ public:
     setCustom(0);
   }
   void conv4To2StateIfPossible() {
-    if (!getCustom())
+    if (!getIs4S())
       return;
     uint32_t hasUnk = isExtended() ? (getExtend() & REP10) : 0;
     for (size_t i = 0; i < getNumWords() && !hasUnk; i++) {
@@ -1281,7 +1281,7 @@ public:
   }
   template <auto Func4S, auto Func2S, typename T0, typename T1>
   static void bitwiseOp4S(BigInt &out, const T0 &lhs, const T1 &rhs) {
-    if (!lhs.getCustom() && !rhs.getCustom()) {
+    if (!lhs.getIs4S() && !rhs.getIs4S()) {
       Func2S(out, lhs, rhs);
       return;
     }
@@ -1298,8 +1298,8 @@ public:
     }
 
     Extend{out.field} =
-        Func4S(lhs.getCustom() ? lhs.getExtend() : unpack_bits(lhs.getExtend()),
-               rhs.getCustom() ? rhs.getExtend()
+        Func4S(lhs.getIs4S() ? lhs.getExtend() : unpack_bits(lhs.getExtend()),
+               rhs.getIs4S() ? rhs.getExtend()
                                : unpack_bits(rhs.getExtend())) &
         0b11;
 
@@ -1331,7 +1331,7 @@ public:
 #define LINEAR_OP_4S(ident, func2s)                                            \
   template <BigIntAPI T0, BigIntAPI T1>                                        \
   static void ident(BigInt &out, const T0 &lhs, const T1 &rhs) {               \
-    if (lhs.getCustom() || rhs.getCustom()) {                                  \
+    if (lhs.getIs4S() || rhs.getIs4S()) {                                  \
       out.setRepeating(EXTX_MASK,                                              \
                        std::max(lhs.getRawNumBits(), rhs.getRawNumBits()), 1); \
       return;                                                                  \
@@ -1341,7 +1341,7 @@ public:
 
   template <BigIntAPI T0, BigIntAPI T1>
   static void addOp4S(BigInt &out, const T0 &lhs, const T1 &rhs) {
-    if (lhs.getCustom() || rhs.getCustom()) {
+    if (lhs.getIs4S() || rhs.getIs4S()) {
       out.setRepeating(EXTX_MASK,
                        std ::max(lhs.getRawNumBits(), rhs.getRawNumBits()), 1);
       return;
@@ -1352,24 +1352,24 @@ public:
 
   template <BigIntAPI T0>
   static void shlOp4S(BigInt &out, const T0 &lhs, unsigned rhs) {
-    shlOp(out, lhs, lhs.getCustom() ? 2 * rhs : rhs);
+    shlOp(out, lhs, lhs.getIs4S() ? 2 * rhs : rhs);
     out.conv4To2StateIfPossible();
   }
   template <BigIntAPI T0>
   static void lshrOp4S(BigInt &out, const T0 &lhs, unsigned rhs) {
-    lshrOp(out, lhs, lhs.getCustom() ? 2 * rhs : rhs);
+    lshrOp(out, lhs, lhs.getIs4S() ? 2 * rhs : rhs);
     out.conv4To2StateIfPossible();
   }
   template <BigIntAPI T0>
   static void ashrOp4S(BigInt &out, const T0 &lhs, unsigned rhs) {
-    ashrOp(out, lhs, lhs.getCustom() ? 2 * rhs : rhs);
+    ashrOp(out, lhs, lhs.getIs4S() ? 2 * rhs : rhs);
     out.conv4To2StateIfPossible();
   }
 
   template <BigIntAPI T>
   static void resizeOp4S(BigInt &out, const T &lhs, uint32_t newSize,
                          bool sign = false) {
-    if (lhs.getCustom()) {
+    if (lhs.getIs4S()) {
       BigInt::resizeOp(out, lhs, 2 * newSize,
                        sign ? lhs.getExtendPatFromSignBit() : 0);
       out.conv4To2StateIfPossible();
@@ -1380,7 +1380,7 @@ public:
   template <BigIntAPI T>
   static void rangeSelectOp4S(BigInt &out, const T &src, uint32_t bitOffs,
                               uint32_t bitLen) {
-    if (src.getCustom()) {
+    if (src.getIs4S()) {
       BigInt::rangeSelectOp(out, src, bitOffs * 2, bitLen * 2);
       out.setCustom(1);
       out.conv4To2StateIfPossible();
@@ -1390,7 +1390,7 @@ public:
   }
   template <BigIntAPI T0, BigIntAPI T1>
   static auto udivmodOp4S(const T0 &lhs, const T1 &rhs) {
-    if (lhs.getCustom() || rhs.getCustom()) {
+    if (lhs.getIs4S() || rhs.getIs4S()) {
       BigInt outA;
       BigInt outB;
       outA.setRepeating(EXTX_MASK, lhs.getRawNumBits(), 1);
@@ -1402,7 +1402,7 @@ public:
   }
   template <BigIntAPI T0, BigIntAPI T1>
   static auto sdivmodOp4S(const T0 &lhs, const T1 &rhs) {
-    if (lhs.getCustom() || rhs.getCustom() || rhs.valueEquals(0)) {
+    if (lhs.getIs4S() || rhs.getIs4S() || rhs.valueEquals(0)) {
       BigInt outA;
       BigInt outB;
       outA.setRepeating(EXTX_MASK, lhs.getRawNumBits(), 1);
@@ -1414,7 +1414,7 @@ public:
   }
   template <int Mode = 0, BigIntAPI T0, BigIntAPI T1>
   static auto mulOp4S(const T0 &lhs, const T1 &rhs) {
-    if (lhs.getCustom() || rhs.getCustom()) {
+    if (lhs.getIs4S() || rhs.getIs4S()) {
       BigInt out;
       out.setRepeating(EXTX_MASK,
                        Mode == 0
@@ -1430,19 +1430,19 @@ public:
   }
 
   template <BigIntAPI T> static FourState reductionXOROp4S(const T &val) {
-    if (val.getCustom())
+    if (val.getIs4S())
       return FourState::SX;
     return reductionXOROp(val);
   }
 
   template <BigIntAPI T0, BigIntAPI T1>
   static void concatOp4S(BigInt &out, const T0 &lhs, const T1 &rhs) {
-    bool custom = rhs.getCustom() || lhs.getCustom();
-    if (lhs.getCustom() && !rhs.getCustom()) {
+    bool custom = rhs.getIs4S() || lhs.getIs4S();
+    if (lhs.getIs4S() && !rhs.getIs4S()) {
       BigInt rhsCopy{rhs};
       rhsCopy.conv2To4State();
       concatOp(out, lhs, rhsCopy);
-    } else if (!lhs.getCustom() && rhs.getCustom()) {
+    } else if (!lhs.getIs4S() && rhs.getIs4S()) {
       BigInt lhsCopy{lhs};
       lhsCopy.conv2To4State();
       concatOp(out, lhsCopy, rhs);
@@ -1453,7 +1453,7 @@ public:
 
   template <BigIntAPI T0>
   static void repeatOp4S(BigInt &out, const T0 &val, uint32_t count) {
-    bool custom = val.getCustom();
+    bool custom = val.getIs4S();
     repeatOp(out, val, count);
     out.setCustom(custom);
   }
@@ -1540,7 +1540,7 @@ public:
   }
   template <typename T>
   static void stream_hex_4s_vlog(std::ostream &os, const T &self) {
-    if (!self.getCustom())
+    if (!self.getIs4S())
       return BigInt::stream_hex(os, self);
 
     constexpr size_t digits_per_word = 4;
@@ -1804,7 +1804,7 @@ template <typename Derived>
 void BigIntMixin<Derived>::toStream(std::ostream &os, int base,
                                     bool unsized) const {
   const char *baseStr = (base == 16 ? "h" : (base == 10 ? "d" : "b"));
-  if (self().getCustom()) {
+  if (self().getIs4S()) {
     if (!unsized)
       os << self().getRawNumBits() / 2 << "'" << baseStr;
 
@@ -1858,7 +1858,7 @@ public:
 
     AddrField{field}.set(bigInt.getNumWords());
     ExtendField{field}.set(bigInt.getExtend());
-    CustomField{field}.set(bigInt.getCustom());
+    CustomField{field}.set(bigInt.getIs4S());
 
     std::copy(bigInt.getWords().begin(), bigInt.getWords().end(), trailing());
   }
@@ -1871,7 +1871,7 @@ public:
 private:
   size_t getNumWords() const { return AddrField{field}; }
   uint8_t getExtend() const { return ExtendField{field}; }
-  uint8_t getCustom() const { return CustomField{field}; }
+  uint8_t getIs4S() const { return CustomField{field}; }
 };
 static_assert(TrailingObj<Constant>);
 
@@ -1934,8 +1934,8 @@ public:
   uint8_t getExtend() const {
     return isInline() ? customField<ExtPattern>() : ptr->getExtend();
   }
-  uint8_t getCustom() const {
-    return isInline() ? customField<Custom>() : ptr->getCustom();
+  uint8_t getIs4S() const {
+    return isInline() ? customField<Custom>() : ptr->getIs4S();
   }
   unsigned getNumWords() const { return isInline() ? 1 : ptr->getNumWords(); };
 
@@ -1970,7 +1970,7 @@ public:
 
   template <typename T> uint32_t constantHash(const T &constant) {
     uint32_t acc = 0;
-    acc ^= hash(constant.getCustom());
+    acc ^= hash(constant.getIs4S());
     acc ^= hash(constant.getExtend());
     acc ^= hash(constant.getRawNumBits());
     acc ^= hash(constant.getNumWords());
@@ -2176,7 +2176,7 @@ public:
     if (cur.getNumWords() == 1 &&
         cur.getRawNumBits() < (1ULL << ConstantRef::NBits::size))
       return ConstantRef{cur.getRawNumBits(), cur.getWords()[0],
-                         cur.getExtend(), cur.getCustom()};
+                         cur.getExtend(), cur.getIs4S()};
 
     return store.findOrInsert(cur);
   }
