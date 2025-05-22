@@ -2,6 +2,7 @@
 
 #include "dyno/Instr.h"
 #include "dyno/Obj.h"
+#include "hw/DefUseMixin.h"
 #include "hw/IDs.h"
 #include "support/Optional.h"
 
@@ -27,7 +28,7 @@ public:
       : numBits(numBits) {}
 };
 
-class RegisterRef : public FatObjRef<Register> {
+class RegisterRef : public FatObjRef<Register>, public InstrDefUseMixin<RegisterRef>  {
 public:
   using FatObjRef<Register>::FatObjRef;
   RegisterRef(FatObjRef<Register> ref) : FatObjRef<Register>(ref) {}

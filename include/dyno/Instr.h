@@ -58,7 +58,7 @@ public:
     return f;
   }
 
-public:
+private:
   template <typename T> void emplace(FatDynObjRef<T> newRef) {
     ref = newRef;
     InlineStorageRef<T *>{custom}.emplace(newRef.getPtr());
@@ -67,12 +67,13 @@ public:
   template <typename T> void emplace(FatObjRef<T> newRef) {
     ref = newRef;
     InlineStorageRef<T *>{custom}.emplace(newRef.getPtr());
-  }
+}
 
   void emplace(DynObjRef newRef) {
     assert(!isDefUseOperand(newRef));
     ref = newRef;
   }
+public:
 
   void *ptr() { return *custom.as<void *>(); }
 
@@ -224,6 +225,11 @@ public:
   Operand *operator->() const { return &instrRef->operand(getNum()); }
   Operand &operator[](int index) const { return *((*this) + index); }
   explicit operator Operand &() const { return instrRef->operand(getNum()); }
+
+  template <typename T> void replace(FatObjRef<T> newRef) {
+    return replace(newRef.template as<FatDynObjRef<>>());
+  }
+  template <typename T> void replace(FatDynObjRef<T> newRef);
 
 private:
   void addToDefUse() const;
@@ -669,20 +675,24 @@ inline void GenericOperand::setLinkedPos(uint16_t pos) {
 }
 #endif
 
+template <typename T> void OperandRef::replace(FatDynObjRef<T> newRef) {
+  auto &op = (**this);
+  if (Operand::isDefUseOperand(op.ref)) {
+    op.customFat<InstrDefUse>()->erase(op.ref);
+  }
+  op.ref = newRef;
+  InlineStorageRef<T *>{op.custom}.emplace(newRef.getPtr());
+  if (Operand::isDefUseOperand(op.ref))
+    addToDefUse();
+}
+
 inline void OperandRef::addToDefUse() const {
   assert(Operand::isDefUseOperand(getRef()));
-
-  // try to not slow down the hot path too much.
-  // could also write specializations of this without dynamic dispatch
-  // if ref type is known.
   (*this)->customFat<InstrDefUse>()->insert(*this);
 }
 
 inline void Operand::destroy() {
   if (isDefUseOperand(ref)) {
-    // try to not slow down the hot path too much.
-    // could also write specializations of this without dynamic dispatch
-    // if ref type is known.
     customFat<InstrDefUse>()->erase(ref);
   }
 

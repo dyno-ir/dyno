@@ -607,17 +607,18 @@ public:
     return procInstRef;
   }
 
-  HWInstrRef buildInstance(ModuleRef module) {
-
+  HWInstrRef buildInstance(ModuleRef module, ArrayRef<RegisterRef> portRegs) {
     auto instr =
-        InstrRef{ctx.getInstrs().create(1 + module->ports.size(), HW_INSTANCE)};
+        InstrRef{ctx.getInstrs().create(1 + portRegs.size(), HW_INSTANCE)};
+
+    assert(portRegs.size() == module->ports.size());
 
     InstrBuilder build{instr};
     build.other();
     build.addRef(module);
 
-    for (size_t i = 0; i < module->ports.size(); i++)
-      build.addRef(buildRegister());
+    for (size_t i = 0; i < portRegs.size(); i++)
+      build.addRef(portRegs[i]);
 
     insertInstr(instr);
 
@@ -820,7 +821,8 @@ public:
                  uint numRetvals = 0) {
     auto callInstr = CallInstrRef{
         ctx.getInstrs().create(numRetvals + 1 + args.size(), OP_CALL)};
-    //assert(args.size() == func.func()->params.size() && "param size mismatch");
+    // assert(args.size() == func.func()->params.size() && "param size
+    // mismatch");
     insertInstr(callInstr);
 
     InstrBuilder build{callInstr};
@@ -837,6 +839,11 @@ public:
   // todo: full constant support
   ConstantRef buildConst(uint bits, uint64_t value) {
     return ConstantBuilder{ctx.getConstants()}.val(bits, value);
+  }
+
+  void destroyInstr(InstrRef instr) {
+    ctx.getCFG()[instr].erase();
+    ctx.getInstrs().destroy(instr);
   }
 
   void setInsertPoint(BlockRef_iterator<true> it) { insert = it; }

@@ -32,7 +32,7 @@ class ModuleIRef;
 class ModuleRef : public FatObjRef<Module>, public InstrDefUseMixin<ModuleRef> {
 public:
   using FatObjRef::FatObjRef;
-  // ModuleRef(const FatObjRef<Module> ref) : FatObjRef<Module>(ref) {}
+  ModuleRef(const FatObjRef<Module> ref) : FatObjRef<Module>(ref) {}
 
   ModuleIRef iref();
 };
@@ -68,6 +68,10 @@ public:
       break;
     }
     return it;
+  }
+
+  Range<BlockRef_iterator<true>> regs() {
+    return Range{block().begin(), regs_end()};
   }
 };
 

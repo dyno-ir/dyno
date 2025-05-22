@@ -1803,6 +1803,11 @@ template <BigIntAPI T0> inline BigInt operator-(const T0 &val) {
 template <typename Derived>
 void BigIntMixin<Derived>::toStream(std::ostream &os, int base,
                                     bool unsized) const {
+  if (self().getNumBits() == 0) {
+    os << "0'";
+    return;
+  }
+
   const char *baseStr = (base == 16 ? "h" : (base == 10 ? "d" : "b"));
   if (self().getIs4S()) {
     if (!unsized)
