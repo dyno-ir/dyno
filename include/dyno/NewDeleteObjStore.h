@@ -46,6 +46,8 @@ public:
   NewDeleteObjStore &operator=(NewDeleteObjStore &&) = delete;
   ~NewDeleteObjStore() {
     for (auto *ptr : map.elements) {
+      if (!ptr)
+        continue;
       ptr->~T();
       free(ptr);
     }

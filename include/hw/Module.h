@@ -1,16 +1,11 @@
 #pragma once
 
 #include "dyno/CFG.h"
-#include "dyno/DialectInfo.h"
 #include "dyno/Instr.h"
 #include "dyno/Obj.h"
 #include "hw/IDs.h"
-#include "hw/Process.h"
 #include "hw/Register.h"
-#include "op/Function.h"
-#include "op/IDs.h"
 #include "support/SmallVec.h"
-#include "support/Utility.h"
 
 namespace dyno {
 

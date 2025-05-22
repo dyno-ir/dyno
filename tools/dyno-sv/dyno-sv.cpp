@@ -360,8 +360,6 @@ public:
       curModIsInterface = slangMod->parentInstance->isInterface();
       build.setInsertPoint(mod.block().end());
 
-      std::cout << "handling " << slangMod->name << "\n";
-
       size_t i = 0;
       for (auto port : slangMod->getPortList()) {
         if (auto *asPS = port->as_if<slang::ast::PortSymbol>()) {

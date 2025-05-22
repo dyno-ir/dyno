@@ -32,10 +32,11 @@ class Block {
   InstrDefUse defUse;
   SmallVec<Node, 16> instrs;
   CFG *cfg;
+  bool sorted;
   ObjRef<Block> ref;
 
 public:
-  Block(ObjRef<Block> ref, CFG &cfg) : cfg(&cfg), ref(ref) {
+  Block(ObjRef<Block> ref, CFG &cfg) : cfg(&cfg), sorted(true), ref(ref) {
     instrs.emplace_back(InstrRef{nullref}, IDImpl<uint32_t>{0},
                         IDImpl<uint32_t>{0});
   }
@@ -85,6 +86,7 @@ public:
   InstrRef instr() const { return entry().ref; }
 
   void erase() {
+    block->sorted = false;
     entryOrderedPrev().next = entry().next;
     entryOrderedNext().prev = entry().prev;
     if (block->instrs.erase_unordered(block->instrs.begin() + pos)) {
@@ -102,6 +104,7 @@ public:
   }
 
   void insertPrev(InstrRef ref) {
+    block->sorted = (pos == 0);
     uint32_t newID = block->instrs.size();
     block->instrs.emplace_back(ref, IDImpl<uint32_t>{pos},
                                IDImpl<uint32_t>{entry().prev});
@@ -202,7 +205,7 @@ public:
     auto &instrsOld = (*this)->instrs;
     SmallVec<Block::Node, 16> instrsNew{instrsOld.size()};
     instrsNew[0] =
-        Block::Node{InstrRef{nullref}, ObjID{instrsNew.size() - 1}, ObjID{1}};
+        Block::Node{InstrRef{nullref}, ObjID{1}, ObjID{instrsNew.size() - 1}};
 
     size_t idx = 1;
     for (auto instr : *this) {
@@ -213,9 +216,39 @@ public:
       pos = idx;
       idx++;
     }
+    instrsNew.back().next = 0;
 
     (*this)->instrs = std::move(instrsNew);
-    //(*this)->sorted = 1;
+    (*this)->sorted = 1;
+  }
+
+  void sort_inplace() {
+    // might still be broken
+    size_t idx = 1;
+    auto &instrs = (*this)->instrs;
+    for (auto instr : *this) {
+      uint32_t &pos = (*this)->cfg->map[instr].blockPos;
+
+      if (pos == idx) {
+        idx++;
+        continue;
+      }
+
+      uint32_t a = instrs[idx].prev;
+      uint32_t b = instrs[idx].next;
+
+      instrs[instrs[pos].prev].next = idx;
+      instrs[instrs[pos].next].prev = idx;
+
+      instrs[a].next = pos;
+      instrs[b].prev = pos;
+
+      std::swap(instrs[idx], instrs[pos]);
+
+      pos = idx;
+      idx++;
+    }
+    (*this)->sorted = 1;
   }
 };
 
