@@ -706,7 +706,7 @@ public:
     switch (instr.getDialectOpcode().raw()) {
     case OP_IF.raw(): {
       auto asIf = IfInstrRef{instr};
-      if (sizeof...(value) >= asIf.getNumYieldValues()) {
+      if (sizeof...(value) > asIf.getNumYieldValues()) {
 
         auto newInstr =
             InstrRef{ctx.getInstrs().create(sizeof...(value) + 3, OP_IF)};
@@ -729,17 +729,16 @@ public:
         ctx.getInstrs().destroy(instr);
         instr = newInstr;
         asIf = newInstr;
-
-        size_t idx = 0;
-        for (auto val : {value...}) {
-          WireRef yieldVal = asIf.getYieldValue(idx).template as<WireRef>();
-          if (val.getNumBits()) {
-            if (!yieldVal->numBits)
-              yieldVal->numBits = val.getNumBits();
-            assert(yieldVal->numBits == val.getNumBits());
-          }
-          idx++;
+      }
+      size_t idx = 0;
+      for (auto val : {value...}) {
+        WireRef yieldVal = asIf.getYieldValue(idx).template as<WireRef>();
+        if (val.getNumBits()) {
+          if (!yieldVal->numBits)
+            yieldVal->numBits = val.getNumBits();
+          assert(yieldVal->numBits == val.getNumBits());
         }
+        idx++;
       }
       break;
     }
@@ -808,7 +807,11 @@ public:
 
   auto buildFuncParam(Optional<uint32_t> numBits = nullopt) {
     auto reg = ctx.getRegs().create(numBits);
-    auto instr = buildInstr(OP_PARAM, false, reg);
+    auto instr = InstrRef{ctx.getInstrs().create(1, OP_PARAM)};
+    insertInstr(instr);
+    InstrBuilder build{instr};
+    build.addRef(reg);
+
     auto func = insert.blockRef().defI().as<FunctionIRef>();
     func.func()->params.emplace_back(instr);
     return reg;

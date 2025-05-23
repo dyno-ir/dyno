@@ -44,8 +44,12 @@
 #include "slang/ast/types/Type.h"
 #include "slang/diagnostics/DiagnosticEngine.h"
 #include "slang/diagnostics/Diagnostics.h"
+#include "slang/diagnostics/TextDiagnosticClient.h"
 #include "slang/driver/Driver.h"
 #include "slang/numeric/SVInt.h"
+#include "slang/parsing/KnownSystemName.h"
+#include "slang/text/SourceLocation.h"
+#include "slang/text/SourceManager.h"
 #include "support/Bits.h"
 #include "support/SmallVec.h"
 #include "support/Utility.h"
@@ -61,6 +65,30 @@
 
 using namespace dyno;
 
+class SlangErrorPrinter {
+
+  slang::SourceManager &sm;
+
+public:
+  void error(slang::SourceRange range) {
+    auto client = std::make_shared<slang::TextDiagnosticClient>();
+    client->showColors(true);
+    slang::DiagnosticEngine engine{sm};
+    engine.addClient(client);
+    auto code = slang::DiagCode{slang::DiagSubsystem::Compilation, 0xFFFF};
+    engine.setMessage(code, "unsupported");
+    engine.setSeverity(code, slang::DiagnosticSeverity::Error);
+    engine.issue(slang::Diagnostic{code, range.start()});
+
+    std::cerr << client->getString();
+
+    abort();
+  }
+
+public:
+  explicit SlangErrorPrinter(slang::SourceManager &sm) : sm(sm) {}
+};
+
 class VisitorAST : public slang::ast::ASTVisitor<VisitorAST, true, true> {
 public:
   struct Value;
@@ -72,6 +100,8 @@ public:
   HWInstrBuilderStack build;
   BlockRef_iterator<true> regsBackIt;
 
+  SlangErrorPrinter &print;
+
   using RegisterOrConstantRef = FatRefUnion<RegisterRef, ConstantRef>;
 
   DenseMap<const slang::ast::Symbol *, RegisterOrConstantRef> vars;
@@ -81,7 +111,8 @@ public:
 
   SmallVec<Value *, 4> assignLVStack;
 
-  VisitorAST(HWContext &ctx) : ctx(ctx), build(ctx) {}
+  VisitorAST(HWContext &ctx, SlangErrorPrinter &errorPrint)
+      : ctx(ctx), build(ctx), print(errorPrint) {}
 
   struct Value : public RTTIUtilMixin<Value> {
     const slang::ast::Type *type;
@@ -154,8 +185,9 @@ public:
         [[fallthrough]];
       case Value::VK_R: {
         auto splice = build.buildSplice(value.proGetValue(build), range);
-        splice.as<WireRef>()->numBits = type->getBitstreamWidth();
-        return std::make_unique<RValue>(splice.as<WireRef>(), type);
+        if (auto asWire = splice.dyn_as<WireRef>())
+          asWire->numBits = type->getBitstreamWidth();
+        return std::make_unique<RValue>(splice, type);
       }
       case Value::VK_L: {
         auto &lv = value.as<RegLValue>();
@@ -434,6 +466,8 @@ public:
         break;
       case slang::ast::SymbolKind::Parameter: {
         auto &asParam = member.as<slang::ast::ParameterSymbol>();
+        if (asParam.getValue().bad())
+          break;
         vars.insert(&asParam.symbol,
                     toDynoConstant(asParam.getValue().integer()));
         break;
@@ -828,6 +862,8 @@ public:
     }
 
     case slang::ast::StatementKind::Invalid:
+      break;
+
     case slang::ast::StatementKind::Return: {
       auto &asRet = stmt.as<slang::ast::ReturnStatement>();
       if (asRet.expr)
@@ -1005,6 +1041,13 @@ public:
       auto &asUArrT = type.as<slang::ast::FixedSizeUnpackedArrayType>();
       return asUArrT.elementType.getBitstreamWidth();
       break;
+    }
+    case slang::ast::SymbolKind::TypeAlias: {
+      auto &asTypeAlias = type.as<slang::ast::TypeAliasType>();
+      return getArrayElemWidth(asTypeAlias.targetType.getType());
+    }
+    case slang::ast::SymbolKind::PredefinedIntegerType: {
+      return 1;
     }
     default:
       abort();
@@ -1340,6 +1383,8 @@ public:
       auto src = handle_expr(asConv.operand());
       HWValue val = src->proGetValue(build);
       uint32_t newWidth = asConv.type->getBitstreamWidth();
+      if (!val.getNumBits())
+        print.error(asConv.operand().sourceRange);
       if (newWidth > val.getNumBits())
         val = build.buildExt(newWidth, val, src->type->isSigned());
       else if (newWidth < val.getNumBits())
@@ -1428,16 +1473,25 @@ public:
                    ConstantRef::fromU32(asField.getType().getBitstreamWidth())},
           expr.type);
     }
-    case slang::ast::ExpressionKind::Invalid:
-    case slang::ast::ExpressionKind::RealLiteral:
-    case slang::ast::ExpressionKind::TimeLiteral:
 
-    case slang::ast::ExpressionKind::NullLiteral:
-    case slang::ast::ExpressionKind::UnboundedLiteral:
-    case slang::ast::ExpressionKind::StringLiteral:
-    case slang::ast::ExpressionKind::ConditionalOp:
-    case slang::ast::ExpressionKind::Inside:
-      break;
+    case slang::ast::ExpressionKind::ConditionalOp: {
+      auto &asCond = expr.as<slang::ast::ConditionalExpression>();
+      if (asCond.conditions.size() != 1 || asCond.conditions[0].pattern)
+        abort();
+
+      auto ifElse = build.buildIfElse(
+          handle_expr(*asCond.conditions[0].expr)->proGetValue(build), 1);
+
+      build.pushInsertPoint(ifElse.getTrueBlock().end());
+      build.buildYield(handle_expr(asCond.left())->proGetValue(build));
+      build.popInsertPoint();
+
+      build.pushInsertPoint(ifElse.getFalseBlock().end());
+      build.buildYield(handle_expr(asCond.right())->proGetValue(build));
+      build.popInsertPoint();
+
+      return std::make_unique<RValue>(ifElse.getYieldValue(0), expr.type);
+    }
 
     case slang::ast::ExpressionKind::SimpleAssignmentPattern:
     case slang::ast::ExpressionKind::Concatenation: {
@@ -1574,6 +1628,17 @@ public:
               handle_expr(*asCall.arguments().front())->proGetValue(build));
           return std::make_unique<RValue>(val, expr.type);
         }
+        case slang::parsing::KnownSystemName::Bits: {
+          return std::make_unique<RValue>(
+              ConstantRef::fromU32(
+                  asCall.arguments().front()->type->getBitstreamWidth()),
+              expr.type);
+        }
+        case slang::parsing::KnownSystemName::Signed: {
+          return std::make_unique<RValue>(
+              handle_expr(*asCall.arguments().front())->proGetValue(build),
+              expr.type);
+        }
         default:
           abort();
         }
@@ -1609,21 +1674,22 @@ public:
 
       if (subr->returnValVar) {
         auto rv = build.buildCall(func, args, 1);
-        return std::make_unique<RValue>(rv.retvals().begin()[0]->as<WireRef>(),
-                                        expr.type);
+        auto callRV = rv.retvals().begin()[0]->as<WireRef>();
+        callRV->numBits = subr->returnValVar->getType().getBitstreamWidth();
+        return std::make_unique<RValue>(callRV, expr.type);
       }
       build.buildCall(func, args, 0);
       return std::make_unique<RValue>(nullref, nullptr);
     }
-    case slang::ast::ExpressionKind::ArbitrarySymbol: {
-
-      // return std::make_unique<RValue>(
-      //     ctx.constBuild().zero(expr.type->getBitstreamWidth()).get(),
-      //     expr.type);
-    }
-
+    case slang::ast::ExpressionKind::ArbitrarySymbol:
+    case slang::ast::ExpressionKind::Invalid:
+    case slang::ast::ExpressionKind::RealLiteral:
+    case slang::ast::ExpressionKind::TimeLiteral:
+    case slang::ast::ExpressionKind::NullLiteral:
+    case slang::ast::ExpressionKind::UnboundedLiteral:
+    case slang::ast::ExpressionKind::StringLiteral:
+    case slang::ast::ExpressionKind::Inside:
     case slang::ast::ExpressionKind::Streaming:
-
     case slang::ast::ExpressionKind::DataType:
     case slang::ast::ExpressionKind::TypeReference:
     case slang::ast::ExpressionKind::ReplicatedAssignmentPattern:
@@ -1667,12 +1733,13 @@ int main(int argc, char **argv) {
     return 1;
   }
 
-  if (!driver.reportDiagnostics(false))
+  if (!driver.reportDiagnostics(true))
     return 1;
 
   HWContext ctx;
 
-  VisitorAST visitor{ctx};
+  SlangErrorPrinter errorPrint{driver.sourceManager};
+  VisitorAST visitor{ctx, errorPrint};
   compilation->getRoot().visit(visitor);
   visitor.handle_modules();
 
