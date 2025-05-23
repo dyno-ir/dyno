@@ -1,4 +1,5 @@
 
+#include "dyno/CFG.h"
 #include "dyno/Constant.h"
 #include "dyno/Instr.h"
 #include "dyno/Obj.h"
@@ -68,6 +69,7 @@ public:
   ProcessIRef proc;
   // BlockRef blockRef;
   HWInstrBuilderStack build;
+  BlockRef_iterator<true> regsBackIt;
 
   using RegisterOrConstantRef = FatRefUnion<RegisterRef, ConstantRef>;
 
@@ -358,7 +360,10 @@ public:
       mod = fDynoMod.getSingleDef()->instr();
       vars.clear();
       curModIsInterface = slangMod->parentInstance->isInterface();
-      build.setInsertPoint(mod.block().end());
+
+      regsBackIt = mod.regs_end();
+      build.setInsertPoint(regsBackIt);
+      --regsBackIt;
 
       size_t i = 0;
       for (auto port : slangMod->getPortList()) {
@@ -399,8 +404,9 @@ public:
   }
 
   RegisterRef makeReg(uint32_t size) {
-    build.pushInsertPoint(mod.regs_end());
+    build.pushInsertPoint(regsBackIt.succ());
     auto reg = build.buildRegister();
+    regsBackIt = build.insert.pred();
     reg->numBits = size;
     build.popInsertPoint();
     return reg;
@@ -524,8 +530,9 @@ public:
               asLV && asLV->lvBitRange.isFull()) {
             portRegs.emplace_back(asLV->lvReg);
           } else {
-            build.pushInsertPoint(mod.regs_end());
+            build.pushInsertPoint(regsBackIt.succ());
             portRegs.emplace_back(build.buildRegister());
+            regsBackIt = build.insert.pred();
             build.popInsertPoint();
 
             if (auto *psym = conn->port.as_if<slang::ast::PortSymbol>())
@@ -541,9 +548,10 @@ public:
           // for interfaces, expose internal vars as ports
           for (auto *ifVar : extractIFModuleVars(asInst.body)) {
             auto [found, it] = vars.findOrInsert(ifVar, [&] {
-              build.pushInsertPoint(mod.regs_end());
+              build.pushInsertPoint(regsBackIt.succ());
               auto rv =
                   build.buildRegister(ifVar->getType().getBitstreamWidth());
+              regsBackIt = build.insert.pred();
               build.popInsertPoint();
               return rv;
             });
@@ -805,8 +813,9 @@ public:
 
     case slang::ast::StatementKind::VariableDeclaration: {
       auto &asVarDecl = stmt.as<slang::ast::VariableDeclStatement>();
-      build.pushInsertPoint(mod.regs_end());
+      build.pushInsertPoint(regsBackIt.succ());
       auto reg = build.buildRegister();
+      regsBackIt = build.insert.pred();
       build.popInsertPoint();
 
       vars.findOrInsert(&asVarDecl.symbol, reg);

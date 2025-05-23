@@ -164,6 +164,18 @@ public:
     return tmp;
   }
 
+  BlockRef_iterator succ() {
+    BlockRef_iterator tmp(*this);
+    ++tmp;
+    return tmp;
+  }
+
+  BlockRef_iterator pred() {
+    BlockRef_iterator tmp(*this);
+    --tmp;
+    return tmp;
+  }
+
   friend bool operator==(const BlockRef_iterator &a,
                          const BlockRef_iterator &b) {
     return a.block == b.block && a.pos == b.pos;
