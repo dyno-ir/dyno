@@ -88,7 +88,7 @@ protected:
   }
   uint32_t __attribute__((always_inline)) getWord4S(uint32_t i) const {
     return self().getIs4S() ? getWord(i)
-                              : unpack_bits(getWord(i / 2) >> ((i % 2) * 16));
+                            : unpack_bits(getWord(i / 2) >> ((i % 2) * 16));
   }
   uint8_t getRawBit(uint32_t i) const {
     assert(i <= self().getRawNumBits());
@@ -120,7 +120,7 @@ public:
   uint8_t getSignBit() const { return getBit(self().getNumBits() - 1); }
   uint32_t getNumBits() const {
     return self().getIs4S() ? self().getRawNumBits() / 2
-                              : self().getRawNumBits();
+                            : self().getRawNumBits();
   }
 
   void toStream(std::ostream &os, int base = 16, bool unsized = false) const;
@@ -149,8 +149,7 @@ public:
   friend bool operator==(const Derived &lhs, const T &rhs) {
     if (!(lhs.getRawNumBits() == rhs.getRawNumBits() &&
           lhs.getNumWords() == rhs.getNumWords() &&
-          lhs.getExtend() == rhs.getExtend() &&
-          lhs.getIs4S() == rhs.getIs4S()))
+          lhs.getExtend() == rhs.getExtend() && lhs.getIs4S() == rhs.getIs4S()))
       return false;
 
     for (size_t i = 0; i < lhs.getNumWords(); i++)
@@ -345,7 +344,7 @@ public:
   }
   LINEAR_OP(addOp, __builtin_addc(lhs, rhs, cin, cout))
   LINEAR_OP(subOp, __builtin_subc(lhs, rhs, cin, cout))
-  LINEAR_OP(andOp, lhs & rhs)
+  LINEAR_OP(andOp, lhs &rhs)
   LINEAR_OP(orOp, lhs | rhs)
   LINEAR_OP(xorOp, lhs ^ rhs)
   LINEAR_OP(xnorOp, ~(lhs ^ rhs))
@@ -548,8 +547,8 @@ public:
     // may be negative.
     int64_t zeroBits = val.getRawNumBits() - (val.getNumWords() * WordBits);
     uint32_t lastWord = val.getWords()[val.getNumWords() - 1];
-    // holds bc normalization
-    assert(lastWord != 0);
+    if (lastWord == 0)
+      return zeroBits + WordBits;
     return zeroBits + __builtin_clz(lastWord);
   }
 
@@ -592,6 +591,13 @@ public:
       return BigInt::fromU64(1, lhs.getNumBits());
     }
     return BigInt::fromU64(0, lhs.getNumBits());
+  }
+
+  template <typename T0>
+  static Optional<uint32_t> leadingZeros4S(const T0 &val) {
+    if (val.getIs4S())
+      return nullopt;
+    return leadingZeros(val);
   }
 
   template <typename T0, typename T1>
@@ -1299,8 +1305,7 @@ public:
 
     Extend{out.field} =
         Func4S(lhs.getIs4S() ? lhs.getExtend() : unpack_bits(lhs.getExtend()),
-               rhs.getIs4S() ? rhs.getExtend()
-                               : unpack_bits(rhs.getExtend())) &
+               rhs.getIs4S() ? rhs.getExtend() : unpack_bits(rhs.getExtend())) &
         0b11;
 
     if (!hasUnk && (!out.isExtended() || !(Extend{out.field} & 0b10)))
@@ -1331,7 +1336,7 @@ public:
 #define LINEAR_OP_4S(ident, func2s)                                            \
   template <BigIntAPI T0, BigIntAPI T1>                                        \
   static void ident(BigInt &out, const T0 &lhs, const T1 &rhs) {               \
-    if (lhs.getIs4S() || rhs.getIs4S()) {                                  \
+    if (lhs.getIs4S() || rhs.getIs4S()) {                                      \
       out.setRepeating(EXTX_MASK,                                              \
                        std::max(lhs.getRawNumBits(), rhs.getRawNumBits()), 1); \
       return;                                                                  \
@@ -1913,6 +1918,10 @@ public:
     return ConstantRef{1, (bool)f, 0, 0};
   }
   static ConstantRef fromBool(bool b) { return ConstantRef{1, b, 0, 0}; }
+
+  static ConstantRef undef32() {
+    return ConstantRef{32, BigInt::EXTX_MASK, FourState::SX, 1};
+  }
   // static ConstantRef zero(uint32_t bits) { return ConstantRef{bits, 0, 0,
   // 0}; } template <typename T> static ConstantRef zeroLike(const T &t) {
   //   return zero(t.getNumBits());

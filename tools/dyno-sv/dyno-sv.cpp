@@ -18,6 +18,7 @@
 #include "slang/ast/SemanticFacts.h"
 #include "slang/ast/Statement.h"
 #include "slang/ast/Symbol.h"
+#include "slang/ast/SystemSubroutine.h"
 #include "slang/ast/TimingControl.h"
 #include "slang/ast/expressions/AssignmentExpressions.h"
 #include "slang/ast/expressions/CallExpression.h"
@@ -927,9 +928,9 @@ public:
           handle_expr(*init);
       } else {
         for (auto *var : asForLoop.loopVars) {
-          auto reg = makeOrFindReg(*var);
+          makeOrFindReg(*var);
           if (auto *init = var->getInitializer()) {
-            build.buildStore(reg, handle_expr(*init)->proGetValue(build));
+            handle_expr(*init);
           }
         }
       }
@@ -1563,8 +1564,20 @@ public:
     case slang::ast::ExpressionKind::Call: {
       auto &asCall = expr.as<slang::ast::CallExpression>();
       if (!std::holds_alternative<const slang::ast::SubroutineSymbol *>(
-              asCall.subroutine))
-        abort();
+              asCall.subroutine)) {
+
+        auto builtin = std::get<1>(asCall.subroutine);
+
+        switch (builtin.subroutine->knownNameId) {
+        case slang::parsing::KnownSystemName::Clog2: {
+          auto val = build.buildCLOG2(
+              handle_expr(*asCall.arguments().front())->proGetValue(build));
+          return std::make_unique<RValue>(val, expr.type);
+        }
+        default:
+          abort();
+        }
+      }
       auto subr = std::get<0>(asCall.subroutine);
       SmallVec<HWValueOrReg, 8> args{asCall.arguments().size()};
       for (auto [idx, arg] : Range{asCall.arguments()}.enumerate()) {

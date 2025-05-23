@@ -536,6 +536,17 @@ public:
     return rv;
   }
 
+  HWValue buildCLOG2(HWValue value) {
+    if (auto asConst = value.dyn_as<ConstantRef>()) {
+      auto tmp = asConst - BigInt::fromU64(1, asConst.getNumBits());
+      if (auto lz = BigInt::leadingZeros4S(tmp)) {
+        return ConstantRef::fromU32(asConst.getNumBits() - lz);
+      } else
+        return ConstantRef::undef32();
+    }
+    return buildInstr(HW_CLOG2, true, value);
+  }
+
   WireRef buildLoad(RegisterRef reg, BitRange range = BitRange::full()) {
     HWInstrRef ref;
     if (range == BitRange::full())

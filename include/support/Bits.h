@@ -38,9 +38,9 @@ template <typename T> constexpr T bit_mask_ms_nbits(unsigned nbits) {
 
 template <typename T> constexpr unsigned clog2(T val) {
   return std::bit_width(val);
-  // if (val == 0)
+  // if (val == 0 || val == 1)
   //   return 0;
-  // return bit_mask_sz<T> - std::countl_zero(val);
+  // return bit_mask_sz<T> - std::countl_zero(val - 1);
 }
 
 template <typename T> constexpr T round_up_div(T dividend, T divisor) {
