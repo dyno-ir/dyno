@@ -29,8 +29,6 @@ class FunctionInlinePass {
 
     while (!worklist.empty()) {
       FunctionIRef instr = worklist.pop_back_val();
-      // mark as visited
-      CustFuncRef{instr}.emplace(1);
 
       for (auto useIt = instr.func().use_begin();
            useIt != instr.func().use_end(); useIt++) {
@@ -44,6 +42,9 @@ class FunctionInlinePass {
             continue;
           }
         }
+
+        // mark as visited
+        CustFuncRef{instr}.emplace(1);
 
         // std::cerr << "\n\n\ninlining\n";
         // dumpInstr(instr);
