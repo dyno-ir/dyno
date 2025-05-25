@@ -67,14 +67,14 @@ private:
   template <typename T> void emplace(FatObjRef<T> newRef) {
     ref = newRef;
     InlineStorageRef<T *>{custom}.emplace(newRef.getPtr());
-}
+  }
 
   void emplace(DynObjRef newRef) {
     assert(!isDefUseOperand(newRef));
     ref = newRef;
   }
-public:
 
+public:
   void *ptr() { return *custom.as<void *>(); }
 
   void destroy();
@@ -100,6 +100,8 @@ class Instr : public TrailingObjArr<Instr, Operand> {
   uint8_t _unused; // num extra operands/storage
   uint16_t numOperands;
   uint16_t numDefs;
+
+protected:
   InlineStorage<8> customStorage;
 
 public:
@@ -240,7 +242,8 @@ class InstrRef : public FatObjRef<Instr> {
 
 public:
   using FatObjRef<Instr>::FatObjRef;
-  explicit InstrRef(FatObjRef<Instr> instrRef) : FatObjRef<Instr>(instrRef) {}
+  explicit constexpr InstrRef(FatObjRef<Instr> instrRef)
+      : FatObjRef<Instr>(instrRef) {}
 
   class iterator {
     OperandRef ref;
@@ -339,9 +342,9 @@ public:
     return OperandRef{*this, getNumDefs() + n};
   }
 
-  DialectID getDialect() { return (*this)->dialect; }
-  OpcodeID getOpcode() { return (*this)->opc; }
-  DialectOpcode getDialectOpcode() {
+  DialectID getDialect() const { return (*this)->dialect; }
+  OpcodeID getOpcode() const { return (*this)->opc; }
+  DialectOpcode getDialectOpcode() const {
     return DialectOpcode{(*this)->dialect, (*this)->opc};
   }
   DialectID getDialectID() = delete;
@@ -353,10 +356,15 @@ public:
   Range<iterator> defs() { return {def_begin(), def_end()}; }
   Range<iterator> others() { return {other_begin(), other_end()}; }
 
-  template <IsDialectOpcode... Ts> bool isOpc(Ts... opcs) {
+  template <IsDialectOpcode... Ts> bool isOpc(Ts... opcs) const {
     return ((getDialect() == opcs.getDialectID() &&
              getOpcode() == opcs.getOpcodeID()) ||
             ...);
+  }
+
+  auto &customStorage() { return ptr->customStorage; }
+  void clearCustomStorage() {
+    InlineStorageRef<uint64_t>{this->customStorage()}.emplace(0);
   }
 };
 
@@ -513,7 +521,11 @@ private:
   }
 };
 
-inline InstrRef OperandRef::instr() const { return instrRef.as<InstrRef>(); }
+inline InstrRef OperandRef::instr() const {
+  InstrRef tmp{instrRef};
+  tmp.clearCustom();
+  return tmp;
+}
 
 template <> struct ObjTraits<Instr> {
   static constexpr DialectID dialect{DIALECT_CORE};

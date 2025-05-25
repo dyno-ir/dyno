@@ -4,7 +4,9 @@
 #include "dyno/Instr.h"
 #include "dyno/Obj.h"
 #include "hw/IDs.h"
+#include "hw/Process.h"
 #include "hw/Register.h"
+#include "op/Function.h"
 #include "support/SmallVec.h"
 
 namespace dyno {
@@ -17,7 +19,15 @@ public:
   InstrDefUse defUse;
   std::string name;
 
-  SmallVec<RegisterRef, 8> ports;
+  struct Port {
+    RegisterRef reg;
+    DialectOpcode portType;
+
+    Port(RegisterRef reg, DialectOpcode portType)
+        : reg(reg), portType(portType) {}
+  };
+
+  SmallVec<Port, 8> ports;
 
   Module(DynObjRef, std::string name) : name(name) {}
 };
@@ -65,8 +75,31 @@ public:
     return it;
   }
 
-  Range<BlockRef_iterator<true>> regs() {
-    return Range{block().begin(), regs_end()};
+  auto regs() { return Range{block().begin(), regs_end()}.as<RegisterIRef>(); }
+
+  auto procs() {
+    return Range{regs_end(), block().end()}
+        .filter([](InstrRef instr) { return instr.def(0)->is<ProcessRef>(); })
+        .transform(
+            [](size_t, InstrRef instr) { return instr.as<ProcessIRef>(); });
+  }
+  auto comb_procs() {
+    return Range{regs_end(), block().end()}
+        .filter(
+            [](InstrRef instr) { return instr.isOpc(HW_COMB_PROCESS_INSTR); })
+        .transform(
+            [](size_t, InstrRef instr) { return instr.as<ProcessIRef>(); });
+  }
+
+  auto funcs() {
+    return Range{regs_end(), block().end()}
+        .filter([](InstrRef instr) { return instr.is<FunctionIRef>(); })
+        .transform(
+            [](size_t, InstrRef instr) { return instr.as<FunctionIRef>(); });
+  }
+
+  static bool is_impl(FatObjRef<Instr> ref) {
+    return InstrRef{ref}.isOpc(HW_MODULE_INSTR);
   }
 };
 

@@ -94,8 +94,8 @@ public:
   using Traits = ObjTraits<T>;
   using value_type = T;
 
-  ObjRef() {}
-  ObjRef(nullref_t) : obj(ObjID::INVALID) {}
+  constexpr ObjRef() {}
+  constexpr ObjRef(nullref_t) : obj(ObjID::INVALID) {}
   explicit constexpr ObjRef(ObjID obj) : obj(obj) {}
 
   explicit operator bool() const { return static_cast<bool>(obj); }
@@ -144,7 +144,9 @@ public:
   DynObjRef(T ref) : DynObjRef(ofObj<typename T::value_type>(ref.getObjID())) {}
 
   template <IsFatObjRef T>
-  DynObjRef(T ref) : DynObjRef(ofObj<typename T::value_type>(ref.getObjID(), ref.getCustom())) {}
+  DynObjRef(T ref)
+      : DynObjRef(
+            ofObj<typename T::value_type>(ref.getObjID(), ref.getCustom())) {}
 
   constexpr DynObjRef(DialectID dialect, TyID ty, ObjID obj, uint16_t custom)
       : dialect(dialect), ty(ty), custom(custom), obj(obj) {}
@@ -165,13 +167,8 @@ public:
     return a.custom == b.custom && a.dialect == b.dialect && a.ty == b.ty &&
            a.obj == b.obj;
   }
-  friend bool operator==(const DynObjRef &a, nullref_t) {
-    return !a;
-  }
-  friend bool operator==(nullref_t, const DynObjRef &b) {
-    return !b;
-  }
-
+  friend bool operator==(const DynObjRef &a, nullref_t) { return !a; }
+  friend bool operator==(nullref_t, const DynObjRef &b) { return !b; }
 
   // always true, we can support arbitrary ObjRefs
   template <typename T> static bool is_impl(ObjRef<T>) { return true; }
@@ -213,8 +210,8 @@ public:
   using ByValueRTTIUtilMixin<FatObjRef<T>>::as;
   using ByValueRTTIUtilMixin<FatObjRef<T>>::dyn_as;
   using ByValueRTTIUtilMixin<FatObjRef<T>>::is;
-  FatObjRef() = default;
-  FatObjRef(nullref_t)
+  constexpr FatObjRef() = default;
+  constexpr FatObjRef(nullref_t)
       : ObjRef<T>(nullref), custom(0), special(0), ptr(nullptr) {}
   // FatObjRef(const FatObjRef &other) = default;
   // FatObjRef& operator=(const FatObjRef& rhs) {
@@ -225,13 +222,17 @@ public:
   //   return *this;
   // }
 
-  FatObjRef(ObjRef<T> ref, T *ptr, uint16_t custom = 0)
+  constexpr FatObjRef(ObjRef<T> ref, T *ptr, uint16_t custom = 0)
       : ObjRef<T>(ref), custom(custom), special(0), ptr(ptr) {}
-  FatObjRef(ObjRef<T> ref, T &ptr, uint16_t custom = 0)
+  constexpr FatObjRef(ObjRef<T> ref, T &ptr, uint16_t custom = 0)
       : ObjRef<T>(ref), custom(custom), special(0), ptr(&ptr) {}
-  FatObjRef(ObjID obj, T *ptr, uint16_t custom = 0)
+
+  template <typename U = T,
+            typename = std::enable_if<!std::is_void<U>::value, void>::type>
+  constexpr FatObjRef(ObjID obj, T *ptr, uint16_t custom = 0)
       : ObjRef<T>(obj), custom(custom), special(0), ptr(ptr) {}
-  FatObjRef(ObjID obj, T &ptr, uint16_t custom = 0)
+
+  constexpr FatObjRef(ObjID obj, T &ptr, uint16_t custom = 0)
       : ObjRef<T>(obj), custom(custom), special(0), ptr(&ptr) {}
   FatObjRef(ObjID obj, void *ptr, uint16_t custom = 0)
       : ObjRef<T>(obj), custom(custom), special(0),
@@ -249,6 +250,10 @@ public:
   friend bool operator==(const FatObjRef &a, const FatObjRef &b) {
     // do not test special here.
     return a.custom == b.custom && a.obj == b.obj;
+  }
+
+  uint64_t rawNoPtr() const {
+    return uint64_t(special) << 48 | uint64_t(custom) << 32 | this->obj.num;
   }
 
   T *getPtr() const { return ptr; }
@@ -395,6 +400,14 @@ template <> struct std::hash<dyno::DynObjRef> {
   }
 };
 
+template <dyno::IsPureObjRef T> struct std::hash<T> {
+  size_t operator()(const T &ref) const { return std::bit_cast<uint32_t>(ref); }
+};
+
+template <dyno::IsFatObjRef T> struct std::hash<T> {
+  size_t operator()(const T &ref) const { return ref.rawNoPtr(); }
+};
+
 template <> struct DenseMapInfo<dyno::DynObjRef> {
   // we don't want to use nullref here, otherwise we can't store nullref in map.
   static constexpr dyno::DynObjRef getEmptyKey() {
@@ -408,8 +421,35 @@ template <> struct DenseMapInfo<dyno::DynObjRef> {
   static unsigned getHashValue(const dyno::DynObjRef &k) {
     return std::hash<dyno::DynObjRef>()(k);
   }
-  static unsigned isEqual(const dyno::DynObjRef &lhs,
-                          const dyno::DynObjRef &rhs) {
+  static bool isEqual(const dyno::DynObjRef &lhs, const dyno::DynObjRef &rhs) {
     return std::bit_cast<uint64_t>(lhs) == std::bit_cast<uint64_t>(rhs);
+  }
+};
+
+template <dyno::IsPureObjRef T> struct DenseMapInfo<T> {
+  // we don't want to use nullref here, otherwise we can't store nullref in map.
+  static constexpr T getEmptyKey() {
+    return T{dyno::ObjID{dyno::ObjID::invalid() - 1}};
+  }
+  static constexpr T getTombstoneKey() {
+    return T{dyno::ObjID{dyno::ObjID::invalid() - 2}};
+  }
+  static unsigned getHashValue(const T &k) { return std::hash<T>()(k); }
+  static bool isEqual(const T &lhs, const T &rhs) {
+    return std::bit_cast<uint32_t>(lhs) == std::bit_cast<uint32_t>(rhs);
+  }
+};
+
+template <dyno::IsFatObjRef T> struct DenseMapInfo<T> {
+  // we don't want to use nullref here, otherwise we can't store nullref in map.
+  static constexpr T getEmptyKey() {
+    return T{dyno::ObjID{dyno::ObjID::invalid() - 1}, nullptr};
+  }
+  static constexpr T getTombstoneKey() {
+    return T{dyno::ObjID{dyno::ObjID::invalid() - 2}, nullptr};
+  }
+  static unsigned getHashValue(const T &k) { return std::hash<T>()(k); }
+  static bool isEqual(const T &lhs, const T &rhs) {
+    return lhs.rawNoPtr() == rhs.rawNoPtr();
   }
 };

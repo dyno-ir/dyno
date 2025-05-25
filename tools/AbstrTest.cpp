@@ -39,7 +39,7 @@ int main() {
   ifelse = build.buildYield(build.buildConst(32, 1337)).second;
 
   build.setInsertPoint(proc2.block().end());
-  build.buildStore(mod.mod()->ports[1], ifelse.getYieldValue());
+  build.buildStore(mod.mod()->ports[1].reg, ifelse.getYieldValue());
 
   // auto endIt = ifelse.getFalseBlock().end();
   //--endIt;

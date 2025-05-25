@@ -126,7 +126,7 @@ public:
   void introduce(FatDynObjRef<> ref) {
     DynObjRef noCustom = ref;
     noCustom.clearCustom();
-    auto it = introduced.insert(noCustom, introduced.size());
+    auto [found, it] = introduced.findOrInsert(noCustom, introduced.size());
     str << '%' << it.val() << ":";
   }
 

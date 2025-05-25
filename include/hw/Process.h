@@ -48,9 +48,21 @@ template <> struct ObjTraits<Process> {
 class ProcessIRef : public InstrRef {
 public:
   using InstrRef::InstrRef;
+  constexpr ProcessIRef(InstrRef ref) : InstrRef(ref) {}
 
   ProcessRef proc() { return def(0)->as<ProcessRef>(); }
   BlockRef block() { return def(1)->as<BlockRef>(); }
+
+  static bool is_impl(const FatObjRef<Instr> &instr) {
+    return InstrRef{instr}.isOpc(HW_COMB_PROCESS_INSTR, HW_INIT_PROCESS_INSTR,
+                                 HW_SEQ_PROCESS_INSTR, HW_FINAL_PROCESS_INSTR,
+                                 HW_LATCH_PROCESS_INSTR);
+  }
+  static bool is_impl(const FatDynObjRef<> &ref) {
+    if (auto asInstr = ref.dyn_as<InstrRef>())
+      return is_impl(asInstr);
+    return false;
+  }
 };
 
 }; // namespace dyno

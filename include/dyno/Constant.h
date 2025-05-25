@@ -1270,7 +1270,7 @@ public:
     if (numBits == 0)
       return;
     size_t outNumWords = round_up_div(2 * getNumBits(), WordBits);
-    SmallVec<uint32_t, 4> buf{outNumWords};
+    SmallVec<uint32_t, 4> buf(outNumWords);
 
     for (size_t i = 0; i < getNumWords() - 1; i++) {
       buf[2 * i + 0] = unpack_bits(words[i]);

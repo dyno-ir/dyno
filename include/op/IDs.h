@@ -7,7 +7,7 @@
 #include <dyno/DialectInfo.h>
 
 namespace dyno {
-enum OpTyID : uint8_t { SCF_FUNC = 0 | TY_DEF_USE_START };
+enum OpTyID : uint8_t { OP_FUNC = 0 | TY_DEF_USE_START };
 
 using OpOpcode = SpecificDialectOpcode<DialectID{DIALECT_OP}>;
 

@@ -16,7 +16,7 @@ public:
 
   // alternative to maintaining full copies here would be category-ordered
   // defUse.
-  SmallVec<FatObjRef<Instr>, 4> params;
+  SmallVec<InstrRef, 4> params;
 
   Function(DynObjRef) {}
 };
@@ -40,7 +40,7 @@ public:
 
 template <> struct ObjTraits<Function> {
   static constexpr DialectID dialect{DIALECT_OP};
-  static constexpr TyID ty{SCF_FUNC};
+  static constexpr TyID ty{OP_FUNC};
   using FatRefT = Function;
 };
 
@@ -52,6 +52,15 @@ public:
   FunctionRef func() { return this->def()->as<FunctionRef>(); }
   uint getNumParams() { return func()->params.size(); }
   BlockRef getBlock() { return this->def(1)->as<BlockRef>(); }
+
+  static bool is_impl(const FatObjRef<Instr> &ref) {
+    return InstrRef{ref}.isOpc(OP_FUNC_INSTR);
+  }
+  static bool is_impl(const FatDynObjRef<> &ref) {
+    if (auto asInstr = ref.dyn_as<InstrRef>())
+      return is_impl(asInstr);
+    return false;
+  }
 };
 
 inline FunctionIRef FunctionRef::iref() const {
@@ -63,9 +72,13 @@ public:
   using InstrRef::InstrRef;
 
   FunctionRef func() { return this->other(0)->as<FunctionRef>(); }
+
   Range<iterator> retvals() { return this->defs(); }
+  auto getNumRetvals() { return this->getNumDefs(); }
+
   Range<iterator> params() {
     return Range{this->other_begin() + 1, this->other_end()};
   }
+  auto getNumParams() { return this->getNumOthers() - 1; }
 };
 }; // namespace dyno

@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cassert>
 #include <cstddef>
+#include <initializer_list>
 #include <memory>
 #include <support/Bits.h>
 #include <support/InlineStorage.h>
@@ -33,6 +34,8 @@ public:
     this->SmallVecImpl<T>::operator=(std::move(o));
     return *this;
   }
+
+  SmallVec(std::initializer_list<T> list);
 
   SmallVec(size_t size)
       : SmallVecImpl<T>(std::launder(reinterpret_cast<T *>(storage.storage)),
@@ -162,7 +165,7 @@ public:
     assert(pos < sz);
     return arr[pos];
   }
-  const T &operator[] (size_type pos) const {
+  const T &operator[](size_type pos) const {
     assert(pos < sz);
     return arr[pos];
   }
@@ -284,3 +287,9 @@ public:
   const_iterator begin() const { return arr; }
   const_iterator end() const { return arr + sz; }
 };
+
+template <typename T, unsigned N>
+inline SmallVec<T, N>::SmallVec(std::initializer_list<T> list)
+    : SmallVec(list.size()) {
+  std::copy(list.begin(), list.end(), this->begin());
+}

@@ -2,6 +2,7 @@
 #include "dyno/IDs.h"
 #include "dyno/InstrPrinter.h"
 #include "dyno/Obj.h"
+#include "dyno/Opcode.h"
 #include "hw/HWAbstraction.h"
 #include "hw/IDs.h"
 #include "hw/Process.h"
@@ -95,5 +96,20 @@ public:
     }
   }
 };
+
+
+inline void dumpCtx(HWContext &ctx) {
+  HWPrinter{std::cerr}.printCtx(ctx);
+}
+
+inline void dumpInstr(InstrRef instr) {
+  HWPrinter{std::cerr}.printInstr(instr);
+}
+
+inline void dumpObj(FatDynObjRef<> obj) {
+  if (auto asInstr = obj.dyn_as<InstrRef>())
+    return dumpInstr(asInstr);
+  HWPrinter{std::cerr}.printDef(obj);
+}
 
 }; // namespace dyno

@@ -212,6 +212,8 @@ public:
 
   bool empty() { return size() == 0; }
 
+  void reserve(size_t count) { (*this)->instrs.reserve(count + 1); }
+
   void sort() {
     // think copy is faster than in place, just guess though.
     auto &instrsOld = (*this)->instrs;

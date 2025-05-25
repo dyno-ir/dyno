@@ -5,6 +5,7 @@
 #include "dyno/Obj.h"
 #include "dyno/RefUnion.h"
 #include "hw/BitRange.h"
+#include "hw/DeepCopy.h"
 #include "hw/HWAbstraction.h"
 #include "hw/HWPrinter.h"
 #include "hw/HWValue.h"
@@ -12,6 +13,7 @@
 #include "hw/Module.h"
 #include "hw/Process.h"
 #include "hw/Register.h"
+#include "hw/passes/FunctionInline.h"
 #include "slang/ast/ASTVisitor.h"
 #include "slang/ast/Compilation.h"
 #include "slang/ast/Expression.h"
@@ -401,11 +403,11 @@ public:
       size_t i = 0;
       for (auto port : slangMod->getPortList()) {
         if (auto *asPS = port->as_if<slang::ast::PortSymbol>()) {
-          vars.insert(asPS->internalSymbol, fDynoMod->ports[i]);
+          vars.insert(asPS->internalSymbol, fDynoMod->ports[i].reg);
           if (auto *init = asPS->getInitializer()) {
             auto proc = build.buildProcess(HW_INIT_PROCESS_INSTR);
             build.pushInsertPoint(proc.block().end());
-            build.buildStore(fDynoMod->ports[i],
+            build.buildStore(fDynoMod->ports[i].reg,
                              handle_expr(*init)->proGetValue(build));
             build.popInsertPoint();
           }
@@ -417,7 +419,7 @@ public:
           auto ifMod = moduleMap.find(&ifInstance.body);
           assert(ifMod && "no interface module?");
           for (auto *var : extractIFModuleVarsPorts(ifInstance.body)) {
-            vars.insert(var, fDynoMod->ports[i++]);
+            vars.insert(var, fDynoMod->ports[i++].reg);
           }
           i--;
 
@@ -429,7 +431,7 @@ public:
 
       if (curModIsInterface)
         for (auto ifPort : extractIFModuleVars(*slangMod)) {
-          vars.insert(ifPort, fDynoMod->ports[i++]);
+          vars.insert(ifPort, fDynoMod->ports[i++].reg);
         }
 
       handle_member_list(slangMod->Scope::members());
@@ -702,6 +704,10 @@ public:
                                      subSens.signals.end());
       }
       return sens;
+    }
+    case slang::ast::TimingControlKind::ImplicitEvent: {
+      // auto &asImplEvent = timing.as<slang::ast::ImplicitEventControl>();
+      return ProcSenstv{};
     }
     default:
       break;
@@ -1668,8 +1674,12 @@ public:
         args[idx] = var;
       }
 
-      auto [found, it] = functionMap.findOrInsert(
-          subr, [&] { return build.buildFunc().func(); });
+      auto [found, it] = functionMap.findOrInsert(subr, [&] {
+        build.pushInsertPoint(regsBackIt.succ());
+        auto rv = build.buildFunc().func();
+        build.popInsertPoint();
+        return rv;
+      });
       auto func = FunctionRef{it.val(), ctx.getFuncs()[it.val()]}.iref();
 
       if (subr->returnValVar) {
@@ -1744,7 +1754,12 @@ int main(int argc, char **argv) {
   visitor.handle_modules();
 
   std::cout << "\n\n\n";
-
   HWPrinter print{std::cout};
+  print.printCtx(ctx);
+
+  FunctionInlinePass pass{ctx};
+  pass.run();
+
+  print.reset();
   print.printCtx(ctx);
 }

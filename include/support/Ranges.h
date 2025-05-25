@@ -293,6 +293,12 @@ public:
                    transform_iterator<It, TransformT>(endIt)};
   }
 
+  template <typename T> auto as() {
+    auto lambda = [](size_t, auto src) { return src.template as<T>(); };
+    return ::Range{transform_iterator<It, decltype(lambda)>(beginIt, lambda),
+                   transform_iterator<It, decltype(lambda)>(endIt)};
+  }
+
   template <typename FilterT> auto filter(FilterT filterF) {
     return ::Range{filter_iterator<It, FilterT>(beginIt, endIt, filterF),
                    filter_iterator<It, FilterT>(endIt)};
