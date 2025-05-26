@@ -2203,8 +2203,8 @@ public:
 using ConstantBuilder = ConstantBuilderBase<BigInt>;
 
 template <> struct ObjTraits<Constant> {
-  static constexpr DialectID dialect{DIALECT_CORE};
-  static constexpr TyID ty{CORE_CONSTANT};
+  //static constexpr DialectID dialect{DIALECT_CORE};
+  static constexpr DialectType ty{CORE_CONSTANT};
   using FatRefT = ConstantRef;
 };
 

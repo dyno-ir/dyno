@@ -3,6 +3,7 @@
 #include "Obj.h"
 #include "dyno/IDs.h"
 #include "dyno/Opcode.h"
+#include "dyno/Type.h"
 #include "support/Bits.h"
 #include "support/RTTI.h"
 #include "support/SmallVec.h"
@@ -112,8 +113,7 @@ public:
     InlineStorageRef<uint64_t>{customStorage}.emplace(0);
   }
   Instr(DynObjRef, uint16_t numOperands, DialectOpcode opc)
-      : opc(opc.getOpcodeID()), dialect(opc.getDialectID()),
-        numOperands(numOperands) {
+      : opc(opc.opc), dialect(opc.dialect), numOperands(numOperands) {
     InlineStorageRef<uint64_t>{customStorage}.emplace(0);
   }
 
@@ -530,8 +530,9 @@ inline InstrRef OperandRef::instr() const {
 }
 
 template <> struct ObjTraits<Instr> {
-  static constexpr DialectID dialect{DIALECT_CORE};
-  static constexpr TyID ty{CORE_INSTR};
+  // static constexpr DialectID dialect{DIALECT_CORE};
+  // static constexpr TyID ty{CORE_INSTR};
+  static constexpr DialectType ty{CORE_INSTR};
   using FatRefT = InstrRef;
   using RefT = ObjRef<Instr>;
 };

@@ -51,8 +51,8 @@ public:
 };
 
 template <> struct ObjTraits<Register> {
-  static constexpr DialectID dialect{DIALECT_HW};
-  static constexpr TyID ty{HW_REGISTER};
+  //static constexpr DialectID dialect{DIALECT_HW};
+  static constexpr DialectType ty{HW_REGISTER};
   using FatRefT = RegisterRef;
 };
 

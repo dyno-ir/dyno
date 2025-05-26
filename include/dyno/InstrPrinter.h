@@ -200,7 +200,7 @@ public:
 
   bool printTypeCore(FatDynObjRef<> ref, bool def) {
     switch (ref.getTyID()) {
-    case CORE_CONSTANT: {
+    case CORE_CONSTANT.type: {
       str << '#' << ref.as<ConstantRef>();
       return true;
     }

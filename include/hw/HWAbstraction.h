@@ -875,29 +875,28 @@ public:
   }
 
   void destroyObj(FatDynObjRef<> obj) {
-#define DIAL_TY(d, t) (((d) << 8) | (t))
-    switch (DIAL_TY(obj.getDialectID(), obj.getTyID())) {
-    case DIAL_TY(DIALECT_CORE, CORE_INSTR): {
+    switch (*obj.getType()) {
+    case *CORE_INSTR: {
       destroyInstr(obj.as<InstrRef>());
       break;
     }
-    case DIAL_TY(DIALECT_CORE, CORE_BLOCK): {
+    case *CORE_BLOCK: {
       destroyBlock(obj.as<BlockRef>());
       break;
     }
-    case DIAL_TY(DIALECT_OP, OP_FUNC): {
+    case *OP_FUNC: {
       ctx.getFuncs().destroy(obj.as<FunctionRef>());
       break;
     }
-    case DIAL_TY(DIALECT_HW, HW_REGISTER): {
+    case *HW_REGISTER: {
       ctx.getRegs().destroy(obj.as<RegisterRef>());
       break;
     }
-    case DIAL_TY(DIALECT_HW, HW_WIRE): {
+    case *HW_WIRE: {
       ctx.getWires().destroy(obj.as<WireRef>());
       break;
     }
-    case DIAL_TY(DIALECT_HW, HW_PROCESS): {
+    case *HW_PROCESS: {
       ctx.getProcs().destroy(obj.as<ProcessRef>());
       break;
     }

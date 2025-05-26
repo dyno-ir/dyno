@@ -4,20 +4,35 @@
 
 #include "dyno/Obj.h"
 #include "dyno/Opcode.h"
+#include "dyno/Type.h"
 #include <cstdint>
 #include <dyno/DialectInfo.h>
 
 namespace dyno {
 
 enum HWDialectID : uint8_t { DIALECT_HW = DIALECT_CUSTOM };
-enum RTLTyID : uint8_t {
-  HW_WIRE = 0 | TY_DEF_USE_START,
-  HW_REGISTER = 1 | TY_DEF_USE_START,
-  HW_PROCESS = 2 | TY_DEF_USE_START,
-  HW_MODULE = 3 | TY_DEF_USE_START
-};
-
+using HWType = SpecificDialectType<DialectID{DIALECT_HW}>;
 using HWOpcode = SpecificDialectOpcode<DialectID{DIALECT_HW}>;
+
+// clang-format off
+#define TYPES(x) \
+  x(HW_WIRE,     0 | TY_DEF_USE_START) \
+  x(HW_REGISTER, 1 | TY_DEF_USE_START) \
+  x(HW_PROCESS,  2 | TY_DEF_USE_START) \
+  x(HW_MODULE,   3 | TY_DEF_USE_START)
+// clang-format on
+
+#define ENUM_EXPAND(ident, idx) ident = idx,
+
+enum class HWTyID : uint8_t { TYPES(ENUM_EXPAND) };
+
+#define CEXPR_EXPAND(ident, idx) constexpr HWType ident{uint8_t(HWTyID::ident)};
+
+TYPES(CEXPR_EXPAND)
+
+#undef TYPES
+#undef ENUM_EXPAND
+#undef CEXPR_EXPAND
 
 #define HEADER enum class HWOpcID : uint16_t {
 #define ADD_OP(x) HW_##x,

@@ -43,8 +43,8 @@ public:
 };
 
 template <> struct ObjTraits<Module> {
-  static constexpr DialectID dialect{DIALECT_HW};
-  static constexpr TyID ty{HW_MODULE};
+  //static constexpr DialectID dialect{DIALECT_HW};
+  static constexpr DialectType ty{HW_MODULE};
   using FatRefT = ModuleRef;
 };
 

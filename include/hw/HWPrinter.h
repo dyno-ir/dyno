@@ -48,19 +48,19 @@ public:
 
   bool printHWType(FatDynObjRef<> ref, bool def) {
     switch (ref.getTyID()) {
-    case HW_WIRE: {
+    case HW_WIRE.type: {
       WireRef asWire = ref.as<WireRef>();
       str << "wire";
       if (asWire->numBits)
         str << "(" << *asWire->numBits << ")";
       break;
     }
-    case HW_MODULE: {
+    case HW_MODULE.type: {
       ModuleRef asModule = ref.as<ModuleRef>();
       str << "module(\"" << asModule->name << "\")";
       break;
     }
-    case HW_REGISTER: {
+    case HW_REGISTER.type: {
       RegisterRef asReg = ref.as<RegisterRef>();
       str << "register";
       if (asReg->numBits) {
@@ -68,7 +68,7 @@ public:
       }
       break;
     }
-    case HW_PROCESS: {
+    case HW_PROCESS.type: {
       ProcessRef asProc = ref.as<ProcessRef>();
       str << "process";
       if (!asProc->modes.empty()) {
@@ -97,10 +97,7 @@ public:
   }
 };
 
-
-inline void dumpCtx(HWContext &ctx) {
-  HWPrinter{std::cerr}.printCtx(ctx);
-}
+inline void dumpCtx(HWContext &ctx) { HWPrinter{std::cerr}.printCtx(ctx); }
 
 inline void dumpInstr(InstrRef instr) {
   HWPrinter{std::cerr}.printInstr(instr);

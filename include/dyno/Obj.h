@@ -1,5 +1,7 @@
 #pragma once
 
+#include "dyno/IDImpl.h"
+#include "dyno/Type.h"
 #include "support/Bits.h"
 #include "support/DenseMapInfo.h"
 #include "support/RTTI.h"
@@ -11,39 +13,6 @@
 namespace dyno {
 
 template <typename T> struct ObjTraits;
-
-template <typename NumT> class IDImpl {
-public:
-  static constexpr IDImpl invalid() { return IDImpl{bit_mask_ones<NumT>()}; }
-  static const inline IDImpl INVALID = invalid();
-
-  using num_t = NumT;
-  num_t num;
-
-  constexpr IDImpl() = default;
-  constexpr explicit IDImpl(num_t num) : num(num) {}
-
-  operator num_t() { return num; }
-
-  explicit operator bool() const { return *this != invalid(); }
-
-  constexpr bool operator==(IDImpl o) const { return num == o.num; }
-
-  template <typename... T> bool anyOf(T... ids) {
-    for (auto id : {ids...}) {
-      if (id == num)
-        return true;
-    }
-    return false;
-  }
-};
-
-using DialectID = IDImpl<uint8_t>;
-using TyID = IDImpl<uint8_t>;
-using ObjID = IDImpl<uint32_t>;
-using InterfaceID = IDImpl<uint16_t>;
-
-const inline TyID::num_t TY_DEF_USE_START = bit_mask_msb<TyID::num_t>();
 
 class DynObjRef;
 template <typename T = void> class FatDynObjRef;
@@ -127,11 +96,12 @@ protected:
 
 public:
   template <typename T> static DynObjRef ofTy(uint16_t custom = 0) {
-    return {ObjTraits<T>::dialect, ObjTraits<T>::ty, ObjID::INVALID, custom};
+    return {ObjTraits<T>::ty.dialect, ObjTraits<T>::ty.type, ObjID::INVALID,
+            custom};
   }
 
   template <typename T> static DynObjRef ofObj(ObjID obj, uint16_t custom = 0) {
-    return {ObjTraits<T>::dialect, ObjTraits<T>::ty, obj, custom};
+    return {ObjTraits<T>::ty.dialect, ObjTraits<T>::ty.type, obj, custom};
   }
 
   DynObjRef() = default;
@@ -162,6 +132,7 @@ public:
   TyID getTyID() const { return ty; }
   ObjID getObjID() const { return obj; }
   uint16_t getCustom() const { return custom; }
+  DialectType getType() const { return DialectType{dialect, ty}; }
 
   friend bool operator==(const DynObjRef &a, const DynObjRef &b) {
     return a.custom == b.custom && a.dialect == b.dialect && a.ty == b.ty &&
@@ -378,14 +349,13 @@ concept TrailingObj = requires(T x) {
 };
 
 template <typename T> bool ObjRef<T>::is_impl(const DynObjRef &Ref) {
-  return Ref.getDialectID() == Traits::dialect && Ref.getTyID() == Traits::ty;
+  return Ref.getType() == Traits::ty;
 }
 
 template <typename T>
   requires(!std::is_void_v<T>)
 bool FatObjRef<T>::is_impl(const DynObjRef &Ref) {
-  return Ref.getDialectID() == ObjTraits<T>::dialect &&
-         Ref.getTyID() == ObjTraits<T>::ty;
+  return Ref.getType() == ObjTraits<T>::ty;
 }
 
 // FatDynObjRef<> DynObjRef::fat() {

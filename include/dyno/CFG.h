@@ -287,8 +287,8 @@ inline auto BlockRef_iterator_base::blockRef() const {
 }
 
 template <> struct ObjTraits<Block> {
-  static constexpr DialectID dialect{DIALECT_CORE};
-  static constexpr TyID ty{CORE_BLOCK};
+  //static constexpr DialectID dialect{DIALECT_CORE};
+  static constexpr DialectType ty{CORE_BLOCK};
   using RefT = BlockRef;
 };
 

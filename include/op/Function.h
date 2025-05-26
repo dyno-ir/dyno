@@ -39,8 +39,8 @@ public:
 };
 
 template <> struct ObjTraits<Function> {
-  static constexpr DialectID dialect{DIALECT_OP};
-  static constexpr TyID ty{OP_FUNC};
+  //static constexpr DialectID dialect{DIALECT_OP};
+  static constexpr DialectType ty{OP_FUNC};
   using FatRefT = Function;
 };
 

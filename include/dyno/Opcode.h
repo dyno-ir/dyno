@@ -11,10 +11,12 @@ template <typename T>
 concept IsDialectOpcode = std::is_base_of_v<DialectOpcode, T>;
 
 class DialectOpcode {
+public:
   // like this so dialect is more significant when ordering
   OpcodeID opc;
   DialectID dialect;
 
+protected:
   explicit DialectOpcode(uint32_t combined)
       : opc(combined & bit_mask_ones<OpcodeID::num_t>()),
         dialect(combined >> bit_mask_sz<OpcodeID::num_t>) {
@@ -39,6 +41,7 @@ public:
     return (dialect.num << bit_mask_sz<OpcodeID::num_t> | opc.num);
   }
   constexpr uint32_t raw() const { return uint32_t(*this); }
+  constexpr uint16_t operator*() const { return raw(); }
 
   constexpr friend auto operator<=>(DialectOpcode lhs, DialectOpcode rhs) {
     return uint32_t(lhs) <=> uint32_t(rhs);

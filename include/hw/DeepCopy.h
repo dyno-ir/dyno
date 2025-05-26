@@ -19,28 +19,27 @@ public:
   template <
       std::invocable<DeepCopier *, InstrRef, BlockRef_iterator<true>> InstrHook>
   FatDynObjRef<> deepCopyObj(FatDynObjRef<> obj, InstrHook &&instrCallback) {
-#define DIAL_TY(d, t) (((d) << 8) | (t))
 
     if (!obj)
       return obj;
 
-    switch (DIAL_TY(obj.getDialectID(), obj.getTyID())) {
-    case DIAL_TY(DIALECT_CORE, CORE_BLOCK): {
+    switch (*obj.getType()) {
+    case *CORE_BLOCK: {
       auto asBlock = obj.as<BlockRef>();
       BlockRef blockRef = ctx.createBlock();
       blockRef.reserve(asBlock.size());
       deepCopyInstrsImpl(asBlock.begin(), blockRef.begin(), instrCallback);
       return blockRef;
     }
-    case DIAL_TY(DIALECT_OP, OP_FUNC): {
+    case *OP_FUNC: {
       // do not clone functions
       return obj;
     }
-    case DIAL_TY(DIALECT_HW, HW_WIRE): {
+    case *HW_WIRE: {
       auto asWire = obj.as<WireRef>();
       return ctx.getWires().create(asWire->numBits);
     }
-    case DIAL_TY(DIALECT_HW, HW_REGISTER): {
+    case *HW_REGISTER: {
       auto asReg = obj.as<RegisterRef>();
       return ctx.getWires().create(asReg->numBits);
     }

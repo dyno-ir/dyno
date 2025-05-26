@@ -15,10 +15,10 @@ public:
   using FatRefUnion::FatRefUnion;
 
   Optional<uint32_t> getNumBits() const {
-    switch (getDialectID() << 8 | getTyID()) {
-    case (DIALECT_CORE << 8) | CORE_CONSTANT:
+    switch (*getType()) {
+    case *CORE_CONSTANT:
       return this->as<ConstantRef>().getNumBits();
-    case (DIALECT_HW << 8) | HW_WIRE:
+    case *HW_WIRE:
       return this->as<WireRef>().getNumBits();
     default:
       dyno_unreachable("invalid value");
@@ -42,12 +42,12 @@ public:
   using FatRefUnion::FatRefUnion;
 
   Optional<uint32_t> getNumBits() const {
-    switch (getDialectID() << 8 | getTyID()) {
-    case (DIALECT_CORE << 8) | CORE_CONSTANT:
+    switch (*getType()) {
+    case *CORE_CONSTANT:
       return this->as<ConstantRef>().getNumBits();
-    case (DIALECT_HW << 8) | HW_WIRE:
+    case *HW_WIRE:
       return this->as<WireRef>().getNumBits();
-    case (DIALECT_HW << 8) | HW_REGISTER:
+    case *HW_REGISTER:
       return this->as<RegisterRef>().getNumBits();
     default:
       dyno_unreachable("invalid value");
