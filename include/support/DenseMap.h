@@ -311,6 +311,7 @@ public:
     if constexpr (std::is_trivially_destructible_v<V>) {
       for (size_t i = 0; i < cap; i++)
         getBuckets()[i].setKeysEmpty();
+      sz = 0;
       return;
     }
 
@@ -318,6 +319,7 @@ public:
     while (it != end()) {
       it = it.erase();
     }
+    sz = 0;
   }
 
 protected:
@@ -390,7 +392,7 @@ public:
   }
 
   void insert(ArrayRef<K> arr) {
-    for (const K& elem : arr) {
+    for (const K &elem : arr) {
       insert(elem);
     }
   }
@@ -488,6 +490,37 @@ public:
   }
 };
 
+template <typename K, typename V, size_t InlineBuckets>
+class SmallDenseMap : public DenseMapBase<SmallDenseMap<K, V, InlineBuckets>, K,
+                                          V, DenseMapBucket<K, V>> {
+public:
+  using Base = DenseMapBase<SmallDenseMap<K, V, InlineBuckets>, K, V,
+                            DenseMapBucket<K, V>>;
+  using Bucket = DenseMapBucket<K, V>;
+  Bucket *buckets;
+  InlineStorageArr<Bucket, InlineBuckets> arr;
+
+  Bucket *&getBuckets() const { return const_cast<Bucket *&>(buckets); }
+  void deleteArr(Bucket *buckets) {
+    if (buckets == *arr)
+      return;
+    ::operator delete[](buckets);
+  }
+
+  // todo: copy/move construct
+  bool isSmall() { return buckets == *arr; }
+
+  SmallDenseMap() : Base(InlineBuckets, 0), arr() {
+    std::construct_at(*arr);
+    buckets = *arr;
+  }
+  ~SmallDenseMap() {
+    if (isSmall())
+      return;
+    ::operator delete[](buckets);
+  }
+};
+
 template <typename K>
 class DenseSet : public DenseSetBase<DenseSet<K>, K, DenseSetBucket<K>> {
 public:
@@ -503,9 +536,11 @@ public:
 };
 
 template <typename K, size_t InlineBuckets>
-class SmallDenseSet : public DenseSetBase<SmallDenseSet<K, InlineBuckets>, K, DenseSetBucket<K>> {
+class SmallDenseSet : public DenseSetBase<SmallDenseSet<K, InlineBuckets>, K,
+                                          DenseSetBucket<K>> {
 public:
-  using Base = DenseSetBase<SmallDenseSet<K, InlineBuckets>, K, DenseSetBucket<K>>;
+  using Base =
+      DenseSetBase<SmallDenseSet<K, InlineBuckets>, K, DenseSetBucket<K>>;
   using Bucket = DenseSetBucket<K>;
   Bucket *buckets;
   InlineStorageArr<Bucket, InlineBuckets> arr;

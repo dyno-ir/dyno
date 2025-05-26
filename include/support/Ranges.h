@@ -288,6 +288,11 @@ public:
                    std::reverse_iterator<It>{begin()}};
   }
 
+  auto drop_front() {
+    ++beginIt;
+    return Range{*this};
+  }
+
   template <typename TransformT> auto transform(TransformT transformF) {
     return ::Range{transform_iterator<It, TransformT>(beginIt, transformF),
                    transform_iterator<It, TransformT>(endIt)};

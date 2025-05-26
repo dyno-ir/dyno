@@ -1,6 +1,11 @@
 #pragma once
 
+#include "dyno/Instr.h"
+#include "dyno/Obj.h"
 #include <utility>
+
+namespace dyno {
+
 template <typename Derived, typename StorageT>
 class CustomInstrRef : public Derived {
 public:
@@ -19,4 +24,10 @@ public:
     emplace(func());
     return get();
   }
+
+  CustomInstrRef(FatObjRef<Instr> ref) : Derived(ref) {}
+  CustomInstrRef(FatDynObjRef<> ref) : Derived(ref) {}
+  //CustomInstrRef(Derived ref) : Derived(ref) {}
 };
+
+}; // namespace dyno

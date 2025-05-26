@@ -5,6 +5,10 @@
 namespace dyno {
 
 using OpcodeID = IDImpl<uint16_t>;
+class DialectOpcode;
+
+template <typename T>
+concept IsDialectOpcode = std::is_base_of_v<DialectOpcode, T>;
 
 class DialectOpcode {
   // like this so dialect is more significant when ordering
@@ -51,10 +55,11 @@ public:
   }
 
   constexpr DialectOpcode() = default;
-};
 
-template <typename T>
-concept IsDialectOpcode = std::is_base_of_v<DialectOpcode, T>;
+  template <IsDialectOpcode... Ts> bool is(Ts... ts) {
+    return ((ts == *this) || ...);
+  }
+};
 
 template <DialectID D> class SpecificDialectOpcode : public DialectOpcode {
 public:

@@ -108,10 +108,14 @@ public:
   using iterator = Operand *;
 
   Instr(DynObjRef, uint16_t numOperands, DialectID dialect, OpcodeID opc)
-      : opc(opc), dialect(dialect), numOperands(numOperands) {}
+      : opc(opc), dialect(dialect), numOperands(numOperands) {
+    InlineStorageRef<uint64_t>{customStorage}.emplace(0);
+  }
   Instr(DynObjRef, uint16_t numOperands, DialectOpcode opc)
       : opc(opc.getOpcodeID()), dialect(opc.getDialectID()),
-        numOperands(numOperands) {}
+        numOperands(numOperands) {
+    InlineStorageRef<uint64_t>{customStorage}.emplace(0);
+  }
 
   Instr(const Instr &) = delete;
   Instr(Instr &&) = delete;
@@ -357,9 +361,7 @@ public:
   Range<iterator> others() { return {other_begin(), other_end()}; }
 
   template <IsDialectOpcode... Ts> bool isOpc(Ts... opcs) const {
-    return ((getDialect() == opcs.getDialectID() &&
-             getOpcode() == opcs.getOpcodeID()) ||
-            ...);
+    return getDialectOpcode().is(opcs...);
   }
 
   auto &customStorage() { return ptr->customStorage; }

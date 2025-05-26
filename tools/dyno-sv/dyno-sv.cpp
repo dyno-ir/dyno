@@ -5,7 +5,6 @@
 #include "dyno/Obj.h"
 #include "dyno/RefUnion.h"
 #include "hw/BitRange.h"
-#include "hw/DeepCopy.h"
 #include "hw/HWAbstraction.h"
 #include "hw/HWPrinter.h"
 #include "hw/HWValue.h"
@@ -13,7 +12,7 @@
 #include "hw/Module.h"
 #include "hw/Process.h"
 #include "hw/Register.h"
-#include "hw/passes/FunctionInline.h"
+#include "hw/passes/ProcessLinearize.h"
 #include "slang/ast/ASTVisitor.h"
 #include "slang/ast/Compilation.h"
 #include "slang/ast/Expression.h"
@@ -1757,7 +1756,7 @@ int main(int argc, char **argv) {
   HWPrinter print{std::cout};
   print.printCtx(ctx);
 
-  FunctionInlinePass pass{ctx};
+  ProcessLinearizePass pass{ctx};
   pass.run();
 
   print.reset();

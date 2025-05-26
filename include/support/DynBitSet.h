@@ -1,11 +1,119 @@
 #pragma once
 
+#include "Bits.h"
 #include <bit>
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
-#include <iterator>
 #include <vector>
+
+template <typename Container, Container::value_type DefaultWord = 0>
+class UnsizedBitSet {
+  Container storage;
+  using word_t = Container::value_type;
+  static constexpr size_t WordBits = bit_mask_sz<word_t>;
+  static constexpr size_t wordIdx(size_t i) { return i / WordBits; }
+  static constexpr size_t bitIdx(size_t i) { return i % WordBits; }
+  static constexpr word_t bitMsk(size_t i) { return word_t(1) << bitIdx(i); }
+
+public:
+  UnsizedBitSet(const UnsizedBitSet &) = default;
+  UnsizedBitSet(UnsizedBitSet &&) = default;
+  UnsizedBitSet &operator=(const UnsizedBitSet &) = default;
+  UnsizedBitSet &operator=(UnsizedBitSet &&) = default;
+
+  UnsizedBitSet() = default;
+  UnsizedBitSet(size_t preallocBits)
+      : storage(round_up_div(preallocBits, WordBits)) {}
+
+  void set(size_t i) { storage[wordIdx(i)] |= bitMsk(i); }
+  void clear(size_t i) { storage[wordIdx(i)] &= ~bitMsk(i); }
+  bool get(size_t i) const { storage[wordIdx(i)] & bitMsk(i); }
+  void ensureBits(size_t i) { ensureWords(round_up_div(i, WordBits)); }
+  void ensureWords(size_t words) {
+    if (storage.size() <= words) [[unlikely]]
+      storage.resize(words, DefaultWord);
+  }
+  void resizeBits(size_t i) { resizeWords(round_up_div(i, WordBits)); }
+  void resizeWords(size_t words) { storage.resize(words, DefaultWord); }
+  void setDyn(size_t i) {
+    ensureBits(i + 1);
+    set(i);
+  }
+  void clearDyn(size_t i) {
+    ensureBits(i + 1);
+    clear(i);
+  }
+  bool getDyn(size_t i) const {
+    auto word = wordIdx(i);
+    if (word >= storage.size())
+      return DefaultWord & bitMsk(i);
+    return storage[word] & bitMsk(i);
+  }
+
+  word_t getWordDyn(size_t i) const {
+    if (i >= storage.size())
+      return DefaultWord;
+    return storage[i];
+  }
+
+  word_t numWords() const { return storage.size(); }
+
+  friend bool operator==(const UnsizedBitSet &lhs, const UnsizedBitSet &rhs) {
+    if (lhs.numWords() != rhs.numWords()) {
+      const UnsizedBitSet *longer =
+          lhs.numWords() > rhs.numWords() ? &lhs : &rhs;
+      size_t min = std::min(lhs.numWords(), rhs.numWords());
+      size_t max = std::max(lhs.numWords(), rhs.numWords());
+      for (size_t i = min; i < max; i++)
+        if (longer->storage[i] != DefaultWord)
+          return false;
+    }
+
+    for (size_t i = 0; i < lhs.numWords(); i++)
+      if (lhs.storage[i] != rhs.storage[i])
+        return false;
+
+    return true;
+  }
+  UnsizedBitSet &operator|=(const UnsizedBitSet &o) {
+    ensureWords(o.storage.size());
+    for (size_t i = 0; i < storage.size(); ++i) {
+      storage[i] |= o.getWordDyn(i);
+    }
+    return *this;
+  }
+  UnsizedBitSet &operator&=(const UnsizedBitSet &o) {
+    ensureWords(o.storage.size());
+    for (size_t i = 0; i < storage.size(); ++i) {
+      storage[i] &= o.getWordDyn(i);
+    }
+    return *this;
+  }
+  UnsizedBitSet &nand(const UnsizedBitSet &o) {
+    ensureWords(o.storage.size());
+    for (size_t i = 0; i < storage.size(); ++i) {
+      storage[i] &= o.getWordDyn(i);
+    }
+    return *this;
+  }
+  UnsizedBitSet &nor(const UnsizedBitSet &o) {
+    ensureWords(o.storage.size());
+    for (size_t i = 0; i < storage.size(); ++i) {
+      storage[i] |= o.getWordDyn(i);
+    }
+    return *this;
+  }
+
+  size_t count() const {
+    assert(DefaultWord == 0 && "not well defined");
+    size_t cnt = 0;
+    for (size_t i = 0; i < storage.size(); ++i) {
+      cnt += std::popcount(storage[i]);
+    }
+    return cnt;
+  }
+};
 
 class DynBitSet {
 public:
