@@ -355,7 +355,7 @@ template <typename T> bool ObjRef<T>::is_impl(const DynObjRef &Ref) {
 template <typename T>
   requires(!std::is_void_v<T>)
 bool FatObjRef<T>::is_impl(const DynObjRef &Ref) {
-  return Ref.getType() == ObjTraits<T>::ty;
+  return ObjRef<T>::is_impl(Ref);
 }
 
 // FatDynObjRef<> DynObjRef::fat() {

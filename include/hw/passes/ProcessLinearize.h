@@ -87,6 +87,12 @@ public:
         case HW_LOAD.raw():
           break;
 
+        case HW_STORE_DEFER.raw():
+          break;
+
+        case HW_TRIGGER_INSTR.raw():
+          break;
+
         default:
           dyno_unreachable("register ref'd by unexpected instr");
         }
@@ -100,17 +106,20 @@ public:
 
       for (auto access : reg.oref().uses()) {
         auto instr = HWInstrRef{access.instr()};
-        auto proc = CustProcIRef{instr.parentProc(ctx)};
-        auto &custom = proc.getOrEmplace([] { return new Custom(); });
 
         switch (instr.getDialectOpcode().raw()) {
         case HW_LOAD.raw(): {
+          auto proc = CustProcIRef{instr.parentProc(ctx)};
+          auto &custom = proc.getOrEmplace([] { return new Custom(); });
           custom->predsSet.insert(ArrayRef{writersVec});
           break;
         }
         case HW_STORE.raw(): {
-          if (regIsAnyOutput)
+          if (regIsAnyOutput) {
+            auto proc = CustProcIRef{instr.parentProc(ctx)};
+            auto &custom = proc.getOrEmplace([] { return new Custom(); });
             custom->dependingOutputs.setDyn(outputIdxCnt);
+          }
           break;
         }
         default:
@@ -227,10 +236,9 @@ public:
                               proc.block().end().pred());
 
         if (auto *ptr = CustProcIRef{mergeProc}.get())
-            delete ptr;
-          HWInstrBuilder{ctx}.destroyInstr(mergeProc);
+          delete ptr;
+        HWInstrBuilder{ctx}.destroyInstr(mergeProc);
       }
-
     }
   }
 
@@ -240,7 +248,6 @@ public:
   }
 
   void run() {
-
     for (auto instr : ctx.getInstrs()) {
       InstrRef{instr}.clearCustomStorage();
     }

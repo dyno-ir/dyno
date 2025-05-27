@@ -13,6 +13,7 @@
 #include "hw/Module.h"
 #include "hw/Process.h"
 #include "hw/Register.h"
+#include "hw/SensList.h"
 #include "hw/Wire.h"
 #include "op/Function.h"
 #include "op/IDs.h"
@@ -35,6 +36,7 @@ class HWContext {
   NewDeleteObjStore<Wire> wires;
   NewDeleteObjStore<Function> funcs;
   NewDeleteObjStore<Process> procs;
+  NewDeleteObjStore<Trigger> triggers;
   CFG cfg;
   NewDeleteObjStore<Instr> instrs;
 
@@ -47,6 +49,7 @@ public:
   auto &getProcs() { return procs; }
   auto &getInstrs() { return instrs; }
   auto &getCFG() { return cfg; }
+  auto &getTriggers() { return triggers; }
 
   ModuleIRef createModule(std::string_view name) {
     auto moduleRef = modules.create(std::string(name));
@@ -580,11 +583,18 @@ public:
   }
 
   HWInstrRef buildStore(RegisterRef reg, HWValue value,
-                        BitRange range = BitRange::full(), bool defer = false) {
+                        BitRange range = BitRange::full(), bool defer = false,
+                        TriggerIRef trigger = nullref) {
+    assert(!(!defer && trigger) && "trigger on non-deferred store");
+    auto opc = defer ? HW_STORE_DEFER : HW_STORE;
+    if (trigger) {
+      if (range == BitRange::full())
+        return buildInstr(opc, false, value, reg, trigger.oref());
+      return buildInstr(opc, false, value, reg, range, trigger.oref());
+    }
     if (range == BitRange::full())
-      return buildInstr(defer ? HW_STORE_DEFER : HW_STORE, false, value, reg);
-    return buildInstr(defer ? HW_STORE_DEFER : HW_STORE, false, value, reg,
-                      range);
+      return buildInstr(opc, false, value, reg);
+    return buildInstr(opc, false, value, reg, range);
   }
 
   RegisterRef buildRegister(Optional<uint32_t> bitSize = nullopt) {
@@ -619,22 +629,57 @@ public:
   }
 
   ProcessIRef buildProcess(HWOpcode type = HW_COMB_PROCESS_INSTR,
-                           ProcSenstv &&sens = ProcSenstv::empty()) {
+                           TriggerIRef trigger = nullref) {
     assert(type == HW_INIT_PROCESS_INSTR || type == HW_COMB_PROCESS_INSTR ||
            type == HW_SEQ_PROCESS_INSTR || type == HW_FINAL_PROCESS_INSTR ||
            type == HW_LATCH_PROCESS_INSTR);
-    auto procRef = ctx.getProcs().create(sens);
+    auto procRef = ctx.getProcs().create();
     auto procInstRef =
-        ProcessIRef{ctx.getInstrs().create(2 + sens.signals.size(), type)};
+        ProcessIRef{ctx.getInstrs().create(2 + (trigger != nullref), type)};
     InstrBuilder build{procInstRef};
     build.addRef(procRef).addRef(ctx.createBlock()).other();
 
-    for (size_t i = 0; i < sens.signals.size(); i++) {
-      build.addRef(sens.signals[i].first);
-    }
+    if (trigger)
+      build.addRef(trigger.oref());
 
     insertInstr(procInstRef);
     return procInstRef;
+  }
+
+  // HWInstrRef buildEventDelay(RegisterRef dReg, RegisterRef qReg,
+  //                            const SensList &sens) {
+  //   auto instrRef = ProcessIRef{
+  //       ctx.getInstrs().create(3 + sens.signals.size(), HW_TRIGGER_INSTR)};
+  //   insertInstr(instrRef);
+  //   InstrBuilder build{instrRef};
+  //   build.other().addRef(dReg).addRef(qReg).addRef(
+  //       SensModesRef::fromSensList(sens));
+
+  //   for (size_t i = 0; i < sens.signals.size(); i++) {
+  //     build.addRef(sens.signals[i].first);
+  //   }
+
+  //   return instrRef;
+  // }
+
+  TriggerIRef buildTrigger(const SensList &list) {
+    if (list.signals.empty())
+      return nullref;
+
+    auto instrRef = TriggerIRef{
+        ctx.getInstrs().create(1 + list.signals.size(), HW_TRIGGER_INSTR)};
+    insertInstr(instrRef);
+    TriggerRef trigRef = TriggerRef{ctx.getTriggers().create()};
+
+    InstrBuilder build{instrRef};
+    build.addRef(trigRef).other();
+
+    for (auto [reg, mode] : list.signals) {
+      build.addRef(reg);
+      trigRef->addMode(mode);
+    }
+
+    return instrRef;
   }
 
   HWInstrRef buildInstance(ModuleRef module, ArrayRef<RegisterRef> portRegs) {
@@ -900,6 +945,11 @@ public:
       ctx.getProcs().destroy(obj.as<ProcessRef>());
       break;
     }
+    case *HW_TRIGGER: {
+      ctx.getTriggers().destroy(obj.as<TriggerRef>());
+    }
+    default:
+      dyno_unreachable("deleting unknown object");
     }
   }
 

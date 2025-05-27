@@ -13,6 +13,7 @@
 #include "hw/Process.h"
 #include "hw/Register.h"
 #include "hw/passes/ProcessLinearize.h"
+#include "hw/passes/SeqToComb.h"
 #include "slang/ast/ASTVisitor.h"
 #include "slang/ast/Compilation.h"
 #include "slang/ast/Expression.h"
@@ -663,10 +664,9 @@ public:
     }
   }
 
-  ProcSenstv handle_timing(const slang::ast::TimingControl &timing) {
+  void handle_timing(const slang::ast::TimingControl &timing, SensList &sens) {
     switch (timing.kind) {
     case slang::ast::TimingControlKind::SignalEvent: {
-      ProcSenstv sens;
       auto &asSigEvt = timing.as<slang::ast::SignalEventControl>();
       auto &sym = asSigEvt.expr.as<slang::ast::ValueExpressionBase>().symbol;
       auto it = vars.find(&sym);
@@ -675,43 +675,39 @@ public:
       if (!it.val().is<RegisterRef>())
         abort();
 
-      ProcSenstv::Mode mode;
+      SensMode mode;
       switch (asSigEvt.edge) {
       case slang::ast::EdgeKind::None:
         abort();
       case slang::ast::EdgeKind::PosEdge:
-        mode = ProcSenstv::POSEDGE;
+        mode = SensMode::POSEDGE;
         break;
       case slang::ast::EdgeKind::NegEdge:
-        mode = ProcSenstv::NEGEDGE;
+        mode = SensMode::NEGEDGE;
         break;
       case slang::ast::EdgeKind::BothEdges:
-        mode = ProcSenstv::ANYEDGE;
+        mode = SensMode::ANYEDGE;
         break;
       }
 
       sens.signals.emplace_back(
           std::make_pair(it.val().as<RegisterRef>(), mode));
-      return sens;
+      break;
     }
     case slang::ast::TimingControlKind::EventList: {
       auto &asEvtList = timing.as<slang::ast::EventListControl>();
-      ProcSenstv sens;
+      SensList sens;
       for (auto sub : asEvtList.events) {
-        auto subSens = handle_timing(*sub);
-        sens.signals.push_back_range(subSens.signals.begin(),
-                                     subSens.signals.end());
+        handle_timing(*sub, sens);
       }
-      return sens;
-    }
-    case slang::ast::TimingControlKind::ImplicitEvent: {
-      // auto &asImplEvent = timing.as<slang::ast::ImplicitEventControl>();
-      return ProcSenstv{};
-    }
-    default:
       break;
     }
-    abort();
+    case slang::ast::TimingControlKind::ImplicitEvent: {
+      return;
+    }
+    default:
+      abort();
+    }
   }
 
   void handle_proc(const slang::ast::ProceduralBlockSymbol &block) {
@@ -738,14 +734,14 @@ public:
     }
 
     auto *stmt = &block.getBody();
-    ProcSenstv sens;
-
+    SensList sens;
     if (auto *asTimed = stmt->as_if<slang::ast::TimedStatement>()) {
       stmt = &asTimed->stmt;
-      sens = handle_timing(asTimed->timing);
+      handle_timing(asTimed->timing, sens);
     }
 
-    proc = build.buildProcess(opc, std::move(sens));
+    auto trigger = build.buildTrigger(sens);
+    proc = build.buildProcess(opc, trigger);
     build.pushInsertPoint(proc.block().end());
     handle_stmt(*stmt);
     build.popInsertPoint();
@@ -1756,8 +1752,11 @@ int main(int argc, char **argv) {
   HWPrinter print{std::cout};
   print.printCtx(ctx);
 
-  ProcessLinearizePass pass{ctx};
+  SeqToCombPass pass{ctx};
   pass.run();
+
+  ProcessLinearizePass pass2{ctx};
+  pass2.run();
 
   print.reset();
   print.printCtx(ctx);

@@ -69,14 +69,19 @@ public:
       break;
     }
     case HW_PROCESS.type: {
-      ProcessRef asProc = ref.as<ProcessRef>();
+      // ProcessRef asProc = ref.as<ProcessRef>();
       str << "process";
-      if (!asProc->modes.empty()) {
+      break;
+    }
+    case HW_TRIGGER.type: {
+      str << "trigger";
+      auto asTrigger = ref.as<TriggerRef>();
+      if (asTrigger->size() != 0) {
         str << "(";
-        for (const auto &mode : asProc->modes) {
+        for (size_t i = 0; i < asTrigger->size(); i++) {
           auto arr = std::array<const char *, 4>{"pos", "neg", "any", "iff"};
-          str << arr.at(mode);
-          if (&mode != &asProc->modes.back())
+          str << arr[size_t(asTrigger->getMode(i))];
+          if (i != asTrigger->size() - 1)
             str << ", ";
         }
         str << ")";

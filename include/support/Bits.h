@@ -37,7 +37,7 @@ template <typename T> constexpr T bit_mask_ms_nbits(unsigned nbits) {
 }
 
 template <typename T> constexpr unsigned clog2(T val) {
-  return std::bit_width(val);
+  return std::bit_width(val - 1);
   // if (val == 0 || val == 1)
   //   return 0;
   // return bit_mask_sz<T> - std::countl_zero(val - 1);

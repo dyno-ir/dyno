@@ -2,6 +2,7 @@
 
 #pragma once
 
+#include "dyno/IDImpl.h"
 #include "dyno/Obj.h"
 #include "dyno/Opcode.h"
 #include "dyno/Type.h"
@@ -16,10 +17,12 @@ using HWOpcode = SpecificDialectOpcode<DialectID{DIALECT_HW}>;
 
 // clang-format off
 #define TYPES(x) \
-  x(HW_WIRE,     0 | TY_DEF_USE_START) \
-  x(HW_REGISTER, 1 | TY_DEF_USE_START) \
-  x(HW_PROCESS,  2 | TY_DEF_USE_START) \
-  x(HW_MODULE,   3 | TY_DEF_USE_START)
+  x(HW_WIRE,         0 | TY_DEF_USE_START) \
+  x(HW_REGISTER,     1 | TY_DEF_USE_START) \
+  x(HW_PROCESS,      2 | TY_DEF_USE_START) \
+  x(HW_MODULE,       3 | TY_DEF_USE_START) \
+  x(HW_SENS_MODES,   4) \
+  x(HW_TRIGGER,      5 | TY_DEF_USE_START)
 // clang-format on
 
 #define ENUM_EXPAND(ident, idx) ident = idx,
@@ -46,7 +49,7 @@ TYPES(CEXPR_EXPAND)
 template <> struct DialectTraits<DIALECT_HW> {
   constexpr static DialectInfo info{"rtl"};
   constexpr static TyInfo tyInfo[] = {
-      {"wire"}, {"register"}, {"process"}, {"module"}};
+      {"wire"}, {"register"}, {"process"}, {"module"}, {"sens_modes"}, {"trigger"}};
   constexpr static OpcodeInfo opcInfo[] = {
 #define HEADER
 #define FOOTER

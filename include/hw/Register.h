@@ -51,8 +51,10 @@ public:
 };
 
 template <> struct ObjTraits<Register> {
-  //static constexpr DialectID dialect{DIALECT_HW};
+  // static constexpr DialectID dialect{DIALECT_HW};
   static constexpr DialectType ty{HW_REGISTER};
+  // static constexpr auto altTys = {HW_REGISTER_POS, HW_REGISTER_NEG,
+  //                                 HW_REGISTER_ANY};
   using FatRefT = RegisterRef;
 };
 

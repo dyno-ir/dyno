@@ -114,13 +114,13 @@ public:
 
     DynObjRef noCustom = ref;
     noCustom.clearCustom();
-    auto it = introduced.find(noCustom);
-    if (it != introduced.end()) {
-      str << '%' << it.val();
-      printCustom(ref);
-      return;
+    auto [found, it] = introduced.findOrInsert(noCustom, introduced.size());
+    str << '%' << it.val();
+    //printCustom(ref);
+    if (!found) {
+      str << "?";
+      printUse(ref);
     }
-    printUse(ref);
   }
 
   void introduce(FatDynObjRef<> ref) {

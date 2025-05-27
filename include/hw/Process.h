@@ -4,32 +4,14 @@
 #include "dyno/Instr.h"
 #include "dyno/Obj.h"
 #include "hw/IDs.h"
-#include "hw/Register.h"
 
 namespace dyno {
-
-struct ProcSenstv {
-  enum Mode : uint8_t { POSEDGE, NEGEDGE, ANYEDGE, IFF };
-  SmallVec<std::pair<RegisterRef, Mode>, 2> signals;
-
-  static ProcSenstv empty() { return ProcSenstv{}; }
-  explicit operator bool() const { return !signals.empty(); }
-};
 
 class Process {
 public:
   InstrDefUse defUse;
-  SmallVec<ProcSenstv::Mode, 2> modes;
 
-  Process(DynObjRef, const ProcSenstv &sens) : modes(sens.signals.size()) {
-    // we're storing mode here but register refs in the instr. maybe
-    // we can somehow spare a few bits in the DynObjRef?
-    // -> multiple register types all mapping to Register
-    // -> 2 high bits in obj id
-    // -> limit to 2 or 3 signals and store in proc opcode like CLK, CLK_RST,
-    // CLK_NRST, ... (prob best)
-    for (size_t i = 0; i < sens.signals.size(); i++)
-      modes[i] = sens.signals[i].second;
+  Process(DynObjRef) {
   }
 };
 
@@ -40,7 +22,7 @@ public:
 };
 
 template <> struct ObjTraits<Process> {
-  //static constexpr DialectID dialect{DIALECT_HW};
+  // static constexpr DialectID dialect{DIALECT_HW};
   static constexpr DialectType ty{HW_PROCESS};
   using FatRefT = ProcessRef;
 };

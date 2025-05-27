@@ -71,6 +71,7 @@ public:
     assert(it != base.instr().end());
     return (it)->as<HWValue>();
   }
+  BitRangeOperand(OperandRef base) : base(base) {}
 };
 
 inline BitRange::BitRange(BitRangeOperand operand)

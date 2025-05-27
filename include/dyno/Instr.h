@@ -368,6 +368,19 @@ public:
   void clearCustomStorage() {
     InlineStorageRef<uint64_t>{this->customStorage()}.emplace(0);
   }
+  void mutateOpcode(DialectOpcode newOpc) {
+    ptr->dialect = newOpc.dialect;
+    ptr->opc = newOpc.opc;
+  }
+  void downsizeOperands(size_t newNumOperands) {
+    assert(newNumOperands <= getNumOperands());
+    for (size_t i = newNumOperands; i < getNumOperands(); i++) {
+      this->operand(i)->destroy();
+    }
+    ptr->numOperands = newNumOperands;
+    if (ptr->numOperands < ptr->numDefs)
+      ptr->numDefs = ptr->numOperands;
+  }
 };
 
 class InstrDefUse {
