@@ -41,7 +41,7 @@ public:
     return (dialect.num << bit_mask_sz<OpcodeID::num_t> | opc.num);
   }
   constexpr uint32_t raw() const { return uint32_t(*this); }
-  constexpr uint16_t operator*() const { return raw(); }
+  constexpr uint32_t operator*() const { return raw(); }
 
   constexpr friend auto operator<=>(DialectOpcode lhs, DialectOpcode rhs) {
     return uint32_t(lhs) <=> uint32_t(rhs);
