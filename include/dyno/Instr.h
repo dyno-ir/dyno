@@ -37,16 +37,15 @@ class Operand : public ByValueRTTIUtilMixin<Operand>, ByValueRTTITag2 {
 
   DynObjRef ref;
   InlineStorage<8> custom;
-
-  static inline bool isDefUseOperand(DynObjRef ref) {
-    return ref.getTyID() & bit_mask_msb<TyID::num_t>();
-  }
   template <typename T = void> FatDynObjRef<T> customFat() const {
     auto ptr = custom.as<T *>();
     return {ref, *ptr};
   }
 
 public:
+  static inline bool isDefUseOperand(DynObjRef ref) {
+    return ref.getTyID() & bit_mask_msb<TyID::num_t>();
+  }
   Operand(const Operand &) = delete;
   Operand(Operand &&) = delete;
   Operand &operator=(const Operand &) = delete;

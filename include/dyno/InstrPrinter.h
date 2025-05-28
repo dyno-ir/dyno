@@ -88,8 +88,8 @@ public:
         return;
     }
     printTypeDefault(ref);
-    str << '[' << ref.getObjID() << "]";
-    printCustom(ref);
+    //str << '[' << ref.getObjID() << "]";
+    //printCustom(ref);
   }
 
   void printDef(FatDynObjRef<> ref) {
@@ -114,11 +114,20 @@ public:
 
     DynObjRef noCustom = ref;
     noCustom.clearCustom();
-    auto [found, it] = introduced.findOrInsert(noCustom, introduced.size());
-    str << '%' << it.val();
-    //printCustom(ref);
-    if (!found) {
-      str << "?";
+
+    if (Operand::isDefUseOperand(ref)) {
+      auto [found, it] = introduced.findOrInsert(noCustom, introduced.size());
+      str << '%' << it.val();
+      if (!found) {
+        str << ":?";
+        printUse(ref);
+      }
+      return;
+    }
+    auto it = introduced.find(noCustom);
+    if (it) {
+      str << '%' << it.val();
+    } else {
       printUse(ref);
     }
   }

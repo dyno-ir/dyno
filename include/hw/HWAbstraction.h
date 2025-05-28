@@ -865,7 +865,9 @@ public:
     return DoWhileInstrRef{instrRef};
   }
 
-  auto buildAssert(HWValue value) {
+  auto buildAssert(HWValue value, TriggerIRef deferTrigger = nullref) {
+    if (deferTrigger)
+      return buildInstr(HW_ASSERT_DEFER, false, value, deferTrigger.oref());
     return buildInstr(OP_ASSERT, false, value);
   }
 
