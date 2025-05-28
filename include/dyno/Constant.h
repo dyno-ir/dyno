@@ -1315,7 +1315,7 @@ public:
   }
   template <BigIntAPI T0, BigIntAPI T1>
   static void andOp4S(BigInt &out, const T0 &lhs, const T1 &rhs) {
-    return bitwiseOp4S<and_4state, addOp<T0, T1>, T0, T1>(out, lhs, rhs);
+    return bitwiseOp4S<and_4state, andOp<T0, T1>, T0, T1>(out, lhs, rhs);
   }
   template <BigIntAPI T0, BigIntAPI T1>
   static void orOp4S(BigInt &out, const T0 &lhs, const T1 &rhs) {

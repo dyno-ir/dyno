@@ -62,11 +62,13 @@ int main() {
   build.setInsertPoint(func.getBlock().begin());
   auto param = build.buildFuncParam();
   auto ret = build.buildFuncReturn(param, build.buildConst(64, 1UL << 40));
-  build.buildFuncReturn(param, ConstantBuilder{ctx.getConstants()}
-                                   .add(ret.operand(2)->as<ConstantRef>())
+  auto ret2 = build.buildFuncReturn(param, ConstantBuilder{ctx.getConstants()}
+                                   .add(ret.operand(1)->as<ConstantRef>())
                                    .add(1)
                                    .bitAND(-2)
                                    .get());
+
+  assert(ret.operand(1)->ptr() == ret2.operand(1)->ptr());
 
   HWPrinter print{std::cout};
 
