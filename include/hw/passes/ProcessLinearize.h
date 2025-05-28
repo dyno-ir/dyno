@@ -66,7 +66,7 @@ public:
         switch (instr.getDialectOpcode().raw()) {
 
         case HW_STORE.raw(): {
-          writers.insert(instr.parentProc(ctx));
+          writers.findOrInsert(instr.parentProc(ctx));
           break;
         }
 
@@ -111,7 +111,7 @@ public:
         case HW_LOAD.raw(): {
           auto proc = CustProcIRef{instr.parentProc(ctx)};
           auto &custom = proc.getOrEmplace([] { return new Custom(); });
-          custom->predsSet.insert(ArrayRef{writersVec});
+          custom->predsSet.findOrInsert(ArrayRef{writersVec});
           break;
         }
         case HW_STORE.raw(): {

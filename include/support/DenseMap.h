@@ -32,21 +32,74 @@ public:
     size_type offset = 1;
     while (true) {
       if (auto entryIndex = getBuckets()[bucketIndex].find(k);
-          entryIndex != Bucket::entriesPerBucket) [[likely]] {
-        return std::make_pair(true, iterator{&getBuckets()[bucketIndex],
-                                             cap - bucketIndex, entryIndex});
+          entryIndex != Bucket::entriesPerBucket) {
+        return std::make_pair(true,
+                              iterator{&getBuckets()[bucketIndex],
+                                       cap - bucketIndex, entryIndex, offset});
       }
       if (auto emptyIndex =
               getBuckets()[bucketIndex].find(DenseMapInfo<K>::getEmptyKey());
           emptyIndex != Bucket::entriesPerBucket) {
-        return std::make_pair(false, iterator{&getBuckets()[bucketIndex],
-                                              cap - bucketIndex, emptyIndex});
+        return std::make_pair(false,
+                              iterator{&getBuckets()[bucketIndex],
+                                       cap - bucketIndex, emptyIndex, offset});
       }
 
       bucketIndex = (bucketIndex + offset) & (cap - 1);
       offset += 1;
     }
     dyno_unreachable("full hash map");
+  }
+
+  iterator findEmptyImpl(const K &k, bool assertNotExist = true) const {
+    assert(!DenseMapInfo<K>::isEqual(k, DenseMapInfo<K>::getEmptyKey()) &&
+           !DenseMapInfo<K>::isEqual(k, DenseMapInfo<K>::getTombstoneKey()));
+    size_type bucketIndex = DenseMapInfo<K>::getHashValue(k) & (cap - 1);
+    size_type offset = 1;
+    while (true) {
+
+      if (assertNotExist)
+        if (auto entryIndex = getBuckets()[bucketIndex].find(k);
+            entryIndex != Bucket::entriesPerBucket) {
+          dyno_unreachable("key exists");
+        }
+
+      if (auto emptyIndex = getBuckets()[bucketIndex].findEmptyOrTombstone();
+          emptyIndex != Bucket::entriesPerBucket) {
+        return iterator{&getBuckets()[bucketIndex], cap - bucketIndex,
+                        emptyIndex, offset};
+      }
+
+      bucketIndex = (bucketIndex + offset) & (cap - 1);
+      offset += 1;
+    }
+    dyno_unreachable("full hash map");
+  }
+
+  template <std::invocable<Bucket *, size_type> T> void grow(T &&reinsertFunc) {
+    auto oldBuckets = getBuckets();
+    auto oldCap = cap;
+
+    getBuckets() = new Bucket[cap *= 2]();
+    sz = 0;
+
+    for (size_t i = 0; i < oldCap; i++) {
+      size_type j = ~0;
+      while ((j = oldBuckets[i].getNextValid(j)) != Bucket::entriesPerBucket) {
+        reinsertFunc(&oldBuckets[i], j);
+      }
+    }
+    self().deleteArr(oldBuckets);
+  }
+
+  template <std::invocable<Bucket *, size_type> T>
+  bool growIfOversized(T &&reinsertFunc) {
+    auto max = cap * Bucket::entriesPerBucket;
+    if (sz > (max / 2) + (max / 4)) {
+      grow(reinsertFunc);
+      return true;
+    }
+    return false;
   }
 
 public:
@@ -103,6 +156,12 @@ struct DenseSetMapIteratorBase {
 public:
   static_assert(std::is_trivially_destructible_v<K>);
 
+  DenseSetMapIteratorBase(Bucket *bucket, size_type rem, size_type idx)
+      : bucket(bucket), rem(rem), idx(idx) {}
+  DenseSetMapIteratorBase(Bucket *bucket, size_type rem, size_type idx,
+                          size_type)
+      : bucket(bucket), rem(rem), idx(idx) {}
+
   DenseSetMapIteratorBase &operator++() {
     next();
     return *this;
@@ -138,6 +197,7 @@ public:
   using reference = const K &;
 
   using Base = DenseSetMapIteratorBase<Bucket, K, size_type>;
+  using Base::Base;
   using Base::bucket;
   using Base::idx;
   using Base::rem;
@@ -156,7 +216,7 @@ public:
     return std::pair<const K &, V &>(bucket->keys[idx], bucket->values[idx]);
   }
   // can't support this with non-contiguous key/val (maybe w proxy object)
-  value_type operator->() = delete;
+  auto operator->() = delete;
 
   const V &val() { return (**this).second; }
 };
@@ -171,6 +231,7 @@ public:
   using reference = const K &;
 
   using Base = DenseSetMapIteratorBase<Bucket, K, size_type>;
+  using Base::Base;
   using Base::bucket;
   using Base::idx;
   using Base::rem;
@@ -186,65 +247,37 @@ public:
   }
 
   value_type operator*() { return bucket->keys[idx]; }
-  // can't support this with non-contiguous key/val (maybe w proxy object)
-  value_type operator->() = delete;
+  pointer operator->() { return &bucket->keys[idx]; };
 };
 
-template <typename Derived, typename K, typename V, typename Bucket>
-class DenseMapBase : public DenseSetMapBase<Derived, K, Bucket,
-                                            DenseMapIterator<Bucket, K, V>> {
-  using Base =
-      DenseSetMapBase<Derived, K, Bucket, DenseMapIterator<Bucket, K, V>>;
-  using iterator = Base::iterator;
-  using size_type = Base::size_type;
+template <typename Derived, typename K, typename V, typename Bucket,
+          typename Iterator = DenseMapIterator<Bucket, K, V>>
+class DenseMapBase : public DenseSetMapBase<Derived, K, Bucket, Iterator> {
+  using Base = DenseSetMapBase<Derived, K, Bucket, Iterator>;
 
+  bool growIfOversized() {
+    return Base::growIfOversized([&](Bucket *bucket, size_type j) {
+      insert(std::move(bucket->keys[j]), std::move(bucket->values[j]));
+      std::destroy_at(&bucket->values[j]);
+    });
+  }
+
+protected:
   using Base::cap;
   using Base::getBuckets;
   using Base::self;
   using Base::sz;
 
-  void grow() {
-    auto oldBuckets = getBuckets();
-    auto oldCap = cap;
-
-    getBuckets() = new Bucket[cap *= 2]();
-    sz = 0;
-
-    for (size_t i = 0; i < oldCap; i++) {
-      size_type j = ~0;
-      while ((j = oldBuckets[i].getNextValid(j)) != Bucket::entriesPerBucket) {
-        insert(std::move(oldBuckets[i].keys[j]),
-               std::move(oldBuckets[i].values[j]));
-
-        std::destroy_at(&oldBuckets[i].values[j]);
-      }
-    }
-
-    self().deleteArr(oldBuckets);
-  }
-
-  bool growIfOversized() {
-    auto max = cap * Bucket::entriesPerBucket;
-    if (sz > (max / 2) + (max / 4)) {
-      grow();
-      return true;
-    }
-    return false;
-  }
-
 public:
+  using iterator = Base::iterator;
+  using size_type = Base::size_type;
+  using bucket_type = Bucket;
   using Base::begin;
   using Base::end;
 
   iterator insert(const K &k, V &&v) {
-    auto [found, iter] = Base::findImpl(k);
-    if (found)
-      return end();
-
-    if (growIfOversized())
-      // iterator invalid after growing so re-run
-      return insert(k, std::move(v));
-
+    growIfOversized();
+    auto iter = Base::findEmptyImpl(k);
     sz++;
     iter.keyMut() = k;
     (*iter).second = std::move(v);
@@ -340,52 +373,29 @@ template <typename Derived, typename K, typename Bucket>
 class DenseSetBase
     : public DenseSetMapBase<Derived, K, Bucket, DenseSetIterator<Bucket, K>> {
   using Base = DenseSetMapBase<Derived, K, Bucket, DenseSetIterator<Bucket, K>>;
-  using iterator = Base::iterator;
-  using size_type = Base::size_type;
 
+protected:
   using Base::cap;
   using Base::getBuckets;
   using Base::self;
   using Base::sz;
 
-  void grow() {
-    auto oldBuckets = getBuckets();
-    auto oldCap = cap;
-
-    getBuckets() = new Bucket[cap *= 2]();
-    sz = 0;
-
-    for (size_t i = 0; i < oldCap; i++) {
-      size_type j = ~0;
-      while ((j = oldBuckets[i].getNextValid(j)) != Bucket::entriesPerBucket) {
-        insert(std::move(oldBuckets[i].keys[j]));
-      }
-    }
-    self().deleteArr(oldBuckets);
-  }
-
-  bool growIfOversized() {
-    auto max = cap * Bucket::entriesPerBucket;
-    if (sz > (max / 2) + (max / 4)) {
-      grow();
-      return true;
-    }
-    return false;
-  }
-
 public:
+  using iterator = Base::iterator;
+  using size_type = Base::size_type;
+  using bucket_type = Bucket;
   using Base::begin;
   using Base::end;
 
+  bool growIfOversized() {
+    return Base::growIfOversized([&](Bucket *bucket, size_type j) {
+      insert(std::move(bucket->keys[j]));
+    });
+  }
+
   iterator insert(const K &k) {
-    auto [found, iter] = Base::findImpl(k);
-    if (found)
-      return end();
-
-    if (growIfOversized())
-      // iterator invalid after growing so re-run
-      return insert(k);
-
+    growIfOversized();
+    auto iter = Base::findEmptyImpl(k);
     sz++;
     iter.keyMut() = k;
     return iter;
@@ -395,19 +405,6 @@ public:
     for (const K &elem : arr) {
       insert(elem);
     }
-  }
-
-  iterator insertOrAssign(const K &k) {
-    auto [found, iter] = Base::findImpl(k);
-    if (!found) {
-
-      if (growIfOversized())
-        return insertOrAssign(k);
-
-      sz++;
-      iter.keyMut() = k;
-    }
-    return iter;
   }
 
   auto findOrInsert(const K &k) {
@@ -421,6 +418,12 @@ public:
     sz++;
     iter.keyMut() = k;
     return std::make_pair(false, iter);
+  }
+
+  void findOrInsert(ArrayRef<K> arr) {
+    for (const K &elem : arr) {
+      findOrInsert(elem);
+    }
   }
 
   void clear() {
@@ -442,8 +445,9 @@ template <typename K, typename size_type = uint32_t> struct DenseSetBucket {
   size_type getNextValid(size_type cur) {
     // todo: vectorize manually
     for (size_type i = cur + 1; i < keys.size(); i++) {
-      if (keys[i] != DenseMapInfo<K>::getEmptyKey() &&
-          keys[i] != DenseMapInfo<K>::getTombstoneKey())
+      if (!DenseMapInfo<K>::isEqual(keys[i], DenseMapInfo<K>::getEmptyKey()) &&
+          !DenseMapInfo<K>::isEqual(keys[i],
+                                    DenseMapInfo<K>::getTombstoneKey()))
         return i;
     }
     // invalid
@@ -454,6 +458,16 @@ template <typename K, typename size_type = uint32_t> struct DenseSetBucket {
     // todo: vectorize manually
     for (size_type i = cur + 1; i < keys.size(); i++) {
       if (DenseMapInfo<K>::isEqual(keys[i], k))
+        return i;
+    }
+    return entriesPerBucket;
+  }
+
+  size_type findEmptyOrTombstone(size_type cur = ~0) {
+    // todo: vectorize manually
+    for (size_type i = cur + 1; i < keys.size(); i++) {
+      if (DenseMapInfo<K>::isEqual(keys[i], DenseMapInfo<K>::getEmptyKey()) ||
+          DenseMapInfo<K>::isEqual(keys[i], DenseMapInfo<K>::getTombstoneKey()))
         return i;
     }
     return entriesPerBucket;
@@ -472,96 +486,81 @@ struct DenseMapBucket : DenseSetBucket<K, size_type> {
   std::array<V, Base::entriesPerBucket> values;
 };
 
-template <typename K, typename V>
-class DenseMap
-    : public DenseMapBase<DenseMap<K, V>, K, V, DenseMapBucket<K, V>> {
-public:
-  using Base = DenseMapBase<DenseMap<K, V>, K, V, DenseMapBucket<K, V>>;
-  using Bucket = DenseMapBucket<K, V>;
+template <typename Base> class LargeSetMap : public Base {
+  using Bucket = Base::bucket_type;
   Bucket *buckets;
+
+public:
   Bucket *&getBuckets() const { return const_cast<Bucket *&>(buckets); }
   void deleteArr(Bucket *buckets) { ::operator delete[](buckets); }
 
+public:
   // todo: copy/move construct
-  DenseMap() : Base(1, 0) { buckets = new Bucket[1](); }
-  ~DenseMap() {
-    this->clearDelete();
+  LargeSetMap() : Base(1, 0) { buckets = new Bucket[1](); }
+  ~LargeSetMap() {
+    this->Base::clearDelete();
     ::operator delete[](buckets);
   }
+};
+
+template <typename Base, size_t InlineBuckets> class SmallSetMap : public Base {
+  using Bucket = Base::bucket_type;
+  Bucket *buckets;
+  InlineStorageArr<Bucket, InlineBuckets> arr;
+
+public:
+  Bucket *&getBuckets() const { return const_cast<Bucket *&>(buckets); }
+  void deleteArr(Bucket *buckets) {
+    if (buckets == *arr)
+      return;
+    ::operator delete[](buckets);
+  }
+
+public:
+  bool isSmall() { return buckets == *arr; }
+
+  SmallSetMap() : Base(InlineBuckets, 0), arr() {
+    std::construct_at(*arr);
+    buckets = *arr;
+  }
+  ~SmallSetMap() {
+    if (isSmall())
+      return;
+    ::operator delete[](buckets);
+  }
+};
+
+template <typename K, typename V>
+class DenseMap : public LargeSetMap<
+                     DenseMapBase<DenseMap<K, V>, K, V, DenseMapBucket<K, V>>> {
+  using Base =
+      LargeSetMap<DenseMapBase<DenseMap<K, V>, K, V, DenseMapBucket<K, V>>>;
+  using Base::Base;
 };
 
 template <typename K, typename V, size_t InlineBuckets>
-class SmallDenseMap : public DenseMapBase<SmallDenseMap<K, V, InlineBuckets>, K,
-                                          V, DenseMapBucket<K, V>> {
-public:
-  using Base = DenseMapBase<SmallDenseMap<K, V, InlineBuckets>, K, V,
-                            DenseMapBucket<K, V>>;
-  using Bucket = DenseMapBucket<K, V>;
-  Bucket *buckets;
-  InlineStorageArr<Bucket, InlineBuckets> arr;
-
-  Bucket *&getBuckets() const { return const_cast<Bucket *&>(buckets); }
-  void deleteArr(Bucket *buckets) {
-    if (buckets == *arr)
-      return;
-    ::operator delete[](buckets);
-  }
-
-  // todo: copy/move construct
-  bool isSmall() { return buckets == *arr; }
-
-  SmallDenseMap() : Base(InlineBuckets, 0), arr() {
-    std::construct_at(*arr);
-    buckets = *arr;
-  }
-  ~SmallDenseMap() {
-    if (isSmall())
-      return;
-    ::operator delete[](buckets);
-  }
+class SmallDenseMap
+    : public SmallSetMap<
+          DenseMapBase<DenseMap<K, V>, K, V, DenseMapBucket<K, V>>,
+          InlineBuckets> {
+  using Base =
+      SmallSetMap<DenseMapBase<DenseMap<K, V>, K, V, DenseMapBucket<K, V>>,
+                  InlineBuckets>;
+  using Base::Base;
 };
 
 template <typename K>
-class DenseSet : public DenseSetBase<DenseSet<K>, K, DenseSetBucket<K>> {
-public:
-  using Base = DenseSetBase<DenseSet<K>, K, DenseSetBucket<K>>;
-  using Bucket = DenseSetBucket<K>;
-  Bucket *buckets;
-  Bucket *&getBuckets() const { return const_cast<Bucket *&>(buckets); }
-  void deleteArr(Bucket *buckets) { ::operator delete[](buckets); }
-
-  // todo: copy/move construct
-  DenseSet() : Base(1, 0) { buckets = new Bucket[1](); }
-  ~DenseSet() { ::operator delete[](buckets); }
+class DenseSet
+    : public LargeSetMap<DenseSetBase<DenseSet<K>, K, DenseSetBucket<K>>> {
+  using Base = LargeSetMap<DenseSetBase<DenseSet<K>, K, DenseSetBucket<K>>>;
+  using Base::Base;
 };
 
 template <typename K, size_t InlineBuckets>
-class SmallDenseSet : public DenseSetBase<SmallDenseSet<K, InlineBuckets>, K,
-                                          DenseSetBucket<K>> {
-public:
-  using Base =
-      DenseSetBase<SmallDenseSet<K, InlineBuckets>, K, DenseSetBucket<K>>;
-  using Bucket = DenseSetBucket<K>;
-  Bucket *buckets;
-  InlineStorageArr<Bucket, InlineBuckets> arr;
-
-  Bucket *&getBuckets() const { return const_cast<Bucket *&>(buckets); }
-  void deleteArr(Bucket *buckets) {
-    if (buckets == *arr)
-      return;
-    ::operator delete[](buckets);
-  }
-
-  // todo: copy/move construct
-  bool isSmall() { return buckets == *arr; }
-
-  SmallDenseSet() : Base(InlineBuckets, 0), arr() {
-    std::construct_at(*arr);
-    buckets = *arr;
-  }
-  ~SmallDenseSet() {
-    if (isSmall())
-      return;
-    ::operator delete[](buckets);
-  }
+class SmallDenseSet
+    : public SmallSetMap<DenseSetBase<DenseSet<K>, K, DenseSetBucket<K>>,
+                         InlineBuckets> {
+  using Base = SmallSetMap<DenseSetBase<DenseSet<K>, K, DenseSetBucket<K>>,
+                           InlineBuckets>;
+  using Base::Base;
 };

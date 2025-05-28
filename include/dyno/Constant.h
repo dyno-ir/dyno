@@ -1,6 +1,7 @@
 #pragma once
 
 #include "support/Bits.h"
+#include "support/DenseMultimap.h"
 #include "support/Optional.h"
 #include "support/SmallVec.h"
 #include "support/Utility.h"
@@ -18,7 +19,6 @@
 #include <span>
 #include <string>
 #include <type_traits>
-#include <unordered_map>
 
 namespace dyno {
 
@@ -1970,7 +1970,8 @@ class ConstantStore {
   // Just using hash as a key rather than the Constant itself. We want to do
   // the full key compare part manually so that we can compare with BigInt
   // rather than Constant.
-  std::unordered_multimap<uint32_t, ObjRef<Constant>> map;
+  // std::unordered_multimap<uint32_t, ObjRef<Constant>> map;
+  DenseMultimap<uint32_t, ObjRef<Constant>> map;
 
 public:
   uint32_t hash(uint32_t a) {
@@ -1995,14 +1996,16 @@ public:
 
   ConstantRef findOrInsert(const BigInt &bigInt) {
     uint32_t hash = constantHash(bigInt);
-    for (auto [it, rangeEnd] = map.equal_range(hash); it != rangeEnd; ++it) {
-      auto ref = store.resolve(it->second);
+    auto it = map.find(hash);
+
+    for (; it != map.end(); it = map.find_next(it)) {
+      auto ref = store.resolve(it.val());
       if (bigInt == ConstantRef{ref})
         return ref;
     }
 
     auto ref = store.create(bigInt.getNumWords(), bigInt);
-    map.insert(std::make_pair(hash, ref));
+    map.insert(hash, ref);
     return ref;
   }
 
@@ -2203,7 +2206,7 @@ public:
 using ConstantBuilder = ConstantBuilderBase<BigInt>;
 
 template <> struct ObjTraits<Constant> {
-  //static constexpr DialectID dialect{DIALECT_CORE};
+  // static constexpr DialectID dialect{DIALECT_CORE};
   static constexpr DialectType ty{CORE_CONSTANT};
   using FatRefT = ConstantRef;
 };

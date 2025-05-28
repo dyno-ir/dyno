@@ -64,6 +64,7 @@
 #include <ranges>
 #include <slang/syntax/SyntaxNode.h>
 #include <tuple>
+// #include "support/DenseMultimap.h"
 
 using namespace dyno;
 
@@ -599,7 +600,7 @@ public:
 
           for (auto [i, ifPort] :
                Range{asInst.getPortConnections()}.enumerate()) {
-            vars.insert(
+            vars.insertOrAssign(
                 ifPort->port.as<slang::ast::PortSymbol>().internalSymbol,
                 portRegs[i]);
           }
@@ -1752,11 +1753,11 @@ int main(int argc, char **argv) {
   HWPrinter print{std::cout};
   print.printCtx(ctx);
 
-  SeqToCombPass pass{ctx};
-  pass.run();
+  // SeqToCombPass pass{ctx};
+  // pass.run();
 
-  ProcessLinearizePass pass2{ctx};
-  pass2.run();
+  // ProcessLinearizePass pass2{ctx};
+  // pass2.run();
 
   print.reset();
   print.printCtx(ctx);

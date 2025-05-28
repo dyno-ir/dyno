@@ -566,7 +566,9 @@ public:
       } else
         return ConstantRef::undef32();
     }
-    return buildInstr(HW_CLOG2, true, value);
+    auto rv =  buildInstr(HW_CLOG2, true, value).defW();
+    rv->numBits = 32;
+    return rv;
   }
 
   WireRef buildLoad(RegisterRef reg, BitRange range = BitRange::full()) {
