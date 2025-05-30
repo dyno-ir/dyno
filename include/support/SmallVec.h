@@ -35,6 +35,18 @@ public:
     return *this;
   }
 
+  SmallVec(const SmallVecImpl<T> &o)
+      : SmallVecImpl<T>(std::launder(reinterpret_cast<T *>(storage.storage)), N,
+                        o) {}
+  SmallVec(const SmallVec<T, N> &o)
+      : SmallVecImpl<T>(std::launder(reinterpret_cast<T *>(storage.storage)), N,
+                        o) {}
+
+  SmallVec &operator=(const SmallVec &o) {
+    this->SmallVecImpl<T>::operator=(o);
+    return *this;
+  }
+
   SmallVec(std::initializer_list<T> list);
 
   SmallVec(size_t size)
@@ -113,8 +125,15 @@ protected:
 
   ~SmallVecImpl() { destroy(); }
 
-  SmallVecImpl(const SmallVecImpl &) = delete;
-  SmallVecImpl &operator=(const SmallVecImpl &) = delete;
+  SmallVecImpl(T *arr, size_type cap, const SmallVecImpl &o)
+      : SmallVecImpl(arr, cap) {
+    (*this) = o;
+  };
+  SmallVecImpl &operator=(const SmallVecImpl &o) {
+    this->resize(o.size());
+    std::copy(o.begin(), o.end(), this->begin());
+    return *this;
+  };
 
   SmallVecImpl(T *arr, size_type cap, SmallVecImpl &&o)
       : SmallVecImpl<T>(arr, cap) {
@@ -207,6 +226,13 @@ public:
     }
   }
 
+  void downsize(size_type n) {
+    assert(n <= sz);
+    if (n < sz)
+      std::destroy(begin() + n, end());
+    sz = n;
+  }
+
   void reserve(size_type n) {
     if (n <= cap)
       return;
@@ -252,6 +278,26 @@ public:
     T *obj = std::construct_at<T>(end(), std::move(arr[pos]));
     arr[pos] = val;
     ++sz;
+  }
+
+  iterator insert(iterator it, T &&val) {
+    assert(it <= end());
+    if (it == end()) {
+      emplace_back(val);
+      return end() - 1;
+    }
+    size_t pos = it - begin();
+    grow(sz + 1);
+    std::move(begin() + pos, end(), begin() + pos + 1);
+    arr[pos] = std::move(val);
+    ++sz;
+    return begin() + pos;
+  }
+  iterator insert(iterator it, const T &val) { return insert(it, T{val}); }
+
+  iterator erase(iterator it) {
+    std::move(it + 1, end(), it);
+    return it;
   }
 
   template <std::input_iterator It> void push_back_range(Range<It> range) {

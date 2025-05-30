@@ -39,6 +39,7 @@ private:
   }
 
 public:
+  using value_type = T;
   NewDeleteObjStore() {}
   NewDeleteObjStore(const NewDeleteObjStore &) = delete;
   NewDeleteObjStore(NewDeleteObjStore &&) = delete;
@@ -89,6 +90,8 @@ public:
 
   auto begin() { return objs().begin(); }
   auto end() { return objs().end(); }
+
+  ObjID::num_t numIDs() { return map.size(); }
 };
 
 } // namespace dyno

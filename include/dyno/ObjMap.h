@@ -30,7 +30,8 @@ public:
 
   size_t size() { return elements.size(); }
 
-  /*template <typename VV> void sync(ObjMapVec<K, VV> &o) { resize(o.size()); }*/
+  /*template <typename VV> void sync(ObjMapVec<K, VV> &o) { resize(o.size());
+   * }*/
 
   V &operator[](ObjRef<K> ref) {
     assert(inRange(ref));
@@ -40,6 +41,80 @@ public:
   V &get_ensure(ObjRef<K> ref) {
     ensure(ref);
     return this->operator[](ref);
+  }
+
+  class iterator {
+    V *ptr;
+    ObjID::num_t idx;
+
+  public:
+    using value_type = std::pair<ObjRef<K>, V>;
+    using difference_type = std::ptrdiff_t;
+    using reference = std::pair<ObjRef<K>, V &>;
+    using pointer = std::pair<ObjRef<K>, V *>;
+    using iterator_category = std::random_access_iterator_tag;
+
+    explicit iterator(V *ptr, ObjID::num_t idx) : ptr(ptr), idx(idx) {}
+
+    iterator &operator++() {
+      ++ptr;
+      ++idx;
+      return *this;
+    }
+    iterator operator++(int) {
+      auto tmp{*this};
+      ++ptr;
+      ++idx;
+      return tmp;
+    }
+
+    iterator &operator--() {
+      --ptr;
+      --idx;
+      return *this;
+    }
+    iterator operator--(int) {
+      auto tmp{*this};
+      --ptr;
+      --idx;
+      return tmp;
+    }
+
+    iterator &operator+=(difference_type n) {
+      ptr += n;
+      idx += n;
+      return *this;
+    }
+    iterator &operator-=(difference_type n) {
+      ptr -= n;
+      idx -= n;
+      return *this;
+    }
+
+    reference operator*() const {
+      return reference(ObjRef<K>{ObjID{idx}}, *ptr);
+    }
+    pointer operator->() const { return ptr; }
+
+    iterator operator+(difference_type n) const {
+      return iterator{ptr + n, idx + n};
+    }
+    iterator operator-(difference_type n) const {
+      return iterator{ptr - n, idx - n};
+    }
+
+    difference_type operator-(const iterator &other) const {
+      return ptr - other.ptr;
+    }
+
+    reference operator[](difference_type n) const { return *(ptr + n); }
+    bool operator==(const iterator &other) const { return ptr == other.ptr; }
+    auto operator<=>(const iterator &other) const { return ptr <=> other.ptr; }
+  };
+
+  auto begin() { return iterator{&elements.front(), 0}; }
+  auto end() {
+    return iterator{&elements.back() + 1, (uint32_t)elements.size()};
   }
 };
 

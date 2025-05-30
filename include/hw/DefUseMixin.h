@@ -29,6 +29,10 @@ public:
   auto use_end() { return self().use_end(); }
   auto defs() { return self().defs(); }
   auto uses() { return self().uses(); }
+
+  void replaceAllUsesWith(FatDynObjRef<> ref) {
+    self().replaceAllUsesWith(ref);
+  }
 };
 
 }; // namespace dyno

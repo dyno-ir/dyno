@@ -17,8 +17,8 @@ public:
   bool hasFalseBlock() { return getNumDefs() >= 2; }
   uint getNumYieldValues() { return getNumDefs() < 2 ? 0 : getNumDefs() - 2; }
 
-  FatDynObjRef<> getCondValue() {
-    return this->operand(getNumDefs())->as<FatDynObjRef<>>();
+  OperandRef getCondValue() {
+    return this->operand(getNumDefs());
   }
   BlockRef getTrueBlock() { return this->operand(0)->as<BlockRef>(); }
   BlockRef getFalseBlock() {
@@ -27,9 +27,9 @@ public:
     return this->operand(1)->as<BlockRef>();
   }
   // do not ref specific value vreg like Wire here
-  FatDynObjRef<> getYieldValue(uint n = 0) {
+  OperandRef getYieldValue(uint n = 0) {
     assert(n < getNumYieldValues());
-    return this->operand(2 + n)->as<FatDynObjRef<>>();
+    return this->operand(2 + n);
   }
 };
 

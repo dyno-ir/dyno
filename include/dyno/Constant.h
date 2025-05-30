@@ -1899,6 +1899,11 @@ public:
   using FatObjRef<Constant>::FatObjRef;
 
   ConstantRef(FatObjRef<Constant> ref) : FatObjRef<Constant>(ref) {}
+  explicit ConstantRef(DynObjRef ref)
+      : FatObjRef<Constant>(ref.getObjID(), nullptr, ref.getCustom()) {
+    assert(ref.is<ObjRef<Constant>>());
+    assert(this->isInline());
+  }
 
   ConstantRef(unsigned n, uint32_t val, uint8_t extPattern, uint8_t custom)
       : FatObjRef<Constant>() {

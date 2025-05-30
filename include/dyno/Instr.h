@@ -202,7 +202,7 @@ public:
   OperandRef &operator-=(int i) { return (*this) += -i; }
   friend OperandRef operator+(const OperandRef &lhs, int rhs) {
     OperandRef tmp{lhs};
-    tmp += (-rhs);
+    tmp += rhs;
     return tmp;
   }
   friend OperandRef operator+(int lhs, const OperandRef &rhs) {
@@ -446,6 +446,21 @@ public:
   Range<iterator> defs() { return {def_begin(), def_end()}; }
   Range<iterator> uses() { return {use_begin(), use_end()}; }
 
+  void replaceAllUsesWith(FatDynObjRef<> newRef) {
+    if (Operand::isDefUseOperand(newRef)) {
+      auto &other = *reinterpret_cast<InstrDefUse *>(newRef.getPtr());
+      for (OperandRef use : uses()) {
+        use->emplace(newRef);
+        other.insertUse(use);
+      }
+    } else {
+      for (OperandRef use : uses()) {
+        use->emplace(newRef);
+      }
+    }
+    refs.downsize(numDefs);
+  }
+
   void setInsertHook(insert_hook_t insertHook) {
     this->insertHook = insertHook;
   }
@@ -502,6 +517,19 @@ private:
       pos = refs.size();
       refs.emplace_back(opRef);
     }
+    opRef->ref.setCustom(pos);
+  }
+
+  void insertUse(OperandRef opRef) {
+    assert(opRef.hasDefUse());
+    assert(!opRef->ref.isCustom());
+    if (insertHook) [[unlikely]] {
+      if (insertHook(this, opRef)) {
+        return;
+      }
+    }
+    unsigned pos = refs.size();
+    refs.emplace_back(opRef);
     opRef->ref.setCustom(pos);
   }
 
@@ -610,7 +638,17 @@ template <> struct InterfaceTraits<OpcodeInfo> {
   }
 };
 
-class BinopInstrRef : public InstrRef {};
+template <typename Base, DialectOpcode... Opc>
+class OpcodeInstrRef : public Base {
+public:
+  using Base::Base;
+  static bool is_impl(FatObjRef<Instr> ref) { return InstrRef{ref}.isOpc(Opc...); }
+  static bool is_impl(FatDynObjRef<> ref) {
+    if (auto instr = ref.dyn_as<InstrRef>())
+      return is_impl(instr);
+    return false;
+  }
+};
 
 template <typename Base, uint NumCategories, auto ClassifierF>
 class CategoricalDefUse : public Base {

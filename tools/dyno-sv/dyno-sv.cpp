@@ -13,6 +13,7 @@
 #include "hw/Process.h"
 #include "hw/Register.h"
 #include "hw/passes/ProcessLinearize.h"
+#include "hw/passes/SSAConstruct.h"
 #include "hw/passes/SeqToComb.h"
 #include "slang/ast/ASTVisitor.h"
 #include "slang/ast/Compilation.h"
@@ -64,7 +65,6 @@
 #include <ranges>
 #include <slang/syntax/SyntaxNode.h>
 #include <tuple>
-// #include "support/DenseMultimap.h"
 
 using namespace dyno;
 
@@ -1144,7 +1144,7 @@ public:
                      .second;
         build.popInsertPoint();
 
-        return std::make_unique<RValue>(ifElse.getYieldValue(0).as<WireRef>(),
+        return std::make_unique<RValue>(ifElse.getYieldValue(0)->as<WireRef>(),
                                         expr.type);
       };
       default:
@@ -1492,7 +1492,8 @@ public:
       build.buildYield(handle_expr(asCond.right())->proGetValue(build));
       build.popInsertPoint();
 
-      return std::make_unique<RValue>(ifElse.getYieldValue(0), expr.type);
+      return std::make_unique<RValue>(ifElse.getYieldValue(0)->as<HWValue>(),
+                                      expr.type);
     }
 
     case slang::ast::ExpressionKind::SimpleAssignmentPattern:
@@ -1753,11 +1754,14 @@ int main(int argc, char **argv) {
   HWPrinter print{std::cout};
   print.printCtx(ctx);
 
-  // SeqToCombPass pass{ctx};
-  // pass.run();
+  SeqToCombPass pass{ctx};
+  pass.run();
 
-  // ProcessLinearizePass pass2{ctx};
-  // pass2.run();
+  ProcessLinearizePass pass2{ctx};
+  pass2.run();
+
+  SSAConstructPass pass3{ctx};
+  pass3.run();
 
   print.reset();
   print.printCtx(ctx);

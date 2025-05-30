@@ -3,11 +3,12 @@
 #include "HWValue.h"
 #include "dyno/CFG.h"
 #include "dyno/Constant.h"
-#include "dyno/DialectInfo.h"
 #include "dyno/IDs.h"
 #include "dyno/Instr.h"
 #include "dyno/Obj.h"
 #include "hw/BitRange.h"
+#include "hw/HWContext.h"
+#include "hw/HWInstr.h"
 #include "hw/HWValue.h"
 #include "hw/IDs.h"
 #include "hw/Module.h"
@@ -20,101 +21,12 @@
 #include "op/StructuredControlFlow.h"
 #include "support/ArrayRef.h"
 #include "support/RTTI.h"
-#include "support/TemplateUtil.h"
 #include "support/Utility.h"
 #include <algorithm>
 #include <dyno/NewDeleteObjStore.h>
 #include <type_traits>
 
 namespace dyno {
-
-class HWContext {
-
-  ConstantStore constants;
-  NewDeleteObjStore<Module> modules;
-  NewDeleteObjStore<Register> regs;
-  NewDeleteObjStore<Wire> wires;
-  NewDeleteObjStore<Function> funcs;
-  NewDeleteObjStore<Process> procs;
-  NewDeleteObjStore<Trigger> triggers;
-  CFG cfg;
-  NewDeleteObjStore<Instr> instrs;
-
-public:
-  auto &getConstants() { return constants; }
-  auto &getModules() { return modules; }
-  auto &getRegs() { return regs; }
-  auto &getWires() { return wires; }
-  auto &getFuncs() { return funcs; }
-  auto &getProcs() { return procs; }
-  auto &getInstrs() { return instrs; }
-  auto &getCFG() { return cfg; }
-  auto &getTriggers() { return triggers; }
-
-  ModuleIRef createModule(std::string_view name) {
-    auto moduleRef = modules.create(std::string(name));
-    auto moduleInstr = InstrRef{instrs.create(2, HW_MODULE_INSTR)};
-
-    InstrBuilder{moduleInstr}.addRef(moduleRef).addRef(createBlock());
-    return moduleInstr;
-  }
-
-  BlockRef createBlock() {
-    auto blockRef = cfg.blocks.create(cfg);
-    // auto blockInstrRef =
-    //     InstrRef{instrs.create(1 + sizeof...(parents),
-    //     DialectID{DIALECT_HW},
-    //                            OpcodeID{HW_BLOCK_INSTR})};
-    // InstrBuilder build{blockInstrRef};
-    // build.addRef(blockRef).other();
-    //(([&]() { build.addRef(parents); })(), ...);
-    return blockRef;
-  }
-
-  ConstantBuilder constBuild() { return ConstantBuilder{constants}; }
-};
-
-class HWInstrRef : public InstrRef {
-public:
-  using InstrRef::InstrRef;
-  HWInstrRef(const InstrRef &ref) : InstrRef(ref) {}
-
-  WireRef operandW(uint n) { return operand(n)->as<WireRef>(); }
-  WireRef defW(uint n = 0) {
-    assert(n < getNumDefs());
-    return operandW(n);
-  }
-  // todo: get rid of ctx params via global directory.
-  auto iter(HWContext &ctx) { return ctx.getCFG()[this->as<ObjRef<Instr>>()]; }
-  BlockRef parentBlock(HWContext &ctx) { return iter(ctx).blockRef(); }
-  FatRefUnion<ProcessIRef, FunctionIRef> parent(HWContext &ctx) {
-    while (true) {
-      auto block = parentBlock(ctx);
-      if (auto parent =
-              block.defI().dyn_as<FatRefUnion<ProcessIRef, FunctionIRef>>())
-        return parent;
-      return HWInstrRef{block.defI()}.parent(ctx);
-    }
-  }
-  ProcessIRef parentProc(HWContext &ctx) {
-    auto rv = parent(ctx);
-    assert(rv.is<ProcessIRef>() && "parent is not process");
-    return rv.as<ProcessIRef>();
-  }
-  FunctionIRef parentFunc(HWContext &ctx) {
-    auto rv = parent(ctx);
-    assert(rv.is<FunctionIRef>() && "parent is not function");
-    return rv.as<FunctionIRef>();
-  }
-  ModuleIRef parentMod(HWContext &ctx) {
-    while (true) {
-      auto block = parentBlock(ctx);
-      if (auto mod = block.defI().dyn_as<ModuleIRef>())
-        return mod;
-      return HWInstrRef{block.defI()}.parentMod(ctx);
-    }
-  }
-};
 
 class HWInstrBuilder {
 public:
@@ -466,6 +378,17 @@ public:
       return cbuild.get();
     }
 
+    if (values.size() == 1) {
+      auto val = values.front().first;
+      auto range = values.front().second;
+      if (range.isConstant() &&
+          range.getAddr().as<ConstantRef>().valueEquals(0) &&
+          (!range.getLen() ||
+           range.getExactConstantLen() == val.getNumBits())) {
+        return val;
+      }
+    }
+
     auto instr =
         InstrRef{ctx.getInstrs().create(1 + values.size() * 3, HW_SPLICE)};
 
@@ -477,7 +400,7 @@ public:
 
     Optional<uint32_t> numBits = 0;
 
-    for (auto [value, range] : values) {
+    for (auto [value, range] : Range{values}.reverse()) {
       if (auto asConst = range.getLen().dyn_as<ConstantRef>();
           asConst && asConst.valueEquals(0))
         continue;
@@ -496,6 +419,12 @@ public:
 
     auto rv = HWInstrRef{instr}.defW();
     rv->numBits = numBits;
+    return rv;
+  }
+
+  HWValue buildInsert(HWValue base, HWValue insert, BitRange range) {
+    auto rv = buildInstr(HW_INSERT, true, base, insert, range).defW();
+    rv->numBits = base.getNumBits();
     return rv;
   }
 
@@ -566,7 +495,7 @@ public:
       } else
         return ConstantRef::undef32();
     }
-    auto rv =  buildInstr(HW_CLOG2, true, value).defW();
+    auto rv = buildInstr(HW_CLOG2, true, value).defW();
     rv->numBits = 32;
     return rv;
   }
@@ -729,6 +658,33 @@ public:
     return IfInstrRef{instrRef};
   }
 
+  IfInstrRef buildIfElse(IfInstrRef old, uint yieldPrealloc = 0) {
+    InstrRef instrRef =
+        InstrRef{ctx.getInstrs().create(3 + yieldPrealloc, OP_IF)};
+    insertInstr(instrRef);
+    InstrBuilder build{instrRef};
+
+    build.addRef(old.getTrueBlock())
+        .addRef(old.hasFalseBlock() ? old.getFalseBlock() : ctx.createBlock());
+
+    old.operand(0).replace(FatDynObjRef<>{nullref});
+    if (old.hasFalseBlock())
+      old.operand(1).replace(FatDynObjRef<>{nullref});
+
+    for (uint i = 0; i < yieldPrealloc; i++) {
+      if (i >= old.getNumYieldValues())
+        build.addRef(ctx.getWires().create());
+      else {
+        auto operand = old.getYieldValue(i);
+        operand.replace(FatDynObjRef<>{nullref});
+        build.addRef(operand->as<FatDynObjRef<>>());
+      }
+    }
+
+    build.other().addRef(old.getCondValue()->as<FatDynObjRef<>>());
+    return IfInstrRef{instrRef};
+  }
+
   SwitchInstrRef buildSwitch(HWValue cond, uint yieldPrealloc = 0) {
     SwitchInstrRef instrRef =
         SwitchInstrRef{ctx.getInstrs().create(2 + yieldPrealloc, OP_SWITCH)};
@@ -798,7 +754,7 @@ public:
       }
       size_t idx = 0;
       for (auto val : {value...}) {
-        WireRef yieldVal = asIf.getYieldValue(idx).template as<WireRef>();
+        WireRef yieldVal = asIf.getYieldValue(idx)->as<WireRef>();
         if (val.getNumBits()) {
           if (!yieldVal->numBits)
             yieldVal->numBits = val.getNumBits();
@@ -833,6 +789,25 @@ public:
 
     auto yieldInstr = buildInstr(OP_YIELD, false, value...);
     return std::make_pair(yieldInstr, instr);
+  }
+
+  auto buildYield(InstrRef old, ArrayRef<HWValue> addedYieldVals) {
+    assert(!old || (old.isOpc(OP_YIELD)));
+
+    uint newYieldVals = addedYieldVals.size() + (old ? old.getNumOperands() : 0);
+
+    auto instr = InstrRef{ctx.getInstrs().create(newYieldVals, OP_YIELD)};
+    insertInstr(instr);
+    InstrBuilder ibuild{instr};
+    ibuild.other();
+
+    if (old)
+      for (auto def : old.defs())
+        ibuild.addRef(def->as<FatDynObjRef<>>());
+    for (auto val : addedYieldVals)
+      ibuild.addRef(val);
+
+    return instr;
   }
 
   template <typename... Ts> auto buildWhile(Ts... inputs) {
@@ -924,6 +899,8 @@ public:
   }
 
   void destroyObj(FatDynObjRef<> obj) {
+    if (obj == nullref)
+      return;
     switch (*obj.getType()) {
     case *CORE_INSTR: {
       destroyInstr(obj.as<InstrRef>());

@@ -1,0 +1,477 @@
+#pragma once
+#include "dyno/Obj.h"
+#include "hw/HWAbstraction.h"
+#include "hw/HWInstr.h"
+#include "hw/HWValue.h"
+#include "hw/IDs.h"
+#include "hw/LoadStore.h"
+#include "op/IDs.h"
+#include "op/StructuredControlFlow.h"
+
+namespace dyno {
+
+class SSAConstructPass {
+  HWContext &ctx;
+  uint depth = 0;
+
+  // we essentially need a concat value style recursive value representation.
+  // values may be:
+  // -> HWValue
+  // -> maybe store directly in case we want to backref.
+  // -> old value lazy backref?
+  struct RegisterValue {
+    struct Fragment {
+      DynObjRef ref;
+      uint32_t srcAddr;
+      uint32_t dstAddr;
+      uint32_t len;
+
+      std::pair<HWValue, BitRange> getValue(HWInstrBuilder &build,
+                                            uint32_t addr, uint32_t len) {
+        addr += srcAddr;
+        if (auto regThin = ref.dyn_as<ObjRef<Register>>()) {
+          auto reg = RegisterRef{build.ctx.getRegs().resolve(regThin)};
+          return std::make_pair(build.buildLoad(reg, BitRange{addr, len}),
+                                BitRange{0, len});
+        } else if (auto wireThin = ref.dyn_as<ObjRef<Wire>>()) {
+          auto wire = WireRef{build.ctx.getWires().resolve(wireThin)};
+          return std::make_pair(wire, BitRange{addr, len});
+        } else if (ref.is<ObjRef<Constant>>()) {
+          auto constant = ref.isCustom()
+                              ? ConstantRef{ref}
+                              : ConstantRef{build.ctx.getConstants().resolve(
+                                    ref.as<ObjRef<Constant>>())};
+          return std::make_pair(constant, BitRange{addr, len});
+        } else {
+          assert(0 && "unsupported");
+          auto store =
+              StoreIRef{build.ctx.getInstrs().resolve(ref.as<ObjRef<Instr>>())};
+          assert(len <= this->len);
+          return std::make_pair(store.value(), BitRange{addr, len});
+        }
+      }
+    };
+    // sorted by dst addr
+    SmallVec<Fragment, 1> frags;
+    uint32_t depth;
+
+    RegisterValue() = default;
+    RegisterValue(const RegisterValue &) = default;
+    RegisterValue(RegisterValue &&) = default;
+    RegisterValue &operator=(const RegisterValue &) = default;
+    RegisterValue &operator=(RegisterValue &&) = default;
+
+    RegisterValue(RegisterRef reg, uint32_t depth)
+        : frags{{reg, 0, 0, reg->numBits}}, depth(depth) {}
+    RegisterValue(DynObjRef value, uint32_t bits, uint32_t depth)
+        : frags{{value, 0, 0, bits}}, depth(depth) {}
+
+    // returns last iterator before regions with higher start addr.
+    auto getInsertIt(uint32_t dstAddr) {
+      // todo: binary search when large
+      auto it = frags.begin();
+      while (it != frags.end() && it->dstAddr <= dstAddr)
+        it++;
+      if (it == frags.begin())
+        return it;
+      return it - 1;
+    }
+
+    void overwrite(DynObjRef ref, uint32_t srcAddr, uint32_t dstAddr,
+                   uint32_t len) {
+      uint32_t newStart = dstAddr;
+      uint32_t newEnd = dstAddr + len;
+
+      auto it = getInsertIt(newStart);
+      auto insertPos = it - frags.begin();
+
+      // adjust or remove overlapping existing fragments
+      while (it != frags.end()) {
+        uint32_t start = it->dstAddr;
+        uint32_t end = it->dstAddr + it->len;
+
+        if (start >= newEnd)
+          break;
+
+        if (end <= newStart) {
+          ++it;
+          assert(false);
+          continue;
+        }
+
+        // full cover: split existing into two
+        if (newStart > start && newEnd < end) {
+          uint32_t leftLen = newStart - start;
+          uint32_t rightLen = end - newEnd;
+          // create right
+          Fragment right{it->ref, it->srcAddr + (newEnd - start), newEnd,
+                         rightLen};
+          // shrink left
+          it->len = leftLen;
+          frags.insert(it + 1, right);
+          ++insertPos;
+          break;
+        }
+
+        // overlap on left: trim right side of existing
+        if (start < newStart && end > newStart) {
+          it->len = newStart - start;
+          ++it;
+          ++insertPos;
+          continue;
+        }
+
+        // overlap on right: trim left side of existing
+        if (start < newEnd && end > newEnd) {
+          uint32_t cut = newEnd - start;
+          it->srcAddr += cut;
+          it->dstAddr = newEnd;
+          it->len = end - newEnd;
+          ++it;
+          continue;
+        }
+
+        // else: existing perfectly matches new
+        *it = Fragment{
+            ref,
+            srcAddr,
+            newStart,
+            len,
+        };
+        return;
+      }
+
+      // insert new fragment in sorted order
+      frags.insert(frags.begin() + insertPos,
+                   Fragment{ref, srcAddr, newStart, len});
+    }
+
+    HWValue get(HWInstrBuilder &build, uint32_t addr, uint32_t len) {
+      auto it = getInsertIt(addr);
+
+      auto addrB = addr;
+      auto lenB = len;
+
+      uint32_t end = addr + len;
+
+      SmallVec<std::pair<HWValue, BitRange>, 4> operands;
+
+      while (it != frags.end() && len != 0) {
+        uint32_t itEnd = it->dstAddr + it->len;
+
+        if (addr < itEnd && it->dstAddr < end) {
+
+          uint32_t start = addr - it->dstAddr;
+          if (it->dstAddr > addr)
+            start = 0;
+
+          uint32_t pieceLen =
+              std::min(end, itEnd) - std::max(addr, it->dstAddr);
+          operands.emplace_back(it->getValue(build, start, pieceLen));
+
+          addr += start;
+          len -= pieceLen;
+          it++;
+        } else
+          break;
+      }
+
+      auto rv = build.buildSplice(ArrayRef{operands});
+      overwrite(rv, 0, addrB, lenB);
+      return rv;
+    }
+
+    HWValue get(HWInstrBuilder &build) {
+      SmallVec<std::pair<HWValue, BitRange>, 4> operands;
+      uint32_t len = 0;
+      for (auto frag : frags) {
+        operands.emplace_back(frag.getValue(build, 0, frag.len));
+        len += frag.len;
+      }
+
+      auto rv = build.buildSplice(ArrayRef{operands});
+      overwrite(rv, 0, 0, len);
+      return rv;
+    }
+
+    void replaceDefault(HWInstrBuilder &build, RegisterValue &newDefault) {
+      for (auto frag : frags) {
+        if (frag.ref.is<RegisterRef>()) {
+          // todo: don't always materialize value. can just set ref in many
+          // cases.
+          overwrite(newDefault.get(build, frag.dstAddr, frag.len), 0,
+                    frag.dstAddr, frag.len);
+        }
+      }
+    }
+
+    friend bool operator==(const RegisterValue &lhs, const RegisterValue &rhs) {
+      if (lhs.frags.size() != rhs.frags.size())
+        return false;
+      for (size_t i = 0; i < lhs.frags.size(); i++)
+        if (lhs.frags[i].ref != rhs.frags[i].ref ||
+            lhs.frags[i].srcAddr != rhs.frags[i].srcAddr ||
+            lhs.frags[i].dstAddr != rhs.frags[i].dstAddr ||
+            lhs.frags[i].len != rhs.frags[i].len)
+          return false;
+      return true;
+    }
+  };
+
+  struct RegState {
+    SmallVec<RegisterValue, 4> stack;
+
+    RegisterValue &at(uint depth, RegisterRef reg) {
+      if (!stack.empty() && stack.back().depth == depth)
+        return stack.back();
+      else
+        return stack.emplace_back(RegisterValue{reg, depth});
+    }
+    RegisterValue &operator[](uint depth) {
+      assert(!stack.empty() && stack.back().depth == depth);
+      return stack.back();
+    }
+
+    bool has(uint depth) {
+      if (stack.empty())
+        return false;
+      return stack.back().depth == depth;
+    }
+
+    void clear(uint depth, RegisterRef reg) {
+      at(depth, reg) = RegisterValue{reg, depth};
+    }
+
+    void plainValue(uint depth, RegisterRef reg, HWValue value) {
+      at(depth, reg) = RegisterValue{value, reg->numBits, depth};
+    }
+  };
+
+  ObjMapVec<Register, RegState> regMap;
+
+  InstrRef resolve(ObjRef<Instr> ref) {
+    if (!ref)
+      return nullref;
+    return InstrRef{ctx.getInstrs().resolve(ref)};
+  }
+
+public:
+  explicit SSAConstructPass(HWContext &ctx) : ctx(ctx) {}
+
+  void runOnBlock(ProcessIRef proc, BlockRef block) {
+
+    HWInstrBuilder build{ctx};
+    SmallVec<FatDynObjRef<>, 32> destroyList;
+
+    for (auto instr : block) {
+      switch (*instr.getDialectOpcode()) {
+      case *HW_STORE: {
+        auto asStore = instr.as<StoreIRef>();
+        auto &regState = regMap[asStore.reg()];
+
+        uint32_t addr = 0;
+        uint32_t len = asStore.reg()->numBits;
+        if (auto range = asStore.range()) {
+          if (!range->isConstant()) {
+            build.setInsertPoint(asStore.iter(ctx));
+            auto val = regState.at(depth, asStore.reg())
+                           .get(build, 0, asStore.reg()->numBits);
+            val = build.buildInsert(val, asStore.value(), *asStore.range());
+            regState.plainValue(depth, asStore.reg(), val);
+            destroyList.emplace_back(asStore);
+            break;
+          }
+          assert(range->isConstant() && "todo");
+          addr = range->getAddr().as<ConstantRef>().getExactVal();
+          len = range->getLen().as<ConstantRef>().getExactVal();
+        }
+
+        destroyList.emplace_back(asStore);
+        regState.at(depth, asStore.reg())
+            .overwrite(asStore.value(), 0, addr, len);
+        break;
+      }
+
+        // case *HW_STORE_DEFER: {
+        //   auto asStore = instr.as<StoreIRef>();
+        //   auto &regState = regMap[asStore.reg()];
+        //   assert(0);
+        //   break;
+        // }
+
+      case *HW_LOAD: {
+        auto asLoad = instr.as<LoadIRef>();
+        auto &regState = regMap[asLoad.reg()];
+
+        if (!regState.has(depth))
+          // todo: still update known value to materialized
+          break;
+
+        auto &val = regState.at(depth, asLoad.reg());
+        // todo: only load from defer
+
+        uint32_t addr = 0;
+        uint32_t len = asLoad.reg()->numBits;
+        if (asLoad.hasRange()) {
+          auto range = asLoad.range();
+          if (!range.isConstant())
+            break;
+          addr = range.getAddr().as<ConstantRef>().getExactVal();
+          len = range.getLen().as<ConstantRef>().getExactVal();
+        }
+
+        build.setInsertPoint(asLoad.iter(ctx));
+        auto newVal = val.get(build, addr, len);
+        asLoad.defW().replaceAllUsesWith(newVal);
+        destroyList.emplace_back(asLoad);
+        break;
+      }
+
+      case *OP_IF: {
+        auto asIf = instr.as<IfInstrRef>();
+        assert(asIf.hasFalseBlock() && "todo");
+        auto startDepth = depth;
+
+        auto trueDepth = depth + 1;
+        auto falseDepth = depth + 2;
+
+        // Run through both true and false block. They get a copy of the
+        // current var state as their initial value which they modify according
+        // to their contents.
+        for (auto [obj, regState] : regMap) {
+          if (!regState.has(startDepth))
+            continue;
+          auto startState = regState[startDepth];
+          regState.stack.emplace_back(startState).depth = trueDepth;
+        }
+        depth = trueDepth;
+        runOnBlock(proc, asIf.getTrueBlock());
+
+        for (auto [obj, regState] : regMap) {
+          if (!regState.has(startDepth))
+            continue;
+          auto startState = regState[startDepth];
+          regState.stack.emplace_back(startState).depth = falseDepth;
+        }
+        depth = falseDepth;
+        runOnBlock(proc, asIf.getFalseBlock());
+
+        // Check if register state was modified in one or both of the blocks.
+        SmallVec<HWValue, 4> yieldValsT;
+        SmallVec<HWValue, 4> yieldValsF;
+        SmallVec<RegisterRef, 4> yieldRegs;
+
+        // todo: better data structure, don't iter thru all regs
+        for (auto [obj, regState] : regMap) {
+          if (regState.stack.empty())
+            continue;
+          auto topDepth = regState.stack.back().depth;
+          // skip if not modified in either branch
+          if (topDepth <= startDepth)
+            continue;
+
+          auto reg = RegisterRef{ctx.getRegs().resolve(obj)};
+
+          // simple case: value exists in base -> exists in all
+          if (regState.stack.size() >= 3 &&
+              regState.stack[regState.stack.size() - 3].depth == startDepth) {
+            auto trueState = regState.stack[regState.stack.size() - 2];
+            auto falseState = regState.stack[regState.stack.size() - 1];
+            assert(trueState.depth == trueDepth);
+            assert(falseState.depth == falseDepth);
+
+            // todo: don't fully materialize, iter thru and only materialize
+            // modified chunks.
+            yieldValsT.emplace_back(trueState.get(build));
+            yieldValsF.emplace_back(falseState.get(build));
+            yieldRegs.emplace_back(reg);
+
+            regState.stack.resize(regState.stack.size() - 2);
+          } else
+            assert(0 && "todo");
+
+          // if not modified: nothing to do.
+        }
+        assert(yieldValsF.size() == yieldValsT.size());
+
+        // Create yields for modified register values.
+        uint oldYieldVals = asIf.getNumYieldValues();
+        uint newYieldVals = yieldValsT.size() + oldYieldVals;
+
+        auto createYield = [&](BlockRef block, ArrayRef<HWValue> vals) {
+          InstrRef lastYield = nullref;
+          if (!block.empty() && block.end().pred()->isOpc(OP_YIELD))
+            lastYield = block.end().pred().instr();
+          build.setInsertPoint(block.end());
+          build.buildYield(lastYield, vals);
+        };
+        createYield(asIf.getTrueBlock(), yieldValsT);
+        createYield(asIf.getFalseBlock(), yieldValsF);
+
+        build.setInsertPoint(HWInstrRef{asIf}.iter(ctx));
+        auto newIf = build.buildIfElse(asIf, newYieldVals);
+        depth = startDepth;
+
+        for (auto [i, reg] : Range{yieldRegs}.enumerate()) {
+          auto yieldVal = newIf.getYieldValue(i + oldYieldVals)->as<WireRef>();
+          yieldVal->numBits = reg->numBits;
+          regMap[reg][depth].overwrite(yieldVal, 0, 0, reg->numBits);
+        }
+
+        destroyList.emplace_back(asIf);
+        break;
+      }
+
+      case *OP_WHILE: {
+
+        break;
+      }
+
+      case *OP_SWITCH: {
+
+        break;
+      }
+
+      default:
+        break;
+      }
+    }
+
+    if (depth == 0) {
+      build.setInsertPoint(proc.block().end());
+      for (auto [obj, regState] : regMap) {
+        if (regState.stack.empty())
+          continue;
+        auto reg = RegisterRef{ctx.getRegs().resolve(obj)};
+
+        build.buildStore(reg, regState.at(0, reg).get(build, 0, reg->numBits));
+      }
+    }
+
+    for (auto obj : Range{destroyList}.reverse())
+      build.destroyObj(obj);
+  }
+
+  void runOnProc(ModuleIRef mod, ProcessIRef proc) {
+    // ObjMapVec regMap assumes that we have reasonably few (or just one)
+    // modules in the context. Otherwise better use some other type of map
+    // or double indirection for mapping without eager allocation.
+    regMap.clear();
+    regMap.resize(ctx.getRegs().numIDs());
+
+    runOnBlock(proc, proc.block());
+  }
+
+  void runOnModule(ModuleIRef mod) {
+    for (auto proc : mod.procs()) {
+      runOnProc(mod, proc);
+    }
+  }
+  void run() {
+    for (auto mod : Range{ctx.getModules()}.as<ModuleRef>()) {
+      runOnModule(mod.iref());
+    }
+  }
+};
+
+}; // namespace dyno

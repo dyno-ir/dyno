@@ -61,13 +61,12 @@ public:
   static BitRange full() { return BitRange(ConstantRef::fromU32(0), nullref); }
 };
 
-class BitRangeOperand : public BitRangeMixin<BitRange> {
+class BitRangeOperand : public BitRangeMixin<BitRangeOperand> {
 public:
   OperandRef base;
   HWValue getAddr() const { return base->as<HWValue>(); }
   HWValue getLen() const {
-    auto it = base;
-    ++it;
+    auto it = base + 1;
     assert(it != base.instr().end());
     return (it)->as<HWValue>();
   }

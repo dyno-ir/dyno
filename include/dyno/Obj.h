@@ -240,8 +240,8 @@ public:
 
   template <IsFatDynObjRef U> explicit operator U() const {
     assert((::is<U, FatObjRef>(*this)));
-    return U{DynObjRef::ofObj<typename U::value_type>(this->obj, custom),
-             reinterpret_cast<U::value_type *>(ptr)};
+    return U{DynObjRef::ofObj<T>(this->obj, custom),
+             reinterpret_cast<U *>(ptr)};
   }
 };
 static_assert(sizeof(FatObjRef<int>) == 16);
