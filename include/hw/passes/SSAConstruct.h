@@ -7,6 +7,7 @@
 #include "hw/LoadStore.h"
 #include "op/IDs.h"
 #include "op/StructuredControlFlow.h"
+#include "support/Ranges.h"
 
 namespace dyno {
 
@@ -181,7 +182,7 @@ class SSAConstructPass {
       return rv;
     }
 
-    HWValue get(HWInstrBuilder &build) {
+    HWValue get(HWInstrBuilder &build, bool update = true) {
       SmallVec<std::pair<HWValue, BitRange>, 4> operands;
       uint32_t len = 0;
       for (auto frag : frags) {
@@ -190,7 +191,8 @@ class SSAConstructPass {
       }
 
       auto rv = build.buildSplice(ArrayRef{operands});
-      overwrite(rv, 0, 0, len);
+      if (update)
+        overwrite(rv, 0, 0, len);
       return rv;
     }
 
@@ -347,6 +349,7 @@ public:
         depth = trueDepth;
         runOnBlock(proc, asIf.getTrueBlock());
 
+        // fixme: this never copies anything.
         for (auto [obj, regState] : regMap) {
           if (!regState.has(startDepth))
             continue;
@@ -357,8 +360,7 @@ public:
         runOnBlock(proc, asIf.getFalseBlock());
 
         // Check if register state was modified in one or both of the blocks.
-        SmallVec<HWValue, 4> yieldValsT;
-        SmallVec<HWValue, 4> yieldValsF;
+        std::array<SmallVec<HWValue, 4>, 2> yieldVals;
         SmallVec<RegisterRef, 4> yieldRegs;
 
         // todo: better data structure, don't iter thru all regs
@@ -372,31 +374,36 @@ public:
 
           auto reg = RegisterRef{ctx.getRegs().resolve(obj)};
 
-          // simple case: value exists in base -> exists in all
-          if (regState.stack.size() >= 3 &&
-              regState.stack[regState.stack.size() - 3].depth == startDepth) {
-            auto trueState = regState.stack[regState.stack.size() - 2];
-            auto falseState = regState.stack[regState.stack.size() - 1];
-            assert(trueState.depth == trueDepth);
-            assert(falseState.depth == falseDepth);
+          RegisterValue lazyLoad{reg, startDepth};
+          std::array<RegisterValue *, 2> vals{&lazyLoad, &lazyLoad};
 
-            // todo: don't fully materialize, iter thru and only materialize
-            // modified chunks.
-            yieldValsT.emplace_back(trueState.get(build));
-            yieldValsF.emplace_back(falseState.get(build));
-            yieldRegs.emplace_back(reg);
+          ssize_t i = regState.stack.size() - 1;
+          while (i >= 0 && regState.stack[i].depth > startDepth) {
+            auto &val = regState.stack[i--];
+            vals[val.depth - startDepth - 1] = &val;
+          }
 
-            regState.stack.resize(regState.stack.size() - 2);
-          } else
-            assert(0 && "todo");
+          for (auto [i, block] :
+               InitListRange{asIf.getTrueBlock(), asIf.getFalseBlock()}
+                   .enumerate()) {
 
-          // if not modified: nothing to do.
+            // Three Options
+            // 1. Value set in this block => just yield this block's version.
+            // 2. Value set in parent block => yield parent's version.
+            // 3. Value not set at all => load register and yield that.
+
+            build.setInsertPoint(BlockRef{block}.end());
+            yieldVals[i].emplace_back(vals[i]->get(build, false));
+          }
+
+          yieldRegs.emplace_back(reg);
+          regState.stack.resize(i + 1);
         }
-        assert(yieldValsF.size() == yieldValsT.size());
+        assert(yieldVals[0].size() == yieldVals[1].size());
 
         // Create yields for modified register values.
         uint oldYieldVals = asIf.getNumYieldValues();
-        uint newYieldVals = yieldValsT.size() + oldYieldVals;
+        uint newYieldVals = yieldVals[0].size() + oldYieldVals;
 
         auto createYield = [&](BlockRef block, ArrayRef<HWValue> vals) {
           InstrRef lastYield = nullref;
@@ -405,8 +412,8 @@ public:
           build.setInsertPoint(block.end());
           build.buildYield(lastYield, vals);
         };
-        createYield(asIf.getTrueBlock(), yieldValsT);
-        createYield(asIf.getFalseBlock(), yieldValsF);
+        createYield(asIf.getTrueBlock(), yieldVals[0]);
+        createYield(asIf.getFalseBlock(), yieldVals[1]);
 
         build.setInsertPoint(HWInstrRef{asIf}.iter(ctx));
         auto newIf = build.buildIfElse(asIf, newYieldVals);
@@ -415,7 +422,7 @@ public:
         for (auto [i, reg] : Range{yieldRegs}.enumerate()) {
           auto yieldVal = newIf.getYieldValue(i + oldYieldVals)->as<WireRef>();
           yieldVal->numBits = reg->numBits;
-          regMap[reg][depth].overwrite(yieldVal, 0, 0, reg->numBits);
+          regMap[reg].at(depth, reg).overwrite(yieldVal, 0, 0, reg->numBits);
         }
 
         destroyList.emplace_back(asIf);

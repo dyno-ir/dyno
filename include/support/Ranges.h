@@ -1,5 +1,6 @@
 #pragma once
 
+#include <initializer_list>
 #include <iterator>
 
 template <typename It> class Range;
@@ -311,6 +312,15 @@ public:
 
 private:
   It beginIt, endIt;
+};
+
+template <typename T>
+class InitListRange
+    : public Range<typename std::initializer_list<T>::iterator> {
+public:
+  InitListRange(std::initializer_list<T> ilist)
+      : Range<typename std::initializer_list<T>::iterator>(ilist.begin(),
+                                                           ilist.end()) {}
 };
 
 template <typename U> Range(U &u) -> Range<decltype(u.begin())>;
