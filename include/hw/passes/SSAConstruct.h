@@ -8,6 +8,7 @@
 #include "op/IDs.h"
 #include "op/StructuredControlFlow.h"
 #include "support/Ranges.h"
+#include "support/Utility.h"
 
 namespace dyno {
 
@@ -200,6 +201,44 @@ class SSAConstructPass {
       return rv;
     }
 
+    void overwriteNoMaterialize(RegisterValue &src, Fragment *toOverwrite) {
+      uint32_t srcAddr = toOverwrite->dstAddr;
+      uint32_t dstAddr = toOverwrite->dstAddr;
+      uint32_t len = toOverwrite->len;
+
+      auto it = toOverwrite;
+      auto itO = src.getInsertIt(srcAddr);
+      while (len != 0) {
+        auto thisRemLen = it->len - (dstAddr - it->dstAddr);
+        auto otherRemLen = itO->len - (dstAddr - itO->dstAddr);
+        auto pieceLen = std::min(std::min(thisRemLen, otherRemLen), len);
+
+        // other frag limiting -> split ours in half
+        if (pieceLen != thisRemLen) {
+          it = frags.insert(it, *it);
+          it->len = pieceLen;
+          (it + 1)->srcAddr += pieceLen;
+          (it + 1)->dstAddr += pieceLen;
+          (it + 1)->len -= pieceLen;
+        }
+
+        // this frag is limiting (or perfect match) -> just completely overwrite
+        it->ref = itO->ref;
+        it->srcAddr = itO->srcAddr + (dstAddr - itO->dstAddr);
+        // it->len = it->len; unchanged
+        // it->dstAddr = it->dstAddr; unchanged
+
+        srcAddr += pieceLen;
+        dstAddr += pieceLen;
+        len -= pieceLen;
+
+        ++it;
+        // if perfect match
+        if (pieceLen == otherRemLen)
+          ++itO;
+      }
+    }
+
     // void replaceDefault(HWInstrBuilder &build, RegisterValue &newDefault) {
     //   for (auto frag : frags) {
     //     if (frag.ref.is<RegisterRef>()) {
@@ -319,7 +358,7 @@ public:
   struct MultiwayResult {
     SmallVec<std::pair<RegisterRef, std::pair<uint32_t, uint32_t>>, 2>
         yieldRegs;
-    uint numNewYieldVals;
+    SmallVec<SmallVec<HWValue, 4>, 2> yieldVals;
 
     explicit operator bool() { return !yieldRegs.empty(); }
   };
@@ -363,8 +402,8 @@ public:
     }
 
     // Check if register state was modified in one or more of the blocks.
-    SmallVec<SmallVec<HWValue, 4>, 2> yieldVals(wayBlocks.size());
     MultiwayResult rv;
+    rv.yieldVals.resize(wayBlocks.size());
 
     // todo: better data structure, don't iter thru all regs
     for (auto [obj, regState] : regMap) {
@@ -402,9 +441,9 @@ public:
 
         build.setInsertPoint(BlockRef{block}.end());
 
-        yieldVals[i].reserve(yieldVals[i].size() + diffs.size());
+        rv.yieldVals[i].reserve(rv.yieldVals[i].size() + diffs.size());
         for (auto diff : diffs)
-          yieldVals[i].emplace_back(
+          rv.yieldVals[i].emplace_back(
               vals[i]->get(build, diff.first, diff.second, false));
       }
 
@@ -413,22 +452,6 @@ public:
 
       regState.stack.resize(i + 1);
     }
-
-    if (yieldVals[0].empty())
-      return {};
-
-    auto createYield = [&](BlockRef block, ArrayRef<HWValue> vals) {
-      InstrRef lastYield = nullref;
-      if (!block.empty() && block.end().pred()->isOpc(OP_YIELD))
-        lastYield = block.end().pred().instr();
-      build.setInsertPoint(block.end());
-      build.buildYield(lastYield, vals);
-    };
-
-    for (size_t i = 0; i < wayBlocks.size(); i++)
-      createYield(wayBlocks[i], yieldVals[i]);
-
-    rv.numNewYieldVals = yieldVals[0].size();
 
     return rv;
   }
@@ -504,19 +527,35 @@ public:
 
       case *OP_IF: {
         auto asIf = instr.as<IfInstrRef>();
-        assert(asIf.hasFalseBlock() && "todo");
         auto startDepth = depth;
 
-        std::array<BlockRef, 2> blocks{asIf.getTrueBlock(),
-                                       asIf.getFalseBlock()};
+        BlockRef falseBlock =
+            asIf.hasFalseBlock() ? asIf.getFalseBlock() : nullref;
+        if (!falseBlock)
+          falseBlock = ctx.createBlock();
+
+        std::array<BlockRef, 2> blocks{asIf.getTrueBlock(), falseBlock};
         auto res = runOnMultiway(proc, blocks);
 
         // Create yields for modified register values.
+        uint addedYieldVals = res.yieldVals[0].size();
+        if (addedYieldVals == 0) {
+          if (!asIf.hasFalseBlock())
+            build.destroyObj(falseBlock);
+          break;
+        }
+
         uint oldYieldVals = asIf.getNumYieldValues();
-        uint newYieldVals = res.numNewYieldVals + oldYieldVals;
+        uint newYieldVals = addedYieldVals + oldYieldVals;
+
+        for (size_t i = 0; i < blocks.size(); i++) {
+          auto [oldYield, newYield] =
+              build.extendOrNewYield(blocks[i], res.yieldVals[i]);
+          destroyList.emplace_back(oldYield);
+        }
 
         build.setInsertPoint(HWInstrRef{asIf}.iter(ctx));
-        auto newIf = build.buildIfElse(asIf, newYieldVals);
+        auto newIf = build.buildIfElse(asIf, newYieldVals, falseBlock);
         depth = startDepth;
 
         for (auto [i, pair] : Range{res.yieldRegs}.enumerate()) {
@@ -534,8 +573,104 @@ public:
         break;
       }
 
-      case *OP_WHILE: {
+      case *OP_DO_WHILE: {
+        auto asWhile = instr.as<DoWhileInstrRef>();
 
+        auto startDepth = depth;
+        auto bodyDepth = ++depth;
+
+        // First pass through loop body, detect stores and convert to yields.
+        runOnBlock(proc, asWhile.getBlock());
+        SmallVec<std::pair<RegisterRef, std::pair<uint32_t, uint32_t>>, 4>
+            yieldVals;
+        SmallVec<HWValue, 4> materializedYieldVals(yieldVals.size());
+        SmallVec<WireRef, 4> unyieldWires;
+        for (auto [obj, state] : regMap) {
+          // entire register unmodified in body.
+          if (state.has(startDepth)) {
+            // for next pass: expose state of untouched (invariant) reg to
+            // body.
+            auto &copy = state.stack.emplace_back(state.get());
+            copy.depth = bodyDepth;
+            continue;
+          }
+          if (!state.has(bodyDepth))
+            continue;
+
+          // check if parent block has a state for this reg.
+          RegisterValue *parentVal = nullptr;
+          if (state.stack.size() > 1) {
+            auto &entryBelow = state.stack[state.stack.size() - 2];
+            if (entryBelow.depth == startDepth)
+              parentVal = &entryBelow;
+          }
+
+          auto &val = state.get();
+          auto reg = RegisterRef{ctx.getRegs().resolve(obj)};
+
+          for (auto &frag : val.frags) {
+            // skip default frags
+            if (frag.ref == obj && frag.srcAddr == frag.dstAddr) {
+              // for next pass: overwrite untouched frag with parent's value.
+              if (parentVal)
+                val.overwriteNoMaterialize(*parentVal, &frag);
+              continue;
+            }
+            yieldVals.emplace_back(reg, std::make_pair(frag.dstAddr, frag.len));
+
+            auto [matVal, matRange] = frag.getValue(build, 0, frag.len);
+            assert(matRange == (BitRange{(uint32_t)0, (uint32_t)frag.len}));
+            materializedYieldVals.emplace_back(matVal);
+
+            // for next pass: make this point to the unyield value.
+            frag.ref =
+                unyieldWires.emplace_back(ctx.getWires().create(frag.len));
+            frag.srcAddr = 0;
+          }
+        }
+
+        auto [oldY, newY] =
+            build.extendOrNewYield(asWhile.getBlock(), materializedYieldVals);
+        destroyList.emplace_back(oldY);
+        build.extendOrNewUnyield(asWhile.getBlock(), unyieldWires);
+
+        // Second pass, can now resolve loads from both yield and invariant
+        // vals.
+        runOnBlock(proc, asWhile.getBlock());
+
+        // Clear body state.
+        for (auto [obj, state] : regMap) {
+          if (state.has(bodyDepth))
+            state.stack.pop_back();
+        }
+        depth = startDepth;
+        if (yieldVals.size() == 0)
+          break;
+
+        build.setInsertPoint(HWInstrRef{asWhile}.iter(ctx));
+
+        SmallVec<HWValue, 4> newUses;
+        newUses.reserve(yieldVals.size());
+        for (auto [reg, range] : yieldVals) {
+          auto &val = regMap[reg].getOrSetDefault(depth, reg);
+          // set initial yield vals to value before loop.
+          newUses.emplace_back(
+              val.get(build, range.first, range.second, false));
+        }
+
+        SmallVec<WireRef, 4> newDefs;
+        newDefs.reserve(yieldVals.size());
+
+        for (auto [reg, range] : yieldVals) {
+          auto &val = regMap[reg].getOrSetDefault(depth, reg);
+          // set reg state after loop to output yield vals.
+          auto wire = ctx.getWires().create(range.second);
+          newDefs.emplace_back(wire);
+          val.overwrite(wire, 0, range.first, range.second);
+        }
+
+        build.addOperands(asWhile, newDefs, newUses);
+        destroyList.emplace_back(asWhile);
         break;
       }
 

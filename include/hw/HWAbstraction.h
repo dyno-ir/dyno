@@ -658,14 +658,16 @@ public:
     return IfInstrRef{instrRef};
   }
 
-  IfInstrRef buildIfElse(IfInstrRef old, uint yieldPrealloc = 0) {
+  IfInstrRef buildIfElse(IfInstrRef old, uint yieldPrealloc = 0,
+                         BlockRef falseBlock = nullref) {
     InstrRef instrRef =
         InstrRef{ctx.getInstrs().create(3 + yieldPrealloc, OP_IF)};
     insertInstr(instrRef);
     InstrBuilder build{instrRef};
 
     build.addRef(old.getTrueBlock())
-        .addRef(old.hasFalseBlock() ? old.getFalseBlock() : ctx.createBlock());
+        .addRef(old.hasFalseBlock() ? old.getFalseBlock()
+                                    : (falseBlock ?: ctx.createBlock()));
 
     old.operand(0).replace(FatDynObjRef<>{nullref});
     if (old.hasFalseBlock())
@@ -792,9 +794,10 @@ public:
   }
 
   auto buildYield(InstrRef old, ArrayRef<HWValue> addedYieldVals) {
-    assert(!old || (old.isOpc(OP_YIELD)));
+    assert(!old || old.isOpc(OP_YIELD));
 
-    uint newYieldVals = addedYieldVals.size() + (old ? old.getNumOperands() : 0);
+    uint newYieldVals =
+        addedYieldVals.size() + (old ? old.getNumOperands() : 0);
 
     auto instr = InstrRef{ctx.getInstrs().create(newYieldVals, OP_YIELD)};
     insertInstr(instr);
@@ -802,12 +805,74 @@ public:
     ibuild.other();
 
     if (old)
-      for (auto def : old.defs())
-        ibuild.addRef(def->as<FatDynObjRef<>>());
+      for (auto operand : old)
+        ibuild.addRef(operand->as<FatDynObjRef<>>());
     for (auto val : addedYieldVals)
       ibuild.addRef(val);
 
     return instr;
+  }
+
+  auto extendOrNewYield(BlockRef block, ArrayRef<HWValue> addedYieldVals) {
+    InstrRef lastYield = nullref;
+    if (!block.empty() && block.end().pred()->isOpc(OP_YIELD))
+      lastYield = block.end().pred().instr();
+    setInsertPoint(block.end());
+    return std::make_pair(lastYield, buildYield(lastYield, addedYieldVals));
+  }
+
+  auto buildUnyield(InstrRef old, ArrayRef<WireRef> addedYieldVals) {
+    assert(!old || old.isOpc(OP_UNYIELD));
+
+    uint newYieldVals =
+        addedYieldVals.size() + (old ? old.getNumOperands() : 0);
+
+    auto instr = InstrRef{ctx.getInstrs().create(newYieldVals, OP_UNYIELD)};
+    insertInstr(instr);
+    InstrBuilder ibuild{instr};
+
+    if (old)
+      for (auto def : old)
+        ibuild.addRef(def->as<FatDynObjRef<>>());
+    for (auto wire : addedYieldVals)
+      ibuild.addRef(wire);
+
+    return instr;
+  }
+
+  auto extendOrNewUnyield(BlockRef block, ArrayRef<WireRef> addedYieldVals) {
+    InstrRef lastYield = nullref;
+    if (!block.empty() && block.begin()->isOpc(OP_UNYIELD))
+      lastYield = block.begin().instr();
+    setInsertPoint(block.begin());
+    return std::make_pair(lastYield, buildUnyield(lastYield, addedYieldVals));
+  }
+
+  InstrRef addOperands(InstrRef old, ArrayRef<WireRef> newDefs,
+                       ArrayRef<HWValue> newUses) {
+    setInsertPoint(ctx.getCFG()[old]);
+    auto newInstr = InstrRef{ctx.getInstrs().create(
+        old.getNumOperands() + newDefs.size() + newUses.size(),
+        old.getDialectOpcode())};
+    insertInstr(newInstr);
+    // todo: steal slots in defUse rather than shuffling around.
+    InstrBuilder ibuild{newInstr};
+    for (auto def : old.defs()) {
+      ibuild.addRef(def->as<FatDynObjRef<>>());
+      def.replace(FatDynObjRef<>(nullref));
+    }
+    for (auto def : newDefs) {
+      ibuild.addRef(def);
+    }
+    ibuild.other();
+    for (auto use : old.others()) {
+      ibuild.addRef(use->as<FatDynObjRef<>>());
+      use.replace(FatDynObjRef<>(nullref));
+    }
+    for (auto use : newUses) {
+      ibuild.addRef(use);
+    }
+    return newInstr;
   }
 
   template <typename... Ts> auto buildWhile(Ts... inputs) {
