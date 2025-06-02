@@ -301,7 +301,7 @@ public:
     }
     size_t pos = it - begin();
     grow(sz + 1);
-    std::move(begin() + pos, end(), begin() + pos + 1);
+    std::move_backward(begin() + pos, end(), begin() + sz + 1);
     arr[pos] = std::move(val);
     ++sz;
     return begin() + pos;

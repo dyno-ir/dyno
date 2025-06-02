@@ -987,7 +987,7 @@ public:
       for (auto *step : asForLoop.steps) {
         handle_expr(*step);
       }
-      build.buildYield(ConstantRef::fromBool(true));
+      //build.buildYield(ConstantRef::fromBool(true));
       build.popInsertPoint();
       break;
     }

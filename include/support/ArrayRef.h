@@ -56,28 +56,29 @@ template <typename T> class MutArrayRef {
   using iterator = pointer;
   using const_iterator = const_pointer;
 
-  const T *ptr;
+  T *ptr;
   size_t sz;
 
 public:
   iterator begin() const { return ptr; }
   iterator end() const { return ptr + sz; }
 
-  size_t size() { return sz; }
+  size_t size() const { return sz; }
 
-  reference operator[](size_t i) {
+  reference operator[](size_t i) const {
     assert(i < sz);
     return ptr[i];
   }
 
-  MutArrayRef(const_iterator begin, const_iterator end)
-      : ptr(begin), sz(end - begin) {}
-  MutArrayRef(const_iterator begin, size_t size) : ptr(begin), sz(size) {}
+  MutArrayRef(iterator begin, iterator end) : ptr(begin), sz(end - begin) {}
+  MutArrayRef(iterator begin, size_t size) : ptr(begin), sz(size) {}
 
   reference back() { return ptr[sz - 1]; }
   reference front() { return ptr[0]; }
 
-  static constexpr MutArrayRef empty() { return MutArrayRef{nullptr, size_t(0)}; }
+  static constexpr MutArrayRef empty() {
+    return MutArrayRef{nullptr, size_t(0)};
+  }
 
   template <typename U> MutArrayRef(U &u) : MutArrayRef(u.begin(), u.end()) {}
 };
