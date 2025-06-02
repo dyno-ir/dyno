@@ -31,6 +31,12 @@ public:
                         std::move(o)) {}
 
   SmallVec &operator=(SmallVec &&o) {
+    // recover from moved-from state.
+    if (this->arr == nullptr) [[unlikely]] {
+      this->arr = std::launder(reinterpret_cast<T *>(storage.storage));
+      this->cap = N;
+      this->sz = 0;
+    }
     this->SmallVecImpl<T>::operator=(std::move(o));
     return *this;
   }
@@ -43,6 +49,12 @@ public:
                         o) {}
 
   SmallVec &operator=(const SmallVec &o) {
+    // recover from moved-from state.
+    if (this->arr == nullptr) [[unlikely]] {
+      this->arr = std::launder(reinterpret_cast<T *>(storage.storage));
+      this->cap = N;
+      this->sz = 0;
+    }
     this->SmallVecImpl<T>::operator=(o);
     return *this;
   }
@@ -75,11 +87,12 @@ public:
   using const_iterator = const T *;
   using param_type = T &;
 
-private:
+protected:
   size_type sz;
   size_type cap;
   T *arr;
 
+private:
   void grow(size_type minSz) {
     if (minSz <= cap)
       return;

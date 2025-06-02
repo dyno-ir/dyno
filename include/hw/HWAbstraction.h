@@ -678,8 +678,8 @@ public:
         build.addRef(ctx.getWires().create());
       else {
         auto operand = old.getYieldValue(i);
-        operand.replace(FatDynObjRef<>{nullref});
         build.addRef(operand->as<FatDynObjRef<>>());
+        operand.replace(FatDynObjRef<>{nullref});
       }
     }
 

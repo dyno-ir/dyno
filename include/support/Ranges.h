@@ -290,8 +290,14 @@ public:
   }
 
   auto drop_front() {
-    ++beginIt;
-    return Range{*this};
+    auto rv = Range{*this};
+    ++rv.beginIt;
+    return rv;
+  }
+  auto drop_back() {
+    auto rv = Range{*this};
+    --rv.endIt;
+    return rv;
   }
 
   template <typename TransformT> auto transform(TransformT transformF) {

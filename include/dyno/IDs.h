@@ -11,9 +11,12 @@ using CoreType = SpecificDialectType<DialectID{DIALECT_CORE}>;
 
 // clang-format off
 #define TYPES(x) \
-  x(CORE_INSTR,    0                   ) \
-  x(CORE_CONSTANT, 1                   ) \
-  x(CORE_BLOCK,    2 | TY_DEF_USE_START)
+  /* _CORE_INVALID not for real use (use ObjID::invalid()). \
+     Just so accidental zero ref doesn't print as instr. */ \
+  x(_CORE_INVALID, 0                   ) \
+  x(CORE_INSTR,    1                   ) \
+  x(CORE_CONSTANT, 2                   ) \
+  x(CORE_BLOCK,    3 | TY_DEF_USE_START)
 // clang-format on
 
 #define ENUM_EXPAND(ident, idx) ident = idx,
@@ -31,7 +34,8 @@ TYPES(CEXPR_EXPAND)
 
 template <> struct DialectTraits<DIALECT_CORE> {
   constexpr static DialectInfo info{"core"};
-  constexpr static TyInfo tyInfo[] = {{"instr"}, {"constant"}, {"block"}};
+  constexpr static TyInfo tyInfo[] = {
+      {"_invalid"}, {"instr"}, {"constant"}, {"block"}};
   constexpr static OpcodeInfo opcInfo[] = {{"block_instr"}};
 };
 

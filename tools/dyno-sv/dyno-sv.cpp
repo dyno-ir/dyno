@@ -942,7 +942,7 @@ public:
 
       build.pushInsertPoint(whileInstr.getBodyBlock().end());
       handle_stmt(asWhileLoop.body);
-      build.buildYield(ConstantRef::fromBool(true));
+      //build.buildYield(ConstantRef::fromBool(true));
       build.popInsertPoint();
       break;
     }
@@ -1057,7 +1057,7 @@ public:
   }
 
   HWValue makeBool(HWValue val, bool inverse = false) {
-    if (val.getNumBits() == 1)
+    if (val.getNumBits() == 1 && !inverse)
       return val;
     return build.buildICmp(val, ctx.constBuild().zeroLike(val).get(),
                            inverse ? BigInt::ICMP_EQ : BigInt::ICMP_NE);
