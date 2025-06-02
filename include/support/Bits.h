@@ -113,6 +113,9 @@ public:
     return *this;
   }
 
+  BitField &operator+=(num_t v) { return (*this) = (*this) + v; }
+  BitField &operator-=(num_t v) { return (*this) = (*this) - v; }
+
   operator num_t() const { return get(); }
 
   num_t get() const { return (num & mask_ones) >> pos; }

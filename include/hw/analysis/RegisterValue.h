@@ -1,6 +1,7 @@
 #pragma once
 
 #include "hw/HWAbstraction.h"
+#include "support/Bits.h"
 #include <cstdint>
 #include <utility>
 
@@ -12,6 +13,7 @@ struct RegisterValue {
     uint32_t srcAddr;
     uint32_t dstAddr;
     uint32_t len;
+    bool untouched;
 
     std::pair<HWValue, BitRange> getValue(HWInstrBuilder &build, uint32_t addr,
                                           uint32_t len) {
@@ -42,7 +44,7 @@ struct RegisterValue {
   // sorted by dst addr
   SmallVec<Fragment, 1> frags;
   uint32_t depth;
-  bool untouched;
+  bool untouched = false;
 
   RegisterValue() = default;
   RegisterValue(const RegisterValue &) = default;
@@ -50,10 +52,12 @@ struct RegisterValue {
   RegisterValue &operator=(const RegisterValue &) = default;
   RegisterValue &operator=(RegisterValue &&) = default;
 
-  RegisterValue(RegisterRef reg, uint32_t depth)
-      : frags{{reg, 0, 0, reg->numBits}}, depth(depth) {}
-  RegisterValue(DynObjRef value, uint32_t bits, uint32_t depth)
-      : frags{{value, 0, 0, bits}}, depth(depth) {}
+  RegisterValue(RegisterRef reg, uint32_t depth, bool untouched)
+      : frags{{reg, 0, 0, reg->numBits, untouched}}, depth(depth),
+        untouched(untouched) {}
+  RegisterValue(DynObjRef value, uint32_t bits, uint32_t depth, bool untouched)
+      : frags{{value, 0, 0, bits, untouched}}, depth(depth),
+        untouched(untouched) {}
 
   // returns last iterator before regions with higher start addr.
   auto getInsertItLin(uint32_t dstAddr) {
@@ -87,8 +91,8 @@ struct RegisterValue {
   }
 
   void overwrite(DynObjRef ref, uint32_t srcAddr, uint32_t dstAddr,
-                 uint32_t len) {
-    untouched = false;
+                 uint32_t len, bool remainUntouched = false) {
+    untouched &= remainUntouched;
     uint32_t newStart = dstAddr;
     uint32_t newEnd = dstAddr + len;
 
@@ -115,7 +119,7 @@ struct RegisterValue {
         uint32_t rightLen = end - newEnd;
         // create right
         Fragment right{it->ref, it->srcAddr + (newEnd - start), newEnd,
-                       rightLen};
+                       rightLen, it->untouched};
         // shrink left
         it->len = leftLen;
         frags.insert(it + 1, right);
@@ -142,18 +146,14 @@ struct RegisterValue {
       }
 
       // else: existing perfectly matches new
-      *it = Fragment{
-          ref,
-          srcAddr,
-          newStart,
-          len,
-      };
+      auto minLen = std::min(len, it->len);
+      *it = Fragment{ref, srcAddr, newStart, minLen, remainUntouched};
       return;
     }
 
     // insert new fragment in sorted order
     frags.insert(frags.begin() + insertPos,
-                 Fragment{ref, srcAddr, newStart, len});
+                 Fragment{ref, srcAddr, newStart, len, remainUntouched});
   }
 
   HWValue get(HWInstrBuilder &build, uint32_t addr, uint32_t len,
@@ -167,6 +167,8 @@ struct RegisterValue {
 
     SmallVec<std::pair<HWValue, BitRange>, 4> operands;
 
+    bool allUntouched = true;
+
     while (it != frags.end() && len != 0) {
       uint32_t itEnd = it->dstAddr + it->len;
 
@@ -178,6 +180,7 @@ struct RegisterValue {
 
         uint32_t pieceLen = std::min(end, itEnd) - std::max(addr, it->dstAddr);
         operands.emplace_back(it->getValue(build, start, pieceLen));
+        allUntouched &= it->untouched;
 
         addr += pieceLen;
         len -= pieceLen;
@@ -188,27 +191,30 @@ struct RegisterValue {
 
     auto rv = build.buildSplice(ArrayRef{operands});
     if (update)
-      overwrite(rv, 0, addrB, lenB);
+      overwrite(rv, 0, addrB, lenB, allUntouched);
     return rv;
   }
 
   HWValue get(HWInstrBuilder &build, bool update = true) {
     SmallVec<std::pair<HWValue, BitRange>, 4> operands;
     uint32_t len = 0;
+    bool allUntouched = true;
     for (auto frag : frags) {
       operands.emplace_back(frag.getValue(build, 0, frag.len));
       len += frag.len;
+      allUntouched &= frag.untouched;
     }
+    assert(allUntouched == untouched);
 
     auto rv = build.buildSplice(ArrayRef{operands});
     if (update)
-      overwrite(rv, 0, 0, len);
+      overwrite(rv, 0, 0, len, allUntouched);
     return rv;
   }
 
   void overwriteNoMaterialize(RegisterValue &src, Fragment *frag,
-                              uint32_t srcAddr, uint32_t dstAddr,
-                              uint32_t len) {
+                              uint32_t srcAddr, uint32_t dstAddr, uint32_t len,
+                              bool remainUntouched = false) {
     auto it = frag;
     auto itO = src.getInsertIt(srcAddr);
     while (len != 0) {
@@ -220,6 +226,7 @@ struct RegisterValue {
       if (pieceLen != thisRemLen) {
         it = frags.insert(it, *it);
         it->len = pieceLen;
+
         (it + 1)->srcAddr += pieceLen;
         (it + 1)->dstAddr += pieceLen;
         (it + 1)->len -= pieceLen;
@@ -228,6 +235,7 @@ struct RegisterValue {
       // this frag is limiting (or perfect match) -> just completely overwrite
       it->ref = itO->ref;
       it->srcAddr = itO->srcAddr + (dstAddr - itO->dstAddr);
+      it->untouched = remainUntouched;
       // it->len = it->len; unchanged
       // it->dstAddr = it->dstAddr; unchanged
 
@@ -279,8 +287,30 @@ struct RegisterValue {
   }
 };
 
-auto diffRegisterValues(ArrayRef<RegisterValue *> regVals) {
-  SmallVec<std::pair<uint32_t, uint32_t>, 4> diffs;
+struct ConstRange {
+private:
+  uint32_t addr_f;
+  uint32_t untouched1_len31_f;
+
+public:
+  using AddrField = BitField<uint32_t, 31, 0>;
+  using UntouchedField = BitField<uint32_t, 1, 31>;
+  uint32_t &addr() { return addr_f; }
+  auto len() { return AddrField{untouched1_len31_f}; }
+  auto untouched() { return UntouchedField{untouched1_len31_f}; }
+
+  ConstRange(uint32_t addr_f, uint32_t len_f, bool untouched_f)
+      : addr_f(addr_f) {
+    len() = len_f;
+    untouched() = untouched_f;
+  }
+  ConstRange() = default;
+
+  auto pair() { return std::make_pair(addr(), len()); }
+};
+
+inline auto diffRegisterValues(ArrayRef<RegisterValue *> regVals) {
+  SmallVec<ConstRange, 4> diffs;
 
   SmallVec<uint32_t, 4> idxs(regVals.size());
 
@@ -289,9 +319,11 @@ auto diffRegisterValues(ArrayRef<RegisterValue *> regVals) {
   while (idxs[0] < regVals[0]->frags.size()) {
     uint32_t overlapEnd = UINT32_MAX;
     bool equalChunk = true;
+    bool equalUntouched = true;
 
     uint32_t sa;
     DynObjRef ref;
+    bool untouched;
 
     for (size_t i = 0; i < regVals.size(); i++) {
       auto &frag = regVals[i]->frags[idxs[i]];
@@ -300,21 +332,27 @@ auto diffRegisterValues(ArrayRef<RegisterValue *> regVals) {
 
       uint32_t sa2 = frag.srcAddr + (curAddr - frag.dstAddr);
       DynObjRef ref2 = frag.ref;
+      bool untouched2 = frag.untouched;
       if (i == 0) {
         sa = sa2;
         ref = ref2;
-      } else
-        equalChunk &= (ref == ref2) && (sa2 == sa);
+        untouched = untouched2;
+      } else {
+        equalUntouched &= (untouched2 == untouched);
+        equalChunk &= (ref2 == ref) && (sa2 == sa);
+      }
     }
+    equalChunk &= equalUntouched;
     uint32_t chunkLen = overlapEnd - curAddr;
 
     if (!equalChunk) {
       // either start a new diff run or extend the last one
       if (!diffs.empty() &&
-          diffs.back().first + diffs.back().second == curAddr) {
-        diffs.back().second += chunkLen;
+          diffs.back().addr() + diffs.back().len() == curAddr &&
+          diffs.back().untouched() == equalUntouched) {
+        diffs.back().len() += chunkLen;
       } else
-        diffs.emplace_back(curAddr, chunkLen);
+        diffs.emplace_back(curAddr, chunkLen, equalUntouched);
     }
 
     curAddr = overlapEnd;
