@@ -12,6 +12,7 @@
 #include "hw/Module.h"
 #include "hw/Process.h"
 #include "hw/Register.h"
+#include "hw/passes/FunctionInline.h"
 #include "hw/passes/ProcessLinearize.h"
 #include "hw/passes/SSAConstruct.h"
 #include "hw/passes/SeqToComb.h"
@@ -1754,11 +1755,17 @@ int main(int argc, char **argv) {
   HWPrinter print{std::cout};
   print.printCtx(ctx);
 
+  FunctionInlinePass pass0{ctx};
+  pass0.run();
+
   SeqToCombPass pass{ctx};
   pass.run();
 
   ProcessLinearizePass pass2{ctx};
   pass2.run();
+
+  print.reset();
+  print.printCtx(ctx);
 
   SSAConstructPass pass3{ctx};
   pass3.run();

@@ -301,6 +301,7 @@ public:
     }
     size_t pos = it - begin();
     grow(sz + 1);
+    std::construct_at(begin() + sz);
     std::move_backward(begin() + pos, end(), begin() + sz + 1);
     arr[pos] = std::move(val);
     ++sz;
@@ -309,6 +310,7 @@ public:
   iterator insert(iterator it, const T &val) { return insert(it, T{val}); }
 
   iterator erase(iterator it) {
+    std::destroy_at(it);
     std::move(it + 1, end(), it);
     return it;
   }

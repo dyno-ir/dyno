@@ -2,8 +2,8 @@
 #include "dyno/CFG.h"
 #include "dyno/Obj.h"
 #include "hw/HWAbstraction.h"
-#include "support/DenseMap.h"
 #include "hw/HWPrinter.h"
+#include "support/DenseMap.h"
 
 namespace dyno {
 
@@ -15,6 +15,9 @@ public:
   // objID for new. Then we need another type switch to get the ptr though, so
   // just store a full FatDynObjRef.
   DenseMap<DynObjRef, FatDynObjRef<>> oldToNewMap;
+
+  static constexpr auto emptyCallback =
+      [](DeepCopier *, InstrRef, BlockRef_iterator<true>) { return false; };
 
   template <
       std::invocable<DeepCopier *, InstrRef, BlockRef_iterator<true>> InstrHook>
@@ -47,6 +50,33 @@ public:
       dyno_unreachable("copying is not supported");
     }
   }
+  template <
+      std::invocable<DeepCopier *, InstrRef, BlockRef_iterator<true>> InstrHook>
+  InstrRef copyInstr(InstrRef srcInstr, BlockRef_iterator<true> dstIt,
+                     InstrHook &&instrCallback) {
+    auto copyInstr = InstrRef{ctx.getInstrs().create(
+        srcInstr.getNumOperands(), srcInstr.getDialectOpcode())};
+    dstIt.insertPrev(copyInstr);
+    InstrBuilder build{copyInstr};
+
+    for (size_t i = 0; i < srcInstr.getNumDefs(); i++) {
+      auto oldObj = srcInstr.def(i)->fat();
+      auto newObj = deepCopyObj(oldObj, instrCallback);
+      oldToNewMap.insert(oldObj, newObj);
+      build.addRef(newObj);
+    }
+
+    build.other();
+    for (size_t i = 0; i < srcInstr.getNumOthers(); i++) {
+      auto ref = srcInstr.other(i)->fat();
+      if (auto it = oldToNewMap.find(ref)) {
+        ref = it.val();
+      }
+      build.addRef(ref);
+    }
+
+    return copyInstr;
+  }
 
 private:
   template <
@@ -64,28 +94,7 @@ private:
         srcIt++;
         continue;
       }
-
-      auto copyInstr = InstrRef{ctx.getInstrs().create(
-          srcInstr.getNumOperands(), srcInstr.getDialectOpcode())};
-      dstIt.insertPrev(copyInstr);
-      InstrBuilder build{copyInstr};
-
-      for (size_t i = 0; i < srcInstr.getNumDefs(); i++) {
-        auto oldObj = srcInstr.def(i)->fat();
-        auto newObj = deepCopyObj(oldObj, instrCallback);
-        oldToNewMap.insert(oldObj, newObj);
-        build.addRef(newObj);
-      }
-
-      build.other();
-      for (size_t i = 0; i < srcInstr.getNumOthers(); i++) {
-        auto ref = srcInstr.other(i)->fat();
-        if (auto it = oldToNewMap.find(ref)) {
-          ref = it.val();
-        }
-        build.addRef(ref);
-      }
-
+      copyInstr(srcInstr, dstIt, instrCallback);
       srcIt++;
     }
   }
@@ -94,12 +103,11 @@ public:
   void deepCopyInstrs(BlockRef_iterator<true> srcIt,
                       BlockRef_iterator<true> dstIt) {
     oldToNewMap.clear();
-    deepCopyInstrsImpl(
-        srcIt, dstIt,
-        [](DeepCopier *, InstrRef, BlockRef_iterator<true>) { return false; });
+    deepCopyInstrsImpl(srcIt, dstIt, emptyCallback);
   }
 
-  template <std::invocable<DeepCopier *, InstrRef, BlockRef_iterator<true>> InstrHook>
+  template <
+      std::invocable<DeepCopier *, InstrRef, BlockRef_iterator<true>> InstrHook>
   void deepCopyInstrs(BlockRef_iterator<true> srcIt,
                       BlockRef_iterator<true> dstIt, InstrHook &&instrHook) {
     oldToNewMap.clear();

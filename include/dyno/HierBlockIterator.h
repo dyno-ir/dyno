@@ -12,10 +12,11 @@ class HierBlockRange {
 
   public:
     iterator &operator++() {
-      auto isBlockRef = [](OperandRef opRef) {
-        return opRef->template is<BlockRef>();
+      auto isNonEmptyBlockRef = [](OperandRef opRef) {
+        return opRef->template is<BlockRef>() && !opRef->as<BlockRef>().empty();
       };
-      auto subIt = *std::find_if(it->def_begin(), it->def_end(), isBlockRef);
+      auto subIt =
+          *std::find_if(it->def_begin(), it->def_end(), isNonEmptyBlockRef);
 
       if (subIt != it->def_end()) {
         parent.stack.emplace_back(
@@ -32,7 +33,7 @@ class HierBlockRange {
         auto [parentIt, subIdx] = parent.stack.back();
         if (subIdx != 0) {
           auto subIt = *std::find_if(parentIt->def_begin() + subIdx,
-                                         parentIt->def_end(), isBlockRef);
+                                     parentIt->def_end(), isNonEmptyBlockRef);
           if (subIt != parentIt->def_end()) {
             parent.stack.back().second = subIt - parentIt->def_begin() + 1;
             it = subIt->as<BlockRef>().begin();

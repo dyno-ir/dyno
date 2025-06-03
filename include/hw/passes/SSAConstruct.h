@@ -202,7 +202,7 @@ public:
         // body.
         for (uint32_t i = 0; i < numLoopBlocks; i++) {
           auto &copy = state.stack.emplace_back(state.get());
-          copy.depth = startDepth + i;
+          copy.depth = startDepth + i + 1;
         }
         continue;
       }
@@ -430,9 +430,16 @@ public:
         uint32_t len = asLoad.reg()->numBits;
         if (asLoad.hasRange()) {
           auto range = asLoad.range();
-          if (!range.isConstant())
-            // todo load via splice (ideally only if any overlapping bits known)
+          if (!range.isConstant()) {
+            // if (val.untouched)
+            //   break;
+            build.setInsertPoint(ctx.getCFG()[asLoad]);
+            auto matVal =
+                build.buildSplice(val.get(build), BitRange{asLoad.range()});
+            asLoad.defW().replaceAllUsesWith(matVal);
+            destroyList.emplace_back(asLoad);
             break;
+          }
           addr = range.getAddr().as<ConstantRef>().getExactVal();
           len = range.getLen().as<ConstantRef>().getExactVal();
         }
@@ -580,6 +587,8 @@ public:
         for (auto [obj, state] : regMap) {
           if (state.has(bodyDepth))
             state.stack.pop_back();
+          assert(state.stack.size() <= depth &&
+                 "too many values on stack. missing cleanup?");
         }
         depth = startDepth;
 

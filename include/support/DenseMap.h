@@ -540,12 +540,12 @@ class DenseMap : public LargeSetMap<
 
 template <typename K, typename V, size_t InlineBuckets>
 class SmallDenseMap
-    : public SmallSetMap<
-          DenseMapBase<DenseMap<K, V>, K, V, DenseMapBucket<K, V>>,
-          InlineBuckets> {
-  using Base =
-      SmallSetMap<DenseMapBase<DenseMap<K, V>, K, V, DenseMapBucket<K, V>>,
-                  InlineBuckets>;
+    : public SmallSetMap<DenseMapBase<SmallDenseMap<K, V, InlineBuckets>, K, V,
+                                      DenseMapBucket<K, V>>,
+                         InlineBuckets> {
+  using Base = SmallSetMap<DenseMapBase<SmallDenseMap<K, V, InlineBuckets>, K,
+                                        V, DenseMapBucket<K, V>>,
+                           InlineBuckets>;
   using Base::Base;
 };
 
@@ -558,9 +558,11 @@ class DenseSet
 
 template <typename K, size_t InlineBuckets>
 class SmallDenseSet
-    : public SmallSetMap<DenseSetBase<DenseSet<K>, K, DenseSetBucket<K>>,
-                         InlineBuckets> {
-  using Base = SmallSetMap<DenseSetBase<DenseSet<K>, K, DenseSetBucket<K>>,
-                           InlineBuckets>;
+    : public SmallSetMap<
+          DenseSetBase<SmallDenseSet<K, InlineBuckets>, K, DenseSetBucket<K>>,
+          InlineBuckets> {
+  using Base = SmallSetMap<
+      DenseSetBase<SmallDenseSet<K, InlineBuckets>, K, DenseSetBucket<K>>,
+      InlineBuckets>;
   using Base::Base;
 };

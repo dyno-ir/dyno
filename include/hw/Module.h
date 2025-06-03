@@ -43,7 +43,7 @@ public:
 };
 
 template <> struct ObjTraits<Module> {
-  //static constexpr DialectID dialect{DIALECT_HW};
+  // static constexpr DialectID dialect{DIALECT_HW};
   static constexpr DialectType ty{HW_MODULE};
   using FatRefT = ModuleRef;
 };
@@ -79,7 +79,9 @@ public:
 
   auto procs() {
     return Range{regs_end(), block().end()}
-        .filter([](InstrRef instr) { return instr.def(0)->is<ProcessRef>(); })
+        .filter([](InstrRef instr) {
+          return instr.getNumDefs() > 0 && instr.def(0)->is<ProcessRef>();
+        })
         .transform(
             [](size_t, InstrRef instr) { return instr.as<ProcessIRef>(); });
   }

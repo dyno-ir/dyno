@@ -27,8 +27,8 @@ public:
     std::optional<BlockRef_iterator<true>> regs_end;
 
     SmallVec<InstrRef, 16> destroyList;
-
-    for (auto instr : HierBlockRange{proc.block()}) {
+    auto range = HierBlockRange{proc.block()};
+    for (auto instr : range) {
       switch (*instr.getDialectOpcode()) {
       case *HW_STORE: {
         // for all regs that are written to by regular STORE in seq process:
