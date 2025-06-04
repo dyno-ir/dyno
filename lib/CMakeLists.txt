@@ -1,10 +1,20 @@
-#add_library(core
-#)
-
 add_library(coreSupport INTERFACE)
+target_include_directories(coreSupport INTERFACE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../include
+)
 
-#target_compile_features(core PUBLIC cxx_std_20)
-#target_include_directories(core PUBLIC ../include)
-#target_include_directories(core PUBLIC ${CMAKE_CURRENT_BINARY_DIR}/dsl)
+# split libs at some point
+add_library(core STATIC
+    dyno/Constant.cpp
+    hw/HWPrinter.cpp
+    support/ErrorRecovery.cpp
+)
 
-target_include_directories(coreSupport INTERFACE ../include)
+add_library(hw STATIC
+    hw/HWPrinter.cpp
+)
+
+
+target_compile_features(core PUBLIC cxx_std_23)
+target_link_libraries(core PUBLIC coreSupport)
+target_link_libraries(hw PUBLIC core)

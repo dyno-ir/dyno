@@ -69,6 +69,7 @@ public:
         it++;
         continue;
       default:
+        break;
       }
       break;
     }

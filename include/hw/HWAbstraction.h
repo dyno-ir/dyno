@@ -722,7 +722,6 @@ public:
     // IfInstrRef. Alternative is a GET_YIELD instr or something. For now
     // naive implementation as reference, just delete old instr and rebuild
 
-    auto opcode = OP_YIELD;
     auto instr = insert.blockRef().defI();
     assert(instr.isOpc(OP_IF, OP_WHILE, OP_DO_WHILE, OP_FOR, OP_CASE,
                        OP_CASE_DEFAULT));

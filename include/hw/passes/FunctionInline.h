@@ -11,7 +11,9 @@
 #include "hw/Register.h"
 #include "op/Function.h"
 #include "op/IDs.h"
+#include "support/Debug.h"
 #include "support/DenseMap.h"
+#include "support/ErrorRecovery.h"
 
 namespace dyno {
 
@@ -47,10 +49,8 @@ class FunctionInlinePass {
 
       auto funcInstr = callInstr.func().iref();
 
-      std::cerr << "\n\n\ninlining\n";
-      dumpInstr(callInstr);
-      std::cerr << "context:";
-      dumpCtx(ctx);
+      DEBUG(dbgs() << "\n\n\ninlining\n"; dumpInstr(callInstr);
+            dbgs() << "context:"; dumpCtx(ctx);)
 
       SmallVec<RegisterRef, 2> returnRegs{callInstr.getNumRetvals()};
       SmallVec<RegisterRef, 4> paramRegs{callInstr.getNumParams()};
@@ -125,13 +125,12 @@ class FunctionInlinePass {
       if (calledAny) {
         if (std::find(callStack.begin(), callStack.end(), funcInstr) !=
             callStack.end()) {
-          assert(0 && "mutual recursion");
+          report_fatal_error("mutual recursion");
         }
         callStack.emplace_back(funcInstr);
         assert(TaggedCallRef{callInstr}.get() == 0);
       } else {
         for (uint64_t i = 0; i < TaggedCallRef{callInstr}.get(); i++) {
-          // TaggedCallRef{callInstr}.get() = 0;
           callStack.pop_back();
         }
       }

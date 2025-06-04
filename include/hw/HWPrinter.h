@@ -102,16 +102,8 @@ public:
   }
 };
 
-inline void dumpCtx(HWContext &ctx) { HWPrinter{std::cerr}.printCtx(ctx); }
-
-inline void dumpInstr(InstrRef instr) {
-  HWPrinter{std::cerr}.printInstr(instr);
-}
-
-inline void dumpObj(FatDynObjRef<> obj) {
-  if (auto asInstr = obj.dyn_as<InstrRef>())
-    return dumpInstr(asInstr);
-  HWPrinter{std::cerr}.printDef(obj);
-}
+void dumpCtx(HWContext &ctx);
+void dumpInstr(InstrRef instr);
+void dumpObj(FatDynObjRef<> obj);
 
 }; // namespace dyno

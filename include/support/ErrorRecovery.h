@@ -1,7 +1,6 @@
 #pragma once
 
 #include <stdexcept>
-#include <string_view>
 #include <vector>
 
 template <typename T> class FrameLogger {
@@ -40,3 +39,5 @@ public:
 private:
   bool isFreezed = false;
 };
+
+void report_fatal_error(const char *reason) __attribute__((noreturn));
