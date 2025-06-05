@@ -7,57 +7,9 @@
 
 namespace dyno {
 
-struct RegisterValue {
-  struct Fragment {
-    DynObjRef ref;
-    uint32_t srcAddr;
-    uint32_t dstAddr;
-    uint32_t len;
-    bool untouched;
+template <typename Fragment, size_t NumInline = 1> struct RegisterFrags {
 
-    std::pair<HWValue, BitRange> getValue(HWInstrBuilder &build, uint32_t addr,
-                                          uint32_t len) {
-      addr += srcAddr;
-      if (auto regThin = ref.dyn_as<ObjRef<Register>>()) {
-        auto reg = RegisterRef{build.ctx.getRegs().resolve(regThin)};
-        return std::make_pair(build.buildLoad(reg, BitRange{addr, len}),
-                              BitRange{0, len});
-      }
-      if (auto wireThin = ref.dyn_as<ObjRef<Wire>>()) {
-        auto wire = WireRef{build.ctx.getWires().resolve(wireThin)};
-        return std::make_pair(wire, BitRange{addr, len});
-      }
-      if (ref.is<ObjRef<Constant>>()) {
-        auto constant = ref.isCustom()
-                            ? ConstantRef{ref}
-                            : ConstantRef{build.ctx.getConstants().resolve(
-                                  ref.as<ObjRef<Constant>>())};
-        return std::make_pair(constant, BitRange{addr, len});
-      }
-      dyno_unreachable("unsupported");
-      // auto store =
-      // StoreIRef{build.ctx.getInstrs().resolve(ref.as<ObjRef<Instr>>())};
-      // assert(len <= this->len);
-      // return std::make_pair(store.value(), BitRange{addr, len});
-    }
-  };
-  // sorted by dst addr
-  SmallVec<Fragment, 1> frags;
-  uint32_t depth;
-  bool untouched = false;
-
-  RegisterValue() = default;
-  RegisterValue(const RegisterValue &) = default;
-  RegisterValue(RegisterValue &&) = default;
-  RegisterValue &operator=(const RegisterValue &) = default;
-  RegisterValue &operator=(RegisterValue &&) = default;
-
-  RegisterValue(RegisterRef reg, uint32_t depth, bool untouched)
-      : frags{{reg, 0, 0, reg->numBits, untouched}}, depth(depth),
-        untouched(untouched) {}
-  RegisterValue(DynObjRef value, uint32_t bits, uint32_t depth, bool untouched)
-      : frags{{value, 0, 0, bits, untouched}}, depth(depth),
-        untouched(untouched) {}
+  SmallVec<Fragment, NumInline> frags;
 
   // returns last iterator before regions with higher start addr.
   auto getInsertItLin(uint32_t dstAddr) {
@@ -89,6 +41,61 @@ struct RegisterValue {
     assert(getInsertItLin(dstAddr) == rv);
     return rv;
   }
+};
+
+struct RegisterValueFragment {
+  DynObjRef ref;
+  uint32_t srcAddr;
+  uint32_t dstAddr;
+  uint32_t len;
+  bool untouched;
+
+  std::pair<HWValue, BitRange> getValue(HWInstrBuilder &build, uint32_t addr,
+                                        uint32_t len) {
+    addr += srcAddr;
+    if (auto regThin = ref.dyn_as<ObjRef<Register>>()) {
+      auto reg = RegisterRef{build.ctx.getRegs().resolve(regThin)};
+      return std::make_pair(build.buildLoad(reg, BitRange{addr, len}),
+                            BitRange{0, len});
+    }
+    if (auto wireThin = ref.dyn_as<ObjRef<Wire>>()) {
+      auto wire = WireRef{build.ctx.getWires().resolve(wireThin)};
+      return std::make_pair(wire, BitRange{addr, len});
+    }
+    if (ref.is<ObjRef<Constant>>()) {
+      auto constant = ref.isCustom()
+                          ? ConstantRef{ref}
+                          : ConstantRef{build.ctx.getConstants().resolve(
+                                ref.as<ObjRef<Constant>>())};
+      return std::make_pair(constant, BitRange{addr, len});
+    }
+    dyno_unreachable("unsupported");
+    // auto store =
+    // StoreIRef{build.ctx.getInstrs().resolve(ref.as<ObjRef<Instr>>())};
+    // assert(len <= this->len);
+    // return std::make_pair(store.value(), BitRange{addr, len});
+  }
+};
+
+struct RegisterValue : public RegisterFrags<RegisterValueFragment> {
+  using Fragment = RegisterValueFragment;
+
+  // sorted by dst addr
+  uint32_t depth;
+  bool untouched = false;
+
+  RegisterValue() = default;
+  RegisterValue(const RegisterValue &) = default;
+  RegisterValue(RegisterValue &&) = default;
+  RegisterValue &operator=(const RegisterValue &) = default;
+  RegisterValue &operator=(RegisterValue &&) = default;
+
+  RegisterValue(RegisterRef reg, uint32_t depth, bool untouched)
+      : RegisterFrags({{reg, 0, 0, reg->numBits, untouched}}), depth(depth),
+        untouched(untouched) {}
+  RegisterValue(DynObjRef value, uint32_t bits, uint32_t depth, bool untouched)
+      : RegisterFrags({{value, 0, 0, bits, untouched}}), depth(depth),
+        untouched(untouched) {}
 
   void overwrite(DynObjRef ref, uint32_t srcAddr, uint32_t dstAddr,
                  uint32_t len, bool remainUntouched = false) {
@@ -107,11 +114,7 @@ struct RegisterValue {
       if (start >= newEnd)
         break;
 
-      if (end <= newStart) {
-        ++it;
-        assert(false);
-        continue;
-      }
+      assert(end > newStart);
 
       // full cover: split existing into two
       if (newStart > start && newEnd < end) {

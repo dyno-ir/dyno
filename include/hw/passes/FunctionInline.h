@@ -49,8 +49,8 @@ class FunctionInlinePass {
 
       auto funcInstr = callInstr.func().iref();
 
-      DEBUG(dbgs() << "\n\n\ninlining\n"; dumpInstr(callInstr);
-            dbgs() << "context:"; dumpCtx(ctx);)
+      DEBUG("FunctionInline", dbgs() << "\n\n\ninlining\n";
+            dumpInstr(callInstr); dbgs() << "context:"; dumpCtx(ctx);)
 
       SmallVec<RegisterRef, 2> returnRegs{callInstr.getNumRetvals()};
       SmallVec<RegisterRef, 4> paramRegs{callInstr.getNumParams()};
@@ -96,10 +96,10 @@ class FunctionInlinePass {
               return true;
             }
             if (src.isOpc(OP_RETURN)) {
-              assert(
-                  BlockRef_iterator<true>{HWInstrRef{src}.iter(ctx)}.succ() ==
-                      funcInstr.getBlock().end() &&
-                  "expected return to be last instruction");
+              if (BlockRef_iterator<true>{HWInstrRef{src}.iter(ctx)}.succ() !=
+                  funcInstr.getBlock().end())
+                report_fatal_error("expected return to be last instruction");
+
               HWInstrBuilder build{self->ctx, dstIt};
               for (size_t i = 0; i < src.getNumOperands(); i++)
                 build.buildStore(
@@ -136,6 +136,11 @@ class FunctionInlinePass {
       }
 
       build.destroyInstr(callInstr);
+    }
+
+    HWInstrBuilder build{ctx};
+    for (auto func : mod.funcs()) {
+      build.destroyInstr(func);
     }
   }
 

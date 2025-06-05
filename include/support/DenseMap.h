@@ -1,7 +1,7 @@
 #pragma once
-#include "support/ArrayRef.h"
 #include "support/DenseMapInfo.h"
 #include "support/InlineStorage.h"
+#include "support/Ranges.h"
 #include "support/Utility.h"
 #include <array>
 #include <cstddef>
@@ -155,6 +155,12 @@ struct DenseSetMapIteratorBase {
 
 public:
   static_assert(std::is_trivially_destructible_v<K>);
+
+  DenseSetMapIteratorBase(const DenseSetMapIteratorBase &) = default;
+  DenseSetMapIteratorBase(DenseSetMapIteratorBase &&) = default;
+  DenseSetMapIteratorBase &operator=(const DenseSetMapIteratorBase &) = default;
+  DenseSetMapIteratorBase &operator=(DenseSetMapIteratorBase &&) = default;
+  DenseSetMapIteratorBase() = default;
 
   DenseSetMapIteratorBase(Bucket *bucket, size_type rem, size_type idx)
       : bucket(bucket), rem(rem), idx(idx) {}
@@ -401,7 +407,7 @@ public:
     return iter;
   }
 
-  void insert(ArrayRef<K> arr) {
+  template <typename It> void insert(Range<It> arr) {
     for (const K &elem : arr) {
       insert(elem);
     }
@@ -420,7 +426,7 @@ public:
     return std::make_pair(false, iter);
   }
 
-  void findOrInsert(ArrayRef<K> arr) {
+  template <typename It> void findOrInsert(Range<It> arr) {
     for (const K &elem : arr) {
       findOrInsert(elem);
     }

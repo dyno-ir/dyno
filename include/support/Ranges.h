@@ -2,6 +2,7 @@
 
 #include <initializer_list>
 #include <iterator>
+#include <type_traits>
 
 template <typename It> class Range;
 
@@ -92,8 +93,14 @@ public:
   using reference = value_type &;
   using difference_type = std::iterator_traits<T>::difference_type;
 
-  transform_iterator() = default;
-  transform_iterator(T it) : it(it) {}
+  transform_iterator()
+    requires std::is_default_constructible_v<TransformT>
+  = default;
+
+  transform_iterator(T it)
+    requires std::is_default_constructible_v<TransformT>
+      : it(it) {}
+
   transform_iterator(T it, TransformT transformF)
       : it(it), i(0), transformF(transformF) {}
 
@@ -228,7 +235,7 @@ public:
 
   discard_optional_iterator() = default;
   discard_optional_iterator(T it, T itEnd) : it(it), itEnd(itEnd) { prime(); }
-  discard_optional_iterator(T it) : it(it) {}
+  discard_optional_iterator(T it) : it(it), itEnd(it) {}
 
   auto operator*() { return **it; }
 
@@ -302,7 +309,7 @@ public:
 
   template <typename TransformT> auto transform(TransformT transformF) {
     return ::Range{transform_iterator<It, TransformT>(beginIt, transformF),
-                   transform_iterator<It, TransformT>(endIt)};
+                   transform_iterator<It, TransformT>(endIt, transformF)};
   }
 
   template <typename T> auto as() {

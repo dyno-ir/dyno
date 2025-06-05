@@ -965,6 +965,12 @@ public:
   void destroyObj(FatDynObjRef<> obj) {
     if (obj == nullref)
       return;
+
+    if (Operand::isDefUseOperand(obj)) {
+      reinterpret_cast<InstrDefUse *>(obj.getPtr())
+          ->replaceAllUsesWith(nullref);
+    }
+
     switch (*obj.getType()) {
     case *CORE_INSTR: {
       destroyInstr(obj.as<InstrRef>());
@@ -997,7 +1003,6 @@ public:
       dyno_unreachable("deleting unknown object");
     }
   }
-
   void destroyInstr(InstrRef instr) {
     for (auto oref : instr.defs()) {
       auto obj = oref->fat();
@@ -1008,7 +1013,6 @@ public:
     ctx.getCFG()[instr].erase();
     ctx.getInstrs().destroy(instr);
   }
-
   void destroyBlock(BlockRef block) {
     SmallVec<InstrRef, 16> toDestroy{block.size()};
     for (auto [i, instr] : Range{block}.reverse().enumerate())

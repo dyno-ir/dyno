@@ -430,18 +430,18 @@ public:
         uint32_t len = asLoad.reg()->numBits;
         if (asLoad.hasRange()) {
           auto range = asLoad.range();
-          if (!range.isConstant()) {
+          if (!range->isConstant()) {
             // if (val.untouched)
             //   break;
             build.setInsertPoint(ctx.getCFG()[asLoad]);
             auto matVal =
-                build.buildSplice(val.get(build), BitRange{asLoad.range()});
+                build.buildSplice(val.get(build), BitRange{*asLoad.range()});
             asLoad.defW().replaceAllUsesWith(matVal);
             destroyList.emplace_back(asLoad);
             break;
           }
-          addr = range.getAddr().as<ConstantRef>().getExactVal();
-          len = range.getLen().as<ConstantRef>().getExactVal();
+          addr = range->getAddr().as<ConstantRef>().getExactVal();
+          len = range->getLen().as<ConstantRef>().getExactVal();
         }
 
         build.setInsertPoint(asLoad.iter(ctx));

@@ -5,10 +5,14 @@
 inline uint64_t debugType = 0;
 
 #ifdef _DEBUG_
-#define DEBUG(x)                                                               \
+#define DEBUG(category, x)                                                     \
   do {                                                                         \
     if (debugType) {                                                           \
-      x                                                                        \
+                                                                               \
+      dbgs() << "====" << category << "====\n";                                \
+      do {                                                                     \
+        x                                                                      \
+      } while (1);                                                             \
     }                                                                          \
   } while (0);
 #else

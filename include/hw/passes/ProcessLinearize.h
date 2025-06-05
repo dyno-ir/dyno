@@ -1,12 +1,15 @@
 #pragma once
 #include "dyno/CFG.h"
-#include "dyno/CustomInstr.h"
 #include "dyno/Obj.h"
+#include "dyno/ObjMap.h"
 #include "hw/DeepCopy.h"
 #include "hw/HWAbstraction.h"
 #include "hw/HWPrinter.h"
 #include "hw/IDs.h"
+#include "hw/LoadStore.h"
 #include "hw/Process.h"
+#include "hw/analysis/RegisterValue.h"
+#include "support/Debug.h"
 #include "support/DenseMap.h"
 #include "support/DenseSet.h"
 #include "support/DynBitSet.h"
@@ -14,20 +17,124 @@
 
 namespace dyno {
 
+struct RegisterRegionsFragment {
+  SmallVec<uint32_t, 1> writerIDs;
+  uint32_t dstAddr;
+  uint32_t len;
+};
+
+struct RegisterRegions : public RegisterFrags<RegisterRegionsFragment> {
+  using Fragment = RegisterRegionsFragment;
+
+  void addRegion(uint32_t writerID, uint32_t dstAddr, uint32_t len) {
+
+    auto it = getInsertIt(dstAddr);
+
+    auto isContained = [](RegisterRegionsFragment *it, uint32_t id) {
+      return std::find(it->writerIDs.begin(), it->writerIDs.end(), id) !=
+             it->writerIDs.end();
+    };
+
+    auto addIfNotContained = [](RegisterRegionsFragment *it, uint32_t id) {
+      if (std::find(it->writerIDs.begin(), it->writerIDs.end(), id) ==
+          it->writerIDs.end()) {
+        it->writerIDs.emplace_back(id);
+      }
+    };
+
+    // it starts earlier
+    if (it->dstAddr < dstAddr) {
+      if (isContained(it, writerID)) {
+
+        if (it->dstAddr + it->len >= dstAddr + len)
+          return;
+        dstAddr = it->dstAddr + it->len;
+        len -= it->len;
+
+        ++it;
+      } else {
+        auto pieceLen = dstAddr - it->dstAddr;
+        Fragment frag{it->writerIDs, it->dstAddr, pieceLen};
+        it = frags.insert(it, frag) + 1;
+
+        it->len -= pieceLen;
+        it->dstAddr += pieceLen;
+      }
+    }
+
+    while (len != 0) {
+
+      uint32_t end = dstAddr + len;
+      uint32_t itEnd = it->dstAddr + it->len;
+
+      // it ends later
+      if (itEnd > end) {
+        if (isContained(it, writerID))
+          break;
+        Fragment frag{it->writerIDs, it->dstAddr, len};
+        it->len = itEnd - end;
+        it->dstAddr += len;
+        it = frags.insert(it, frag);
+        addIfNotContained(it, writerID);
+        break;
+      }
+
+      addIfNotContained(it, writerID);
+
+      len -= it->len;
+      dstAddr += it->len;
+      ++it;
+    }
+  }
+
+  auto getAccessors(uint32_t addr, uint32_t len) {
+    SmallDenseSet<uint32_t, 1> writers;
+    uint32_t end = addr + len;
+
+    auto it = getInsertIt(addr);
+    while (it != frags.end() && len != 0) {
+      uint32_t itEnd = it->dstAddr + it->len;
+
+      if (addr < itEnd && it->dstAddr < end) {
+        uint32_t pieceLen = std::min(end, itEnd) - std::max(addr, it->dstAddr);
+
+        writers.findOrInsert(Range{it->writerIDs});
+
+        addr += pieceLen;
+        len -= pieceLen;
+        it++;
+      } else
+        break;
+    }
+
+    return writers;
+  }
+
+  explicit RegisterRegions(uint32_t len) : RegisterFrags({{{}, 0, len}}) {}
+};
+
 class ProcessLinearizePass {
 
   using BitSet = UnsizedBitSet<SmallVec<uint64_t, 2>>;
 
-  // todo: slab allocator
   struct Custom {
     enum BitField : uint8_t { VISITED = 1, PRE_VISITED = 2 };
     uint8_t bitField = 0;
     SmallDenseSet<ProcessIRef, 1> predsSet;
     BitSet dependingOutputs;
+    BitSet dependingInputs;
   };
 
-  using CustInstrRef = CustomInstrRef<InstrRef, Custom *>;
-  using CustProcIRef = CustomInstrRef<ProcessIRef, Custom *>;
+  ObjMapVec<Process, Custom> map;
+
+  struct Config {
+    bool retainIODeps = true;
+    bool retainInnerDeps = false;
+  };
+  Config config;
+
+  // using CustInstrRef = CustomInstrRef<InstrRef, Custom *>;
+  // using CustProcIRef = CustomInstrRef<ProcessIRef, Custom *>;
   HWContext &ctx;
 
   static constexpr ProcessIRef blackBoxWrite(uint16_t id) {
@@ -41,7 +148,7 @@ class ProcessLinearizePass {
 
 public:
   explicit ProcessLinearizePass(HWContext &ctx) : ctx(ctx), copier(ctx) {}
-  std::vector<CustProcIRef> procs;
+  std::vector<ProcessIRef> procs;
   DeepCopier copier;
 
   void findDeps(ModuleIRef module) {
@@ -50,9 +157,6 @@ public:
     uint outputIdxCnt = 0;
 
     for (auto reg : module.regs()) {
-
-      SmallDenseSet<ProcessIRef, 1> writers;
-
       bool regIsAnyInput =
           reg.isOpc(HW_INPUT_REGISTER_INSTR, HW_INOUT_REGISTER_INSTR,
                     HW_REF_REGISTER_INSTR);
@@ -61,12 +165,17 @@ public:
           reg.isOpc(HW_OUTPUT_REGISTER_INSTR, HW_INOUT_REGISTER_INSTR,
                     HW_REF_REGISTER_INSTR);
 
+      RegisterRegions writeRegions{reg.getNumBits()};
+
       for (auto access : reg.oref().uses()) {
         auto instr = HWInstrRef{access.instr()};
         switch (instr.getDialectOpcode().raw()) {
 
         case HW_STORE.raw(): {
-          writers.findOrInsert(instr.parentProc(ctx));
+          auto asStore = instr.as<StoreIRef>();
+          auto parentProc = instr.parentProc(ctx);
+          auto [addr, len] = asStore.getConstAccessRange();
+          writeRegions.addRegion(parentProc.proc().getObjID(), addr, len);
           break;
         }
 
@@ -98,27 +207,60 @@ public:
         }
       }
 
-      if (regIsAnyInput)
-        writers.insert(blackBoxWrite(inputIdxCnt++));
+      RegisterRegions readRegions{reg.getNumBits()};
+      if (regIsAnyInput && config.retainIODeps) {
+        for (auto access : reg.oref().uses()) {
+          auto instr = HWInstrRef{access.instr()};
 
-      SmallVec<ProcessIRef, 4> writersVec{writers.size()};
-      std::copy(writers.begin(), writers.end(), writersVec.begin());
+          switch (instr.getDialectOpcode().raw()) {
+          case HW_LOAD.raw(): {
+            auto procI = instr.parentProc(ctx);
+            auto [addr, len] = instr.as<LoadIRef>().getConstAccessRange();
+            readRegions.addRegion(procI.proc().getObjID(), addr, len);
+            break;
+          }
+          }
+        }
+      }
 
       for (auto access : reg.oref().uses()) {
         auto instr = HWInstrRef{access.instr()};
 
         switch (instr.getDialectOpcode().raw()) {
         case HW_LOAD.raw(): {
-          auto proc = CustProcIRef{instr.parentProc(ctx)};
-          auto &custom = proc.getOrEmplace([] { return new Custom(); });
-          custom->predsSet.findOrInsert(ArrayRef{writersVec});
+          auto asLoad = instr.as<LoadIRef>();
+          auto procI = instr.parentProc(ctx);
+          auto [addr, len] = asLoad.getConstAccessRange();
+          auto writers = writeRegions.getAccessors(addr, len);
+
+          map[procI.proc()].predsSet.findOrInsert(
+              Range{writers}
+                  .transform([&](size_t, uint32_t val) {
+                    if (val == UINT32_MAX)
+                      return std::optional<ProcessIRef>{};
+                    return std::make_optional(
+                        ProcessIRef{ctx.getProcs()
+                                        .resolve(ObjRef<Process>{ObjID{val}})
+                                        ->defUse.getSingleDef()
+                                        ->instr()});
+                  })
+                  .discard_optional());
+
+          if (regIsAnyInput && config.retainIODeps) {
+            readRegions.getAccessors(addr, len);
+            for (auto it = readRegions.getInsertIt(addr);
+                 it != readRegions.getInsertIt(addr + len - 1) + 1; it++) {
+              map[procI.proc()].dependingInputs.setDyn(
+                  inputIdxCnt + (it - readRegions.frags.begin()));
+            }
+          }
+
           break;
         }
         case HW_STORE.raw(): {
           if (regIsAnyOutput) {
-            auto proc = CustProcIRef{instr.parentProc(ctx)};
-            auto &custom = proc.getOrEmplace([] { return new Custom(); });
-            custom->dependingOutputs.setDyn(outputIdxCnt);
+            auto procI = instr.parentProc(ctx);
+            map[procI.proc()].dependingOutputs.setDyn(outputIdxCnt);
           }
           break;
         }
@@ -129,21 +271,25 @@ public:
 
       if (regIsAnyOutput)
         outputIdxCnt++;
+      if (regIsAnyInput)
+        inputIdxCnt += readRegions.frags.size();
     }
   }
 
-  void visit(SmallVecImpl<ProcessIRef> &ordered, CustProcIRef proc) {
-    if ((proc.get()->bitField & Custom::VISITED))
+  void visit(SmallVecImpl<ProcessIRef> &ordered, ProcessIRef proc) {
+    auto &custom = map[proc.proc()];
+
+    if ((custom.bitField & Custom::VISITED))
       return;
-    if ((proc.get()->bitField & Custom::PRE_VISITED)) {
+    if ((custom.bitField & Custom::PRE_VISITED)) {
       std::cerr << "cyclic:\n";
       dumpInstr(proc);
       abort();
     }
 
-    proc.get()->bitField |= Custom::PRE_VISITED;
+    custom.bitField |= Custom::PRE_VISITED;
 
-    for (auto depend : Range{proc.get()->predsSet}) {
+    for (auto depend : Range{custom.predsSet}) {
       if (isBlackBoxWrite(depend))
         continue;
       if (depend == proc)
@@ -151,7 +297,7 @@ public:
       visit(ordered, depend);
     }
 
-    proc.get()->bitField |= Custom::VISITED;
+    custom.bitField |= Custom::VISITED;
     ordered.emplace_back(proc);
   }
 
@@ -161,49 +307,56 @@ public:
       visit(ordered, proc);
     }
 
-    constexpr bool Conservative = true;
-
-    if constexpr (Conservative) {
-      // iterate thru ordered in reverse order and mark all dependencies.
+    if (config.retainIODeps) {
+      // propagate depending outputs.
       for (auto proc : Range{ordered}.reverse()) {
-        auto &custom = *CustProcIRef{proc}.get();
+        auto &custom = map[proc.proc()];
         for (auto pred : Range{custom.predsSet}) {
           if (isBlackBoxWrite(pred))
             continue;
-          CustProcIRef{pred}.get()->dependingOutputs |= custom.dependingOutputs;
+          custom.dependingOutputs |= custom.dependingOutputs;
+        }
+      }
+      // propagate depending inputs.
+      for (auto proc : Range{ordered}) {
+        auto &custom = map[proc.proc()];
+        for (auto pred : Range{custom.predsSet}) {
+          if (isBlackBoxWrite(pred))
+            continue;
+          custom.dependingInputs |= custom.dependingInputs;
         }
       }
 
-      std::cerr << "ordered:\n";
-      for (auto proc : ordered) {
-        dumpInstr(proc);
-      }
-      std::cerr << "\n\n\n";
+      DEBUG(
+          "ProcessLinearize", std::cerr << "ordered:\n";
+          for (auto proc : ordered) { dumpInstr(proc); } dbgs() << "\n\n\n";)
 
       size_t cnt = ordered.size();
       SmallVec<uint32_t, 16> toMerge;
       while (cnt != 0) {
         toMerge.clear();
-        BitSet *repr = nullptr;
-
+        std::optional<BitSet> mergedIns = std::nullopt;
+        bool hasOutputsDeps = false;
         bool skippedAny = false;
 
         for (auto [i, proc] : Range{ordered}.enumerate()) {
           if (!proc)
             continue;
 
-          auto &other = CustProcIRef{proc}.get()->dependingOutputs;
+          auto &otherIns = map[proc.proc()].dependingInputs;
+          bool otherHasOutputDeps =
+              map[proc.proc()].dependingOutputs.count() != 0;
 
-          if (!repr) {
-            repr = &other;
+          if (!mergedIns) {
+            mergedIns = otherIns;
+            hasOutputsDeps = otherHasOutputDeps;
             toMerge.emplace_back(i);
             continue;
           }
 
-          if (other == *repr ||
-              (!skippedAny && (repr->count() == 0 || other.count() == 0))) {
-            if (repr->count() == 0)
-              repr = &other;
+          if (otherIns == *mergedIns ||
+              (!skippedAny && !config.retainInnerDeps && !hasOutputsDeps &&
+               !otherHasOutputDeps)) {
             toMerge.emplace_back(i);
           } else
             skippedAny = true;
@@ -216,9 +369,6 @@ public:
           // todo: move
           copier.deepCopyInstrs(ordered[idx].block().begin(),
                                 proc.block().end().pred());
-
-          if (auto *ptr = CustProcIRef{ordered[idx]}.get())
-            delete ptr;
           HWInstrBuilder{ctx}.destroyInstr(ordered[idx]);
           ordered[idx] = nullref;
         }
@@ -234,9 +384,6 @@ public:
         // todo: move
         copier.deepCopyInstrs(mergeProc.block().begin(),
                               proc.block().end().pred());
-
-        if (auto *ptr = CustProcIRef{mergeProc}.get())
-          delete ptr;
         HWInstrBuilder{ctx}.destroyInstr(mergeProc);
       }
     }
@@ -248,17 +395,9 @@ public:
   }
 
   void run() {
-    for (auto instr : ctx.getInstrs()) {
-      InstrRef{instr}.clearCustomStorage();
-    }
-
+    map.resize(ctx.getProcs().numIDs());
     for (auto mod : ctx.getModules()) {
       runOnModule(ModuleRef{mod}.iref());
-    }
-
-    for (auto instr : ctx.getInstrs()) {
-      if (auto *val = CustInstrRef{instr}.get())
-        delete val;
     }
   }
 };

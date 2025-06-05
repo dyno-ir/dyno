@@ -74,6 +74,8 @@ public:
   ObjID getObjID() { return obj; }
 
   static bool is_impl(const DynObjRef &Ref);
+
+  friend bool operator==(ObjRef lhs, ObjRef rhs) { return lhs.obj == rhs.obj; }
 };
 
 /// Note: Can be uninitialized!

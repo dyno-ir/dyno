@@ -108,13 +108,9 @@ public:
   using iterator = Operand *;
 
   Instr(DynObjRef, uint16_t numOperands, DialectID dialect, OpcodeID opc)
-      : opc(opc), dialect(dialect), numOperands(numOperands) {
-    InlineStorageRef<uint64_t>{customStorage}.emplace(0);
-  }
+      : opc(opc), dialect(dialect), numOperands(numOperands) {}
   Instr(DynObjRef, uint16_t numOperands, DialectOpcode opc)
-      : opc(opc.opc), dialect(opc.dialect), numOperands(numOperands) {
-    InlineStorageRef<uint64_t>{customStorage}.emplace(0);
-  }
+      : opc(opc.opc), dialect(opc.dialect), numOperands(numOperands) {}
 
   Instr(const Instr &) = delete;
   Instr(Instr &&) = delete;
@@ -352,9 +348,9 @@ public:
   }
   DialectID getDialectID() = delete;
 
-  unsigned getNumOperands() { return (*this)->numOperands; }
-  unsigned getNumDefs() { return (*this)->numDefs; }
-  unsigned getNumOthers() { return (*this)->numOperands - (*this)->numDefs; }
+  unsigned getNumOperands() const { return (*this)->numOperands; }
+  unsigned getNumDefs() const { return (*this)->numDefs; }
+  unsigned getNumOthers() const { return (*this)->numOperands - (*this)->numDefs; }
 
   Range<iterator> defs() { return {def_begin(), def_end()}; }
   Range<iterator> others() { return {other_begin(), other_end()}; }
@@ -642,7 +638,9 @@ template <typename Base, DialectOpcode... Opc>
 class OpcodeInstrRef : public Base {
 public:
   using Base::Base;
-  static bool is_impl(FatObjRef<Instr> ref) { return InstrRef{ref}.isOpc(Opc...); }
+  static bool is_impl(FatObjRef<Instr> ref) {
+    return InstrRef{ref}.isOpc(Opc...);
+  }
   static bool is_impl(FatDynObjRef<> ref) {
     if (auto instr = ref.dyn_as<InstrRef>())
       return is_impl(instr);

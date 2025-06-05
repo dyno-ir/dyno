@@ -86,6 +86,15 @@ public:
     free(ref.getPtr());
   }
 
+  void destroyIfExists(FatObjRef<T> ref) {
+    if (!map[ref])
+      return;
+    freeIds.push_back(ref.getObjID());
+    map[ref] = nullptr;
+    ref.getPtr()->~T();
+    free(ref.getPtr());
+  }
+
   FatObjRef<T> resolve(ObjRef<T> ref) { return FatObjRef<T>{ref, map[ref]}; }
 
   auto begin() { return objs().begin(); }
