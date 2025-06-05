@@ -2,7 +2,7 @@
 #include <iostream>
 #include <ostream>
 
-inline uint64_t debugType = 0;
+inline uint64_t debugType = 1;
 
 #ifdef _DEBUG_
 #define DEBUG(category, x)                                                     \
@@ -12,11 +12,11 @@ inline uint64_t debugType = 0;
       dbgs() << "====" << category << "====\n";                                \
       do {                                                                     \
         x                                                                      \
-      } while (1);                                                             \
+      } while (0);                                                             \
     }                                                                          \
   } while (0);
 #else
-#define DEBUG(x)
+#define DEBUG(x, y)
 #endif
 
 inline std::ostream &dbgs() {

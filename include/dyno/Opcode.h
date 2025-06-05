@@ -1,5 +1,5 @@
 #pragma once
-#include "dyno/Obj.h"
+#include "dyno/IDs.h"
 #include "support/Bits.h"
 
 namespace dyno {

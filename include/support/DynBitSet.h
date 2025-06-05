@@ -29,6 +29,37 @@ public:
   void set(size_t i) { storage[wordIdx(i)] |= bitMsk(i); }
   void clear(size_t i) { storage[wordIdx(i)] &= ~bitMsk(i); }
   bool get(size_t i) const { storage[wordIdx(i)] & bitMsk(i); }
+
+  void modifyRange(size_t i, size_t len, word_t value) {
+    if (len == 0) [[unlikely]]
+      return;
+
+    uint64_t lowerIdx = i / WordBits;
+    uint64_t upperIdx = (i + len - 1) / WordBits;
+
+    uint64_t lowerOffs = (i % WordBits);
+    uint64_t upperOffs = ((i + len - 1) % WordBits);
+
+    if (lowerIdx == upperIdx) {
+      word_t mask =
+          bit_mask_ones<word_t>((upperOffs + 1) - lowerOffs, lowerOffs);
+      storage[lowerIdx] &= ~mask;
+      storage[lowerIdx] |= mask & value;
+      return;
+    }
+
+    storage[lowerIdx] &= bit_mask_ones<word_t>(lowerOffs);
+    storage[lowerIdx] |= bit_mask_zeros<word_t>(lowerOffs) & value;
+
+    for (size_t i = lowerIdx + 1; i != upperIdx; i++)
+      storage[i] = value;
+
+    storage[upperIdx] &= bit_mask_zeros<word_t>(upperOffs + 1);
+    storage[upperIdx] |= bit_mask_ones<word_t>(upperOffs + 1) & value;
+  }
+  void setRange(size_t i, size_t len) { modifyRange(i, len, ~word_t(0)); }
+  void clearRange(size_t i, size_t len) { modifyRange(i, len, word_t(0)); }
+
   void ensureBits(size_t i) { ensureWords(round_up_div(i, WordBits)); }
   void ensureWords(size_t words) {
     if (storage.size() <= words) [[unlikely]]
@@ -49,6 +80,14 @@ public:
     if (word >= storage.size())
       return DefaultWord & bitMsk(i);
     return storage[word] & bitMsk(i);
+  }
+  void modifyRangeDyn(size_t i, size_t len, word_t value) {
+    ensureBits(i + len);
+    modifyRange(i, len, value);
+  }
+  void setRangeDyn(size_t i, size_t len) { modifyRangeDyn(i, len, ~word_t(0)); }
+  void clearRangeDyn(size_t i, size_t len) {
+    modifyRangeDyn(i, len, word_t(0));
   }
 
   word_t getWordDyn(size_t i) const {

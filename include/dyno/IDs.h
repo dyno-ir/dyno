@@ -1,7 +1,6 @@
 #pragma once
 
 #include "DialectInfo.h"
-#include "dyno/Obj.h"
 #include "dyno/Type.h"
 #include <cstdint>
 #include <support/Bits.h>

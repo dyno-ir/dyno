@@ -326,17 +326,17 @@ public:
   iterator other_begin() { return OperandRef{*this, (*this)->numDefs}; }
   iterator other_end() { return end(); }
 
-  OperandRef operand(unsigned n) {
+  OperandRef operand(unsigned n) const {
     assert(n < getNumOperands());
     return OperandRef{*this, n};
   }
 
-  OperandRef def(unsigned n = 0) {
+  OperandRef def(unsigned n = 0) const {
     assert(n < getNumDefs());
     return OperandRef{*this, n};
   }
 
-  OperandRef other(unsigned n) {
+  OperandRef other(unsigned n) const {
     assert(n < getNumOthers());
     return OperandRef{*this, getNumDefs() + n};
   }

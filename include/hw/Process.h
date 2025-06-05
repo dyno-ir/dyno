@@ -11,14 +11,17 @@ class Process {
 public:
   InstrDefUse defUse;
 
-  Process(DynObjRef) {
-  }
+  Process(DynObjRef) {}
 };
+
+class ProcessIRef;
 
 class ProcessRef : public FatObjRef<Process> {
 public:
   using FatObjRef<Process>::FatObjRef;
   ProcessRef(const FatObjRef<Process> ref) : FatObjRef<Process>(ref) {}
+
+  ProcessIRef iref() const;
 };
 
 template <> struct ObjTraits<Process> {
@@ -32,8 +35,8 @@ public:
   using InstrRef::InstrRef;
   constexpr ProcessIRef(InstrRef ref) : InstrRef(ref) {}
 
-  ProcessRef proc() { return def(0)->as<ProcessRef>(); }
-  BlockRef block() { return def(1)->as<BlockRef>(); }
+  ProcessRef proc() const { return def(0)->as<ProcessRef>(); }
+  BlockRef block() const { return def(1)->as<BlockRef>(); }
 
   static bool is_impl(const FatObjRef<Instr> &instr) {
     return InstrRef{instr}.isOpc(HW_COMB_PROCESS_INSTR, HW_INIT_PROCESS_INSTR,
@@ -46,5 +49,9 @@ public:
     return false;
   }
 };
+
+inline ProcessIRef ProcessRef::iref() const {
+  return ptr->defUse.getSingleDef()->instr().as<ProcessIRef>();
+}
 
 }; // namespace dyno

@@ -372,4 +372,100 @@ inline auto diffRegisterValues(ArrayRef<RegisterValue *> regVals) {
   return diffs;
 }
 
+struct RegisterRegionsFragment {
+  SmallVec<uint32_t, 1> writerIDs;
+  uint32_t dstAddr;
+  uint32_t len;
+};
+
+struct RegisterRegions : public RegisterFrags<RegisterRegionsFragment> {
+  using Fragment = RegisterRegionsFragment;
+
+  void addRegion(uint32_t writerID, uint32_t dstAddr, uint32_t len) {
+
+    auto it = getInsertIt(dstAddr);
+
+    auto isContained = [](RegisterRegionsFragment *it, uint32_t id) {
+      return std::find(it->writerIDs.begin(), it->writerIDs.end(), id) !=
+             it->writerIDs.end();
+    };
+
+    auto addIfNotContained = [](RegisterRegionsFragment *it, uint32_t id) {
+      if (std::find(it->writerIDs.begin(), it->writerIDs.end(), id) ==
+          it->writerIDs.end()) {
+        it->writerIDs.emplace_back(id);
+      }
+    };
+
+    // it starts earlier
+    if (it->dstAddr < dstAddr) {
+      if (isContained(it, writerID)) {
+
+        if (it->dstAddr + it->len >= dstAddr + len)
+          return;
+        dstAddr = it->dstAddr + it->len;
+        len -= it->len;
+
+        ++it;
+      } else {
+        auto pieceLen = dstAddr - it->dstAddr;
+        Fragment frag{it->writerIDs, it->dstAddr, pieceLen};
+        it = frags.insert(it, frag) + 1;
+
+        it->len -= pieceLen;
+        it->dstAddr += pieceLen;
+      }
+    }
+
+    while (len != 0) {
+
+      uint32_t end = dstAddr + len;
+      uint32_t itEnd = it->dstAddr + it->len;
+
+      // it ends later
+      if (itEnd > end) {
+        if (isContained(it, writerID))
+          break;
+        Fragment frag{it->writerIDs, it->dstAddr, len};
+        it->len = itEnd - end;
+        it->dstAddr += len;
+        it = frags.insert(it, frag);
+        addIfNotContained(it, writerID);
+        break;
+      }
+
+      addIfNotContained(it, writerID);
+
+      len -= it->len;
+      dstAddr += it->len;
+      ++it;
+    }
+  }
+
+  auto getAccessors(uint32_t addr, uint32_t len) {
+    SmallDenseSet<uint32_t, 1> writers;
+    uint32_t end = addr + len;
+
+    auto it = getInsertIt(addr);
+    while (it != frags.end() && len != 0) {
+      uint32_t itEnd = it->dstAddr + it->len;
+
+      if (addr < itEnd && it->dstAddr < end) {
+        uint32_t pieceLen = std::min(end, itEnd) - std::max(addr, it->dstAddr);
+
+        writers.findOrInsert(Range{it->writerIDs});
+
+        addr += pieceLen;
+        len -= pieceLen;
+        it++;
+      } else
+        break;
+    }
+
+    return writers;
+  }
+
+  explicit RegisterRegions(uint32_t len) : RegisterFrags({{{}, 0, len}}) {}
+};
+
 }; // namespace dyno

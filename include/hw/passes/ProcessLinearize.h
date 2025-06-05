@@ -14,104 +14,10 @@
 #include "support/DenseSet.h"
 #include "support/DynBitSet.h"
 #include "support/Utility.h"
+#include <algorithm>
+#include <iterator>
 
 namespace dyno {
-
-struct RegisterRegionsFragment {
-  SmallVec<uint32_t, 1> writerIDs;
-  uint32_t dstAddr;
-  uint32_t len;
-};
-
-struct RegisterRegions : public RegisterFrags<RegisterRegionsFragment> {
-  using Fragment = RegisterRegionsFragment;
-
-  void addRegion(uint32_t writerID, uint32_t dstAddr, uint32_t len) {
-
-    auto it = getInsertIt(dstAddr);
-
-    auto isContained = [](RegisterRegionsFragment *it, uint32_t id) {
-      return std::find(it->writerIDs.begin(), it->writerIDs.end(), id) !=
-             it->writerIDs.end();
-    };
-
-    auto addIfNotContained = [](RegisterRegionsFragment *it, uint32_t id) {
-      if (std::find(it->writerIDs.begin(), it->writerIDs.end(), id) ==
-          it->writerIDs.end()) {
-        it->writerIDs.emplace_back(id);
-      }
-    };
-
-    // it starts earlier
-    if (it->dstAddr < dstAddr) {
-      if (isContained(it, writerID)) {
-
-        if (it->dstAddr + it->len >= dstAddr + len)
-          return;
-        dstAddr = it->dstAddr + it->len;
-        len -= it->len;
-
-        ++it;
-      } else {
-        auto pieceLen = dstAddr - it->dstAddr;
-        Fragment frag{it->writerIDs, it->dstAddr, pieceLen};
-        it = frags.insert(it, frag) + 1;
-
-        it->len -= pieceLen;
-        it->dstAddr += pieceLen;
-      }
-    }
-
-    while (len != 0) {
-
-      uint32_t end = dstAddr + len;
-      uint32_t itEnd = it->dstAddr + it->len;
-
-      // it ends later
-      if (itEnd > end) {
-        if (isContained(it, writerID))
-          break;
-        Fragment frag{it->writerIDs, it->dstAddr, len};
-        it->len = itEnd - end;
-        it->dstAddr += len;
-        it = frags.insert(it, frag);
-        addIfNotContained(it, writerID);
-        break;
-      }
-
-      addIfNotContained(it, writerID);
-
-      len -= it->len;
-      dstAddr += it->len;
-      ++it;
-    }
-  }
-
-  auto getAccessors(uint32_t addr, uint32_t len) {
-    SmallDenseSet<uint32_t, 1> writers;
-    uint32_t end = addr + len;
-
-    auto it = getInsertIt(addr);
-    while (it != frags.end() && len != 0) {
-      uint32_t itEnd = it->dstAddr + it->len;
-
-      if (addr < itEnd && it->dstAddr < end) {
-        uint32_t pieceLen = std::min(end, itEnd) - std::max(addr, it->dstAddr);
-
-        writers.findOrInsert(Range{it->writerIDs});
-
-        addr += pieceLen;
-        len -= pieceLen;
-        it++;
-      } else
-        break;
-    }
-
-    return writers;
-  }
-
-  explicit RegisterRegions(uint32_t len) : RegisterFrags({{{}, 0, len}}) {}
-};
 
 class ProcessLinearizePass {
 
@@ -119,8 +25,14 @@ class ProcessLinearizePass {
 
   struct Custom {
     enum BitField : uint8_t { VISITED = 1, PRE_VISITED = 2 };
+
+    static constexpr uint32_t LOOPID_NONE = 0;
+    static constexpr uint32_t LOOPID_MULTIPLE = ~uint32_t(0);
+
     uint8_t bitField = 0;
+    uint32_t loopID = LOOPID_NONE;
     SmallDenseSet<ProcessIRef, 1> predsSet;
+    // todo: currently we only use bool value of this, replace if not required.
     BitSet dependingOutputs;
     BitSet dependingInputs;
   };
@@ -133,18 +45,7 @@ class ProcessLinearizePass {
   };
   Config config;
 
-  // using CustInstrRef = CustomInstrRef<InstrRef, Custom *>;
-  // using CustProcIRef = CustomInstrRef<ProcessIRef, Custom *>;
   HWContext &ctx;
-
-  static constexpr ProcessIRef blackBoxWrite(uint16_t id) {
-    assert(id < 0xFFFF);
-    auto rv = ProcessIRef{ObjID::invalid(), (Instr *)nullptr, uint16_t(1 + id)};
-    return rv;
-  }
-  static constexpr bool isBlackBoxWrite(ProcessIRef proc) {
-    return proc.getObjID() == ObjID::invalid() && proc.getCustom() >= 1;
-  }
 
 public:
   explicit ProcessLinearizePass(HWContext &ctx) : ctx(ctx), copier(ctx) {}
@@ -248,13 +149,12 @@ public:
 
           if (regIsAnyInput && config.retainIODeps) {
             readRegions.getAccessors(addr, len);
-            for (auto it = readRegions.getInsertIt(addr);
-                 it != readRegions.getInsertIt(addr + len - 1) + 1; it++) {
-              map[procI.proc()].dependingInputs.setDyn(
-                  inputIdxCnt + (it - readRegions.frags.begin()));
-            }
+            auto lowIt = readRegions.getInsertIt(addr);
+            uint bitsI = inputIdxCnt + (lowIt - readRegions.frags.begin());
+            uint bitsLen =
+                (readRegions.getInsertIt(addr + len - 1) + 1) - lowIt;
+            map[procI.proc()].dependingInputs.setRangeDyn(bitsI, bitsLen);
           }
-
           break;
         }
         case HW_STORE.raw(): {
@@ -276,35 +176,80 @@ public:
     }
   }
 
-  void visit(SmallVecImpl<ProcessIRef> &ordered, ProcessIRef proc) {
-    auto &custom = map[proc.proc()];
+  void visit2(SmallVecImpl<ProcessIRef> &ordered, ProcessIRef root) {
+    using Iterator = decltype(Custom::predsSet)::iterator;
+    struct Frame {
+      ProcessRef proc;
+      Iterator it;
+    };
 
-    if ((custom.bitField & Custom::VISITED))
-      return;
-    if ((custom.bitField & Custom::PRE_VISITED)) {
-      std::cerr << "cyclic:\n";
-      dumpInstr(proc);
-      abort();
-    }
+    SmallVec<Frame, 128> stack;
+    stack.emplace_back(root.proc(), map[root.proc()].predsSet.end());
 
-    custom.bitField |= Custom::PRE_VISITED;
+    uint32_t loopIDCnt = 1;
 
-    for (auto depend : Range{custom.predsSet}) {
-      if (isBlackBoxWrite(depend))
+    while (!stack.empty()) {
+      auto &entry = stack.back();
+      auto &custom = map[entry.proc];
+
+      if (entry.proc.getCustom() == 0) {
+        entry.proc.setCustom(1);
+        if ((custom.bitField & Custom::VISITED)) {
+          stack.pop_back();
+          continue;
+        }
+        if ((custom.bitField & Custom::PRE_VISITED)) {
+          auto it =
+              std::find_if(std::make_reverse_iterator(stack.end() - 1),
+                           std::make_reverse_iterator(stack.begin()),
+                           [&](auto &val) { return val.proc == entry.proc; });
+
+          assert(it != std::make_reverse_iterator(stack.begin()));
+
+          for (auto it2 = it.base(); it2 != stack.end(); ++it2) {
+            // giving up on merging if part of multiple logic loops. we might
+            // want to revisit this at some point.
+            bool noLoopID = map[it2->proc].loopID == Custom::LOOPID_NONE;
+            map[it2->proc].loopID =
+                noLoopID ? loopIDCnt : Custom::LOOPID_MULTIPLE;
+          }
+          loopIDCnt++;
+
+          DEBUG("ProcessLinearize", {
+            size_t length = stack.end() - it.base();
+            dbgs() << "Found process loop of length " << length << ":\n";
+            size_t i = 0;
+            for (auto it2 = stack.end() - 1; it2 >= it.base(); --it2, ++i) {
+              dbgs() << "Process " << (i + 1) << " of " << length << "\n";
+              dumpInstr(it2->proc.iref());
+              dbgs() << "\n";
+            }
+          });
+
+          stack.pop_back();
+          continue;
+        }
+        custom.bitField |= Custom::PRE_VISITED;
+        entry.it = custom.predsSet.begin();
+      }
+
+      if (entry.it != custom.predsSet.end()) {
+        stack.emplace_back(entry.it.key().proc(), Iterator{});
+        stack.back().proc.setCustom(0);
+        ++entry.it;
         continue;
-      if (depend == proc)
-        continue;
-      visit(ordered, depend);
-    }
+      }
 
-    custom.bitField |= Custom::VISITED;
-    ordered.emplace_back(proc);
+      custom.bitField |= Custom::VISITED;
+      ordered.emplace_back(entry.proc.iref());
+      stack.pop_back();
+    }
   }
 
   void linearize(ModuleIRef module) {
     SmallVec<ProcessIRef, 16> ordered;
     for (auto proc : module.procs()) {
-      visit(ordered, proc);
+      visit2(ordered, proc);
     }
 
     if (config.retainIODeps) {
@@ -312,30 +257,30 @@ public:
       for (auto proc : Range{ordered}.reverse()) {
         auto &custom = map[proc.proc()];
         for (auto pred : Range{custom.predsSet}) {
-          if (isBlackBoxWrite(pred))
-            continue;
-          custom.dependingOutputs |= custom.dependingOutputs;
+          custom.dependingOutputs |= map[pred.proc()].dependingOutputs;
         }
       }
       // propagate depending inputs.
       for (auto proc : Range{ordered}) {
         auto &custom = map[proc.proc()];
         for (auto pred : Range{custom.predsSet}) {
-          if (isBlackBoxWrite(pred))
-            continue;
-          custom.dependingInputs |= custom.dependingInputs;
+          custom.dependingInputs |= map[pred.proc()].dependingInputs;
         }
       }
 
-      DEBUG(
-          "ProcessLinearize", std::cerr << "ordered:\n";
-          for (auto proc : ordered) { dumpInstr(proc); } dbgs() << "\n\n\n";)
+      // DEBUG(
+      //     "ProcessLinearize", std::cerr << "ordered:\n";
+      //     for (auto proc : ordered) { dumpInstr(proc); } dbgs() << "\n\n\n";)
 
       size_t cnt = ordered.size();
       SmallVec<uint32_t, 16> toMerge;
       while (cnt != 0) {
         toMerge.clear();
-        std::optional<BitSet> mergedIns = std::nullopt;
+
+        bool foundInitial = false;
+
+        uint32_t loopID;
+        BitSet mergedIns;
         bool hasOutputsDeps = false;
         bool skippedAny = false;
 
@@ -343,20 +288,30 @@ public:
           if (!proc)
             continue;
 
-          auto &otherIns = map[proc.proc()].dependingInputs;
-          bool otherHasOutputDeps =
-              map[proc.proc()].dependingOutputs.count() != 0;
+          auto &custom = map[proc.proc()];
+          auto &otherIns = custom.dependingInputs;
+          bool otherHasOutputDeps = custom.dependingOutputs.count() != 0;
 
-          if (!mergedIns) {
+          if (!foundInitial) {
+            loopID = custom.loopID;
             mergedIns = otherIns;
             hasOutputsDeps = otherHasOutputDeps;
             toMerge.emplace_back(i);
+            foundInitial = true;
+            if (loopID == Custom::LOOPID_MULTIPLE)
+              break;
             continue;
           }
 
-          if (otherIns == *mergedIns ||
-              (!skippedAny && !config.retainInnerDeps && !hasOutputsDeps &&
-               !otherHasOutputDeps)) {
+          bool loopOK =
+              custom.loopID == loopID && loopID != Custom::LOOPID_MULTIPLE;
+
+          bool innerMerge = (!config.retainInnerDeps && !skippedAny &&
+                             !hasOutputsDeps && !otherHasOutputDeps);
+
+          bool outerMerge = otherIns == mergedIns;
+
+          if ((innerMerge || outerMerge) && loopOK) {
             toMerge.emplace_back(i);
           } else
             skippedAny = true;
