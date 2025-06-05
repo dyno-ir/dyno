@@ -176,6 +176,8 @@ public:
     }
   }
 
+  uint32_t loopIDCnt = 1;
+
   void visit2(SmallVecImpl<ProcessIRef> &ordered, ProcessIRef root) {
     using Iterator = decltype(Custom::predsSet)::iterator;
     struct Frame {
@@ -184,9 +186,8 @@ public:
     };
 
     SmallVec<Frame, 128> stack;
-    stack.emplace_back(root.proc(), map[root.proc()].predsSet.end());
-
-    uint32_t loopIDCnt = 1;
+    stack.emplace_back(root.proc(), Iterator{});
+    stack.back().proc.setCustom(0);
 
     while (!stack.empty()) {
       auto &entry = stack.back();
@@ -246,6 +247,29 @@ public:
     }
   }
 
+  void visit(SmallVecImpl<ProcessIRef> &ordered, ProcessIRef proc) {
+    auto &custom = map[proc.proc()];
+
+    if ((custom.bitField & Custom::VISITED))
+      return;
+    if ((custom.bitField & Custom::PRE_VISITED)) {
+      std::cerr << "cyclic:\n";
+      dumpInstr(proc);
+      abort();
+    }
+
+    custom.bitField |= Custom::PRE_VISITED;
+
+    for (auto depend : Range{custom.predsSet}) {
+      if (depend == proc)
+        continue;
+      visit(ordered, depend);
+    }
+
+    custom.bitField |= Custom::VISITED;
+    ordered.emplace_back(proc);
+  }
+
   void linearize(ModuleIRef module) {
     SmallVec<ProcessIRef, 16> ordered;
     for (auto proc : module.procs()) {
@@ -268,9 +292,9 @@ public:
         }
       }
 
-      // DEBUG(
-      //     "ProcessLinearize", std::cerr << "ordered:\n";
-      //     for (auto proc : ordered) { dumpInstr(proc); } dbgs() << "\n\n\n";)
+      DEBUG(
+          "ProcessLinearize", std::cerr << "ordered:\n";
+          for (auto proc : ordered) { dumpInstr(proc); } dbgs() << "\n\n\n";)
 
       size_t cnt = ordered.size();
       SmallVec<uint32_t, 16> toMerge;
