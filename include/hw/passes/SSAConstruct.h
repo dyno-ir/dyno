@@ -85,14 +85,16 @@ public:
     // initial value which they modify according to their contents.
 
     // could save on copying with a copy-on-write version of RegisterValue
-    SmallVec<std::pair<ObjRef<Register>, RegisterValue *>, 4> priorValues;
+    SmallVec<std::pair<ObjRef<Register>, RegisterValue>, 4> priorValues;
     for (auto [obj, regState] : regMap) {
       if (regState.has(startDepth)) {
         auto &value = regState.get();
-        auto &copy = regState.stack.emplace_back(value);
+        assert(value.frags.data());
+        priorValues.emplace_back(obj, value);
+
+        auto &copy = regState.stack.emplace_back(priorValues.back().second);
         copy.depth = depth + 1;
         copy.untouched = true;
-        priorValues.emplace_back(obj, &value);
       }
     }
     // first
@@ -101,7 +103,7 @@ public:
     // remaining
     for (auto block : Range{wayBlocks}.drop_front()) {
       for (auto [reg, value] : priorValues) {
-        auto &copy = regMap[reg].stack.emplace_back(*value);
+        auto &copy = regMap[reg].stack.emplace_back(value);
         copy.depth = depth + 1;
         copy.untouched = true;
       }
@@ -201,7 +203,7 @@ public:
         // for next pass: expose state of untouched (invariant) reg to
         // body.
         for (uint32_t i = 0; i < numLoopBlocks; i++) {
-          auto &copy = state.stack.emplace_back(state.get());
+          auto &copy = state.stack.emplace_back(RegisterValue{state.get()});
           copy.depth = startDepth + i + 1;
         }
         continue;

@@ -911,25 +911,30 @@ public:
       auto &asCase = stmt.as<slang::ast::CaseStatement>();
       auto swInstr =
           build.buildSwitch(handle_expr(asCase.expr)->proGetValue(build));
-      build.pushInsertPoint(swInstr.block().end());
-
       SmallVec<HWValue, 8> labels;
+      build.setInsertPoint(build.insert.pred());
       for (auto &swCase : asCase.items) {
         labels.resize(swCase.expressions.size());
         for (auto [idx, expr] : Range{swCase.expressions}.enumerate())
           labels[idx] = handle_expr(*expr)->proGetValue(build);
+
+        build.pushInsertPoint(swInstr.block().end());
         auto caseInstr = build.buildCase(labels);
+        build.popInsertPoint();
+
         build.pushInsertPoint(caseInstr.block().end());
         handle_stmt(*swCase.stmt);
         build.popInsertPoint();
       }
       if (auto defCase = asCase.defaultCase) {
+        build.pushInsertPoint(swInstr.block().end());
         auto defInstr = build.buildDefaultCase();
+        build.popInsertPoint();
+
         build.pushInsertPoint(defInstr.block().end());
         handle_stmt(*defCase);
         build.popInsertPoint();
       }
-      build.popInsertPoint();
       break;
     }
     case slang::ast::StatementKind::WhileLoop: {
@@ -943,7 +948,7 @@ public:
 
       build.pushInsertPoint(whileInstr.getBodyBlock().end());
       handle_stmt(asWhileLoop.body);
-      //build.buildYield(ConstantRef::fromBool(true));
+      // build.buildYield(ConstantRef::fromBool(true));
       build.popInsertPoint();
       break;
     }
@@ -988,7 +993,7 @@ public:
       for (auto *step : asForLoop.steps) {
         handle_expr(*step);
       }
-      //build.buildYield(ConstantRef::fromBool(true));
+      // build.buildYield(ConstantRef::fromBool(true));
       build.popInsertPoint();
       break;
     }
@@ -1361,7 +1366,10 @@ public:
     case slang::ast::ExpressionKind::NamedValue: {
       auto const &nval = expr.as<slang::ast::ValueExpressionBase>();
       auto [found, sig] = vars.findOrInsert(&nval.symbol, [&] {
-        return makeReg(nval.type->getBitstreamWidth());
+        return nval.getConstant() ? RegisterOrConstantRef{toDynoConstant(
+                                        nval.getConstant()->integer())}
+                                  : RegisterOrConstantRef{makeReg(
+                                        nval.type->getBitstreamWidth())};
       });
 
       if (auto reg = sig.val().dyn_as<RegisterRef>())
@@ -1753,7 +1761,7 @@ int main(int argc, char **argv) {
 
   std::cout << "\n\n\n";
   HWPrinter print{std::cout};
-  print.printCtx(ctx);
+  // print.printCtx(ctx);
 
   FunctionInlinePass pass0{ctx};
   pass0.run();
@@ -1761,13 +1769,12 @@ int main(int argc, char **argv) {
   SeqToCombPass pass{ctx};
   pass.run();
 
+  SSAConstructPass pass3{ctx};
+  pass3.run();
+
   ProcessLinearizePass pass2{ctx};
   pass2.run();
 
-  print.reset();
-  print.printCtx(ctx);
-
-  SSAConstructPass pass3{ctx};
   pass3.run();
 
   print.reset();

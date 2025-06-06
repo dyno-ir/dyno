@@ -1884,6 +1884,11 @@ private:
   uint8_t getIs4S() const { return CustomField{field}; }
 };
 static_assert(TrailingObj<Constant>);
+template <> struct ObjTraits<Constant> {
+  // static constexpr DialectID dialect{DIALECT_CORE};
+  static constexpr DialectType ty{CORE_CONSTANT};
+  using FatRefT = ConstantRef;
+};
 
 class ConstantRef : public FatObjRef<Constant>,
                     public BigIntMixin<ConstantRef> {
@@ -2209,11 +2214,5 @@ public:
 };
 
 using ConstantBuilder = ConstantBuilderBase<BigInt>;
-
-template <> struct ObjTraits<Constant> {
-  // static constexpr DialectID dialect{DIALECT_CORE};
-  static constexpr DialectType ty{CORE_CONSTANT};
-  using FatRefT = ConstantRef;
-};
 
 } // namespace dyno

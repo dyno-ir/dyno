@@ -312,6 +312,7 @@ public:
   iterator erase(iterator it) {
     std::destroy_at(it);
     std::move(it + 1, end(), it);
+    --sz;
     return it;
   }
 

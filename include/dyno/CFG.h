@@ -42,6 +42,12 @@ public:
   }
 };
 
+template <> struct ObjTraits<Block> {
+  // static constexpr DialectID dialect{DIALECT_CORE};
+  static constexpr DialectType ty{CORE_BLOCK};
+  using FatRefT = BlockRef;
+};
+
 using BlockStore = NewDeleteObjStore<Block>;
 
 class CFG {
@@ -285,11 +291,5 @@ inline BlockRef_iterator_base CFG::operator[](ObjRef<Instr> ref) {
 inline auto BlockRef_iterator_base::blockRef() const {
   return BlockRef{block->ref.getObjID(), block};
 }
-
-template <> struct ObjTraits<Block> {
-  //static constexpr DialectID dialect{DIALECT_CORE};
-  static constexpr DialectType ty{CORE_BLOCK};
-  using RefT = BlockRef;
-};
 
 } // namespace dyno

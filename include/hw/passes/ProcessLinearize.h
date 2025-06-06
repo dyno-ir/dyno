@@ -42,10 +42,22 @@ class ProcessLinearizePass {
   struct Config {
     bool retainIODeps = true;
     bool retainInnerDeps = false;
+    enum ProcessKind { COMB, INIT };
+    ProcessKind kind = COMB;
   };
   Config config;
 
   HWContext &ctx;
+
+  bool ignoredKind(ProcessIRef iref) {
+    switch (config.kind) {
+    case Config::COMB:
+      return !iref.isOpc(HW_COMB_PROCESS_INSTR);
+    case Config::INIT:
+      return !iref.isOpc(HW_SEQ_PROCESS_INSTR);
+    }
+    dyno_unreachable("invalid kind");
+  };
 
 public:
   explicit ProcessLinearizePass(HWContext &ctx) : ctx(ctx), copier(ctx) {}
@@ -75,6 +87,8 @@ public:
         case HW_STORE.raw(): {
           auto asStore = instr.as<StoreIRef>();
           auto parentProc = instr.parentProc(ctx);
+          if (ignoredKind(parentProc))
+            continue;
           auto [addr, len] = asStore.getConstAccessRange();
           writeRegions.addRegion(parentProc.proc().getObjID(), addr, len);
           break;
@@ -116,6 +130,8 @@ public:
           switch (instr.getDialectOpcode().raw()) {
           case HW_LOAD.raw(): {
             auto procI = instr.parentProc(ctx);
+            if (ignoredKind(procI))
+              continue;
             auto [addr, len] = instr.as<LoadIRef>().getConstAccessRange();
             readRegions.addRegion(procI.proc().getObjID(), addr, len);
             break;
@@ -131,6 +147,8 @@ public:
         case HW_LOAD.raw(): {
           auto asLoad = instr.as<LoadIRef>();
           auto procI = instr.parentProc(ctx);
+          if (ignoredKind(procI))
+            continue;
           auto [addr, len] = asLoad.getConstAccessRange();
           auto writers = writeRegions.getAccessors(addr, len);
 
@@ -160,6 +178,8 @@ public:
         case HW_STORE.raw(): {
           if (regIsAnyOutput) {
             auto procI = instr.parentProc(ctx);
+            if (ignoredKind(procI))
+              continue;
             map[procI.proc()].dependingOutputs.setDyn(outputIdxCnt);
           }
           break;
@@ -273,6 +293,8 @@ public:
   void linearize(ModuleIRef module) {
     SmallVec<ProcessIRef, 16> ordered;
     for (auto proc : module.procs()) {
+      if (ignoredKind(proc))
+        continue;
       visit2(ordered, proc);
     }
 

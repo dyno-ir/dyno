@@ -55,7 +55,7 @@ public:
   }
 
   template <typename... Args>
-  FatObjRef<T> create(Args &&...args)
+  Traits::FatRefT create(Args &&...args)
     requires(!TrailingObj<T>)
   {
     auto ref = createRef();
@@ -66,7 +66,7 @@ public:
   }
 
   template <typename... Args>
-  FatObjRef<T> create(size_t sz, Args &&...args)
+  Traits::FatRefT create(size_t sz, Args &&...args)
     requires TrailingObj<T>
   {
     auto ref = createRef();

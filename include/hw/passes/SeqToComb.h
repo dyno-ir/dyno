@@ -2,7 +2,9 @@
 #include "dyno/CFG.h"
 #include "dyno/CustomInstr.h"
 #include "dyno/HierBlockIterator.h"
+#include "dyno/Instr.h"
 #include "hw/HWAbstraction.h"
+#include "hw/HWInstr.h"
 #include "hw/HWValue.h"
 #include "hw/IDs.h"
 #include "hw/Register.h"
@@ -89,12 +91,28 @@ public:
       runOnProc(module, proc);
     }
 
+    HWInstrBuilder build{ctx};
+
+    SmallVec<ProcessIRef, 32> destroyList;
     for (auto proc : module.procs()) {
       if (proc.isOpc(HW_SEQ_PROCESS_INSTR)) {
-        proc.mutateOpcode(HW_COMB_PROCESS_INSTR);
-        proc.downsizeOperands(2);
+        auto newProc = ctx.getInstrs().create(2, HW_COMB_PROCESS_INSTR);
+        InstrBuilder ibuild{newProc};
+        ibuild.addRef(proc.operand(0)->fat());
+        proc.operand(0).replace(FatDynObjRef<>{nullref});
+
+        ibuild.addRef(proc.operand(1)->fat());
+        proc.operand(1).replace(FatDynObjRef<>{nullref});
+
+        build.setInsertPoint(ctx.getCFG()[proc]);
+        build.insertInstr(newProc);
+
+        destroyList.emplace_back(proc);
       }
     }
+
+    for (auto proc : destroyList)
+      build.destroyInstr(proc);
   }
 
   void run() {

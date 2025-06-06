@@ -97,11 +97,20 @@ struct RegisterValue : public RegisterFrags<RegisterValueFragment> {
       : RegisterFrags({{value, 0, 0, bits, untouched}}), depth(depth),
         untouched(untouched) {}
 
+  uint32_t getLen() const {
+    uint32_t len = 0;
+    for (auto frag : frags)
+      len += frag.len;
+    return len;
+  }
+
   void overwrite(DynObjRef ref, uint32_t srcAddr, uint32_t dstAddr,
                  uint32_t len, bool remainUntouched = false) {
     untouched &= remainUntouched;
     uint32_t newStart = dstAddr;
     uint32_t newEnd = dstAddr + len;
+
+    auto startLen = getLen();
 
     auto it = getInsertIt(newStart);
     auto insertPos = it - frags.begin();
@@ -149,14 +158,15 @@ struct RegisterValue : public RegisterFrags<RegisterValueFragment> {
       }
 
       // else: existing perfectly matches new
-      auto minLen = std::min(len, it->len);
-      *it = Fragment{ref, srcAddr, newStart, minLen, remainUntouched};
-      return;
+      it = frags.erase(it);
     }
 
     // insert new fragment in sorted order
     frags.insert(frags.begin() + insertPos,
                  Fragment{ref, srcAddr, newStart, len, remainUntouched});
+
+    auto endLen = getLen();
+    assert(startLen == endLen);
   }
 
   HWValue get(HWInstrBuilder &build, uint32_t addr, uint32_t len,
