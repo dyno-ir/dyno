@@ -1,6 +1,8 @@
 #pragma once
 #include "dyno/CFG.h"
+#include "dyno/Instr.h"
 #include "dyno/Obj.h"
+#include "dyno/ObjMap.h"
 #include "hw/HWAbstraction.h"
 #include "hw/HWInstr.h"
 #include "hw/HWPrinter.h"
@@ -19,6 +21,7 @@ namespace dyno {
 class SSAConstructPass {
   HWContext &ctx;
   uint depth = 0;
+  ObjMapVec<Instr, bool> isNewLoad;
 
 public:
   struct Config {
@@ -492,7 +495,7 @@ public:
       }
 
       case *HW_LOAD: {
-        if (config.mode == Config::DEFERRED) {
+        if (config.mode == Config::DEFERRED && !isNewLoad[instr]) {
           // deferred stores are not yet visible, can't prop to loads.
           break;
         }
@@ -781,10 +784,23 @@ public:
       runOnProc(mod, proc);
     }
   }
+
   void run() {
+    isNewLoad.resize(ctx.getInstrs().numIDs());
+    auto &createHooks = ctx.getInstrs().createHooks;
+    auto hookSize = createHooks.size();
+
+    if (config.mode == Config::DEFERRED)
+      createHooks.emplace_back([&](InstrRef ref) {
+        if (ref.getDialectOpcode() == HW_LOAD)
+          isNewLoad.get_ensure(ref) = true;
+      });
+
     for (auto mod : Range{ctx.getModules()}.as<ModuleRef>()) {
       runOnModule(mod.iref());
     }
+
+    createHooks.resize(hookSize);
   }
 };
 

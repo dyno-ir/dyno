@@ -1,5 +1,6 @@
 #pragma once
 
+#include "support/SmallVec.h"
 #include <cassert>
 #include <dyno/Obj.h>
 #include <dyno/ObjMap.h>
@@ -15,9 +16,18 @@ namespace dyno {
 template <typename T> class NewDeleteObjStore {
 private:
   using Traits = ObjTraits<T>;
+  using FatRefT = Traits::FatRefT;
+  using CreateHookT = void (*)(FatRefT);
+  using DestroyHookT = void (*)(FatRefT);
+
   std::vector<ObjID> freeIds;
   ObjMapVec<T, T *> map;
 
+public:
+  SmallVec<std::function<void(FatRefT)>, 4> createHooks;
+  SmallVec<std::function<void(FatRefT)>, 4> destroyHooks;
+
+private:
   ObjRef<T> createRef() {
     if (!freeIds.empty()) {
       ObjID id = freeIds.back();
@@ -32,7 +42,7 @@ private:
   auto objs() {
     return Range{map.elements}
         .transform([](auto i, auto *ptr) {
-          return ptr ? std::optional{typename Traits::FatRefT{ObjRef<T>(ObjID(i)), *ptr}}
+          return ptr ? std::optional{FatRefT{ObjRef<T>(ObjID(i)), *ptr}}
                      : std::nullopt;
         })
         .discard_optional();
@@ -55,31 +65,39 @@ public:
   }
 
   template <typename... Args>
-  Traits::FatRefT create(Args &&...args)
+  FatRefT create(Args &&...args)
     requires(!TrailingObj<T>)
   {
     auto ref = createRef();
     void *alloc = malloc(sizeof(T));
     T *ptr = new (alloc) T(ref, std::forward<Args>(args)...);
     map[ref] = ptr;
-    return {ref, *ptr};
+    FatRefT rv{ref, *ptr};
+    for (auto hook : createHooks)
+      hook(rv);
+    return rv;
   }
 
   template <typename... Args>
-  Traits::FatRefT create(size_t sz, Args &&...args)
+  FatRefT create(size_t sz, Args &&...args)
     requires TrailingObj<T>
   {
     auto ref = createRef();
     void *alloc = malloc(T::getAllocSize(sz));
     T *ptr = new (alloc) T(ref, sz, std::forward<Args>(args)...);
     map[ref] = ptr;
-    return {ref, *ptr};
+    FatRefT rv{ref, *ptr};
+    for (auto hook : createHooks)
+      hook(rv);
+    return rv;
   }
 
   T &operator[](ObjRef<T> ref) { return *map[ref]; }
 
   void destroy(FatObjRef<T> ref) {
     assert(map[ref] && "Invalid ref");
+    for (auto hook : destroyHooks)
+      hook(FatRefT{ref});
     freeIds.push_back(ref.getObjID());
     map[ref] = nullptr;
     ref.getPtr()->~T();
@@ -89,15 +107,10 @@ public:
   void destroyIfExists(FatObjRef<T> ref) {
     if (!map[ref])
       return;
-    freeIds.push_back(ref.getObjID());
-    map[ref] = nullptr;
-    ref.getPtr()->~T();
-    free(ref.getPtr());
+    destroy(ref);
   }
 
-  Traits::FatRefT resolve(ObjRef<T> ref) {
-    return typename Traits::FatRefT{ref, map[ref]};
-  }
+  FatRefT resolve(ObjRef<T> ref) { return FatRefT{ref, map[ref]}; }
 
   auto begin() { return objs().begin(); }
   auto end() { return objs().end(); }

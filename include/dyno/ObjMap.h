@@ -26,19 +26,22 @@ public:
 
   void resize(size_t sz) { elements.resize(sz); }
 
+  void resize(size_t sz, const V& v) { elements.resize(sz, v); }
+
   void clear() { elements.clear(); }
 
   size_t size() { return elements.size(); }
 
   /*template <typename VV> void sync(ObjMapVec<K, VV> &o) { resize(o.size());
    * }*/
+  using value_reference = decltype(elements)::reference;
 
-  V &operator[](ObjRef<K> ref) {
+  value_reference operator[](ObjRef<K> ref) {
     assert(inRange(ref));
     return elements[ref.getObjID()];
   }
 
-  V &get_ensure(ObjRef<K> ref) {
+  value_reference get_ensure(ObjRef<K> ref) {
     ensure(ref);
     return this->operator[](ref);
   }
@@ -48,10 +51,10 @@ public:
     ObjID::num_t idx;
 
   public:
-    using value_type = std::pair<ObjRef<K>, V>;
+    using value_type = std::pair<ObjRef<K>, typename decltype(elements)::value_type>;
     using difference_type = std::ptrdiff_t;
-    using reference = std::pair<ObjRef<K>, V &>;
-    using pointer = std::pair<ObjRef<K>, V *>;
+    using reference = std::pair<ObjRef<K>, typename decltype(elements)::reference>;
+    using pointer = std::pair<ObjRef<K>, typename decltype(elements)::pointer>;
     using iterator_category = std::random_access_iterator_tag;
 
     explicit iterator(V *ptr, ObjID::num_t idx) : ptr(ptr), idx(idx) {}
