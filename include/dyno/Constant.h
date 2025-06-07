@@ -2062,16 +2062,16 @@ public:
     return *this;
   }
   template <typename U> ConstantBuilderBase &onesLike(U like) {
-    cur.set(uint32_t(~0ULL), like.getNumBits());
+    cur.set(uint32_t(~0ULL), (uint32_t)like.getNumBits());
     cur.setExtend(bit_mask_ones<uint8_t>(BigIntExtendBits));
     return *this;
   }
   template <typename U> ConstantBuilderBase &zeroLike(U like) {
-    cur.set(uint32_t(0), like.getNumBits());
+    cur.set(uint32_t(0), (uint32_t)like.getNumBits());
     return *this;
   }
   template <typename U> ConstantBuilderBase &oneLike(U like) {
-    cur.set(uint32_t(1), like.getNumBits());
+    cur.set(uint32_t(1), (uint32_t)like.getNumBits());
     return *this;
   }
 

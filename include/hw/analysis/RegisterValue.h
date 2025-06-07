@@ -2,6 +2,7 @@
 
 #include "hw/HWAbstraction.h"
 #include "support/Bits.h"
+#include "support/ErrorRecovery.h"
 #include <cstdint>
 #include <utility>
 
@@ -11,9 +12,7 @@ template <typename Fragment, size_t NumInline = 1> struct RegisterFrags {
 
   SmallVec<Fragment, NumInline> frags;
 
-  // returns last iterator before regions with higher start addr.
   auto getInsertItLin(uint32_t dstAddr) {
-    // todo: binary search when large
     auto it = frags.begin();
     while (it != frags.end() && it->dstAddr <= dstAddr)
       it++;
@@ -31,6 +30,7 @@ template <typename Fragment, size_t NumInline = 1> struct RegisterFrags {
     return std::prev(it);
   }
 
+  // returns last iterator before regions with higher start addr.
   auto getInsertIt(uint32_t dstAddr) {
     if (frags.size() <= 32) [[likely]] {
       auto rv = getInsertItLin(dstAddr);
@@ -49,6 +49,7 @@ struct RegisterValueFragment {
   uint32_t dstAddr;
   uint32_t len;
   bool untouched;
+  Optional<uint16_t> triggerID;
 
   std::pair<HWValue, BitRange> getValue(HWInstrBuilder &build, uint32_t addr,
                                         uint32_t len) {
@@ -90,12 +91,15 @@ struct RegisterValue : public RegisterFrags<RegisterValueFragment> {
   RegisterValue &operator=(const RegisterValue &) = default;
   RegisterValue &operator=(RegisterValue &&) = default;
 
-  RegisterValue(RegisterRef reg, uint32_t depth, bool untouched)
-      : RegisterFrags({{reg, 0, 0, reg->numBits, untouched}}), depth(depth),
-        untouched(untouched) {}
-  RegisterValue(DynObjRef value, uint32_t bits, uint32_t depth, bool untouched)
-      : RegisterFrags({{value, 0, 0, bits, untouched}}), depth(depth),
-        untouched(untouched) {}
+  RegisterValue(RegisterRef reg, uint32_t depth, bool untouched,
+                Optional<uint16_t> triggerID)
+      : RegisterFrags(
+            {Fragment{reg, 0, 0, *reg->numBits, untouched, triggerID}}),
+        depth(depth), untouched(untouched) {}
+  RegisterValue(DynObjRef value, uint32_t bits, uint32_t depth, bool untouched,
+                Optional<uint16_t> triggerID)
+      : RegisterFrags({Fragment{value, 0, 0, bits, untouched, triggerID}}),
+        depth(depth), untouched(untouched) {}
 
   uint32_t getLen() const {
     uint32_t len = 0;
@@ -105,7 +109,8 @@ struct RegisterValue : public RegisterFrags<RegisterValueFragment> {
   }
 
   void overwrite(DynObjRef ref, uint32_t srcAddr, uint32_t dstAddr,
-                 uint32_t len, bool remainUntouched = false) {
+                 uint32_t len, bool remainUntouched = false,
+                 Optional<uint16_t> triggerID = nullopt) {
     untouched &= remainUntouched;
     uint32_t newStart = dstAddr;
     uint32_t newEnd = dstAddr + len;
@@ -114,6 +119,15 @@ struct RegisterValue : public RegisterFrags<RegisterValueFragment> {
 
     auto it = getInsertIt(newStart);
     auto insertPos = it - frags.begin();
+
+    // fixme: not a fan of having this here. maybe register an error handler
+    // in the passes using this to print debug info (we don't know the reg
+    // here).
+    auto checkTriggerCompat = [triggerID](RegisterValueFragment *it) {
+      if (triggerID && it->triggerID && (it->triggerID != triggerID))
+        report_fatal_error("overlapping register regions assigned with "
+                           "different event triggers");
+    };
 
     // adjust or remove overlapping existing fragments
     while (it != frags.end()) {
@@ -124,14 +138,16 @@ struct RegisterValue : public RegisterFrags<RegisterValueFragment> {
         break;
 
       assert(end > newStart);
+      checkTriggerCompat(it);
 
       // full cover: split existing into two
       if (newStart > start && newEnd < end) {
         uint32_t leftLen = newStart - start;
         uint32_t rightLen = end - newEnd;
         // create right
-        Fragment right{it->ref, it->srcAddr + (newEnd - start), newEnd,
-                       rightLen, it->untouched};
+        Fragment right{it->ref,       it->srcAddr + (newEnd - start),
+                       newEnd,        rightLen,
+                       it->untouched, it->triggerID};
         // shrink left
         it->len = leftLen;
         frags.insert(it + 1, right);
@@ -162,8 +178,9 @@ struct RegisterValue : public RegisterFrags<RegisterValueFragment> {
     }
 
     // insert new fragment in sorted order
-    frags.insert(frags.begin() + insertPos,
-                 Fragment{ref, srcAddr, newStart, len, remainUntouched});
+    frags.insert(
+        frags.begin() + insertPos,
+        Fragment{ref, srcAddr, newStart, len, remainUntouched, triggerID});
 
     auto endLen = getLen();
     assert(startLen == endLen);
@@ -227,9 +244,11 @@ struct RegisterValue : public RegisterFrags<RegisterValueFragment> {
 
   void overwriteNoMaterialize(RegisterValue &src, Fragment *frag,
                               uint32_t srcAddr, uint32_t dstAddr, uint32_t len,
-                              bool remainUntouched = false) {
+                              bool remainUntouched = false,
+                              Optional<uint16_t> triggerID = nullopt) {
     auto it = frag;
     auto itO = src.getInsertIt(srcAddr);
+    // todo: normalize
     while (len != 0) {
       auto thisRemLen = it->len - (dstAddr - it->dstAddr);
       auto otherRemLen = itO->len - (dstAddr - itO->dstAddr);
@@ -249,6 +268,7 @@ struct RegisterValue : public RegisterFrags<RegisterValueFragment> {
       it->ref = itO->ref;
       it->srcAddr = itO->srcAddr + (dstAddr - itO->dstAddr);
       it->untouched = remainUntouched;
+      it->triggerID = triggerID;
       // it->len = it->len; unchanged
       // it->dstAddr = it->dstAddr; unchanged
 
@@ -300,30 +320,32 @@ struct RegisterValue : public RegisterFrags<RegisterValueFragment> {
   }
 };
 
-struct ConstRange {
+struct RegValueDiff {
 private:
   uint32_t addr_f;
-  uint32_t untouched1_len31_f;
+  uint32_t len_f;
+  bool untouched_f;
+  Optional<uint16_t> triggerID_f;
 
 public:
   using AddrField = BitField<uint32_t, 31, 0>;
   using UntouchedField = BitField<uint32_t, 1, 31>;
   uint32_t &addr() { return addr_f; }
-  auto len() { return AddrField{untouched1_len31_f}; }
-  auto untouched() { return UntouchedField{untouched1_len31_f}; }
+  auto &len() { return len_f; }
+  auto &untouched() { return untouched_f; }
+  auto &triggerID() { return triggerID_f; }
 
-  ConstRange(uint32_t addr_f, uint32_t len_f, bool untouched_f)
-      : addr_f(addr_f) {
-    len() = len_f;
-    untouched() = untouched_f;
-  }
-  ConstRange() = default;
+  RegValueDiff(uint32_t addr_f, uint32_t len_f, bool untouched_f,
+               Optional<uint16_t> triggerID_f)
+      : addr_f(addr_f), len_f(len_f), untouched_f(untouched_f),
+        triggerID_f(triggerID_f) {}
+  RegValueDiff() = default;
 
   auto pair() { return std::make_pair(addr(), len()); }
 };
 
 inline auto diffRegisterValues(ArrayRef<RegisterValue *> regVals) {
-  SmallVec<ConstRange, 4> diffs;
+  SmallVec<RegValueDiff, 4> diffs;
 
   SmallVec<uint32_t, 4> idxs(regVals.size());
 
@@ -332,11 +354,14 @@ inline auto diffRegisterValues(ArrayRef<RegisterValue *> regVals) {
   while (idxs[0] < regVals[0]->frags.size()) {
     uint32_t overlapEnd = UINT32_MAX;
     bool equalChunk = true;
-    bool equalUntouched = true;
 
     uint32_t sa;
     DynObjRef ref;
     bool untouched;
+    Optional<uint16_t> triggerID;
+
+    bool anyTouched = false;
+    Optional<uint16_t> anyTriggerID = nullopt;
 
     for (size_t i = 0; i < regVals.size(); i++) {
       auto &frag = regVals[i]->frags[idxs[i]];
@@ -346,26 +371,37 @@ inline auto diffRegisterValues(ArrayRef<RegisterValue *> regVals) {
       uint32_t sa2 = frag.srcAddr + (curAddr - frag.dstAddr);
       DynObjRef ref2 = frag.ref;
       bool untouched2 = frag.untouched;
+      auto triggerID2 = frag.triggerID;
       if (i == 0) {
         sa = sa2;
         ref = ref2;
         untouched = untouched2;
+        triggerID = triggerID2;
       } else {
-        equalUntouched &= (untouched2 == untouched);
-        equalChunk &= (ref2 == ref) && (sa2 == sa);
+        equalChunk &= (ref2 == ref) && (sa2 == sa) &&
+                      (untouched2 == untouched) && (triggerID == triggerID2);
+      }
+      anyTouched |= !untouched2;
+
+      if (triggerID2) {
+        if (anyTriggerID && triggerID2 != anyTriggerID)
+          report_fatal_error("overlapping register regions assigned with "
+                             "different event triggers");
+
+        anyTriggerID = triggerID2;
       }
     }
-    equalChunk &= equalUntouched;
     uint32_t chunkLen = overlapEnd - curAddr;
 
     if (!equalChunk) {
       // either start a new diff run or extend the last one
       if (!diffs.empty() &&
           diffs.back().addr() + diffs.back().len() == curAddr &&
-          diffs.back().untouched() == equalUntouched) {
+          diffs.back().untouched() == !anyTouched &&
+          diffs.back().triggerID() == anyTriggerID) {
         diffs.back().len() += chunkLen;
       } else
-        diffs.emplace_back(curAddr, chunkLen, equalUntouched);
+        diffs.emplace_back(curAddr, chunkLen, !anyTouched, anyTriggerID);
     }
 
     curAddr = overlapEnd;

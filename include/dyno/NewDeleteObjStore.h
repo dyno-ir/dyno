@@ -32,7 +32,7 @@ private:
   auto objs() {
     return Range{map.elements}
         .transform([](auto i, auto *ptr) {
-          return ptr ? std::optional{FatObjRef<T>{ObjRef<T>(ObjID(i)), *ptr}}
+          return ptr ? std::optional{typename Traits::FatRefT{ObjRef<T>(ObjID(i)), *ptr}}
                      : std::nullopt;
         })
         .discard_optional();
@@ -95,7 +95,9 @@ public:
     free(ref.getPtr());
   }
 
-  FatObjRef<T> resolve(ObjRef<T> ref) { return FatObjRef<T>{ref, map[ref]}; }
+  Traits::FatRefT resolve(ObjRef<T> ref) {
+    return typename Traits::FatRefT{ref, map[ref]};
+  }
 
   auto begin() { return objs().begin(); }
   auto end() { return objs().end(); }

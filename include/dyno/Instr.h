@@ -57,6 +57,12 @@ public:
       f.clearCustom();
     return f;
   }
+  DynObjRef thin() const {
+    auto f = ref;
+    if (isDefUseOperand(ref))
+      f.clearCustom();
+    return f;
+  }
 
 private:
   template <typename T> void emplace(FatDynObjRef<T> newRef) {

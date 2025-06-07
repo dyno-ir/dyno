@@ -13,7 +13,7 @@ template <typename Derived> class RangeMixin {
 public:
   std::pair<uint32_t, uint32_t> getConstAccessRange() {
     uint32_t addr = 0;
-    uint32_t len = self().reg()->numBits;
+    uint32_t len = *self().reg()->numBits;
     if (self().hasRange() && self().range()->isConstant()) {
       addr = self().range()->getAddr().template as<ConstantRef>().getExactVal();
       len = self().range()->getLen().template as<ConstantRef>().getExactVal();

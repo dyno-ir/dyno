@@ -78,7 +78,7 @@ public:
           reg.isOpc(HW_OUTPUT_REGISTER_INSTR, HW_INOUT_REGISTER_INSTR,
                     HW_REF_REGISTER_INSTR);
 
-      RegisterRegions writeRegions{reg.getNumBits()};
+      RegisterRegions writeRegions{*reg.getNumBits()};
 
       for (auto access : reg.oref().uses()) {
         auto instr = HWInstrRef{access.instr()};
@@ -122,7 +122,7 @@ public:
         }
       }
 
-      RegisterRegions readRegions{reg.getNumBits()};
+      RegisterRegions readRegions{*reg.getNumBits()};
       if (regIsAnyInput && config.retainIODeps) {
         for (auto access : reg.oref().uses()) {
           auto instr = HWInstrRef{access.instr()};

@@ -266,17 +266,17 @@ public:
   HWValue buildResize(HWValue val, uint32_t newSize, bool sign = false) {
     assert(val.getNumBits());
 
-    if (val.getNumBits() < newSize)
+    if (*val.getNumBits() < newSize)
       return buildExt(newSize, val, sign);
-    else if (val.getNumBits() > newSize)
+    else if (*val.getNumBits() > newSize)
       return buildTrunc(newSize, val);
     return val;
   }
   HWValue buildUpsize(HWValue val, uint32_t newSize, bool sign = false) {
     assert(val.getNumBits());
-    if (val.getNumBits() < newSize)
+    if (*val.getNumBits() < newSize)
       return buildExt(newSize, val, sign);
-    assert(val.getNumBits() == newSize);
+    assert(*val.getNumBits() == newSize);
     return val;
   }
 
@@ -384,7 +384,7 @@ public:
       if (range.isConstant() &&
           range.getAddr().as<ConstantRef>().valueEquals(0) &&
           (!range.getLen() ||
-           range.getExactConstantLen() == val.getNumBits())) {
+           range.getExactConstantLen() == *val.getNumBits())) {
         return val;
       }
     }
@@ -491,7 +491,7 @@ public:
     if (auto asConst = value.dyn_as<ConstantRef>()) {
       auto tmp = asConst - BigInt::fromU64(1, asConst.getNumBits());
       if (auto lz = BigInt::leadingZeros4S(tmp)) {
-        return ConstantRef::fromU32(asConst.getNumBits() - lz);
+        return ConstantRef::fromU32(asConst.getNumBits() - *lz);
       } else
         return ConstantRef::undef32();
     }
@@ -831,8 +831,10 @@ public:
     InstrBuilder ibuild{instr};
 
     if (old)
-      for (auto def : old)
+      for (auto def : old) {
         ibuild.addRef(def->as<FatDynObjRef<>>());
+        def.replace(FatDynObjRef<>{nullref});
+      }
     for (auto wire : addedYieldVals)
       ibuild.addRef(wire);
 
@@ -998,6 +1000,7 @@ public:
     }
     case *HW_TRIGGER: {
       ctx.getTriggers().destroy(obj.as<TriggerRef>());
+      break;
     }
     default:
       dyno_unreachable("deleting unknown object");

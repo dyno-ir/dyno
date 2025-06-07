@@ -16,6 +16,7 @@
 #include "hw/passes/ProcessLinearize.h"
 #include "hw/passes/SSAConstruct.h"
 #include "hw/passes/SeqToComb.h"
+#include "hw/passes/TriggerDedupe.h"
 #include "slang/ast/ASTVisitor.h"
 #include "slang/ast/Compilation.h"
 #include "slang/ast/Expression.h"
@@ -715,6 +716,13 @@ public:
   void handle_proc(const slang::ast::ProceduralBlockSymbol &block) {
     assert(mod);
 
+    auto *stmt = &block.getBody();
+    SensList sens;
+    if (auto *asTimed = stmt->as_if<slang::ast::TimedStatement>()) {
+      stmt = &asTimed->stmt;
+      handle_timing(asTimed->timing, sens);
+    }
+
     HWOpcode opc;
     switch (block.procedureKind) {
     case slang::ast::ProceduralBlockKind::Initial:
@@ -723,7 +731,15 @@ public:
     case slang::ast::ProceduralBlockKind::Final:
       opc = HW_FINAL_PROCESS_INSTR;
       break;
-    case slang::ast::ProceduralBlockKind::Always:
+    case slang::ast::ProceduralBlockKind::Always: {
+      bool seq =
+          std::any_of(sens.signals.begin(), sens.signals.end(), [](auto pair) {
+            return pair.second == SensMode::NEGEDGE ||
+                   pair.second == SensMode::POSEDGE;
+          });
+      opc = seq ? HW_SEQ_PROCESS_INSTR : HW_COMB_PROCESS_INSTR;
+      break;
+    }
     case slang::ast::ProceduralBlockKind::AlwaysComb:
       opc = HW_COMB_PROCESS_INSTR;
       break;
@@ -733,13 +749,6 @@ public:
     case slang::ast::ProceduralBlockKind::AlwaysFF:
       opc = HW_SEQ_PROCESS_INSTR;
       break;
-    }
-
-    auto *stmt = &block.getBody();
-    SensList sens;
-    if (auto *asTimed = stmt->as_if<slang::ast::TimedStatement>()) {
-      stmt = &asTimed->stmt;
-      handle_timing(asTimed->timing, sens);
     }
 
     auto trigger = build.buildTrigger(sens);
@@ -1396,9 +1405,9 @@ public:
       uint32_t newWidth = asConv.type->getBitstreamWidth();
       if (!val.getNumBits())
         print.error(asConv.operand().sourceRange);
-      if (newWidth > val.getNumBits())
+      if (newWidth > *val.getNumBits())
         val = build.buildExt(newWidth, val, src->type->isSigned());
-      else if (newWidth < val.getNumBits())
+      else if (newWidth < *val.getNumBits())
         val = build.buildTrunc(newWidth, val);
 
       return std::make_unique<RValue>(val, expr.type);
@@ -1766,6 +1775,9 @@ int main(int argc, char **argv) {
   FunctionInlinePass pass0{ctx};
   pass0.run();
 
+  TriggerDedupePass pass1{ctx};
+  pass1.run();
+
   SeqToCombPass pass{ctx};
   pass.run();
 
@@ -1775,6 +1787,9 @@ int main(int argc, char **argv) {
   ProcessLinearizePass pass2{ctx};
   pass2.run();
 
+  pass3.run();
+
+  pass3.config.mode = SSAConstructPass::Config::DEFERRED;
   pass3.run();
 
   print.reset();

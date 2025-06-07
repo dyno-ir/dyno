@@ -20,7 +20,7 @@ enum class SensMode : uint8_t {
 struct SensList {
   SmallVec<std::pair<RegisterRef, SensMode>, 2> signals;
 
-  //static SensList empty() { return SensList{}; }
+  // static SensList empty() { return SensList{}; }
   explicit operator bool() const { return !signals.empty(); }
 };
 
@@ -93,6 +93,8 @@ public:
     resize(numModes + 1);
     setMode(numModes - 1, mode);
   }
+
+  auto modesRaw() { return sensModes; }
 
   Trigger(DynObjRef) : sensModes(0), numModes(0) {}
 };

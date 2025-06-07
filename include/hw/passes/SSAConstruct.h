@@ -11,6 +11,7 @@
 #include "op/IDs.h"
 #include "op/StructuredControlFlow.h"
 #include "support/ArrayRef.h"
+#include "support/Debug.h"
 #include "support/Ranges.h"
 
 namespace dyno {
@@ -19,6 +20,20 @@ class SSAConstructPass {
   HWContext &ctx;
   uint depth = 0;
 
+public:
+  struct Config {
+
+    enum Mode {
+      IMMEDIATE,
+      DEFERRED,
+    };
+    Mode mode = IMMEDIATE;
+  };
+  Config config;
+
+private:
+  using TriggerID = decltype(RegisterValue::Fragment::triggerID);
+
   struct RegState {
     SmallVec<RegisterValue, 4> stack;
 
@@ -26,7 +41,7 @@ class SSAConstructPass {
       if (!stack.empty() && stack.back().depth == depth)
         return stack.back();
       else {
-        auto &rv = stack.emplace_back(RegisterValue{reg, depth, true});
+        auto &rv = stack.emplace_back(RegisterValue{reg, depth, true, nullopt});
         rv.untouched = true;
         return rv;
       }
@@ -43,12 +58,13 @@ class SSAConstructPass {
     }
 
     void clear(uint depth, RegisterRef reg) {
-      getOrSetDefault(depth, reg) = RegisterValue{reg, depth, true};
+      getOrSetDefault(depth, reg) = RegisterValue{reg, depth, true, nullopt};
     }
 
-    void plainValue(uint depth, RegisterRef reg, HWValue value) {
+    void plainValue(uint depth, RegisterRef reg, HWValue value,
+                    TriggerID trigger) {
       getOrSetDefault(depth, reg) =
-          RegisterValue{value, reg->numBits, depth, false};
+          RegisterValue{value, *reg->numBits, depth, false, trigger};
     }
   };
 
@@ -64,7 +80,8 @@ public:
   explicit SSAConstructPass(HWContext &ctx) : ctx(ctx) {}
 
   struct MultiwayResult {
-    SmallVec<std::pair<RegisterRef, std::pair<uint32_t, uint32_t>>, 2>
+    SmallVec<std::tuple<RegisterRef, std::pair<uint32_t, uint32_t>, TriggerID>,
+             2>
         yieldRegs;
     SmallVec<SmallVec<HWValue, 4>, 2> yieldVals;
 
@@ -97,6 +114,7 @@ public:
         copy.untouched = true;
       }
     }
+
     // first
     depth++;
     runOnBlock(proc, wayBlocks[0]);
@@ -126,7 +144,7 @@ public:
 
       auto reg = RegisterRef{ctx.getRegs().resolve(obj)};
 
-      RegisterValue lazyLoad{reg, startDepth, true};
+      RegisterValue lazyLoad{reg, startDepth, true, nullopt};
       SmallVec<RegisterValue *, 2> vals(wayBlocks.size(), &lazyLoad);
 
       bool allUntouched = true;
@@ -172,7 +190,7 @@ public:
       for (auto diff : diffs) {
         if (diff.untouched())
           continue;
-        rv.yieldRegs.emplace_back(reg, diff.pair());
+        rv.yieldRegs.emplace_back(reg, diff.pair(), diff.triggerID());
       }
 
       regState.stack.resize(i + 1);
@@ -187,7 +205,8 @@ public:
                                   MutArrayRef<BlockRef> loopBlocks) {
     assert(loopBlocks.size() == numLoopBlocks);
     auto startDepth = depth - numLoopBlocks;
-    SmallVec<std::pair<RegisterRef, std::pair<uint32_t, uint32_t>>, 4>
+    SmallVec<std::tuple<RegisterRef, std::pair<uint32_t, uint32_t>, TriggerID>,
+             4>
         yieldVals;
     std::array<SmallVec<HWValue, 4>, numLoopBlocks> materializedYieldVals;
     std::array<SmallVec<WireRef, 4>, numLoopBlocks> unyieldWires;
@@ -211,20 +230,22 @@ public:
       auto reg = RegisterRef{ctx.getRegs().resolve(obj)};
 
       // check if parent block has a state for this reg.
-      RegisterValue defaultVal{reg, ~0U, true};
+      RegisterValue defaultVal{reg, ~0U, true, nullopt};
       std::array<RegisterValue *, numLoopBlocks + 1> blockVals;
       {
         size_t i = 0;
         while (i <= numLoopBlocks) {
           uint32_t expectedDepth = startDepth + numLoopBlocks - i;
           if (state.stack.size() < i + 1) {
-            state.stack.insert(state.stack.begin(),
-                               RegisterValue{reg, expectedDepth, true});
+            state.stack.insert(
+                state.stack.begin(),
+                RegisterValue{reg, expectedDepth, true, nullopt});
           } else {
             auto &entryBelow = state.stack[state.stack.size() - i - 1];
             if (entryBelow.depth != expectedDepth) {
-              state.stack.insert(&entryBelow + 1,
-                                 RegisterValue{reg, expectedDepth, true});
+              state.stack.insert(
+                  &entryBelow + 1,
+                  RegisterValue{reg, expectedDepth, true, nullopt});
             }
           }
           i++;
@@ -257,7 +278,7 @@ public:
         }
         // modified anywhere in loop -> becomes yield value in every loop
         // block.
-        yieldVals.emplace_back(reg, diff.pair());
+        yieldVals.emplace_back(reg, diff.pair(), diff.triggerID());
         for (auto [i, val] : Range{blockVals}.drop_front().enumerate()) {
           // we need to materialize yield values here before we overwrite
           // them.
@@ -271,9 +292,10 @@ public:
 
           // now overwrite with unyield wire for next pass (source for this
           // value becomes yield of previous).
-          auto wire = unyieldWires[i].emplace_back(
-              ctx.getWires().create(diff.len().get()));
-          val->overwrite(wire, 0, diff.addr(), diff.len());
+          auto wire =
+              unyieldWires[i].emplace_back(ctx.getWires().create(diff.len()));
+          val->overwrite(wire, 0, diff.addr(), diff.len(), false,
+                         diff.triggerID());
         }
       }
     }
@@ -291,7 +313,8 @@ public:
     uint startDepth = depth - 1;
     uint bodyDepth = depth;
 
-    SmallVec<std::pair<RegisterRef, std::pair<uint32_t, uint32_t>>, 4>
+    SmallVec<std::tuple<RegisterRef, std::pair<uint32_t, uint32_t>, TriggerID>,
+             4>
         yieldVals;
     SmallVec<HWValue, 4> materializedYieldVals(yieldVals.size());
     SmallVec<WireRef, 4> unyieldWires;
@@ -316,8 +339,9 @@ public:
       }
       auto reg = RegisterRef{ctx.getRegs().resolve(obj)};
       if (!parentVal) {
-        parentVal = state.stack.insert(state.stack.end() - 1,
-                                       RegisterValue{reg, startDepth, true});
+        parentVal =
+            state.stack.insert(state.stack.end() - 1,
+                               RegisterValue{reg, startDepth, true, nullopt});
       }
 
       auto *val = &state.get();
@@ -337,7 +361,8 @@ public:
           dumpCtx(ctx);
           continue;
         }
-        yieldVals.emplace_back(reg, std::make_pair(frag.dstAddr, frag.len));
+        yieldVals.emplace_back(reg, std::make_pair(frag.dstAddr, frag.len),
+                               frag.triggerID);
 
         build.setInsertPoint(loopBlocks[0].end());
         if (!loopBlocks[0].empty() &&
@@ -359,7 +384,8 @@ public:
 
   bool addYieldsToLoopInstr(
       HWInstrBuilder &build, InstrRef loopInstr,
-      ArrayRef<std::pair<RegisterRef, std::pair<uint32_t, uint32_t>>>
+      ArrayRef<
+          std::tuple<RegisterRef, std::pair<uint32_t, uint32_t>, TriggerID>>
           yieldVals) {
     if (yieldVals.size() == 0)
       return false;
@@ -368,7 +394,7 @@ public:
 
     SmallVec<HWValue, 4> newUses;
     newUses.reserve(yieldVals.size());
-    for (auto [reg, range] : yieldVals) {
+    for (auto [reg, range, trigger] : yieldVals) {
       auto &val = regMap[reg].getOrSetDefault(depth, reg);
       // set initial yield vals to value before loop.
       newUses.emplace_back(val.get(build, range.first, range.second, false));
@@ -377,16 +403,41 @@ public:
     SmallVec<WireRef, 4> newDefs;
     newDefs.reserve(yieldVals.size());
 
-    for (auto [reg, range] : yieldVals) {
+    for (auto [reg, range, trigger] : yieldVals) {
       auto &val = regMap[reg].getOrSetDefault(depth, reg);
       // set reg state after loop to output yield vals.
       auto wire = ctx.getWires().create(range.second);
       newDefs.emplace_back(wire);
-      val.overwrite(wire, 0, range.first, range.second);
+      val.overwrite(wire, 0, range.first, range.second, false, trigger);
     }
 
     build.addOperands(loopInstr, newDefs, newUses);
     return true;
+  }
+
+  void dumpState() {
+    DEBUG("SSAConstruct", {
+      dbgs() << "state at depth " << depth << "\n";
+      for (auto [obj, state] : regMap) {
+        if (!state.has(depth))
+          continue;
+
+        auto reg = ctx.getRegs().resolve(obj);
+        dumpInstr(reg.iref());
+
+        HWPrinter print{dbgs()};
+
+        for (auto frag : state.get().frags) {
+          dbgs() << "[" << frag.dstAddr << "+:" << frag.len << "] = ";
+          print.printTypeDefault(frag.ref);
+          dbgs() << "[" << frag.ref.getObjID() << "]";
+          if (frag.untouched)
+            dbgs() << " (untouched)";
+          dbgs() << "\n";
+        }
+        dbgs() << "\n";
+      }
+    })
   }
 
   void runOnBlock(ProcessIRef proc, BlockRef block) {
@@ -396,19 +447,36 @@ public:
 
     for (auto instr : block) {
       switch (*instr.getDialectOpcode()) {
+
+      case *HW_STORE_DEFER:
       case *HW_STORE: {
+        if (instr.getDialectOpcode() == HW_STORE_DEFER &&
+            config.mode != Config::DEFERRED)
+          break;
+        if (instr.getDialectOpcode() == HW_STORE &&
+            config.mode != Config::IMMEDIATE)
+          break;
+
         auto asStore = instr.as<StoreIRef>();
         auto &regState = regMap[asStore.reg()];
 
+        TriggerID trigger = nullopt;
+        if (instr.getDialectOpcode() == HW_STORE_DEFER)
+          trigger = asStore.trigger().getObjID().num;
+
         uint32_t addr = 0;
-        uint32_t len = asStore.reg()->numBits;
+        uint32_t len = *asStore.reg()->numBits;
         if (auto range = asStore.range()) {
           if (!range->isConstant()) {
             build.setInsertPoint(asStore.iter(ctx));
             auto val = regState.getOrSetDefault(depth, asStore.reg())
-                           .get(build, 0, asStore.reg()->numBits);
+                           .get(build, 0, *asStore.reg()->numBits, false);
             val = build.buildInsert(val, asStore.value(), *asStore.range());
-            regState.plainValue(depth, asStore.reg(), val);
+
+            // plain value doesn't check for conflicting triggers.
+            // regState.plainValue(depth, asStore.reg(), val, trigger);
+
+            regState.get().overwrite(val, 0, 0, len, false, trigger);
             destroyList.emplace_back(asStore);
             break;
           }
@@ -417,24 +485,27 @@ public:
         }
 
         destroyList.emplace_back(asStore);
-        regState.getOrSetDefault(depth, asStore.reg())
-            .overwrite(asStore.value(), 0, addr, len);
+
+        auto &state = regState.getOrSetDefault(depth, asStore.reg());
+        state.overwrite(asStore.value(), 0, addr, len, false, trigger);
         break;
       }
 
       case *HW_LOAD: {
+        if (config.mode == Config::DEFERRED) {
+          // deferred stores are not yet visible, can't prop to loads.
+          break;
+        }
         auto asLoad = instr.as<LoadIRef>();
         auto &regState = regMap[asLoad.reg()];
 
         auto &val = regState.getOrSetDefault(depth, asLoad.reg());
 
         uint32_t addr = 0;
-        uint32_t len = asLoad.reg()->numBits;
+        uint32_t len = *asLoad.reg()->numBits;
         if (asLoad.hasRange()) {
           auto range = asLoad.range();
           if (!range->isConstant()) {
-            // if (val.untouched)
-            //   break;
             build.setInsertPoint(ctx.getCFG()[asLoad]);
             auto matVal =
                 build.buildSplice(val.get(build), BitRange{*asLoad.range()});
@@ -485,15 +556,14 @@ public:
         build.setInsertPoint(HWInstrRef{asIf}.iter(ctx));
         auto newIf = build.buildIfElse(asIf, newYieldVals, falseBlock);
 
-        for (auto [i, pair] : Range{res.yieldRegs}.enumerate()) {
-          auto reg = pair.first;
-          auto range = pair.second;
+        for (auto [i, tup] : Range{res.yieldRegs}.enumerate()) {
+          auto [reg, range, trig] = tup;
 
           auto yieldVal = newIf.getYieldValue(i + oldYieldVals)->as<WireRef>();
           yieldVal->numBits = range.second;
           regMap[reg]
               .getOrSetDefault(depth, reg)
-              .overwrite(yieldVal, 0, range.first, range.second);
+              .overwrite(yieldVal, 0, range.first, range.second, false, trig);
         }
 
         destroyList.emplace_back(asIf);
@@ -624,12 +694,12 @@ public:
         SmallVec<WireRef, 4> newYields;
         newYields.reserve(res.yieldRegs.size());
 
-        for (auto [reg, range] : res.yieldRegs) {
+        for (auto [reg, range, trig] : res.yieldRegs) {
           auto yieldVal =
               newYields.emplace_back(ctx.getWires().create(range.second));
           regMap[reg]
               .getOrSetDefault(depth, reg)
-              .overwrite(yieldVal, 0, range.first, range.second);
+              .overwrite(yieldVal, 0, range.first, range.second, false, trig);
         }
 
         build.addOperands(asSwitch, newYields, ArrayRef<HWValue>::empty());
@@ -653,12 +723,20 @@ public:
 
         uint32_t addr = 0;
         uint32_t len = 0;
+        Optional<uint16_t> triggerID;
 
         auto commitPrev = [&]() {
           if (len == 0)
             return;
+          TriggerIRef trigger = nullref;
+          if (triggerID) {
+            trigger = ctx.getTriggers()
+                          .resolve(ObjRef<Trigger>{ObjID{*triggerID}})
+                          .iref();
+          }
           build.buildStore(reg, regState.get().get(build, addr, len),
-                           BitRange{addr, len});
+                           BitRange{addr, len}, config.mode == Config::DEFERRED,
+                           trigger);
         };
         for (auto frag : regState.get().frags) {
           if (frag.untouched) {
@@ -666,15 +744,26 @@ public:
             addr = frag.dstAddr + frag.len;
             len = 0;
           } else {
+            if (frag.triggerID != triggerID) {
+              commitPrev();
+              addr = frag.dstAddr;
+              len = 0;
+            }
             len += frag.len;
+            triggerID = frag.triggerID;
           }
         }
         commitPrev();
       }
     }
 
-    for (auto obj : Range{destroyList}.reverse())
+    for (auto obj : Range{destroyList}.reverse()) {
+      DEBUG("SSAConstruct", {
+        dbgs() << "depth=" << depth << ", destroying: ";
+        dumpObj(obj);
+      })
       build.destroyObj(obj);
+    }
   }
 
   void runOnProc(ModuleIRef mod, ProcessIRef proc) {

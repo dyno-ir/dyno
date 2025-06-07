@@ -38,12 +38,15 @@ public:
     return *this;
   }
 
-  constexpr friend bool operator==(const Optional &rhs, nullopt_t) {
-    return !rhs;
+  constexpr friend bool operator==(const Optional &lhs, nullopt_t) {
+    return !lhs;
+  }
+  constexpr friend bool operator==(const Optional &lhs, const Optional &rhs) {
+    return lhs.val == rhs.val;
   }
 
-  explicit operator bool() { return val != Invalid; }
-  constexpr operator T() {
+  explicit operator bool() const { return val != Invalid; }
+  explicit constexpr operator T() {
     assert(*this);
     return val;
   };
@@ -58,6 +61,8 @@ public:
     assert(*this);
     return val;
   }
+
+  bool has() const { return bool(*this); }
 };
 
 }; // namespace dyno
