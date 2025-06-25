@@ -224,7 +224,7 @@ public:
   // can't support this with non-contiguous key/val (maybe w proxy object)
   auto operator->() = delete;
 
-  const V &val() { return (**this).second; }
+  V &val() { return (**this).second; }
 };
 
 template <typename Bucket, typename K, typename size_type = uint32_t>
@@ -502,7 +502,9 @@ public:
 
 public:
   // todo: copy/move construct
-  LargeSetMap() : Base(1, 0) { buckets = new Bucket[1](); }
+  LargeSetMap() : Base(1, 0) {
+    buckets = new Bucket[1]();
+  }
   ~LargeSetMap() {
     this->Base::clearDelete();
     ::operator delete[](buckets);

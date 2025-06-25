@@ -20,6 +20,7 @@
 #include "op/IDs.h"
 #include "op/StructuredControlFlow.h"
 #include "support/ArrayRef.h"
+#include "support/ErrorRecovery.h"
 #include "support/RTTI.h"
 #include "support/Utility.h"
 #include <algorithm>
@@ -48,6 +49,9 @@ protected:
     if constexpr (std::is_same_v<BitRange, T>) {
       build.addRef(ref.getAddr());
       build.addRef(ref.getLen());
+    } else if constexpr (IsArrayRef<std::remove_reference_t<T>>) {
+      for (auto elem : ref)
+        addSpecialRef(build, elem);
     } else {
       build.addRef(ref);
     }
@@ -65,14 +69,18 @@ public:
     ([&] { addSpecialRef(build, operands); }(), ...);
   }
 
-  template <typename... Ts> constexpr unsigned getNumOperands() {
+  template <typename... Ts> unsigned getNumOperands(Ts... ts) {
     unsigned size = 0;
     (
         // Special types may need more than one operand slot
         [&] {
           if constexpr (std::is_same_v<BitRange, std::decay_t<Ts>>)
             size += 2;
-          else
+          else if constexpr (IsArrayRef<std::decay_t<Ts>>) {
+            auto len = ts.end() - ts.begin();
+            if (!ts.empty())
+              size += len * getNumOperands(ts[0]);
+          } else
             size += 1;
         }(),
         ...);
@@ -83,11 +91,17 @@ public:
   HWInstrRef buildInstr(DialectID dialect, OpcodeID opcode, bool addWireDef,
                         Ts... operands) {
     auto instr = InstrRef{ctx.getInstrs().create(
-        addWireDef + getNumOperands<Ts...>(), dialect, opcode)};
+        addWireDef + getNumOperands<Ts...>(operands...), dialect, opcode)};
 
     insertInstr(instr);
     addRefs(instr, addWireDef, operands...);
     return HWInstrRef{instr};
+  }
+
+  InstrBuilder buildInstrRaw(DialectOpcode opc, uint numOperands) {
+    auto instr = InstrRef{ctx.getInstrs().create(numOperands, opc)};
+    insertInstr(instr);
+    return InstrBuilder{instr};
   }
 
   template <typename... Ts>
@@ -113,12 +127,15 @@ public:
     return rv;                                                                 \
   }
 
-  COMM_OP(buildAdd, OP_ADD, add)
-  COMM_OP(buildAnd, OP_AND, bitAND)
-  COMM_OP(buildOr, OP_OR, bitOR)
-  COMM_OP(buildXor, OP_XOR, bitXOR)
-  COMM_OP(buildXNor, OP_XNOR, bitXNOR)
-  COMM_OP(buildMul, OP_MUL, mul)
+#define FOR_HW_COMM_OPS(FUNC)                                                  \
+  FUNC(buildAdd, OP_ADD, add)                                                  \
+  FUNC(buildAnd, OP_AND, bitAND)                                               \
+  FUNC(buildOr, OP_OR, bitOR)                                                  \
+  FUNC(buildXor, OP_XOR, bitXOR)                                               \
+  FUNC(buildXNor, OP_XNOR, bitXNOR)                                            \
+  FUNC(buildMul, OP_MUL, mul)
+
+  FOR_HW_COMM_OPS(COMM_OP)
 
   // template <IsAnyHWValue... Ts> HWInstrRef buildAdd2(Ts... operands) {
 
@@ -480,7 +497,7 @@ public:
       uint32_t out;
       if (__builtin_umul_overflow(*value.getNumBits(),
                                   count.as<ConstantRef>().getExactVal(), &out))
-        abort(); // todo: what type of error should this throw?
+        report_fatal_error("repeat wire length does not fit in uint");
       rv->numBits = out;
     }
 
@@ -749,6 +766,7 @@ public:
         build.addRef(instr.operand(instr.getNumDefs())->as<FatDynObjRef<>>());
 
         HWInstrRef{instr}.iter(ctx).replace(newInstr);
+        instr->destroyOperands();
         ctx.getInstrs().destroy(instr);
         instr = newInstr;
         asIf = newInstr;
@@ -964,6 +982,12 @@ public:
     return ConstantBuilder{ctx.getConstants()}.val(bits, value);
   }
 
+  HWValue buildMux(HWValue sel, HWValue trueV, HWValue falseV) {
+    auto rv = buildInstr(HW_MUX, true, sel, trueV, falseV).defW();
+    rv->numBits = trueV.getNumBits();
+    return rv;
+  }
+
   void destroyObj(FatDynObjRef<> obj) {
     if (obj == nullref)
       return;
@@ -1002,6 +1026,10 @@ public:
       ctx.getTriggers().destroy(obj.as<TriggerRef>());
       break;
     }
+    case *HW_MODULE: {
+      ctx.getModules().destroy(obj.as<ModuleRef>());
+      break;
+    }
     default:
       dyno_unreachable("deleting unknown object");
     }
@@ -1009,11 +1037,12 @@ public:
   void destroyInstr(InstrRef instr) {
     for (auto oref : instr.defs()) {
       auto obj = oref->fat();
-      oref.replace(FatDynObjRef<>{nullref});
       destroyObj(obj);
     }
 
-    ctx.getCFG()[instr].erase();
+    if (ctx.getCFG().contains(instr))
+      ctx.getCFG()[instr].erase();
+    instr->destroyOthers();
     ctx.getInstrs().destroy(instr);
   }
   void destroyBlock(BlockRef block) {
@@ -1028,6 +1057,7 @@ public:
   }
 
   void setInsertPoint(BlockRef_iterator<true> it) { insert = it; }
+  void setInsertPoint(InstrRef ref) { insert = ctx.getCFG()[ref]; }
 }; // namespace dyno
 
 class HWInstrBuilderStack : public HWInstrBuilder {

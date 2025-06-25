@@ -7,6 +7,7 @@ target_include_directories(coreSupport INTERFACE
 add_library(core STATIC
     dyno/Constant.cpp
     hw/HWPrinter.cpp
+    hw/passes/InstCombine.cpp
     support/ErrorRecovery.cpp
 )
 

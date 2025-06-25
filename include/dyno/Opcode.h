@@ -78,4 +78,25 @@ public:
   constexpr SpecificDialectOpcode() = default;
 };
 
+template <size_t NUM_DIALECTS, typename T> class DialectOpcodeInterface {
+  Interfaces<NUM_DIALECTS, std::vector<T>> interfaces;
+
+public:
+  constexpr T &operator[](DialectOpcode d) {
+    auto &vec =
+        interfaces.template getVal<std::vector<T>>(d.getDialectID().num);
+    if (vec.size() <= d.getOpcodeID().num)
+      vec.resize(d.getOpcodeID().num + 1);
+    return vec[d.getOpcodeID().num];
+  }
+
+  constexpr void set(DialectOpcode d, const T &t) {
+    auto &vec =
+        interfaces.template getVal<std::vector<T>>(d.getDialectID().num);
+    if (vec.size() <= d.getOpcodeID().num)
+      vec.resize(d.getOpcodeID().num + 1);
+    vec[d.getOpcodeID().num] = t;
+  }
+};
+
 }; // namespace dyno

@@ -110,6 +110,8 @@ public:
     destroy(ref);
   }
 
+  bool exists(ObjRef<T> ref) { return !!map[ref]; }
+
   FatRefT resolve(ObjRef<T> ref) { return FatRefT{ref, map[ref]}; }
 
   auto begin() { return objs().begin(); }

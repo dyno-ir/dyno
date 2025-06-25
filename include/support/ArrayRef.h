@@ -4,7 +4,9 @@
 #include <cstddef>
 #include <cstdint>
 #include <iterator>
+#include <type_traits>
 template <typename T> class ArrayRef {
+public:
   using iterator_category = std::random_access_iterator_tag;
   using value_type = T;
   using pointer = T *;
@@ -16,6 +18,7 @@ template <typename T> class ArrayRef {
   using iterator = const_pointer;
   using const_iterator = const_pointer;
 
+private:
   const T *ptr;
   size_t sz;
 
@@ -23,7 +26,8 @@ public:
   const_iterator begin() const { return ptr; }
   const_iterator end() const { return ptr + sz; }
 
-  size_t size() { return sz; }
+  size_t size() const { return sz; }
+  bool empty() const { return size() == 0; }
 
   const_reference operator[](size_t i) {
     assert(i < sz);
@@ -37,14 +41,20 @@ public:
   const_reference back() { return ptr[sz - 1]; }
   const_reference front() { return ptr[0]; }
 
-  static constexpr ArrayRef empty() { return ArrayRef{nullptr, size_t(0)}; }
+  static constexpr ArrayRef emptyRef() { return ArrayRef{nullptr, size_t(0)}; }
 
   template <typename U> ArrayRef(const U &u) : ArrayRef(u.begin(), u.end()) {}
 };
 
 template <typename U> ArrayRef(const U &u) -> ArrayRef<typename U::value_type>;
 
+template <typename T>
+concept IsArrayRef = (requires {
+  typename T::value_type;
+} && std::is_same_v<std::remove_cv_t<T>, ArrayRef<typename T::value_type>>);
+
 template <typename T> class MutArrayRef {
+public:
   using iterator_category = std::random_access_iterator_tag;
   using value_type = T;
   using pointer = T *;
@@ -56,6 +66,7 @@ template <typename T> class MutArrayRef {
   using iterator = pointer;
   using const_iterator = const_pointer;
 
+private:
   T *ptr;
   size_t sz;
 
@@ -64,6 +75,7 @@ public:
   iterator end() const { return ptr + sz; }
 
   size_t size() const { return sz; }
+  bool empty() const { return size() == 0; }
 
   reference operator[](size_t i) const {
     assert(i < sz);
@@ -76,7 +88,7 @@ public:
   reference back() { return ptr[sz - 1]; }
   reference front() { return ptr[0]; }
 
-  static constexpr MutArrayRef empty() {
+  static constexpr MutArrayRef emptyRef() {
     return MutArrayRef{nullptr, size_t(0)};
   }
 

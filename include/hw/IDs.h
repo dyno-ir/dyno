@@ -22,7 +22,8 @@ using HWOpcode = SpecificDialectOpcode<DialectID{DIALECT_HW}>;
   x(HW_PROCESS,      2 | TY_DEF_USE_START) \
   x(HW_MODULE,       3 | TY_DEF_USE_START) \
   x(HW_SENS_MODES,   4) \
-  x(HW_TRIGGER,      5 | TY_DEF_USE_START)
+  x(HW_TRIGGER,      5 | TY_DEF_USE_START) \
+  x(HW_MEMORY,       6 | TY_DEF_USE_START)
 // clang-format on
 
 #define ENUM_EXPAND(ident, idx) ident = idx,
@@ -49,7 +50,7 @@ TYPES(CEXPR_EXPAND)
 template <> struct DialectTraits<DIALECT_HW> {
   constexpr static DialectInfo info{"rtl"};
   constexpr static TyInfo tyInfo[] = {
-      {"wire"}, {"register"}, {"process"}, {"module"}, {"sens_modes"}, {"trigger"}};
+      {"wire"}, {"register"}, {"process"}, {"module"}, {"sens_modes"}, {"trigger"}, {"memory"}};
   constexpr static OpcodeInfo opcInfo[] = {
 #define HEADER
 #define FOOTER

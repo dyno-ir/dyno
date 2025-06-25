@@ -26,7 +26,7 @@ public:
 
   void resize(size_t sz) { elements.resize(sz); }
 
-  void resize(size_t sz, const V& v) { elements.resize(sz, v); }
+  void resize(size_t sz, const V &v) { elements.resize(sz, v); }
 
   void clear() { elements.clear(); }
 
@@ -47,17 +47,20 @@ public:
   }
 
   class iterator {
-    V *ptr;
+    std::vector<V>::iterator ptr;
     ObjID::num_t idx;
 
   public:
-    using value_type = std::pair<ObjRef<K>, typename decltype(elements)::value_type>;
+    using value_type =
+        std::pair<ObjRef<K>, typename decltype(elements)::value_type>;
     using difference_type = std::ptrdiff_t;
-    using reference = std::pair<ObjRef<K>, typename decltype(elements)::reference>;
+    using reference =
+        std::pair<ObjRef<K>, typename decltype(elements)::reference>;
     using pointer = std::pair<ObjRef<K>, typename decltype(elements)::pointer>;
     using iterator_category = std::random_access_iterator_tag;
 
-    explicit iterator(V *ptr, ObjID::num_t idx) : ptr(ptr), idx(idx) {}
+    explicit iterator(std::vector<V>::iterator ptr, ObjID::num_t idx)
+        : ptr(ptr), idx(idx) {}
 
     iterator &operator++() {
       ++ptr;
@@ -115,9 +118,9 @@ public:
     auto operator<=>(const iterator &other) const { return ptr <=> other.ptr; }
   };
 
-  auto begin() { return iterator{&elements.front(), 0}; }
+  auto begin() { return iterator{elements.begin(), 0}; }
   auto end() {
-    return iterator{&elements.back() + 1, (uint32_t)elements.size()};
+    return iterator{elements.end(), (uint32_t)elements.size()};
   }
 };
 

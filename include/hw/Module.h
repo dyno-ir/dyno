@@ -77,7 +77,28 @@ public:
     return it;
   }
 
+  BlockRef_iterator<true> ports_end() {
+    auto it = block().begin();
+    while (it != block().end()) {
+      switch (it.instr().getDialectOpcode().raw()) {
+      case HW_INPUT_REGISTER_INSTR.raw():
+      case HW_OUTPUT_REGISTER_INSTR.raw():
+      case HW_INOUT_REGISTER_INSTR.raw():
+      case HW_REF_REGISTER_INSTR.raw():
+        it++;
+        continue;
+      default:
+        break;
+      }
+      break;
+    }
+    return it;
+  }
+
   auto regs() { return Range{block().begin(), regs_end()}.as<RegisterIRef>(); }
+  auto ports() {
+    return Range{block().begin(), ports_end()}.as<RegisterIRef>();
+  }
 
   auto procs() {
     return Range{regs_end(), block().end()}

@@ -6,12 +6,12 @@
 #include "support/SmallVec.h"
 #include "support/Utility.h"
 #include <algorithm>
-#include <cmath>
 #include <concepts>
 #include <cstdint>
 #include <dyno/IDs.h>
 #include <dyno/NewDeleteObjStore.h>
 #include <dyno/Obj.h>
+#include <expected>
 #include <iomanip>
 #include <ios>
 #include <iostream>
@@ -21,6 +21,64 @@
 #include <type_traits>
 
 namespace dyno {
+
+template <typename T, size_t NumInline> class CexprVec {
+  using value_type = T;
+  using size_type = uint32_t;
+  using iterator = T *;
+  using const_iterator = const T *;
+  using param_type = T &;
+
+  std::array<T, NumInline> arr = {};
+  uint32_t sz;
+
+public:
+  constexpr iterator begin() { return arr.begin(); }
+  constexpr iterator end() { return arr.begin() + sz; }
+  constexpr const_iterator begin() const { return arr.begin(); }
+  constexpr const_iterator end() const { return arr.begin() + sz; }
+
+  constexpr T &back() {
+    assert(!empty());
+    return *(end() - 1);
+  }
+  constexpr const T &back() const {
+    assert(!empty());
+    return *(end() - 1);
+  }
+  constexpr T &front() {
+    assert(!empty());
+    return *(begin());
+  }
+  constexpr const T &front() const {
+    assert(!empty());
+    return *(begin());
+  }
+
+  constexpr void pop_back() {
+    assert(!empty());
+    sz--;
+  }
+
+  constexpr T &operator[](size_type i) {
+    assert(i < sz);
+    return arr[i];
+  }
+  constexpr const T &operator[](size_type i) const {
+    assert(i < sz);
+    return arr[i];
+  }
+
+  constexpr void resize(size_type newSize) {
+    assert(newSize <= NumInline);
+    sz = newSize;
+  }
+  constexpr size_t size() const { return sz; }
+  constexpr bool empty() const { return size() == 0; }
+
+  constexpr CexprVec() = default;
+  constexpr CexprVec(size_type sz) : sz(sz) {}
+};
 
 class ConstantRef;
 template <typename T> class ConstantBuilderBase;
@@ -36,8 +94,11 @@ constexpr size_t BigIntCustomBits = 1;
 constexpr uint32_t WordBits = sizeof(uint32_t) * 8;
 constexpr uint32_t WordBitsM1 = WordBits - 1;
 
-class BigInt;
+template <typename Container> class BigIntBase;
 template <typename Derived> class BigIntMixin;
+
+using BigInt = BigIntBase<SmallVec<uint32_t, 4>>;
+using CBigInt = BigIntBase<CexprVec<uint32_t, 16>>;
 
 template <typename T>
 concept BigIntAPI = std::is_base_of<BigIntMixin<T>, T>::value;
@@ -60,25 +121,28 @@ struct FourState {
 };
 
 template <typename Derived> class BigIntMixin {
-  friend class BigInt;
+  friend BigInt;
+  friend CBigInt;
 
   // Base API for BigInt is getRawNumBits, getNumWords, getExtend, getIs4S and
   // getWords. This is for utility functions using that API that may be shared
   // by all implementing BigInt API.
-  Derived &self() { return *static_cast<Derived *>(this); }
-  const Derived &self() const { return *static_cast<const Derived *>(this); }
+  constexpr Derived &self() { return *static_cast<Derived *>(this); }
+  constexpr const Derived &self() const {
+    return *static_cast<const Derived *>(this);
+  }
 
 protected:
-  static uint32_t bitsToWords(uint32_t bits) {
+  constexpr static uint32_t bitsToWords(uint32_t bits) {
     return round_up_div(bits, WordBits);
   }
-  static constexpr unsigned repeatExtend(uint32_t num) {
+  constexpr static unsigned repeatExtend(uint32_t num) {
     return repeatBits(num, BigIntExtendBits);
   }
-  uint32_t getExtNumWords() const {
+  constexpr uint32_t getExtNumWords() const {
     return bitsToWords(self().getRawNumBits());
   }
-  uint32_t __attribute__((always_inline)) getWord(uint32_t i) const {
+  constexpr uint32_t __attribute__((always_inline)) getWord(uint32_t i) const {
     if (i >= bitsToWords(self().getRawNumBits()))
       dyno_unreachable("out of bounds");
 
@@ -86,20 +150,24 @@ protected:
       return repeatExtend(self().getExtend());
     return self().getWords()[i];
   }
-  uint32_t __attribute__((always_inline)) getWord4S(uint32_t i) const {
+  constexpr uint32_t __attribute__((always_inline))
+  getWord4S(uint32_t i) const {
     return self().getIs4S() ? getWord(i)
                             : unpack_bits(getWord(i / 2) >> ((i % 2) * 16));
   }
-  uint8_t getRawBit(uint32_t i) const {
+  constexpr uint8_t getRawBit(uint32_t i) const {
     assert(i <= self().getRawNumBits());
     return !!(getWord(i / WordBits) & (1 << (i % WordBits)));
   }
 
-  uint8_t getRawSignBit() const {
+  constexpr uint8_t getRawSignBit() const {
     return getRawBit(self().getRawNumBits() - 1);
   }
-  bool isExtended() const { return self().getNumWords() != getExtNumWords(); }
+  constexpr bool isExtended() const {
+    return self().getNumWords() != getExtNumWords();
+  }
 
+public:
   uint8_t getExtendPatFromSignBit() const {
     if (self().getIs4S()) {
       return getSignBit();
@@ -107,8 +175,7 @@ protected:
       return getSignBit() ? 0b11 : 0;
   }
 
-public:
-  FourState getBit(uint32_t i) const {
+  constexpr FourState getBit(uint32_t i) const {
     assert(i <= getNumBits());
     if (!self().getIs4S())
       return !!(getWord(i / WordBits) & (1 << (i % WordBits)));
@@ -117,8 +184,10 @@ public:
     return (getWord(i / WordBits) >> (i % WordBits)) &
            bit_mask_ones<uint32_t>(BigIntExtendBits);
   }
-  uint8_t getSignBit() const { return getBit(self().getNumBits() - 1); }
-  uint32_t getNumBits() const {
+  constexpr uint8_t getSignBit() const {
+    return getBit(self().getNumBits() - 1);
+  }
+  constexpr uint32_t getNumBits() const {
     return self().getIs4S() ? self().getRawNumBits() / 2
                             : self().getRawNumBits();
   }
@@ -146,7 +215,7 @@ public:
   }
 
   template <BigIntAPI T>
-  friend bool operator==(const Derived &lhs, const T &rhs) {
+  constexpr friend bool operator==(const Derived &lhs, const T &rhs) {
     if (!(lhs.getRawNumBits() == rhs.getRawNumBits() &&
           lhs.getNumWords() == rhs.getNumWords() &&
           lhs.getExtend() == rhs.getExtend() && lhs.getIs4S() == rhs.getIs4S()))
@@ -158,26 +227,77 @@ public:
     return true;
   }
 
-  bool valueEquals(uint32_t val) const {
+  constexpr bool valueEquals(uint32_t val) const {
     if (auto val2 = getLimitedVal())
       return val == *val2;
     return false;
   }
-  bool valueEqualsS(int32_t val) const {
+  constexpr bool valueEqualsS(int32_t val) const {
     if (auto val2 = getLimitedValS())
       return val == *val2;
     return false;
   }
 
-  std::optional<uint32_t> getLimitedVal() const {
-    assert(!self().getIs4S());
+  // ext:11 0000 0001 bits: 1
+
+  // ext:11 ffff ffff bits: 64
+  // ext:00 ffff ffff bits: 64
+
+  template <BigIntAPI T> constexpr bool valueEquals(const T &other) const {
+    if (other.getNumWords() != self().getNumWords())
+      return false;
+    if (other.getExtend() != self().getExtend())
+      return false;
+
+    for (size_t i = 0; i < self().getNumWords(); i++)
+      if (self().getWords()[i] != other.getWords()[i])
+        return false;
+
+    return true;
+  }
+
+  uint32_t getLastWordExtended(FourState extend) const {
+    uint32_t word = self().getWords().back();
+
+    if ((self().getRawNumBits() % WordBits) == 0)
+      return word;
+
+    word &= bit_mask_ones<uint32_t>(self().getRawNumBits() % WordBits);
+    word |= bit_mask_zeros<uint32_t>(self().getRawNumBits() % WordBits) &
+            repeatExtend(extend);
+    return word;
+  }
+
+  template <BigIntAPI T> constexpr bool valueEqualsS(const T &other) const {
+    if (other.getNumWords() != self().getNumWords())
+      return false;
+    if (other.getExtend() != self().getExtend())
+      return false;
+
+    for (size_t i = 0; i < self().getNumWords() - 1; i++)
+      if (self().getWords()[i] != other.getWords()[i])
+        return false;
+
+    if (self().getLastWordExtended(self().getExtendPatFromSignBit()) !=
+        other.getLastWordExtended(other.getExtendPatFromSignBit()))
+      return false;
+
+    return true;
+  }
+
+  constexpr std::optional<uint32_t> getRawLimitedVal() const {
     if (self().getNumWords() > 1)
       return std::nullopt;
     if (self().getExtNumWords() > 1 && self().getExtend() != 0)
       return std::nullopt;
     return self().getWords()[0];
   }
-  std::optional<int32_t> getLimitedValS() const {
+
+  constexpr std::optional<uint32_t> getLimitedVal() const {
+    assert(!self().getIs4S());
+    return getRawLimitedVal();
+  }
+  constexpr std::optional<int32_t> getLimitedValS() const {
     assert(!self().getIs4S());
     if (self().getNumWords() > 1)
       return std::nullopt;
@@ -188,12 +308,12 @@ public:
       return std::nullopt;
     return self().getWords()[0];
   }
-  uint32_t getExactVal() const {
+  constexpr uint32_t getExactVal() const {
     auto rv = getLimitedVal();
     assert(rv && "would truncate");
     return *rv;
   }
-  uint32_t getExactValS() const {
+  constexpr uint32_t getExactValS() const {
     auto rv = getLimitedValS();
     assert(rv && "would truncate");
     return *rv;
@@ -204,7 +324,8 @@ class PatBigInt : public BigIntMixin<PatBigInt> {
   friend class Constant;
   friend class ConstantStore;
   friend class BigIntMixin<PatBigInt>;
-  friend class BigInt;
+  friend class BigIntBase<SmallVec<uint32_t, 4>>;
+  friend class BigIntBase<CexprVec<uint32_t, 16>>;
 
   uint32_t bits;
   uint8_t field;
@@ -225,13 +346,22 @@ public:
   }
 };
 
-class BigInt : public BigIntMixin<BigInt> {
+template <typename Container>
+class BigIntBase : public BigIntMixin<BigIntBase<Container>> {
+  friend CBigInt;
+  friend BigInt;
   friend class Constant;
   friend class ConstantStore;
-  friend class BigIntMixin;
-  friend class BigInt;
+  friend class BigIntMixin<BigIntBase>;
+  using BigIntMixin<BigIntBase<Container>>::repeatExtend;
+  using BigIntMixin<BigIntBase<Container>>::isExtended;
+  using BigIntMixin<BigIntBase<Container>>::getExtNumWords;
 
-  SmallVec<uint32_t, 4> words;
+public:
+  using BigIntMixin<BigIntBase<Container>>::getNumBits;
+
+private:
+  Container words;
   uint32_t numBits;
   uint8_t field;
 
@@ -241,31 +371,32 @@ class BigInt : public BigIntMixin<BigInt> {
 
 public:
   // big int API
-  unsigned getNumWords() const { return words.size(); }
-  uint8_t getExtend() const { return Extend{field}; }
-  uint8_t getIs4S() const { return Custom{field}; }
-  std::span<uint32_t> getWords() { return words; }
-  std::span<const uint32_t> getWords() const { return words; }
+  constexpr unsigned getNumWords() const { return words.size(); }
+  constexpr uint32_t getRawNumBits() const { return numBits; }
+  constexpr uint8_t getExtend() const { return Extend{field}; }
+  constexpr uint8_t getIs4S() const { return Custom{field}; }
+  constexpr std::span<uint32_t> getWords() { return words; }
+  constexpr std::span<const uint32_t> getWords() const { return words; }
 
 private:
-  auto custom() { return Custom{field}; }
-  BigInt(uint32_t numBits, uint32_t numWords, uint8_t extend, uint8_t custom)
-      : words(numWords), numBits(numBits) {
+  constexpr BigIntBase(uint32_t numBits, uint32_t numWords, uint8_t extend,
+                       uint8_t custom)
+      : words(numWords), numBits(numBits), field(0) {
     Extend<uint8_t>{field} = extend;
     Custom<uint8_t>{field} = custom;
   }
 
 public:
-  void setExtend(uint8_t val) {
+  constexpr void setExtend(uint8_t val) {
     Extend{field} = val & bit_mask_ones<uint8_t>(BigIntExtendBits);
     normalizeExtend();
   }
-  void setCustom(uint8_t val) {
+  constexpr void setCustom(uint8_t val) {
     Custom{field} = val & bit_mask_ones<uint8_t>(BigIntCustomBits);
   }
 
-  template <BigIntAPI T> BigInt &operator=(const T &other) {
-    if constexpr (std::is_same_v<T, BigInt>)
+  template <BigIntAPI T> constexpr BigIntBase &operator=(const T &other) {
+    if constexpr (std::is_same_v<T, BigIntBase>)
       if (&other == this)
         return *this;
 
@@ -280,50 +411,56 @@ public:
     return *this;
   }
 
-  BigInt &operator=(const BigInt &other) {
-    return this->BigInt::operator= <BigInt>(other);
+  constexpr BigIntBase &operator=(const BigIntBase &other) {
+    return this->BigIntBase::operator= <BigIntBase>(other);
   }
-  BigInt(const BigInt &other) : BigInt() { (*this) = other; }
+  constexpr BigIntBase(const BigIntBase &other) : BigIntBase() {
+    (*this) = other;
+  }
 
-  template <BigIntAPI T> BigInt(const T &other) : BigInt() { (*this) = other; }
+  template <BigIntAPI T> constexpr BigIntBase(const T &other) : BigIntBase() {
+    (*this) = other;
+  }
 
-  BigInt &operator=(BigInt &&other) = default;
-  BigInt(BigInt &&other) = default;
+  constexpr BigIntBase &operator=(BigIntBase &&other) = default;
+  constexpr BigIntBase(BigIntBase &&other) = default;
 
-  BigInt() : words(), numBits(0), field(0) {}
-  static BigInt fromU64Pruned(uint64_t val) {
-    BigInt rv;
+  constexpr BigIntBase() : words(), numBits(0), field(0) {}
+  constexpr static BigIntBase fromU64Pruned(uint64_t val) {
+    BigIntBase rv;
     rv.setPruned(val);
     return rv;
   }
-  static BigInt fromU64(uint64_t val, unsigned bits) {
-    BigInt rv;
+  constexpr static BigIntBase fromU64(uint64_t val, unsigned bits) {
+    BigIntBase rv;
     rv.set(val, bits);
     return rv;
   }
-  static BigInt fromI64(int64_t val, unsigned bits) {
-    BigInt rv;
+  constexpr static BigIntBase fromI64(int64_t val, unsigned bits) {
+    BigIntBase rv;
     rv.set(uint64_t(val), bits);
     rv.setExtend(val < 0 ? 0b11 : 0);
     return rv;
   }
 
-  static BigInt ofLen(uint32_t bits) {
-    return BigInt{bits, round_up_div(bits, WordBits), 0, 0};
+  constexpr static BigIntBase ofLen(uint32_t bits) {
+    return BigIntBase{bits, round_up_div(bits, WordBits), 0, 0};
   }
 
-  static BigInt fromRaw(std::span<const uint32_t> data, uint32_t bits,
-                        uint8_t extend, uint8_t custom) {
-    auto rv = BigInt{bits, (uint32_t)data.size(), extend, 0};
+  constexpr static BigIntBase fromRaw(std::span<const uint32_t> data,
+                                      uint32_t bits, uint8_t extend,
+                                      uint8_t custom) {
+    auto rv = BigIntBase{bits, (uint32_t)data.size(), extend, custom};
     std::copy(data.begin(), data.end(), rv.words.begin());
     rv.normalize();
     if (rv.getIs4S())
       rv.conv4To2StateIfPossible();
     return rv;
   }
-  static BigInt fromRaw(SmallVecImpl<uint32_t> &&data, uint32_t bits,
-                        uint8_t extend, uint8_t custom) {
-    auto rv = BigInt{};
+  constexpr static BigIntBase fromRaw(SmallVecImpl<uint32_t> &&data,
+                                      uint32_t bits, uint8_t extend,
+                                      uint8_t custom) {
+    auto rv = BigIntBase{};
     rv.words = std::move(data);
     rv.numBits = bits;
     rv.setExtend(extend);
@@ -336,7 +473,7 @@ public:
 
 #define LINEAR_OP(ident, code)                                                 \
   template <typename T0, typename T1>                                          \
-  static void ident(BigInt &out, const T0 &lhs, const T1 &rhs) {               \
+  constexpr static void ident(BigIntBase &out, const T0 &lhs, const T1 &rhs) { \
     return carryPropOp<[](unsigned lhs, unsigned rhs,                          \
                           [[maybe_unused]] unsigned cin,                       \
                           [[maybe_unused]] unsigned *cout) { return code; }>(  \
@@ -349,18 +486,19 @@ public:
   LINEAR_OP(xorOp, lhs ^ rhs)
   LINEAR_OP(xnorOp, ~(lhs ^ rhs))
 
-  template <typename T> static void negateOp(BigInt &out, const T &lhs) {
+  template <typename T>
+  constexpr static void negateOp(BigIntBase &out, const T &lhs) {
     subOp(out, PatBigInt(lhs.getRawNumBits(), 0), lhs);
   }
 
-  void setRepeating(uint32_t val, unsigned bits, uint8_t custom = 0) {
+  constexpr void setRepeating(uint32_t val, unsigned bits, uint8_t custom = 0) {
     words.resize(1);
     words[0] = val;
     numBits = bits;
     Extend{field} = val & bit_mask_ones<uint32_t>(BigIntExtendBits);
     Custom{field} = custom;
   }
-  void set(uint64_t val, unsigned bits) {
+  constexpr void set(uint64_t val, unsigned bits) {
     if (bits <= WordBits)
       return set((uint32_t)val, bits);
     words.resize(2);
@@ -369,12 +507,12 @@ public:
     numBits = bits;
     normalize();
   }
-  void set(uint32_t val, unsigned bits) {
+  constexpr void set(uint32_t val, unsigned bits) {
     words.resize(1);
     words[0] = val;
     numBits = bits;
   }
-  void setPruned(uint64_t val) {
+  constexpr void setPruned(uint64_t val) {
     unsigned bits = clog2(val);
     numBits = bits;
     words.resize(bits <= WordBits ? 1 : 2);
@@ -384,10 +522,9 @@ public:
       normalize();
     }
   }
-  uint32_t getRawNumBits() const { return numBits; }
 
   template <bool Left, bool Arith = false, typename T0>
-  static void shiftOp(BigInt &out, const T0 &lhs, uint32_t rhs) {
+  static void shiftOp(BigIntBase &out, const T0 &lhs, uint32_t rhs) {
     uint32_t shamtWords = rhs / WordBits;
     uint32_t shamtRem = rhs % WordBits;
     uint8_t oldExtend = lhs.getExtend();
@@ -471,7 +608,7 @@ public:
   }
 
   template <int Mode = 0, typename T0, typename T1>
-  static BigInt mulOp(const T0 &lhs, const T1 &rhs) {
+  constexpr static BigIntBase mulOp(const T0 &lhs, const T1 &rhs) {
 
     size_t resultBits;
     switch (Mode) {
@@ -484,7 +621,7 @@ public:
       resultBits = lhs.getRawNumBits() + rhs.getRawNumBits();
       break;
     }
-    auto out = BigInt::ofLen(resultBits);
+    auto out = BigIntBase::ofLen(resultBits);
 
     for (size_t i = 0; i < lhs.getExtNumWords(); i++) {
 
@@ -535,7 +672,7 @@ public:
     return out;
   }
 
-  template <typename T0> static uint32_t leadingZeros(const T0 &val) {
+  template <typename T0> constexpr static uint32_t leadingZeros(const T0 &val) {
     if (val.isExtended()) {
       if (val.getExtend() == 0b11 || val.getExtend() == 0b10)
         return 0;
@@ -553,44 +690,44 @@ public:
   }
 
   template <typename T0, typename T1>
-  static BigInt upowOp(const T0 &lhs, const T1 &rhs) {
+  static BigIntBase upowOp(const T0 &lhs, const T1 &rhs) {
     if (rhs.valueEquals(0))
-      return BigInt::fromU64(1, lhs.getNumBits());
+      return BigIntBase::fromU64(1, lhs.getNumBits());
     if (lhs.valueEquals(0))
-      return BigInt::fromU64(0, lhs.getNumBits());
+      return BigIntBase::fromU64(0, lhs.getNumBits());
 
-    BigInt acc = BigInt::fromU64(1, lhs.getNumBits());
-    BigInt pow{lhs};
+    BigIntBase acc = BigIntBase::fromU64(1, lhs.getNumBits());
+    BigIntBase pow{lhs};
 
     uint32_t bits = rhs.getRawNumBits() - leadingZeros(rhs);
     for (uint32_t i = 0; i < bits; i++) {
       if (rhs.getRawBit(i)) {
-        acc = BigInt::mulOp(acc, pow);
+        acc = BigIntBase::mulOp(acc, pow);
         if (acc.valueEquals(0))
           break;
       }
-      pow = BigInt::mulOp(pow, pow);
+      pow = BigIntBase::mulOp(pow, pow);
     }
     return acc;
   }
 
   template <typename T0, typename T1>
-  static BigInt spowOp(const T0 &lhs, const T1 &rhs) {
+  static BigIntBase spowOp(const T0 &lhs, const T1 &rhs) {
     if (!rhs.getRawSignBit())
       return upowOp(lhs, rhs);
 
     if (lhs.valueEqualsS(-1)) {
-      return BigInt::fromI64(rhs.getRawBit(0) ? 1 : -1, lhs.getNumBits());
+      return BigIntBase::fromI64(rhs.getRawBit(0) ? 1 : -1, lhs.getNumBits());
     }
     if (lhs.valueEquals(0)) {
       // in verilog returns x but we check for that in the 4S func
       // instead. just return zero here.
-      return BigInt::fromU64(0, lhs.getNumBits());
+      return BigIntBase::fromU64(0, lhs.getNumBits());
     }
     if (lhs.valueEquals(1)) {
-      return BigInt::fromU64(1, lhs.getNumBits());
+      return BigIntBase::fromU64(1, lhs.getNumBits());
     }
-    return BigInt::fromU64(0, lhs.getNumBits());
+    return BigIntBase::fromU64(0, lhs.getNumBits());
   }
 
   template <typename T0>
@@ -601,23 +738,23 @@ public:
   }
 
   template <typename T0, typename T1>
-  static BigInt upowOp4S(const T0 &lhs, const T1 &rhs) {
+  static BigIntBase upowOp4S(const T0 &lhs, const T1 &rhs) {
     if (lhs.getIs4S() || rhs.getIs4S())
       return PatBigInt(lhs.getRawNumBits(), 0b11, 1);
-    return BigInt::upowOp(lhs, rhs);
+    return BigIntBase::upowOp(lhs, rhs);
   }
 
   template <typename T0, typename T1>
-  static BigInt spowOp4S(const T0 &lhs, const T1 &rhs) {
+  static BigIntBase spowOp4S(const T0 &lhs, const T1 &rhs) {
     if (lhs.getIs4S() || rhs.getIs4S() ||
         (lhs.valueEquals(0) && rhs.getRawSignBit()))
       return PatBigInt(lhs.getRawNumBits(), 0b11, 1);
-    return BigInt::spowOp(lhs, rhs);
+    return BigIntBase::spowOp(lhs, rhs);
   }
 
   template <typename T>
-  static void resizeOp(BigInt &out, const T &lhs, uint32_t newSize,
-                       uint8_t extendPat = 0) {
+  constexpr static void resizeOp(BigIntBase &out, const T &lhs,
+                                 uint32_t newSize, uint8_t extendPat = 0) {
 
     auto copyIfDifferent = [&]() {
       if (lhs.getWords().begin().base() != out.getWords().begin().base())
@@ -628,12 +765,12 @@ public:
 
     // truncate
     if (newSize < lhs.getRawNumBits()) {
-      out.words.resize(
-          std::min(lhs.getNumWords(), round_up_div(newSize, WordBits)));
+      out.words.resize(std::min(lhs.getNumWords(),
+                                std::max(1u, round_up_div(newSize, WordBits))));
       copyIfDifferent();
       out.numBits = newSize;
 
-      // cutting of top (bits) make reveal a collapsable section
+      // cutting of top (bits) might reveal a collapsable section
       out.normalize();
       return;
     }
@@ -666,16 +803,16 @@ public:
 
 public:
   template <BigIntAPI T>
-  static void rangeSelectOp(BigInt &out, const T &src, uint32_t bitOffs,
+  static void rangeSelectOp(BigIntBase &out, const T &src, uint32_t bitOffs,
                             uint32_t bitLen) {
     if (bitLen == 0) {
-      out = BigInt::fromU64(0, 0);
+      out = BigIntBase::fromU64(0, 0);
       return;
     }
 
     uint32_t outWords = round_up_div(bitLen, WordBits);
     do {
-      if constexpr (std::is_same_v<T, BigInt>) {
+      if constexpr (std::is_same_v<T, BigIntBase>) {
         if (&out == &src)
           break;
       }
@@ -704,8 +841,8 @@ public:
   static auto udivmodOp(const T0 &lhs, const T1 &rhs) {
     const uint64_t base = 1UL << 32;
 
-    BigInt quot = BigInt::ofLen(lhs.getRawNumBits());
-    BigInt rem = BigInt::ofLen(rhs.getRawNumBits());
+    BigIntBase quot = BigIntBase::ofLen(lhs.getRawNumBits());
+    BigIntBase rem = BigIntBase::ofLen(rhs.getRawNumBits());
 
     // todo: 64 and maybe 128 bit division fast paths.
 
@@ -738,16 +875,16 @@ public:
     // its high-order bit is on, and shift u left the
     // same amount. We may have to append a high-order
     // digit on the dividend; we do that unconditionally.
-    BigInt un;
-    BigInt vn;
+    BigIntBase un;
+    BigIntBase vn;
 
     // Find most significant 1 bit.
     uint32_t shamt = __builtin_clz(rhs.getWord(highWordIdx));
     vn.resizeOp(vn, rhs, (highWordIdx + 1) * 32 - shamt);
-    BigInt::shlOp(vn, vn, shamt);
+    BigIntBase::shlOp(vn, vn, shamt);
 
-    BigInt::resizeOp(un, lhs, lhs.getRawNumBits() + shamt);
-    BigInt::shlOp(un, un, shamt);
+    BigIntBase::resizeOp(un, lhs, lhs.getRawNumBits() + shamt);
+    BigIntBase::shlOp(un, un, shamt);
     un.expand();
 
     // std::cout << "un = " << un << "\n";
@@ -794,8 +931,8 @@ public:
       }
     }
 
-    BigInt::lshrOp(rem, un, shamt);
-    BigInt::resizeOp(rem, rem, rhs.getRawNumBits());
+    BigIntBase::lshrOp(rem, un, shamt);
+    BigIntBase::resizeOp(rem, rem, rhs.getRawNumBits());
 
     quot.normalize();
     return std::make_pair(std::move(quot), std::move(rem));
@@ -1021,8 +1158,8 @@ public:
     bool lhsSign = lhs.getRawSignBit();
     bool rhsSign = rhs.getRawSignBit();
 
-    BigInt lhsAbs = lhs.getRawSignBit() ? -lhs : lhs;
-    BigInt rhsAbs = rhs.getRawSignBit() ? -rhs : rhs;
+    BigIntBase lhsAbs = lhs.getRawSignBit() ? -lhs : lhs;
+    BigIntBase rhsAbs = rhs.getRawSignBit() ? -rhs : rhs;
 
     auto [div, mod] = udivmodOp(lhsAbs, rhsAbs);
 
@@ -1035,17 +1172,17 @@ public:
   }
 
   template <typename T0>
-  static void shlOp(BigInt &out, const T0 &lhs, uint32_t rhs) {
+  static void shlOp(BigIntBase &out, const T0 &lhs, uint32_t rhs) {
     shiftOp<true>(out, lhs, rhs);
   }
 
   template <typename T0>
-  static void lshrOp(BigInt &out, const T0 &lhs, uint32_t rhs) {
+  static void lshrOp(BigIntBase &out, const T0 &lhs, uint32_t rhs) {
     shiftOp<false>(out, lhs, rhs);
   }
 
   template <typename T0>
-  static void ashrOp(BigInt &out, const T0 &lhs, uint32_t rhs) {
+  static void ashrOp(BigIntBase &out, const T0 &lhs, uint32_t rhs) {
     shiftOp<false, true>(out, lhs, rhs);
   }
 
@@ -1073,12 +1210,13 @@ public:
   }
 
   template <BigIntAPI T0, BigIntAPI T1>
-  static void concatOp(BigInt &out, const T0 &lhs, const T1 &rhs) {
+  constexpr static void concatOp(BigIntBase &out, const T0 &lhs,
+                                 const T1 &rhs) {
     size_t rhsWords = rhs.getNumWords();
     size_t rhsExtWords = rhs.getExtNumWords();
     size_t rhsBits = rhs.getRawNumBits();
 
-    if constexpr (std::is_same_v<BigInt, T0>)
+    if constexpr (std::is_same_v<BigIntBase, T0>)
       assert(&out != &lhs && "only rhs may alias out");
 
     if (lhs.getNumBits() == 0) {
@@ -1100,7 +1238,7 @@ public:
 
     do {
       // edge case rhs == out.
-      if constexpr (std::is_same_v<T1, BigInt>) {
+      if constexpr (std::is_same_v<T1, BigIntBase>) {
         if (&rhs == &out)
           break;
       }
@@ -1133,7 +1271,7 @@ public:
   }
 
   template <BigIntAPI T0>
-  static void repeatOp(BigInt &out, const T0 &val, uint32_t count) {
+  static void repeatOp(BigIntBase &out, const T0 &val, uint32_t count) {
     if (count == 0) {
       out.set(0U, 0);
       return;
@@ -1141,12 +1279,12 @@ public:
       out = val;
       return;
     } else if (count == 2) {
-      concatOp(out, BigInt{val}, out);
+      concatOp(out, BigIntBase{val}, out);
       return;
     }
 
     // out might alias val so do this first
-    BigInt pow;
+    BigIntBase pow;
     concatOp(pow, val, val);
 
     if (!(count & 1))
@@ -1160,7 +1298,7 @@ public:
       }
 
       // todo: edge case concat for repeat
-      concatOp(pow, BigInt{pow}, pow);
+      concatOp(pow, BigIntBase{pow}, pow);
     }
   }
 
@@ -1217,10 +1355,11 @@ public:
            (rhsSC >> 1);
   }
   // static void test() {
-  //   static_assert(BigInt::and_4state(0b00'00'01'01'00'10'10'11,
+  //   static_assert(BigIntBase::and_4state(0b00'00'01'01'00'10'10'11,
   //                                      0b00'01'00'01'10'00'01'01) ==
   //                 0b00'00'00'01'00'00'11'11);
-  //   static_assert(BigInt::or_4state(0b00'01'10'10'11, 0b01'00'01'00'00) ==
+  //   static_assert(BigIntBase::or_4state(0b00'01'10'10'11, 0b01'00'01'00'00)
+  //   ==
   //                 0b01'01'01'11'11);
   // }
 
@@ -1270,7 +1409,7 @@ public:
     if (numBits == 0)
       return;
     size_t outNumWords = round_up_div(2 * getNumBits(), WordBits);
-    SmallVec<uint32_t, 4> buf(outNumWords);
+    Container buf(outNumWords);
 
     for (size_t i = 0; i < getNumWords() - 1; i++) {
       buf[2 * i + 0] = unpack_bits(words[i]);
@@ -1286,7 +1425,7 @@ public:
     Custom{field} = 1;
   }
   template <auto Func4S, auto Func2S, typename T0, typename T1>
-  static void bitwiseOp4S(BigInt &out, const T0 &lhs, const T1 &rhs) {
+  static void bitwiseOp4S(BigIntBase &out, const T0 &lhs, const T1 &rhs) {
     if (!lhs.getIs4S() && !rhs.getIs4S()) {
       Func2S(out, lhs, rhs);
       return;
@@ -1314,28 +1453,28 @@ public:
     out.normalize();
   }
   template <BigIntAPI T0, BigIntAPI T1>
-  static void andOp4S(BigInt &out, const T0 &lhs, const T1 &rhs) {
+  static void andOp4S(BigIntBase &out, const T0 &lhs, const T1 &rhs) {
     return bitwiseOp4S<and_4state, andOp<T0, T1>, T0, T1>(out, lhs, rhs);
   }
   template <BigIntAPI T0, BigIntAPI T1>
-  static void orOp4S(BigInt &out, const T0 &lhs, const T1 &rhs) {
+  static void orOp4S(BigIntBase &out, const T0 &lhs, const T1 &rhs) {
     return bitwiseOp4S<or_4state, orOp<T0, T1>, T0, T1>(out, lhs, rhs);
   }
   template <BigIntAPI T0, BigIntAPI T1>
-  static void xorOp4S(BigInt &out, const T0 &lhs, const T1 &rhs) {
+  static void xorOp4S(BigIntBase &out, const T0 &lhs, const T1 &rhs) {
     return bitwiseOp4S<xor_4state, xorOp<T0, T1>, T0, T1>(out, lhs, rhs);
   }
   template <BigIntAPI T0, BigIntAPI T1>
-  static void xnorOp4S(BigInt &out, const T0 &lhs, const T1 &rhs) {
+  static void xnorOp4S(BigIntBase &out, const T0 &lhs, const T1 &rhs) {
     return bitwiseOp4S<xnor_4state, xnorOp<T0, T1>, T0, T1>(out, lhs, rhs);
   }
-  template <BigIntAPI T0> static void notOp4S(BigInt &out, const T0 &lhs) {
+  template <BigIntAPI T0> static void notOp4S(BigIntBase &out, const T0 &lhs) {
     return xorOp4S(out, lhs, PatBigInt{lhs.getRawNumBits(), 0b11});
   }
 
 #define LINEAR_OP_4S(ident, func2s)                                            \
   template <BigIntAPI T0, BigIntAPI T1>                                        \
-  static void ident(BigInt &out, const T0 &lhs, const T1 &rhs) {               \
+  static void ident(BigIntBase &out, const T0 &lhs, const T1 &rhs) {           \
     if (lhs.getIs4S() || rhs.getIs4S()) {                                      \
       out.setRepeating(EXTX_MASK,                                              \
                        std::max(lhs.getRawNumBits(), rhs.getRawNumBits()), 1); \
@@ -1345,7 +1484,7 @@ public:
   }
 
   template <BigIntAPI T0, BigIntAPI T1>
-  static void addOp4S(BigInt &out, const T0 &lhs, const T1 &rhs) {
+  static void addOp4S(BigIntBase &out, const T0 &lhs, const T1 &rhs) {
     if (lhs.getIs4S() || rhs.getIs4S()) {
       out.setRepeating(EXTX_MASK,
                        std ::max(lhs.getRawNumBits(), rhs.getRawNumBits()), 1);
@@ -1356,71 +1495,71 @@ public:
   LINEAR_OP_4S(subOp4S, subOp)
 
   template <BigIntAPI T0>
-  static void shlOp4S(BigInt &out, const T0 &lhs, unsigned rhs) {
+  static void shlOp4S(BigIntBase &out, const T0 &lhs, unsigned rhs) {
     shlOp(out, lhs, lhs.getIs4S() ? 2 * rhs : rhs);
     out.conv4To2StateIfPossible();
   }
   template <BigIntAPI T0>
-  static void lshrOp4S(BigInt &out, const T0 &lhs, unsigned rhs) {
+  static void lshrOp4S(BigIntBase &out, const T0 &lhs, unsigned rhs) {
     lshrOp(out, lhs, lhs.getIs4S() ? 2 * rhs : rhs);
     out.conv4To2StateIfPossible();
   }
   template <BigIntAPI T0>
-  static void ashrOp4S(BigInt &out, const T0 &lhs, unsigned rhs) {
+  static void ashrOp4S(BigIntBase &out, const T0 &lhs, unsigned rhs) {
     ashrOp(out, lhs, lhs.getIs4S() ? 2 * rhs : rhs);
     out.conv4To2StateIfPossible();
   }
 
   template <BigIntAPI T>
-  static void resizeOp4S(BigInt &out, const T &lhs, uint32_t newSize,
-                         bool sign = false) {
+  constexpr static void resizeOp4S(BigIntBase &out, const T &lhs,
+                                   uint32_t newSize, bool sign = false) {
     if (lhs.getIs4S()) {
-      BigInt::resizeOp(out, lhs, 2 * newSize,
-                       sign ? lhs.getExtendPatFromSignBit() : 0);
+      BigIntBase::resizeOp(out, lhs, 2 * newSize,
+                           sign ? lhs.getExtendPatFromSignBit() : 0);
       out.conv4To2StateIfPossible();
     } else
-      BigInt::resizeOp(out, lhs, newSize,
-                       sign ? lhs.getExtendPatFromSignBit() : 0);
+      BigIntBase::resizeOp(out, lhs, newSize,
+                           sign ? lhs.getExtendPatFromSignBit() : 0);
   }
   template <BigIntAPI T>
-  static void rangeSelectOp4S(BigInt &out, const T &src, uint32_t bitOffs,
+  static void rangeSelectOp4S(BigIntBase &out, const T &src, uint32_t bitOffs,
                               uint32_t bitLen) {
     if (src.getIs4S()) {
-      BigInt::rangeSelectOp(out, src, bitOffs * 2, bitLen * 2);
+      BigIntBase::rangeSelectOp(out, src, bitOffs * 2, bitLen * 2);
       out.setCustom(1);
       out.conv4To2StateIfPossible();
     } else {
-      BigInt::rangeSelectOp(out, src, bitOffs, bitLen);
+      BigIntBase::rangeSelectOp(out, src, bitOffs, bitLen);
     }
   }
   template <BigIntAPI T0, BigIntAPI T1>
   static auto udivmodOp4S(const T0 &lhs, const T1 &rhs) {
     if (lhs.getIs4S() || rhs.getIs4S()) {
-      BigInt outA;
-      BigInt outB;
+      BigIntBase outA;
+      BigIntBase outB;
       outA.setRepeating(EXTX_MASK, lhs.getRawNumBits(), 1);
       outB.setRepeating(EXTX_MASK, lhs.getRawNumBits(), 1);
       return std::make_pair(std::move(outA), std::move(outB));
     }
-    auto [div, rem] = BigInt::udivmodOp(lhs, rhs);
-    return std::make_pair(BigInt{div}, BigInt{rem});
+    auto [div, rem] = BigIntBase::udivmodOp(lhs, rhs);
+    return std::make_pair(BigIntBase{div}, BigIntBase{rem});
   }
   template <BigIntAPI T0, BigIntAPI T1>
   static auto sdivmodOp4S(const T0 &lhs, const T1 &rhs) {
     if (lhs.getIs4S() || rhs.getIs4S() || rhs.valueEquals(0)) {
-      BigInt outA;
-      BigInt outB;
+      BigIntBase outA;
+      BigIntBase outB;
       outA.setRepeating(EXTX_MASK, lhs.getRawNumBits(), 1);
       outB.setRepeating(EXTX_MASK, lhs.getRawNumBits(), 1);
       return std::make_pair(std::move(outA), std::move(outB));
     }
-    auto [div, rem] = BigInt::sdivmodOp(lhs, rhs);
-    return std::make_pair(BigInt{div}, BigInt{rem});
+    auto [div, rem] = BigIntBase::sdivmodOp(lhs, rhs);
+    return std::make_pair(BigIntBase{div}, BigIntBase{rem});
   }
   template <int Mode = 0, BigIntAPI T0, BigIntAPI T1>
   static auto mulOp4S(const T0 &lhs, const T1 &rhs) {
     if (lhs.getIs4S() || rhs.getIs4S()) {
-      BigInt out;
+      BigIntBase out;
       out.setRepeating(EXTX_MASK,
                        Mode == 0
                            ? std::max(lhs.getRawNumBits(), rhs.getRawNumBits())
@@ -1428,9 +1567,9 @@ public:
                        1);
       return out;
     }
-    return BigInt{BigInt::mulOp<Mode>(lhs, rhs)};
+    return BigIntBase{BigIntBase::mulOp<Mode>(lhs, rhs)};
   }
-  template <BigIntAPI T> static void negateOp4S(BigInt &out, const T &lhs) {
+  template <BigIntAPI T> static void negateOp4S(BigIntBase &out, const T &lhs) {
     subOp4S(out, PatBigInt(lhs.getRawNumBits(), 0), lhs);
   }
 
@@ -1441,14 +1580,15 @@ public:
   }
 
   template <BigIntAPI T0, BigIntAPI T1>
-  static void concatOp4S(BigInt &out, const T0 &lhs, const T1 &rhs) {
+  constexpr static void concatOp4S(BigIntBase &out, const T0 &lhs,
+                                   const T1 &rhs) {
     bool custom = rhs.getIs4S() || lhs.getIs4S();
     if (lhs.getIs4S() && !rhs.getIs4S()) {
-      BigInt rhsCopy{rhs};
+      BigIntBase rhsCopy{rhs};
       rhsCopy.conv2To4State();
       concatOp(out, lhs, rhsCopy);
     } else if (!lhs.getIs4S() && rhs.getIs4S()) {
-      BigInt lhsCopy{lhs};
+      BigIntBase lhsCopy{lhs};
       lhsCopy.conv2To4State();
       concatOp(out, lhsCopy, rhs);
     } else
@@ -1457,15 +1597,16 @@ public:
   }
 
   template <BigIntAPI T0>
-  static void repeatOp4S(BigInt &out, const T0 &val, uint32_t count) {
+  static void repeatOp4S(BigIntBase &out, const T0 &val, uint32_t count) {
     bool custom = val.getIs4S();
     repeatOp(out, val, count);
     out.setCustom(custom);
   }
 
   // String Ops
-  static std::optional<BigInt> parseHex(std::span<const char> digits) {
-    BigInt out = BigInt::ofLen(digits.size() * 4);
+  constexpr static std::optional<BigIntBase>
+  parseHex(std::span<const char> digits) {
+    BigIntBase out = BigIntBase::ofLen(digits.size() * 4);
     size_t i = digits.size() - 1;
     for (const char digit : digits) {
 
@@ -1485,13 +1626,12 @@ public:
     out.normalize();
     return out;
   }
-  static std::optional<BigInt> parseDec(std::span<const char> digits) {
-    double bits = ceil(digits.size() * std::log2(10.));
-    BigInt out = BigInt::ofLen(size_t(bits));
-    BigInt base = BigInt::fromU64Pruned(10);
+  constexpr static std::optional<BigIntBase>
+  parseDec(std::span<const char> digits) {
+    BigIntBase out = BigIntBase::ofLen(0);
+    BigIntBase base = BigIntBase::fromU64Pruned(10);
 
     for (const char digit : digits) {
-      out = BigInt::mulOp(out, base);
 
       uint64_t val;
       if (digit >= '0' && digit <= '9')
@@ -1499,7 +1639,13 @@ public:
       else
         return std::nullopt;
 
-      BigInt::addOp(out, out, BigInt::fromU64Pruned(val));
+      // extending multiply.
+      out = BigIntBase::mulOp<1>(out, base);
+      BigIntBase::addOp(out, out, BigIntBase::fromU64Pruned(val));
+      // truncate off unused bits
+      auto truncBits = out.numBits - BigIntBase::leadingZeros(out);
+      if (truncBits != 0)
+        BigIntBase::resizeOp(out, out, truncBits);
     }
 
     return out;
@@ -1546,7 +1692,7 @@ public:
   template <typename T>
   static void stream_hex_4s_vlog(std::ostream &os, const T &self) {
     if (!self.getIs4S())
-      return BigInt::stream_hex(os, self);
+      return BigIntBase::stream_hex(os, self);
 
     constexpr size_t digits_per_word = 4;
     constexpr size_t separator_per = 8;
@@ -1621,42 +1767,227 @@ public:
   static void stream_dec(std::ostream &os, const T &self,
                          bool isSigned = false) {
     if (self.getRawSignBit() && isSigned) {
-      BigInt temp;
-      BigInt::negateOp(temp, self);
+      BigIntBase temp;
+      BigIntBase::negateOp(temp, self);
       os << "-";
       stream_dec(os, temp);
       return;
     }
     SmallVec<uint8_t, 32> str;
 
-    BigInt q = BigInt::fromU64Pruned(10);
-    BigInt n{self};
-    BigInt r;
+    BigIntBase q = BigIntBase::fromU64Pruned(10);
+    BigIntBase n{self};
+    BigIntBase r;
 
     do {
-      std::tie(n, r) = BigInt::udivmodOp(n, q);
+      std::tie(n, r) = BigIntBase::udivmodOp(n, q);
       str.emplace_back(r.getWord(0));
-    } while (n != BigInt::fromU64(0, n.getRawNumBits()));
+    } while (n != BigIntBase::fromU64(0, n.getRawNumBits()));
 
     for (ssize_t i = str.size() - 1; i >= 0; i--)
       os << uint32_t(str[i]);
   }
 
-  void prune() {
+  constexpr void prune() {
     uint32_t extendMask = repeatExtend(Extend{field});
     while (words.size() != 1 && words.back() == extendMask)
       words.pop_back();
-    words.try_to_inline();
+    if constexpr (requires(BigIntBase b) { b.words.try_to_inline(); })
+      words.try_to_inline();
+  }
+
+  enum class ParseError {
+    LENGTH_DOES_NOT_FIT_IN_32,
+    UNKNOWN_BASE,
+    ILLEGAL_DIGIT,
+    TOO_MANY_DIGITS_GIVEN
+  };
+
+  constexpr static BigIntBase parseDec(const char *&ptr) {
+    auto isdigit = [](char c) { return c >= '0' && c <= '9'; };
+    BigIntBase init = fromU64Pruned(0);
+    while (true) {
+      if (!isdigit(*ptr))
+        break;
+      char digit = *ptr++;
+
+      digit -= '0';
+      assert(digit <= 9);
+
+      // extending multiply.
+      init = BigIntBase::mulOp<1>(init, BigIntBase::fromU64Pruned(10));
+      BigIntBase::addOp(init, init, BigIntBase::fromU64Pruned(digit));
+      // truncate off unused bits
+
+      auto truncBits = init.numBits - BigIntBase::leadingZeros(init);
+      if (truncBits != 0)
+        BigIntBase::resizeOp(init, init, truncBits);
+    }
+    return init;
+  }
+
+  struct ParseVlogResult {
+    BigIntBase bigInt;
+    bool isSigned;
+    enum Type : uint8_t { SIMPLE, UNSIZED, SIZED };
+    Type type;
+  };
+
+  constexpr static std::expected<ParseVlogResult, ParseError>
+  parseVlog(const char *&ptr) {
+    // todo: optimize this.
+    auto isxdigit = [](char c) {
+      return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') ||
+             (c >= 'A' && c <= 'F');
+    };
+    auto isNumDigit = [isxdigit](int c) {
+      return isxdigit(c) || c == 'x' || c == 'X' || c == 'z' || c == 'Z';
+    };
+
+    Optional<uint> numBits;
+
+    if (*ptr != '\'') {
+      // first parse simple dec literal. this is either the final value or the
+      // size of a following based & sized literal.
+      BigIntBase init = parseDec(ptr);
+
+      if (*ptr != '\'') {
+        // treat as unsigned 32 bit.
+        BigIntBase::resizeOp(init, init, 32, 0);
+        return ParseVlogResult(init, false, ParseVlogResult::SIMPLE);
+      }
+
+      if (init.numBits > 32)
+        return std::unexpected(ParseError::LENGTH_DOES_NOT_FIT_IN_32);
+
+      numBits = init.getExactVal();
+    }
+    ptr++;
+
+    if (numBits == 0)
+      return ParseVlogResult{BigInt::fromU64(0, 0), false,
+                             ParseVlogResult::SIZED};
+
+    bool isSigned = false;
+    if (*ptr == 's') {
+      ptr++;
+      isSigned = true;
+    }
+
+    uint base;
+    switch (*ptr) {
+    case 'h':
+      base = 16;
+      break;
+    case 'd':
+      base = 10;
+      break;
+    case 'o':
+      base = 8;
+      break;
+    case 'b':
+      base = 2;
+      break;
+
+    // unsized/unbased. these are returned to fill all bits when extending.
+    case '0':
+      ptr++;
+      if (isNumDigit(*ptr))
+        return std::unexpected(ParseError::TOO_MANY_DIGITS_GIVEN);
+      return ParseVlogResult(BigInt::fromU64(0, 1), true,
+                             ParseVlogResult::UNSIZED);
+    case '1':
+      ptr++;
+      if (isNumDigit(*ptr))
+        return std::unexpected(ParseError::TOO_MANY_DIGITS_GIVEN);
+      return ParseVlogResult(BigInt::fromU64(1, 1), true,
+                             ParseVlogResult::UNSIZED);
+    case 'x':
+      ptr++;
+      if (isNumDigit(*ptr))
+        return std::unexpected(ParseError::TOO_MANY_DIGITS_GIVEN);
+      return ParseVlogResult(PatBigInt{2, FourState::SX, 1}, true,
+                             ParseVlogResult::UNSIZED);
+    case 'z':
+      ptr++;
+      if (isNumDigit(*ptr))
+        return std::unexpected(ParseError::TOO_MANY_DIGITS_GIVEN);
+      return ParseVlogResult(PatBigInt{2, FourState::SZ, 1}, true,
+                             ParseVlogResult::UNSIZED);
+    default:
+      return std::unexpected(ParseError::UNKNOWN_BASE);
+    }
+    ptr++;
+
+    uint baseBits = clog2(base);
+
+    BigIntBase acc = BigIntBase::fromU64Pruned(0);
+
+    while (true) {
+      int c = *ptr;
+      if (!isNumDigit(c))
+        break;
+      ptr++;
+
+      BigIntBase digit;
+      // these are used when printing to say that some bits in the digit are
+      // x/z. info lost so can't parse.
+      if (c == 'X' || c == 'Z')
+        return std::unexpected(ParseError::ILLEGAL_DIGIT);
+      // we can't set log2(10) bits to x/z.
+      if (base == 10 && (c == 'x' || c == 'z'))
+        return std::unexpected(ParseError::ILLEGAL_DIGIT);
+      if (c == 'x')
+        digit = PatBigInt{2 * baseBits, FourState::SX, 1};
+      if (c == 'z')
+        digit = PatBigInt{2 * baseBits, FourState::SZ, 1};
+
+      uint hexVal;
+      if (c >= 'a')
+        hexVal = c - 'a' + 10;
+      else if (c >= 'A')
+        hexVal = c - 'A' + 10;
+      else
+        hexVal = c - '0';
+
+      digit = BigIntBase::fromU64(hexVal, baseBits);
+
+      if (base == 10) {
+        assert(!digit.getIs4S());
+        acc = BigIntBase::mulOp<1>(acc, BigIntBase::fromU64Pruned(10));
+        BigIntBase::addOp(acc, acc, digit);
+        BigIntBase::resizeOp(acc, acc,
+                             acc.numBits - BigIntBase::leadingZeros(acc));
+        continue;
+      } else {
+        // fixme: super slow bc we're shifting digits each time
+        BigIntBase::concatOp4S(acc, BigIntBase{acc}, digit);
+      }
+    }
+
+    if (numBits) {
+      if (acc.numBits > *numBits) {
+        auto leading = BigIntBase::leadingZeros4S(acc);
+        if (!leading || acc.numBits - *leading > *numBits)
+          return std::unexpected(ParseError::TOO_MANY_DIGITS_GIVEN);
+        BigIntBase::resizeOp4S(acc, acc, *numBits, false);
+      }
+      if (acc.numBits < *numBits)
+        BigIntBase::resizeOp4S(acc, acc, *numBits, isSigned);
+    }
+    return ParseVlogResult(acc, isSigned,
+                           numBits ? ParseVlogResult::SIZED
+                                   : ParseVlogResult::UNSIZED);
   }
 
 private:
-  void normalizeExtend() {
+  constexpr void normalizeExtend() {
     if (!isExtended())
       Extend{field} = 0;
     setLastWordBitsToPattern(Extend{field});
   }
 
-  void setLastWordBitsToPattern(uint8_t pattern) {
+  constexpr void setLastWordBitsToPattern(uint8_t pattern) {
     // truncate last word and fill with extend.
     if (getRawNumBits() % 32 != 0) {
       auto mask = (1 << (getRawNumBits() % 32)) - 1;
@@ -1665,7 +1996,7 @@ private:
     }
   }
 
-  void normalize() {
+  constexpr void normalize() {
     if (getNumWords() * bit_mask_sz<uint32_t> < numBits)
       prune();
     else if (getNumWords() * bit_mask_sz<uint32_t> >= numBits) {
@@ -1678,7 +2009,7 @@ private:
   }
 
   // opposite of normalize
-  void expand() {
+  constexpr void expand() {
     auto oldSize = getNumWords();
     words.resize(getExtNumWords());
     std::fill(words.begin() + oldSize, words.end(),
@@ -1686,7 +2017,8 @@ private:
   }
 
   template <auto OpFunc, typename T0, typename T1>
-  static void carryPropOp(BigInt &out, const T0 &lhs, const T1 &rhs) {
+  constexpr static void carryPropOp(BigIntBase &out, const T0 &lhs,
+                                    const T1 &rhs) {
 
     // assert(lhs.getRawNumBits() == rhs.getRawNumBits());
     unsigned maxNumBits = std::max(lhs.getRawNumBits(), rhs.getRawNumBits());
@@ -1731,16 +2063,21 @@ private:
   }
 };
 
-// fixme: make constexpr (at least parsing)
-static inline BigInt operator""_b(const char *str) {
-  std::optional<BigInt> rv = std::nullopt;
+static constexpr CBigInt operator""_b(const char *str) {
+  std::optional<CBigInt> rv = std::nullopt;
   if (str[0] == '0' && str[1] == 'x') {
-    rv = BigInt::parseHex(std::span<const char>{
+    rv = CBigInt::parseHex(std::span<const char>{
         str + 2, std::char_traits<char>::length(str) - 2});
   } else
-    rv = BigInt::parseDec(std::span{str, std::char_traits<char>::length(str)});
+    rv = CBigInt::parseDec(std::span{str, std::char_traits<char>::length(str)});
   assert(rv && "invalid str literal");
   return *rv;
+}
+
+static constexpr CBigInt operator""_bv(const char *str, size_t sz) {
+  auto res = CBigInt::parseVlog(str);
+  assert(res);
+  return res.value().bigInt;
 }
 
 #define LINEAR_OP_OPERATOR_INST(identSimple, identAssign, func)                \
@@ -2024,6 +2361,8 @@ public:
   FatObjRef<Constant> resolve(ObjRef<Constant> ref) {
     return store.resolve(ref);
   }
+  bool exists(ObjRef<Constant> ref) { return store.exists(ref); }
+  auto numIDs() { return store.numIDs(); }
 };
 
 template <typename T> class ConstantBuilderBase {
@@ -2036,6 +2375,12 @@ public:
 
   ConstantBuilderBase &val(unsigned bits, uint64_t value64 = 0) {
     cur.set(value64, bits);
+    return *this;
+  }
+  ConstantBuilderBase &val(unsigned bits, uint32_t value32, bool sign) {
+    cur.set(value32, bits);
+    if (sign && int32_t(value32) < 0)
+      cur.setExtend(bit_mask_ones<uint32_t>(BigIntExtendBits));
     return *this;
   }
   ConstantBuilderBase &raw(unsigned bits, std::span<const uint32_t> data,
@@ -2131,6 +2476,10 @@ public:
 
   ConstantBuilderBase &neg() {
     BigInt::negateOp4S(cur, cur);
+    return *this;
+  }
+  ConstantBuilderBase &bitNOT() {
+    BigInt::xorOp4S(cur, cur, PatBigInt{cur.getNumBits(), 0b11});
     return *this;
   }
   template <BigIntAPI U> ConstantBuilderBase &mul(const U &rhs) {

@@ -46,11 +46,11 @@ inline auto make_earlyincr_range(std::ranges::forward_range auto &&rg) {
 }
 
 template <typename T> class deref_iterator {
+  T it;
 public:
   using iterator_category = std::forward_iterator_tag;
-  using value_type = std::iterator_traits<T>::value_type;
-  using pointer = std::iterator_traits<T>::pointer;
-  using reference = std::iterator_traits<T>::reference;
+  using value_type = std::remove_reference_t<decltype(**it)>;
+  using reference = value_type &;
   using difference_type = std::iterator_traits<T>::difference_type;
 
   deref_iterator() = default;
@@ -76,9 +76,6 @@ public:
   friend bool operator!=(const deref_iterator &a, const deref_iterator &b) {
     return a.it != b.it;
   }
-
-private:
-  T it;
 };
 
 template <typename T, typename TransformT> class transform_iterator {
@@ -313,7 +310,7 @@ public:
   }
 
   template <typename T> auto as() {
-    auto lambda = [](size_t, auto src) { return src.template as<T>(); };
+    auto lambda = [](size_t, const auto &src) { return src.template as<T>(); };
     return ::Range{transform_iterator<It, decltype(lambda)>(beginIt, lambda),
                    transform_iterator<It, decltype(lambda)>(endIt)};
   }
@@ -327,6 +324,9 @@ private:
   It beginIt, endIt;
 };
 
+template <typename U> Range(U &u) -> Range<decltype(u.begin())>;
+template <typename U> Range(const U &u) -> Range<decltype(u.begin())>;
+
 template <typename T>
 class InitListRange
     : public Range<typename std::initializer_list<T>::iterator> {
@@ -336,5 +336,41 @@ public:
                                                            ilist.end()) {}
 };
 
-template <typename U> Range(U &u) -> Range<decltype(u.begin())>;
-template <typename U> Range(const U &u) -> Range<decltype(u.begin())>;
+template <typename It> class RefRange {
+public:
+  using iterator = It;
+  using value_type = std::iter_value_t<iterator>;
+  using reference = value_type &;
+  using pointer = value_type *;
+
+  RefRange(It &beginIt, It &endIt) : beginIt(beginIt), endIt(endIt) {}
+  It begin() { return beginIt; }
+  It end() { return endIt; }
+
+  RefRange &operator=(Range<It> other) {
+    beginIt = other.begin();
+    endIt = other.end();
+    return *this;
+  }
+
+  RefRange &operator=(reference other) {
+    beginIt = &other;
+    endIt = &other + 1;
+    return *this;
+  }
+
+  auto drop_front() {
+    auto rv = RefRange{*this};
+    ++rv.beginIt;
+    return rv;
+  }
+  auto drop_back() {
+    auto rv = RefRange{*this};
+    --rv.endIt;
+    return rv;
+  }
+
+private:
+  It &beginIt;
+  It &endIt;
+};

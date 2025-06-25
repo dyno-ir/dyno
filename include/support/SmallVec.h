@@ -316,12 +316,12 @@ public:
     return it;
   }
 
-  template <std::input_iterator It> void push_back_range(Range<It> range) {
-    for (auto &item : range) {
+  template <typename It> void push_back_range(Range<It> range) {
+    for (auto item : range) {
       emplace_back(item);
     }
   }
-  template <std::input_iterator It> void push_back_range(It begin, It end) {
+  template <typename It> void push_back_range(It begin, It end) {
     push_back_range(Range{begin, end});
   }
 

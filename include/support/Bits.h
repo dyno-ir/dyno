@@ -37,6 +37,10 @@ template <typename T> constexpr T bit_mask_ms_nbits(unsigned nbits) {
 }
 
 template <typename T> constexpr unsigned clog2(T val) {
+  if (val == 0)
+    return 0;
+  if (val == 1)
+    return 1;
   return std::bit_width(val - 1);
   // if (val == 0 || val == 1)
   //   return 0;
@@ -106,34 +110,35 @@ public:
   static constexpr unsigned size = N;
   static constexpr unsigned pos = Pos;
 
-  explicit BitField(num_t &v) : num(v) {}
+  explicit constexpr BitField(num_t &v) : num(v) {}
 
-  BitField &operator=(num_t v) {
+  constexpr BitField &operator=(num_t v) {
     set(v);
     return *this;
   }
 
-  BitField &operator+=(num_t v) { return (*this) = (*this) + v; }
-  BitField &operator-=(num_t v) { return (*this) = (*this) - v; }
+  constexpr BitField &operator+=(num_t v) { return (*this) = (*this) + v; }
+  constexpr BitField &operator-=(num_t v) { return (*this) = (*this) - v; }
 
-  operator num_t() const { return get(); }
+  constexpr operator num_t() const { return get(); }
 
-  num_t get() const { return (num & mask_ones) >> pos; }
+  constexpr num_t get() const { return (num & mask_ones) >> pos; }
 
-  void clr() { num &= mask_zeros; }
+  constexpr void clr() { num &= mask_zeros; }
 
-  void set() { num |= mask_ones; }
+  constexpr void set() { num |= mask_ones; }
 
-  void set(num_t v) {
+  constexpr void set(num_t v) {
     assert((v & mask_ones_noshift) == v);
     clr();
     num |= v << pos;
   }
 
-  void flip() { num ^= mask_ones; }
+  constexpr void flip() { num ^= mask_ones; }
 
-  unsigned count() { return std::popcount(num & mask_ones); }
+  constexpr unsigned count() { return std::popcount(num & mask_ones); }
 };
+
 template <std::integral NumT, unsigned N, unsigned Pos>
 class BitField<const NumT, N, Pos> {
   const NumT &num;
@@ -151,12 +156,12 @@ public:
   static constexpr unsigned size = N;
   static constexpr unsigned pos = Pos;
 
-  explicit BitField(num_t &v) : num(v) {}
+  explicit constexpr BitField(num_t &v) : num(v) {}
 
-  operator num_t() const { return get(); }
+  constexpr operator num_t() const { return get(); }
 
-  num_t get() const { return (num & mask_ones) >> pos; }
-  void flip() { num ^= mask_ones; }
+  constexpr num_t get() const { return (num & mask_ones) >> pos; }
+  constexpr void flip() { num ^= mask_ones; }
 
-  unsigned count() { return std::popcount(num & mask_ones); }
+  constexpr unsigned count() { return std::popcount(num & mask_ones); }
 };

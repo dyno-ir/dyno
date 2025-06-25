@@ -68,20 +68,25 @@ template <size_t NumDialects, typename... Types> class Interfaces {
     return result;
   }
 
-  template <typename T> T &get(size_t index) {
+  template <typename T> constexpr T &get(size_t index) {
     return std::get<type_index<T>()>(arr[index]);
   }
-  template <typename T> const T &get(size_t index) const {
+  template <typename T> constexpr const T &get(size_t index) const {
     return std::get<type_index<T>()>(arr[index]);
   }
 
 public:
-  template <typename T> void registerVal(size_t i, const T &t) {
+  template <typename T> constexpr void registerVal(size_t i, const T &t) {
     assert(i < NumDialects);
     get<T>(i) = t;
   }
 
-  template <typename T> const T &getVal(size_t i) const {
+  template <typename T> constexpr const T &getVal(size_t i) const {
+    assert(i < NumDialects);
+    return get<T>(i);
+  }
+
+  template <typename T> constexpr T &getVal(size_t i) {
     assert(i < NumDialects);
     return get<T>(i);
   }

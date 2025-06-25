@@ -1,0 +1,153 @@
+
+
+macro const_negate $n -> $rv [{
+  FatDynObjRef<> negated = cbuild.val((*$n.begin())->as<ConstantRef>()).neg().get();
+  $rv = negated;
+}]
+macro constant_like $val, $other -> $rv [{
+  FatDynObjRef<> constant = cbuild.val($val).resize(*(*$other.begin())->as<WireRef>().getNumBits(), false).get();
+  $rv = constant;
+}]
+macro wire_like $other -> $rv [{
+  FatDynObjRef<> w = ctx.getWires().create((*$other.begin())->as<WireRef>().getNumBits()); $rv = w;
+}]
+
+// # ADD/SUB rules
+// sub to add negated
+match {
+  OP_SUB $subRes, $lhs, $rhs
+  OP_ADD $res, anyorder($subRes:HW_WIRE, $others...)
+}
+replace {
+  OP_XNOR $temp2:wire_like($subRes), $rhs
+  OP_ADD $res, $others..., $lhs, $temp2, constant_like(#1'b1, $res)
+}
+
+// sub to add negated
+match {
+  OP_ADD $temp, $others...
+  OP_SUB $res, $temp:HW_WIRE, $rhs
+}
+replace {
+  OP_XNOR $temp2:wire_like($temp), $rhs
+  OP_ADD $res, $others..., $temp2, constant_like(#1'b1, $res)
+}
+
+// sub constant -> add constant
+match {
+  OP_SUB $out, $lhs, $rhs:CORE_CONSTANT
+}
+replace {
+  OP_ADD $out, $lhs, const_negate($rhs)
+}
+
+macro const_like_reg_len $op, $reg [{
+  auto asConstant = (*$op.begin())->dyn_as<ConstantRef>();
+  if (!asConstant) goto $fail;
+  if (!asConstant.valueEquals(*(*$reg.begin())->as<RegisterRef>().getNumBits()))
+    goto $fail;
+}]
+
+// load with superfluous indexing
+match {
+  HW_LOAD $out, $reg, #'0, $len:const_like_reg_len($reg)
+}
+replace {
+  HW_LOAD $out, $reg
+}
+
+// store with superfluous indexing
+match {
+  HW_STORE $val, $reg, #'0, $len:const_like_reg_len($reg)
+}
+replace {
+  HW_STORE $val, $reg
+}
+
+match {
+  HW_STORE_DEFER $val, $reg, #'0, $len:const_like_reg_len($reg), $trig
+}
+replace {
+  HW_STORE_DEFER $val, $reg, $trig
+}
+
+// concat with zero length constant
+match {
+  HW_CONCAT $out, $pre..., #0', $post...
+}
+replace {
+  HW_CONCAT $out, $pre..., $post...
+}
+
+match {
+  HW_CONCAT $out, $x
+}
+replace $out -> $x
+
+
+macro const_len_of $obj -> $rv [{
+  FatDynObjRef<> c = ConstantRef::fromU32(*(*$obj.begin())->as<HWValue>().getNumBits());
+  $rv = c;
+}]
+
+// todo others
+match {
+  OP_ZEXT $ext, $x
+  OP_TRUNC $out, $ext:HW_WIRE
+}
+with [{
+  auto inBits = (*$x.begin())->as<HWValue>().getNumBits();
+  auto outBits = (*$out.begin())->as<WireRef>().getNumBits();
+  if (!(*outBits < *inBits))
+    goto $fail;
+}]
+replace {
+  OP_TRUNC $out, $x
+}
+
+match {
+  OP_TRUNC $out, $in:CORE_CONSTANT
+}
+with [{
+  FatDynObjRef<> temp = cbuild.val((*$in.begin())->as<ConstantRef>()).resize(*(*$out.begin())->as<WireRef>().getNumBits()).get();
+  $constTrunc = temp;
+}]
+replace $out -> $constTrunc
+
+/*
+macro wire32 -> $rv [{
+  FatDynObjRef<> w = ctx.getWires().create(32);
+  $rv = w;
+}]
+
+macro sort()
+
+// shift + OR
+match {
+  OP_ZEXT $ext, $x
+  OP_SLL $shifted, $ext, $shamt
+  OP_OR $out, anyorder($shifted:HW_WIRE, $others...)
+}
+replace {
+  OP_TRUNC $truncShamt:wire32(), $shamt
+  OP_OR $temp:wire_like($out), $others...
+  HW_SPLICE $origVal:wire_like($x), $temp, $truncShamt, $len:const_len_of($x)
+  OP_OR $modVal:wire_like($x), $origVal, $x
+  HW_INSERT $out, $temp, $modVal, $truncShamt, $len
+
+}
+*/
+
+/*
+match {
+  OP_ADD $sum, $a, $b
+  OP_SUB $diff, $a, $b
+  HW_MUX $out, $sel, $diff:HW_WIRE, $sum:HW_WIRE
+}
+replace {
+  OP_SEXT $mask:wire_like($out), $sel
+  OP_XOR $ones:wire_like($out), $b, $mask
+  OP_ZEXT $zextVal:wire_like($out), $sel
+  OP_ADD $out, $a, $ones, $zextVal
+}
+*/

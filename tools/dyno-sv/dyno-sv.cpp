@@ -12,7 +12,13 @@
 #include "hw/Module.h"
 #include "hw/Process.h"
 #include "hw/Register.h"
+#include "hw/passes/AggressiveDeadCodeElimination.h"
 #include "hw/passes/FunctionInline.h"
+#include "hw/passes/InstCombine.h"
+#include "hw/passes/LinearizeControlFlow.h"
+#include "hw/passes/LoopSimplify.h"
+#include "hw/passes/LowerOps.h"
+#include "hw/passes/ModuleInline.h"
 #include "hw/passes/ProcessLinearize.h"
 #include "hw/passes/SSAConstruct.h"
 #include "hw/passes/SeqToComb.h"
@@ -751,7 +757,9 @@ public:
       break;
     }
 
+    build.pushInsertPoint(regsBackIt.succ());
     auto trigger = build.buildTrigger(sens);
+    build.popInsertPoint();
     proc = build.buildProcess(opc, trigger);
     build.pushInsertPoint(proc.block().end());
     handle_stmt(*stmt);
@@ -1087,7 +1095,7 @@ public:
       ref = ConstantBuilder{ctx.getConstants()}.raw(
           (unsigned)svint.getBitWidth(), data);
     } else {
-      SmallVec<uint32_t, 16> buf{round_up_div(2 * svint.getBitWidth(), 32U)};
+      SmallVec<uint32_t, 16> buf(round_up_div(2 * svint.getBitWidth(), 32U));
 
       std::span<const uint16_t> data16{
           reinterpret_cast<const uint16_t *>(data.data()), data.size() * 2};
@@ -1770,7 +1778,7 @@ int main(int argc, char **argv) {
 
   std::cout << "\n\n\n";
   HWPrinter print{std::cout};
-  // print.printCtx(ctx);
+  print.printCtx(ctx);
 
   FunctionInlinePass pass0{ctx};
   pass0.run();
@@ -1791,6 +1799,27 @@ int main(int argc, char **argv) {
 
   pass3.config.mode = SSAConstructPass::Config::DEFERRED;
   pass3.run();
+
+  InstCombinePass icomb{ctx};
+  icomb.run();
+
+  ModuleInlinePass modInl{ctx};
+  modInl.run();
+
+  LoopSimplifyPass loopSimp{ctx};
+  loopSimp.run();
+
+  LinearizeControlFlowPass linCF{ctx};
+  linCF.run();
+
+  AggressiveDeadCodeEliminationPass adcePass{ctx};
+  adcePass.run();
+
+  icomb.run();
+  //adcePass.run();
+
+  LowerOpsPass lowerOps{ctx};
+  lowerOps.run();
 
   print.reset();
   print.printCtx(ctx);

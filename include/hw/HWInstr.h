@@ -44,6 +44,16 @@ public:
       return HWInstrRef{block.defI()}.parentMod(ctx);
     }
   }
+  bool isDescendantOf(BlockRef block, HWContext &ctx) {
+    HWInstrRef instr = *this;
+    while (ctx.getCFG().contains(instr)) {
+      auto parent = ctx.getCFG()[instr];
+      if (parent.blockRef() == block)
+        return true;
+      instr = parent.blockRef().defI();
+    }
+    return false;
+  }
 };
 
 }; // namespace dyno

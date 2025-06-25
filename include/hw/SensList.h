@@ -97,6 +97,8 @@ public:
   auto modesRaw() { return sensModes; }
 
   Trigger(DynObjRef) : sensModes(0), numModes(0) {}
+  Trigger(DynObjRef, const Trigger &other)
+      : sensModes(other.sensModes), numModes(other.numModes) {}
 };
 
 class TriggerRef : public FatObjRef<Trigger> {

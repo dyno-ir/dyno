@@ -3,6 +3,8 @@
 #include "dyno/Obj.h"
 #include "hw/HWAbstraction.h"
 #include "hw/HWPrinter.h"
+#include "hw/IDs.h"
+#include "hw/SensList.h"
 #include "support/DenseMap.h"
 
 namespace dyno {
@@ -15,6 +17,8 @@ public:
   // objID for new. Then we need another type switch to get the ptr though, so
   // just store a full FatDynObjRef.
   DenseMap<DynObjRef, FatDynObjRef<>> oldToNewMap;
+
+  uint blockDepth = 0;
 
   static constexpr auto emptyCallback =
       [](DeepCopier *, InstrRef, BlockRef_iterator<true>) { return false; };
@@ -31,7 +35,9 @@ public:
       auto asBlock = obj.as<BlockRef>();
       BlockRef blockRef = ctx.createBlock();
       blockRef.reserve(asBlock.size());
+      blockDepth++;
       deepCopyInstrsImpl(asBlock.begin(), blockRef.begin(), instrCallback);
+      blockDepth--;
       return blockRef;
     }
     case *OP_FUNC: {
@@ -45,6 +51,14 @@ public:
     case *HW_REGISTER: {
       auto asReg = obj.as<RegisterRef>();
       return ctx.getWires().create(asReg->numBits);
+    }
+    case *HW_PROCESS: {
+      //auto asProc = obj.as<ProcessRef>();
+      return ctx.getProcs().create();
+    }
+    case *HW_TRIGGER: {
+      auto asTrigger = obj.as<TriggerRef>();
+      return ctx.getTriggers().create(*asTrigger);
     }
     default:
       dyno_unreachable("copying is not supported");

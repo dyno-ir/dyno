@@ -21,7 +21,7 @@ namespace dyno {
 class SSAConstructPass {
   HWContext &ctx;
   uint depth = 0;
-  ObjMapVec<Instr, bool> isNewLoad;
+  ObjMapVec<Instr, bool> isNewInstr;
 
 public:
   struct Config {
@@ -361,7 +361,7 @@ public:
           frag.srcAddr = 0;
           assert(frag.untouched);
 
-          dumpCtx(ctx);
+          //dumpCtx(ctx);
           continue;
         }
         yieldVals.emplace_back(reg, std::make_pair(frag.dstAddr, frag.len),
@@ -495,7 +495,7 @@ public:
       }
 
       case *HW_LOAD: {
-        if (config.mode == Config::DEFERRED && !isNewLoad[instr]) {
+        if (config.mode == Config::DEFERRED && !isNewInstr[instr]) {
           // deferred stores are not yet visible, can't prop to loads.
           break;
         }
@@ -705,7 +705,7 @@ public:
               .overwrite(yieldVal, 0, range.first, range.second, false, trig);
         }
 
-        build.addOperands(asSwitch, newYields, ArrayRef<HWValue>::empty());
+        build.addOperands(asSwitch, newYields, ArrayRef<HWValue>::emptyRef());
         destroyList.emplace_back(asSwitch);
         break;
       }
@@ -786,14 +786,13 @@ public:
   }
 
   void run() {
-    isNewLoad.resize(ctx.getInstrs().numIDs());
+    isNewInstr.resize(ctx.getInstrs().numIDs());
     auto &createHooks = ctx.getInstrs().createHooks;
     auto hookSize = createHooks.size();
 
     if (config.mode == Config::DEFERRED)
       createHooks.emplace_back([&](InstrRef ref) {
-        if (ref.getDialectOpcode() == HW_LOAD)
-          isNewLoad.get_ensure(ref) = true;
+        isNewInstr.get_ensure(ref) = true;
       });
 
     for (auto mod : Range{ctx.getModules()}.as<ModuleRef>()) {

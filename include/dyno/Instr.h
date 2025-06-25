@@ -123,8 +123,15 @@ public:
   Instr &operator=(const Instr &) = delete;
   Instr &operator=(Instr &&) = delete;
 
-  ~Instr() {
+  ~Instr() = default;
+  // hack before we can do this properly
+  void destroyOperands() {
     for (auto &op : *this) {
+      op.destroy();
+    }
+  }
+  void destroyOthers() {
+    for (auto &op : Range{other_begin(), other_end()}) {
       op.destroy();
     }
   }
@@ -356,7 +363,9 @@ public:
 
   unsigned getNumOperands() const { return (*this)->numOperands; }
   unsigned getNumDefs() const { return (*this)->numDefs; }
-  unsigned getNumOthers() const { return (*this)->numOperands - (*this)->numDefs; }
+  unsigned getNumOthers() const {
+    return (*this)->numOperands - (*this)->numDefs;
+  }
 
   Range<iterator> defs() { return {def_begin(), def_end()}; }
   Range<iterator> others() { return {other_begin(), other_end()}; }
@@ -614,6 +623,8 @@ public:
     ++op;
     return *this;
   }
+
+  InstrRef instr() const { return op.instr(); }
 };
 
 template <> struct InterfaceTraits<OpcodeInfo> {

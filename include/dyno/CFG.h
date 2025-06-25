@@ -29,7 +29,10 @@ class Block {
 
   using iterator = Node *;
 
+public:
   InstrDefUse defUse;
+
+private:
   SmallVec<Node, 16> instrs;
   CFG *cfg;
   bool sorted;
