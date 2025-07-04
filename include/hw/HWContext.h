@@ -1,5 +1,6 @@
 #pragma once
 #include "dyno/Constant.h"
+#include "hw/DebugInfo.h"
 #include "hw/Module.h"
 #include "hw/SensList.h"
 #include "hw/Wire.h"
@@ -28,6 +29,7 @@ public:
   auto &getInstrs() { return instrs; }
   auto &getCFG() { return cfg; }
   auto &getTriggers() { return triggers; }
+  DebugInfo dbgInfo;
 
   ModuleIRef createModule(std::string_view name) {
     auto moduleRef = modules.create(std::string(name));
@@ -50,6 +52,11 @@ public:
   }
 
   ConstantBuilder constBuild() { return ConstantBuilder{constants}; }
+
+  HWContext() {
+    instrs.destroyHooks.emplace_back(
+        [&](InstrRef instr) { dbgInfo.resetDebugInfo(instr); });
+  }
 };
 
 }; // namespace dyno

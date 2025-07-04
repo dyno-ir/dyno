@@ -4,6 +4,7 @@
 #include "dyno/Instr.h"
 #include "dyno/Obj.h"
 #include "dyno/RefUnion.h"
+#include "hw/AutoDebugInfo.h"
 #include "hw/BitRange.h"
 #include "hw/HWAbstraction.h"
 #include "hw/HWPrinter.h"
@@ -93,6 +94,8 @@ public:
 
     std::cerr << client->getString();
 
+    sm.getFileName(range.start());
+
     abort();
   }
 
@@ -105,13 +108,15 @@ public:
   struct Value;
 
   HWContext &ctx;
+  slang::SourceManager &sm;
   ModuleIRef mod;
   ProcessIRef proc;
-  // BlockRef blockRef;
   HWInstrBuilderStack build;
   BlockRef_iterator<true> regsBackIt;
 
-  SlangErrorPrinter &print;
+  SlangErrorPrinter print;
+
+  AutoDebugInfoStack debugInfoStack;
 
   using RegisterOrConstantRef = FatRefUnion<RegisterRef, ConstantRef>;
 
@@ -122,8 +127,8 @@ public:
 
   SmallVec<Value *, 4> assignLVStack;
 
-  VisitorAST(HWContext &ctx, SlangErrorPrinter &errorPrint)
-      : ctx(ctx), build(ctx), print(errorPrint) {}
+  VisitorAST(HWContext &ctx, slang::SourceManager &sm)
+      : ctx(ctx), sm(sm), build(ctx), print(sm), debugInfoStack(ctx) {}
 
   struct Value : public RTTIUtilMixin<Value> {
     const slang::ast::Type *type;
@@ -298,6 +303,40 @@ public:
     }
 
     static bool is_impl(const Value &v) { return v.kind == VK_CCL; }
+  };
+
+  void pushSourceRange(slang::SourceRange range) {
+    auto bufStart = range.start().buffer();
+    auto bufEnd = range.end().buffer();
+
+    uint64_t startIndex = range.start().offset();
+    bool first = true;
+
+    while (bufStart != bufEnd) {
+      slang::SourceLocation start{bufStart, startIndex};
+      slang::SourceLocation end{bufStart,
+                                sm.getSourceText(bufStart).size() - 1};
+      debugInfoStack.addDebugInfo(
+          sm.getRawFileName(bufStart), sm.getLineNumber(start),
+          sm.getColumnNumber(start), sm.getLineNumber(end),
+          sm.getColumnNumber(end), first);
+      startIndex = 0;
+      first = false;
+    }
+    slang::SourceLocation start{bufStart, startIndex};
+    debugInfoStack.addDebugInfo(
+        sm.getRawFileName(bufStart), sm.getLineNumber(start),
+        sm.getColumnNumber(start), sm.getLineNumber(range.end()),
+        sm.getColumnNumber(range.end()), first);
+  }
+  void popSourceRange() { debugInfoStack.popDebugInfo(); }
+  struct DebugInfoSourceRange {
+    VisitorAST *self;
+    DebugInfoSourceRange(VisitorAST *self, slang::SourceRange range)
+        : self(self) {
+      self->pushSourceRange(range);
+    }
+    ~DebugInfoSourceRange() { self->popSourceRange(); }
   };
 
   void
@@ -721,8 +760,8 @@ public:
 
   void handle_proc(const slang::ast::ProceduralBlockSymbol &block) {
     assert(mod);
-
     auto *stmt = &block.getBody();
+
     SensList sens;
     if (auto *asTimed = stmt->as_if<slang::ast::TimedStatement>()) {
       stmt = &asTimed->stmt;
@@ -845,7 +884,7 @@ public:
   };
 
   void handle_stmt(const slang::ast::Statement &stmt) {
-
+    DebugInfoSourceRange debugInfoSrcRange{this, stmt.sourceRange};
     switch (stmt.kind) {
     case slang::ast::StatementKind::Empty:
       break;
@@ -1114,6 +1153,7 @@ public:
   }
 
   std::unique_ptr<Value> handle_expr(const slang::ast::Expression &expr) {
+    DebugInfoSourceRange debugInfoSrcRange{this, expr.sourceRange};
 
     switch (expr.kind) {
     case slang::ast::ExpressionKind::Assignment: {
@@ -1307,7 +1347,6 @@ public:
       auto operandVal = operand->proGetValue(build);
 
       // assert(operandVal.getNumBits() == unop.type->getBitstreamWidth());
-
       HWValue val;
 
       switch (unop.op) {
@@ -1771,8 +1810,7 @@ int main(int argc, char **argv) {
 
   HWContext ctx;
 
-  SlangErrorPrinter errorPrint{driver.sourceManager};
-  VisitorAST visitor{ctx, errorPrint};
+  VisitorAST visitor{ctx, driver.sourceManager};
   compilation->getRoot().visit(visitor);
   visitor.handle_modules();
 
@@ -1816,7 +1854,7 @@ int main(int argc, char **argv) {
   adcePass.run();
 
   icomb.run();
-  //adcePass.run();
+  // adcePass.run();
 
   LowerOpsPass lowerOps{ctx};
   lowerOps.run();

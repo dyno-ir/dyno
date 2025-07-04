@@ -9,6 +9,12 @@
 
 namespace dyno {
 
+class DeepCopier;
+
+template <typename T>
+concept IsCopyHook =
+    std::is_invocable_v<T, DeepCopier *, InstrRef, BlockRef_iterator<true>>;
+
 class DeepCopier {
 public:
   HWContext &ctx;
@@ -17,14 +23,12 @@ public:
   // objID for new. Then we need another type switch to get the ptr though, so
   // just store a full FatDynObjRef.
   DenseMap<DynObjRef, FatDynObjRef<>> oldToNewMap;
-
-  uint blockDepth = 0;
+  uint32_t blockDepth = 0;
 
   static constexpr auto emptyCallback =
       [](DeepCopier *, InstrRef, BlockRef_iterator<true>) { return false; };
 
-  template <
-      std::invocable<DeepCopier *, InstrRef, BlockRef_iterator<true>> InstrHook>
+  template <IsCopyHook InstrHook>
   FatDynObjRef<> deepCopyObj(FatDynObjRef<> obj, InstrHook &&instrCallback) {
 
     if (!obj)
@@ -53,7 +57,7 @@ public:
       return ctx.getWires().create(asReg->numBits);
     }
     case *HW_PROCESS: {
-      //auto asProc = obj.as<ProcessRef>();
+      // auto asProc = obj.as<ProcessRef>();
       return ctx.getProcs().create();
     }
     case *HW_TRIGGER: {
@@ -64,10 +68,9 @@ public:
       dyno_unreachable("copying is not supported");
     }
   }
-  template <
-      std::invocable<DeepCopier *, InstrRef, BlockRef_iterator<true>> InstrHook>
+  template <IsCopyHook InstrHook>
   InstrRef copyInstr(InstrRef srcInstr, BlockRef_iterator<true> dstIt,
-                     InstrHook &&instrCallback) {
+                     InstrHook &instrCallback) {
     auto copyInstr = InstrRef{ctx.getInstrs().create(
         srcInstr.getNumOperands(), srcInstr.getDialectOpcode())};
     dstIt.insertPrev(copyInstr);
@@ -89,15 +92,22 @@ public:
       build.addRef(ref);
     }
 
+    ctx.dbgInfo.copyDebugInfo(srcInstr, copyInstr);
     return copyInstr;
   }
 
+  template <IsCopyHook InstrHook>
+  InstrRef moveInstr(InstrRef srcInstr, BlockRef_iterator<true> dstIt,
+                     InstrHook &instrCallback) {
+    ctx.getCFG()[srcInstr] = dstIt;
+    return srcInstr;
+  }
+
 private:
-  template <
-      std::invocable<DeepCopier *, InstrRef, BlockRef_iterator<true>> InstrHook>
-  void deepCopyInstrsImpl(BlockRef_iterator<true> srcIt,
+  template <auto Func, IsCopyHook InstrHook>
+  void copyMoveInstrsImpl(BlockRef_iterator<true> srcIt,
                           BlockRef_iterator<true> dstIt,
-                          InstrHook &&instrCallback) {
+                          InstrHook &instrCallback) {
     // insert after the passed iter
     dstIt++;
 
@@ -108,9 +118,25 @@ private:
         srcIt++;
         continue;
       }
-      copyInstr(srcInstr, dstIt, instrCallback);
+      (this->*Func)(srcInstr, dstIt, instrCallback);
       srcIt++;
     }
+  }
+
+  template <IsCopyHook InstrHook>
+  void deepCopyInstrsImpl(BlockRef_iterator<true> srcIt,
+                          BlockRef_iterator<true> dstIt,
+                          InstrHook &instrCallback) {
+    return copyMoveInstrsImpl<&DeepCopier::copyInstr<InstrHook>, InstrHook>(
+        srcIt, dstIt, instrCallback);
+  }
+
+  template <IsCopyHook InstrHook>
+  void moveInstrsImpl(BlockRef_iterator<true> srcIt,
+                      BlockRef_iterator<true> dstIt,
+                      InstrHook &instrCallback) {
+    return copyMoveInstrsImpl<&DeepCopier::moveInstr<InstrHook>, InstrHook>(
+        srcIt, dstIt, instrCallback);
   }
 
 public:
@@ -120,8 +146,7 @@ public:
     deepCopyInstrsImpl(srcIt, dstIt, emptyCallback);
   }
 
-  template <
-      std::invocable<DeepCopier *, InstrRef, BlockRef_iterator<true>> InstrHook>
+  template <IsCopyHook InstrHook>
   void deepCopyInstrs(BlockRef_iterator<true> srcIt,
                       BlockRef_iterator<true> dstIt, InstrHook &&instrHook) {
     oldToNewMap.clear();

@@ -95,10 +95,12 @@ public:
   }
 
   void printCtx(HWContext &ctx) {
+    debugInfo = &ctx.dbgInfo;
     for (auto instr : ctx.getInstrs()) {
       if (InstrRef{instr}.isOpc(HW_MODULE_INSTR))
         printInstr(InstrRef{instr});
     }
+    debugInfo = nullptr;
   }
 };
 

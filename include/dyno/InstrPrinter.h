@@ -5,6 +5,7 @@
 #include "dyno/DialectInfo.h"
 #include "dyno/IDs.h"
 #include "dyno/Obj.h"
+#include "hw/DebugInfo.h"
 #include "support/DenseMap.h"
 #include <dyno/Instr.h>
 #include <dyno/Interface.h>
@@ -37,9 +38,12 @@ public:
 
 class PrinterBase {
   IndentPrinter indentPrint;
-  DenseMap<DynObjRef, size_t> introduced;
+  DenseMap<DynObjRef, uint32_t> introduced;
 
   std::vector<bool> isDefault = std::vector<bool>(NUM_DIALECTS);
+
+protected:
+  DebugInfo *debugInfo = nullptr;
 
 public:
   Interface<DialectInfo> dialectI;
@@ -88,8 +92,8 @@ public:
         return;
     }
     printTypeDefault(ref);
-    //str << '[' << ref.getObjID() << "]";
-    //printCustom(ref);
+    // str << '[' << ref.getObjID() << "]";
+    // printCustom(ref);
   }
 
   void printDef(FatDynObjRef<> ref) {
@@ -163,7 +167,31 @@ public:
     str << "}";
   }
 
+  void tryPrintSrcLoc(ObjRef<Instr> instr) {
+    if (!debugInfo)
+      return;
+    auto info = debugInfo->get(instr);
+    if (!info || info->sourceLocs.empty())
+      return;
+    str << "// ";
+    for (auto [i, loc] : Range{info->sourceLocs}.enumerate()) {
+      if (i != 0)
+        str << ", ";
+      if (loc.beginLine == loc.endLine) {
+        std::print(str, "{}:{}:{}-{}", debugInfo->getStringName(loc.fileName),
+                   loc.beginLine, loc.beginCol, loc.endCol);
+      } else {
+        std::print(str, "{}:{}:{}-{}:{}",
+                   debugInfo->getStringName(loc.fileName), loc.beginLine,
+                   loc.beginCol, loc.endLine, loc.endCol);
+      }
+    }
+    str << "\n";
+    indentPrint.printIndent();
+  }
+
   void printInstr(InstrRef instr) {
+    tryPrintSrcLoc(instr);
     printOpcodeDefault(instr);
     str << ' ';
 
