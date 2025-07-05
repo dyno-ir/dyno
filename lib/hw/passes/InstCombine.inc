@@ -69,8 +69,8 @@ copyOperands(r20, r15, r16);
 copyOperands(r20, r10, r11);
 copyOperands(r20, r18, r19);
 copyOperands(r20, r21, r22);
-deleteIfSingleUse(ctx, r7);
-deleteF(ctx, r0);
+deleteIfSingleUse(matched, ctx, r7);
+deleteF(matched, ctx, r0);
 return true;
 }
 fail_0:;
@@ -126,8 +126,8 @@ r14.other();
 copyOperands(r14, r7, r8);
 copyOperands(r14, r12, r13);
 copyOperands(r14, r15, r16);
-deleteIfSingleUse(ctx, r4);
-deleteF(ctx, r0);
+deleteIfSingleUse(matched, ctx, r4);
+deleteF(matched, ctx, r0);
 return true;
 }
 fail_1:;
@@ -156,7 +156,7 @@ copyOperands(r6, r1, r3);
 r6.other();
 copyOperands(r6, r3, r4);
 copyOperands(r6, r7, r8);
-deleteF(ctx, r0);
+deleteF(matched, ctx, r0);
 return true;
 }
 fail_2:;
@@ -187,7 +187,7 @@ auto r7 = build.buildInstrRaw(HW_LOAD, (r3-r1)+(r4-r3));
 copyOperands(r7, r1, r3);
 r7.other();
 copyOperands(r7, r3, r4);
-deleteF(ctx, r0);
+deleteF(matched, ctx, r0);
 return true;
 }
 fail_3:;
@@ -218,7 +218,7 @@ auto r7 = build.buildInstrRaw(HW_STORE, (r3-r1)+(r4-r3));
 r7.other();
 copyOperands(r7, r1, r3);
 copyOperands(r7, r3, r4);
-deleteF(ctx, r0);
+deleteF(matched, ctx, r0);
 return true;
 }
 fail_4:;
@@ -252,7 +252,7 @@ r8.other();
 copyOperands(r8, r1, r3);
 copyOperands(r8, r3, r4);
 copyOperands(r8, r6, r7);
-deleteF(ctx, r0);
+deleteF(matched, ctx, r0);
 return true;
 }
 fail_5:;
@@ -289,7 +289,7 @@ copyOperands(r7, r1, r3);
 r7.other();
 copyOperands(r7, r3, r4);
 copyOperands(r7, r5, r6);
-deleteF(ctx, r0);
+deleteF(matched, ctx, r0);
 return true;
 }
 fail_6:;
@@ -305,8 +305,8 @@ r1 = r0.begin();
 r2 = r0.end();
 r3 = std::next(r1);
 r4 = std::next(r3);
-replaceAllUses(r1, r3);
-deleteF(ctx, r0);
+replaceAllUses(replaced, r1, r3);
+deleteF(matched, ctx, r0);
 return true;
 }
 fail_7:;
@@ -348,8 +348,8 @@ auto r12 = build.buildInstrRaw(OP_TRUNC, (r3-r1)+(r8-r7));
 copyOperands(r12, r1, r3);
 r12.other();
 copyOperands(r12, r7, r8);
-deleteIfSingleUse(ctx, r4);
-deleteF(ctx, r0);
+deleteIfSingleUse(matched, ctx, r4);
+deleteF(matched, ctx, r0);
 return true;
 }
 fail_8:;
@@ -371,8 +371,8 @@ r4 = std::next(r3);
 
   FatDynObjRef<> temp = cbuild.val((*RefRange{r3, r4}.begin())->as<ConstantRef>()).resize(*(*RefRange{r1, r3}.begin())->as<WireRef>().getNumBits()).get();
   RefRange{r5, r6} = temp;
-replaceAllUses(r1, r5);
-deleteF(ctx, r0);
+replaceAllUses(replaced, r1, r5);
+deleteF(matched, ctx, r0);
 return true;
 }
 fail_9:;

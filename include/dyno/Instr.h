@@ -10,6 +10,7 @@
 #include "support/Utility.h"
 #include <cassert>
 #include <compare>
+#include <concepts>
 #include <cstdint>
 #include <dyno/Interface.h>
 #include <dyno/Obj.h>
@@ -444,19 +445,26 @@ public:
   Range<iterator> defs() { return {def_begin(), def_end()}; }
   Range<iterator> uses() { return {use_begin(), use_end()}; }
 
-  void replaceAllUsesWith(FatDynObjRef<> newRef) {
+  template <std::invocable<OperandRef> Callback>
+  void replaceAllUsesWith(FatDynObjRef<> newRef, Callback &&func) {
     if (Operand::isDefUseOperand(newRef)) {
       auto &other = *reinterpret_cast<InstrDefUse *>(newRef.getPtr());
       for (OperandRef use : uses()) {
+        func(use);
         use->emplace(newRef);
         other.insertUse(use);
       }
     } else {
       for (OperandRef use : uses()) {
+        func(use);
         use->emplace(newRef);
       }
     }
     refs.downsize(numDefs);
+  }
+
+  void replaceAllUsesWith(FatDynObjRef<> newRef) {
+    return replaceAllUsesWith(newRef, [](OperandRef) {});
   }
 
   void setInsertHook(insert_hook_t insertHook) {

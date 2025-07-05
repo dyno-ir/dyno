@@ -2,6 +2,7 @@
 
 #include "dyno/CFG.h"
 #include "dyno/Constant.h"
+#include "hw/AutoDebugInfo.h"
 #include "hw/DeepCopy.h"
 #include "hw/HWAbstraction.h"
 #include "hw/HWContext.h"
@@ -21,6 +22,7 @@ class LoopSimplifyPass {
   HWContext &ctx;
   DeepCopier copier;
   HWInstrBuilder build;
+  AutoCopyDebugInfoStack autoDebugInfo;
 
   // inspect yields.
   struct YieldVal {
@@ -283,6 +285,8 @@ class LoopSimplifyPass {
     if (!change)
       return false;
 
+    auto token = autoDebugInfo.addWithToken(loop);
+
     // simplify yields by deleting unused.
     for (auto block : blocks) {
       auto unyield = getUnyield(block);
@@ -418,6 +422,6 @@ public:
   }
 
   explicit LoopSimplifyPass(HWContext &ctx)
-      : ctx(ctx), copier(ctx), build(ctx) {}
+      : ctx(ctx), copier(ctx), build(ctx), autoDebugInfo(ctx) {}
 };
 }; // namespace dyno

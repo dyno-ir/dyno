@@ -1587,7 +1587,7 @@ struct CPPBackend {
         break;
 
       case BytecodeOp::REPLACE_ALL_USES:
-        std::print(os, "replaceAllUses(r{}, r{});\n", op.replAllUses.oldOp,
+        std::print(os, "replaceAllUses(replaced, r{}, r{});\n", op.replAllUses.oldOp,
                    op.replAllUses.newOp);
         break;
 
@@ -1669,10 +1669,10 @@ struct CPPBackend {
       }
 
       case BytecodeOp::DELETE:
-        std::print(os, "deleteF(ctx, r{});\n", op.deleteI.instr);
+        std::print(os, "deleteF(matched, ctx, r{});\n", op.deleteI.instr);
         break;
       case BytecodeOp::DELETE_IF_SINGLE_USE:
-        std::print(os, "deleteIfSingleUse(ctx, r{});\n", op.deleteI.instr);
+        std::print(os, "deleteIfSingleUse(matched, ctx, r{});\n", op.deleteI.instr);
         break;
 
       default:

@@ -83,6 +83,19 @@ static constexpr uint32_t unpack_bits(uint16_t x) {
   return xx;
 }
 
+static constexpr uint32_t hash_combine(uint32_t a, uint32_t b) {
+  return a ^ (b + 0x9e3779b9 + (a << 6) + (a >> 2));
+}
+
+static constexpr uint32_t hash_u32(uint32_t a) {
+  a = (a ^ 61) ^ (a >> 16);
+  a = a + (a << 3);
+  a = a ^ (a >> 4);
+  a = a * 0x27d4eb2d;
+  a = a ^ (a >> 15);
+  return a;
+}
+
 // split integer into regions of N bits, return 1000... for each region if equal
 template <int N, std::integral T>
 static constexpr T n_equal_mask(T lhs, T rhs) {

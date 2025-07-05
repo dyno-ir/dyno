@@ -2321,23 +2321,15 @@ class ConstantStore {
   DenseMultimap<uint32_t, ObjRef<Constant>> map;
 
 public:
-  uint32_t hash(uint32_t a) {
-    a = (a ^ 61) ^ (a >> 16);
-    a = a + (a << 3);
-    a = a ^ (a >> 4);
-    a = a * 0x27d4eb2d;
-    a = a ^ (a >> 15);
-    return a;
-  }
 
   template <typename T> uint32_t constantHash(const T &constant) {
     uint32_t acc = 0;
-    acc ^= hash(constant.getIs4S());
-    acc ^= hash(constant.getExtend());
-    acc ^= hash(constant.getRawNumBits());
-    acc ^= hash(constant.getNumWords());
+    acc ^= hash_u32(constant.getIs4S());
+    acc ^= hash_u32(constant.getExtend());
+    acc ^= hash_u32(constant.getRawNumBits());
+    acc ^= hash_u32(constant.getNumWords());
     for (const auto word : constant.getWords())
-      acc ^= hash(word);
+      acc ^= hash_u32(word);
     return acc;
   }
 

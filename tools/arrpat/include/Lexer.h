@@ -153,7 +153,7 @@ public:
       if (i + litLen >= len)
         return Token::makeNone();
       while (multiline
-                 ? (srcC[i + litLen] != ']' || srcC[i + litLen + 1] != '}')
+                 ? (srcC[i + litLen] != '}' || srcC[i + litLen + 1] != ']')
                  : (srcC[i + litLen] != '\"')) {
         if (!multiline && srcC[i + litLen] == '\n')
           return Token::makeNone();

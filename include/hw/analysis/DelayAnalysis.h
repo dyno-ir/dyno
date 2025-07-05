@@ -121,7 +121,10 @@ public:
 
     default: {
       pushUses(instr);
-      return *delay[instr.getDialectOpcode()];
+      auto val = delay[instr.getDialectOpcode()];
+      if (val)
+        return *val;
+      return nullopt;
     }
 
     case *HW_LOAD:

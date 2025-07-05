@@ -317,17 +317,19 @@ public:
       slang::SourceLocation end{bufStart,
                                 sm.getSourceText(bufStart).size() - 1};
       debugInfoStack.addDebugInfo(
-          sm.getRawFileName(bufStart), sm.getLineNumber(start),
+          first, sm.getRawFileName(bufStart), sm.getLineNumber(start),
           sm.getColumnNumber(start), sm.getLineNumber(end),
-          sm.getColumnNumber(end), first);
+          sm.getColumnNumber(end));
       startIndex = 0;
       first = false;
+      // fixme: this should be an increment of buffers.
+      bufStart = bufEnd;
     }
     slang::SourceLocation start{bufStart, startIndex};
     debugInfoStack.addDebugInfo(
-        sm.getRawFileName(bufStart), sm.getLineNumber(start),
+        first, sm.getRawFileName(bufStart), sm.getLineNumber(start),
         sm.getColumnNumber(start), sm.getLineNumber(range.end()),
-        sm.getColumnNumber(range.end()), first);
+        sm.getColumnNumber(range.end()));
   }
   void popSourceRange() { debugInfoStack.popDebugInfo(); }
   struct DebugInfoSourceRange {

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "dyno/Constant.h"
+#include "hw/AutoDebugInfo.h"
 #include "hw/DeepCopy.h"
 #include "hw/HWAbstraction.h"
 #include "hw/HWContext.h"
@@ -18,6 +19,7 @@ class LinearizeControlFlowPass {
   DeepCopier copier;
   HWInstrBuilder build;
   SmallVec<InstrRef, 32> worklist;
+  AutoCopyDebugInfoStack autoDebugInfo;
 
   // if (auto asConst = cond->dyn_as<ConstantRef>();
   //     asConst && asConst.valueEquals(0)) {
@@ -100,6 +102,8 @@ class LinearizeControlFlowPass {
     copier.deepCopyInstrs(instr.getFalseBlock().begin(), insertIter, copyHook);
     build.setInsertPoint(endIter);
 
+    auto token = autoDebugInfo.addWithToken(instr);
+
     assert(yields.size() % 2 == 0 && "invalid number of yield values");
     for (size_t i = 0; i < yields.size() / 2; i++) {
       auto trueV = yields[i];
@@ -143,6 +147,8 @@ class LinearizeControlFlowPass {
     uint numYieldValues = instr.getNumYieldValues();
 
     build.setInsertPoint(endIter);
+
+    auto token = autoDebugInfo.addWithToken(instr);
 
     for (auto [i, yieldVal] : Range{instr.yieldValues()}.enumerate()) {
       Optional<uint32_t> defaultIdx = nullopt;
@@ -192,6 +198,8 @@ class LinearizeControlFlowPass {
     auto endIter = insertIter.succ();
 
     auto cbuild = ctx.constBuild();
+
+    auto token = autoDebugInfo.addWithToken(forLoop);
 
     cbuild.val(forLoop.getLower()->as<ConstantRef>());
     for (uint64_t i = 0; i < *div.getLimitedVal(); i++) {
@@ -243,7 +251,7 @@ public:
       runOnModule(module.iref());
   }
   explicit LinearizeControlFlowPass(HWContext &ctx)
-      : ctx(ctx), copier(ctx), build(ctx) {}
+      : ctx(ctx), copier(ctx), build(ctx), autoDebugInfo(ctx) {}
 };
 
 }; // namespace dyno

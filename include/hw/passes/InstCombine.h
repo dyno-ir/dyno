@@ -16,11 +16,15 @@
 
 namespace dyno {
 
-bool generated(HWContext &ctx, HWInstrRef);
+bool generated(HWContext &ctx, SmallVecImpl<InstrRef> &matched,
+               SmallVecImpl<OperandRef> &replaced, HWInstrRef);
 
 class InstCombinePass {
   HWContext &ctx;
   SmallVec<InstrRef, 128> worklist;
+
+  SmallVec<InstrRef, 8> currentMatched;
+  SmallVec<OperandRef, 4> currentReplaced;
 
   ConstantBuilder cbuild;
 
@@ -44,7 +48,7 @@ private:
           auto defI = asWire.getSingleDef()->instr();
           if (defI.isOpc(opc) && asWire.hasSingleUse()) {
             stack.emplace_back(defI);
-            // mark to delete
+            currentMatched.emplace_back(defI);
             TaggedIRef{defI}.get() = 1;
             change = true;
             continue;
@@ -227,9 +231,16 @@ private:
         return false;
     }
 
+    currentMatched.clear();
+    currentReplaced.clear();
+
     if (manual(instr))
       return true;
-    return generated(ctx, instr);
+
+    currentMatched.clear();
+    currentReplaced.clear();
+
+    return generated(ctx, currentMatched, currentReplaced, instr);
   }
 
   void newInstrHook(InstrRef ref) {
@@ -246,6 +257,15 @@ private:
         break;
       }
     }
+  }
+
+  void oldInstrHook(InstrRef old, ArrayRef<InstrRef> newInstrs) {
+    for (auto newInstr : newInstrs)
+      ctx.dbgInfo.copyDebugInfo(old, newInstr);
+  }
+
+  void replacedUseHook(OperandRef replaced) {
+    worklist.emplace_back(replaced.instr());
   }
 
   void runOnProcess(ProcessIRef proc) {
@@ -267,6 +287,16 @@ private:
         if (lastWorklistSize == worklist.size())
           dbgs() << "<none>\n";
       })
+
+      auto newInstrs = ArrayRef<InstrRef>{worklist.begin() + lastWorklistSize,
+                                          worklist.end()};
+      oldInstrHook(instr, newInstrs);
+      for (auto instr : currentMatched) {
+        oldInstrHook(instr, newInstrs);
+      }
+      for (auto operand : currentReplaced) {
+        replacedUseHook(operand);
+      }
       for (size_t i = lastWorklistSize, sz = worklist.size(); i < sz; i++)
         newInstrHook(worklist[i]);
     }

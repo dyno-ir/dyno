@@ -4,7 +4,9 @@
 #include "hw/HWAbstraction.h"
 #include "hw/HWContext.h"
 #include "hw/HWInstr.h"
+#include "hw/HWValue.h"
 #include "hw/analysis/DelayAnalysis.h"
+#include "support/Utility.h"
 #include <cstdint>
 namespace dyno {
 
@@ -80,10 +82,89 @@ class LowerOpsPass {
     build.destroyInstr(add);
   }
 
+  // probably a good idea to express this and stuff like shift in terms of high
+  // level instructions still. that way we can re run instcomb to handle cases
+  // like (a - b) > 10 to a simple sum.
+  void lowerOrderingICMP(InstrRef instr) {
+    auto numBits = *instr.other(0)->as<HWValue>().getNumBits();
+    build.setInsertPoint(instr);
+    auto ibuild = build.buildInstrRaw(HW_ADD_CARRY, 5);
+    auto carryWire = ctx.getWires().create(1);
+    ibuild.addRef(carryWire);
+    auto sumWire = ctx.getWires().create(numBits);
+    ibuild.addRef(sumWire);
+    ibuild.other();
+
+    HWValue lhs = instr.other(0)->as<HWValue>();
+    HWValue rhs = instr.other(1)->as<HWValue>();
+    bool invertResult = false;
+    bool isSigned = false;
+    switch (*instr.getDialectOpcode()) {
+    case *OP_ICMP_SLT:
+      isSigned = true;
+      [[fallthrough]];
+    case *OP_ICMP_ULT:
+      break;
+
+    case *OP_ICMP_SLE:
+      isSigned = true;
+      [[fallthrough]];
+    case *OP_ICMP_ULE:
+      std::swap(lhs, rhs);
+      invertResult = true;
+      break;
+
+    case *OP_ICMP_SGT:
+      isSigned = true;
+      [[fallthrough]];
+    case *OP_ICMP_UGT:
+      std::swap(lhs, rhs);
+      break;
+
+    case *OP_ICMP_SGE:
+      isSigned = true;
+      [[fallthrough]];
+    case *OP_ICMP_UGE:
+      invertResult = true;
+      break;
+
+    default:
+      dyno_unreachable("unknown opcode");
+    }
+
+    build.setInsertPoint(build.insert.pred());
+    ibuild.addRef(lhs);
+    ibuild.addRef(build.buildXNor(rhs));
+    ibuild.addRef(ConstantRef::fromBool(1));
+
+    build.setInsertPoint(instr);
+
+    HWValue out;
+    if (isSigned) {
+      HWValue signBit = build.buildSplice(sumWire, BitRange{numBits - 1, 1});
+      out = invertResult ? build.buildXNor(signBit, carryWire)
+                         : build.buildXor(signBit, carryWire);
+    } else {
+      out = invertResult ? build.buildXNor(carryWire) : carryWire;
+    }
+    instr.def(0)->as<WireRef>().replaceAllUsesWith(out);
+    build.destroyInstr(instr);
+  }
+
   void runOnInstr(InstrRef instr) {
     switch (*instr.getDialectOpcode()) {
     case *OP_ADD:
       lowerAdd(instr);
+      break;
+    case *OP_ICMP_ULT:
+    case *OP_ICMP_SLT:
+    case *OP_ICMP_ULE:
+    case *OP_ICMP_SLE:
+    case *OP_ICMP_UGT:
+    case *OP_ICMP_SGT:
+    case *OP_ICMP_UGE:
+    case *OP_ICMP_SGE:
+      lowerOrderingICMP(instr);
       break;
     }
   }

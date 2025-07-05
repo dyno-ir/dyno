@@ -3,6 +3,7 @@
 #include "dyno/Instr.h"
 #include "dyno/Obj.h"
 #include "dyno/ObjMap.h"
+#include "hw/AutoDebugInfo.h"
 #include "hw/HWAbstraction.h"
 #include "hw/HWInstr.h"
 #include "hw/HWPrinter.h"
@@ -22,6 +23,7 @@ class SSAConstructPass {
   HWContext &ctx;
   uint depth = 0;
   ObjMapVec<Instr, bool> isNewInstr;
+  AutoCopyDebugInfoStack autoDebugInfo;
 
 public:
   struct Config {
@@ -80,7 +82,7 @@ private:
   }
 
 public:
-  explicit SSAConstructPass(HWContext &ctx) : ctx(ctx) {}
+  explicit SSAConstructPass(HWContext &ctx) : ctx(ctx), autoDebugInfo(ctx) {}
 
   struct MultiwayResult {
     SmallVec<std::tuple<RegisterRef, std::pair<uint32_t, uint32_t>, TriggerID>,
@@ -361,7 +363,7 @@ public:
           frag.srcAddr = 0;
           assert(frag.untouched);
 
-          //dumpCtx(ctx);
+          // dumpCtx(ctx);
           continue;
         }
         yieldVals.emplace_back(reg, std::make_pair(frag.dstAddr, frag.len),
@@ -449,6 +451,7 @@ public:
     SmallVec<FatDynObjRef<>, 32> destroyList;
 
     for (auto instr : block) {
+      auto token = autoDebugInfo.addWithToken(instr);
       switch (*instr.getDialectOpcode()) {
 
       case *HW_STORE_DEFER:
@@ -791,9 +794,8 @@ public:
     auto hookSize = createHooks.size();
 
     if (config.mode == Config::DEFERRED)
-      createHooks.emplace_back([&](InstrRef ref) {
-        isNewInstr.get_ensure(ref) = true;
-      });
+      createHooks.emplace_back(
+          [&](InstrRef ref) { isNewInstr.get_ensure(ref) = true; });
 
     for (auto mod : Range{ctx.getModules()}.as<ModuleRef>()) {
       runOnModule(mod.iref());

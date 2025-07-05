@@ -28,32 +28,43 @@ static InstrRef getDefInstr(InstrRef::iterator use) {
   return (*use)->as<WireRef>().getDefI();
 }
 
-static void deleteF(HWContext &ctx, InstrRef ref) {
+static void deleteF(SmallVecImpl<InstrRef> &matched, HWContext &ctx,
+                    InstrRef ref) {
   for (auto op : ref)
     op.replace(FatDynObjRef<>{nullref});
   InstCombinePass::TaggedIRef{ref}.get() = 1;
+  matched.emplace_back(ref);
 }
 
-static void deleteIfSingleUse(HWContext &ctx, InstrRef ref) {
+static void deleteIfSingleUse(SmallVecImpl<InstrRef> &matched, HWContext &ctx,
+                              InstrRef ref) {
   if (ref.def(0)->as<WireRef>().getNumUses() == 1) {
-    deleteF(ctx, ref);
+    deleteF(matched, ctx, ref);
     return;
   }
+  matched.emplace_back(ref);
 }
 
-static void replaceAllUses(InstrRef::iterator oldOp, InstrRef::iterator newOp) {
-  (*oldOp)->as<WireRef>().replaceAllUsesWith((*newOp)->fat());
+static void replaceAllUses(SmallVecImpl<OperandRef> &replaced,
+                           InstrRef::iterator oldOp, InstrRef::iterator newOp) {
+  (*oldOp)->as<WireRef>()->defUse.replaceAllUsesWith(
+      (*newOp)->fat(), [&replaced](OperandRef r) { replaced.emplace_back(r); });
 }
 
-static void replaceAllUses(InstrRef::iterator oldOp, FatDynObjRef<> *newOp) {
-  (*oldOp)->as<WireRef>().replaceAllUsesWith(*newOp);
+static void replaceAllUses(SmallVecImpl<OperandRef> &replaced,
+                           InstrRef::iterator oldOp, FatDynObjRef<> *newOp) {
+  (*oldOp)->as<WireRef>()->defUse.replaceAllUsesWith(
+      *newOp, [&replaced](OperandRef r) { replaced.emplace_back(r); });
 }
 
-static void replaceAllUses(InstrRef::iterator oldOp, ConstantRef newOp) {
-  (*oldOp)->as<WireRef>().replaceAllUsesWith(newOp);
+static void replaceAllUses(SmallVecImpl<OperandRef> &replaced,
+                           InstrRef::iterator oldOp, ConstantRef newOp) {
+  (*oldOp)->as<WireRef>()->defUse.replaceAllUsesWith(
+      newOp, [&replaced](OperandRef r) { replaced.emplace_back(r); });
 }
 
-bool dyno::generated(HWContext &ctx, HWInstrRef r0) {
+bool dyno::generated(HWContext &ctx, SmallVecImpl<InstrRef> &matched,
+                     SmallVecImpl<OperandRef> &replaced, HWInstrRef r0) {
 
   HWInstrBuilder build{ctx};
   build.setInsertPoint(r0.iter(ctx));

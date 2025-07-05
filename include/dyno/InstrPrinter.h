@@ -170,24 +170,25 @@ public:
   void tryPrintSrcLoc(ObjRef<Instr> instr) {
     if (!debugInfo)
       return;
-    auto info = debugInfo->get(instr);
-    if (!info || info->sourceLocs.empty())
-      return;
-    str << "// ";
-    for (auto [i, loc] : Range{info->sourceLocs}.enumerate()) {
-      if (i != 0)
+    bool any = false;
+    for (auto [i, loc] : Range{debugInfo->getSourceLocs(instr)}.enumerate()) {
+      any = true;
+      if (i == 0)
+        str << "// ";
+      else
         str << ", ";
       if (loc.beginLine == loc.endLine) {
-        std::print(str, "{}:{}:{}-{}", debugInfo->getStringName(loc.fileName),
-                   loc.beginLine, loc.beginCol, loc.endCol);
+        std::print(str, "{}:{}:{}-{}", loc.fileName, loc.beginLine,
+                   loc.beginCol, loc.endCol);
       } else {
-        std::print(str, "{}:{}:{}-{}:{}",
-                   debugInfo->getStringName(loc.fileName), loc.beginLine,
+        std::print(str, "{}:{}.{}-{}.{}", loc.fileName, loc.beginLine,
                    loc.beginCol, loc.endLine, loc.endCol);
       }
     }
-    str << "\n";
-    indentPrint.printIndent();
+    if (any) {
+      str << "\n";
+      indentPrint.printIndent();
+    }
   }
 
   void printInstr(InstrRef instr) {
