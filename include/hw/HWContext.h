@@ -1,5 +1,6 @@
 #pragma once
 #include "dyno/Constant.h"
+#include "dyno/IDs.h"
 #include "hw/DebugInfo.h"
 #include "hw/Module.h"
 #include "hw/SensList.h"
@@ -52,6 +53,48 @@ public:
   }
 
   ConstantBuilder constBuild() { return ConstantBuilder{constants}; }
+
+  FatDynObjRef<> resolveObj(DynObjRef obj) {
+    switch (*obj.getType()) {
+    case *CORE_INSTR: {
+      return getInstrs().resolve(obj.as<ObjRef<Instr>>());
+      break;
+    }
+    case *CORE_BLOCK: {
+      return getCFG().blocks.resolve(obj.as<ObjRef<Block>>());
+      break;
+    }
+    case *CORE_CONSTANT: {
+      return getConstants().resolve(obj);
+    }
+    case *OP_FUNC: {
+      return getFuncs().resolve(obj.as<ObjRef<Function>>());
+      break;
+    }
+    case *HW_REGISTER: {
+      return getRegs().resolve(obj.as<ObjRef<Register>>());
+      break;
+    }
+    case *HW_WIRE: {
+      return getWires().resolve(obj.as<ObjRef<Wire>>());
+      break;
+    }
+    case *HW_PROCESS: {
+      return getProcs().resolve(obj.as<ObjRef<Process>>());
+      break;
+    }
+    case *HW_TRIGGER: {
+      return getTriggers().resolve(obj.as<ObjRef<Trigger>>());
+      break;
+    }
+    case *HW_MODULE: {
+      return getModules().resolve(obj.as<ObjRef<Module>>());
+      break;
+    }
+    default:
+      dyno_unreachable("resolving unknown object");
+    }
+  }
 
   HWContext() {
     instrs.destroyHooks.emplace_back(

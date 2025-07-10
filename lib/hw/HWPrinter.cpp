@@ -11,6 +11,8 @@ void dumpObj(FatDynObjRef<> obj) {
   if (auto asInstr = obj.dyn_as<InstrRef>())
     return dumpInstr(asInstr);
   HWPrinter{dbgs()}.printDef(obj);
+  if (!obj.isCustom())
+    dbgs() << "[" << obj.getObjID() << "]";
 };
 
 }; // namespace dyno

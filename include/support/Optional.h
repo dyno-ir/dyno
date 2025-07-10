@@ -61,6 +61,10 @@ public:
     assert(*this);
     return val;
   }
+  constexpr const T &operator*() const {
+    assert(*this);
+    return val;
+  }
 
   bool has() const { return bool(*this); }
 };

@@ -234,7 +234,10 @@ public:
   discard_optional_iterator(T it, T itEnd) : it(it), itEnd(itEnd) { prime(); }
   discard_optional_iterator(T it) : it(it), itEnd(it) {}
 
-  auto operator*() { return **it; }
+  auto operator*() {
+    assert(*it && "base iterator's operator* is not idempotent");
+    return **it;
+  }
 
   discard_optional_iterator &operator++() {
     ++it;

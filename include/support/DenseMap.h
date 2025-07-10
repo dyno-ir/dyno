@@ -7,6 +7,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <iterator>
+#include <memory>
 #include <new>
 #include <utility>
 
@@ -339,7 +340,7 @@ public:
 
       sz++;
       it.keyMut() = k;
-      (*it).second = V{};
+      std::construct_at(&(*it).second);
     }
     return (*it).second;
   }
@@ -528,7 +529,7 @@ public:
   bool isSmall() { return buckets == *arr; }
 
   SmallSetMap() : Base(InlineBuckets, 0), arr() {
-    std::construct_at(*arr);
+    std::uninitialized_default_construct_n(*arr, InlineBuckets);
     buckets = *arr;
   }
   ~SmallSetMap() {

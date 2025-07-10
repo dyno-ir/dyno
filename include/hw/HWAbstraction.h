@@ -98,6 +98,23 @@ public:
     return HWInstrRef{instr};
   }
 
+  HWInstrRef buildInstr(DialectOpcode opc, bool addWireDef,
+                        ArrayRef<HWValue> operands) {
+    auto instr =
+        InstrRef{ctx.getInstrs().create(addWireDef + operands.size(), opc)};
+
+    insertInstr(instr);
+    InstrBuilder build{instr};
+    if (addWireDef) {
+      auto defWire = ctx.getWires().create();
+      build.addRef(defWire);
+    }
+    build.other();
+    for (auto op : operands)
+      build.addRef(op);
+    return HWInstrRef{instr};
+  }
+
   InstrBuilder buildInstrRaw(DialectOpcode opc, uint numOperands) {
     auto instr = InstrRef{ctx.getInstrs().create(numOperands, opc)};
     insertInstr(instr);
@@ -715,9 +732,10 @@ public:
     return instrRef;
   }
 
-  CaseInstrRef buildCase(ArrayRef<HWValue> conds) {
+  CaseInstrRef buildCase(ArrayRef<HWValue> conds,
+                         DialectOpcode type = OP_CASE) {
     CaseInstrRef instrRef =
-        CaseInstrRef{ctx.getInstrs().create(1 + conds.size(), OP_CASE)};
+        CaseInstrRef{ctx.getInstrs().create(1 + conds.size(), type)};
     insertInstr(instrRef);
     InstrBuilder build{instrRef};
     build.addRef(ctx.createBlock()).other();
@@ -740,8 +758,8 @@ public:
     // naive implementation as reference, just delete old instr and rebuild
 
     auto instr = insert.blockRef().defI();
-    assert(instr.isOpc(OP_IF, OP_WHILE, OP_DO_WHILE, OP_FOR, OP_CASE,
-                       OP_CASE_DEFAULT));
+    assert(instr.isOpc(OP_IF, OP_WHILE, OP_DO_WHILE, OP_FOR, OP_CASE, HW_CASE_X,
+                       HW_CASE_Z, OP_CASE_DEFAULT));
 
     switch (instr.getDialectOpcode().raw()) {
     case OP_IF.raw(): {

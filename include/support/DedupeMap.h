@@ -14,6 +14,7 @@ public:
 
   Container::size_type getCanonicalIndex(const T &t) {
     auto hash = HashFunc(t);
+    // todo: remap the two invalid hashes to something else.
     auto it = map.find(hash);
     for (; it; it = map.find_next(it)) {
       if (container[it.val()] == t) [[likely]]

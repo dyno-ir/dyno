@@ -20,6 +20,7 @@
 #include "hw/passes/LoopSimplify.h"
 #include "hw/passes/LowerOps.h"
 #include "hw/passes/ModuleInline.h"
+#include "hw/passes/MuxTreeOptimization.h"
 #include "hw/passes/ProcessLinearize.h"
 #include "hw/passes/SSAConstruct.h"
 #include "hw/passes/SeqToComb.h"
@@ -970,7 +971,25 @@ public:
       auto swInstr =
           build.buildSwitch(handle_expr(asCase.expr)->proGetValue(build));
       SmallVec<HWValue, 8> labels;
-      build.setInsertPoint(build.insert.pred());
+      build.pushInsertPoint(build.insert.pred());
+
+      DialectOpcode opc;
+      switch (asCase.condition) {
+      case slang::ast::CaseStatementCondition::Normal:
+        opc = OP_CASE;
+        break;
+      case slang::ast::CaseStatementCondition::WildcardXOrZ:
+        opc = HW_CASE_X;
+        break;
+      case slang::ast::CaseStatementCondition::WildcardJustZ:
+        opc = HW_CASE_Z;
+        break;
+      case slang::ast::CaseStatementCondition::Inside:
+        // what is this?
+        print.error(asCase.sourceRange);
+        break;
+      }
+
       for (auto &swCase : asCase.items) {
         labels.resize(swCase.expressions.size());
         for (auto [idx, expr] : Range{swCase.expressions}.enumerate())
@@ -984,15 +1003,17 @@ public:
         handle_stmt(*swCase.stmt);
         build.popInsertPoint();
       }
-      if (auto defCase = asCase.defaultCase) {
-        build.pushInsertPoint(swInstr.block().end());
-        auto defInstr = build.buildDefaultCase();
-        build.popInsertPoint();
 
+      build.pushInsertPoint(swInstr.block().end());
+      auto defInstr = build.buildDefaultCase();
+      build.popInsertPoint();
+
+      if (auto defCase = asCase.defaultCase) {
         build.pushInsertPoint(defInstr.block().end());
         handle_stmt(*defCase);
         build.popInsertPoint();
       }
+      build.popInsertPoint();
       break;
     }
     case slang::ast::StatementKind::WhileLoop: {
@@ -1856,10 +1877,20 @@ int main(int argc, char **argv) {
   adcePass.run();
 
   icomb.run();
-  // adcePass.run();
 
-  LowerOpsPass lowerOps{ctx};
-  lowerOps.run();
+  pass3.config.mode = SSAConstructPass::Config::IMMEDIATE;
+  pass3.run();
+
+  MuxTreeOptimizationPass muxOpt{ctx};
+  muxOpt.run();
+
+  print.reset();
+  print.printCtx(ctx);
+
+  adcePass.run();
+
+  // LowerOpsPass lowerOps{ctx};
+  // lowerOps.run();
 
   print.reset();
   print.printCtx(ctx);

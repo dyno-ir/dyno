@@ -152,10 +152,11 @@ class LinearizeControlFlowPass {
 
     for (auto [i, yieldVal] : Range{instr.yieldValues()}.enumerate()) {
       Optional<uint32_t> defaultIdx = nullopt;
-      auto ibuild = build.buildInstrRaw(HW_SELECT, 1 + labels * 2 + hasDefault);
+      auto ibuild = build.buildInstrRaw(HW_SELECT, 2 + labels * 2 + hasDefault);
       ibuild.addRef(yieldVal->as<WireRef>());
       yieldVal.replace(FatDynObjRef<>{nullref});
       ibuild.other();
+      ibuild.addRef(instr.cond()->as<HWValue>());
       for (auto [j, caseInstr] :
            Range{instr.block().begin(), instr.block().end()}
                .as<CaseInstrRef>()

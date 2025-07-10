@@ -2321,7 +2321,6 @@ class ConstantStore {
   DenseMultimap<uint32_t, ObjRef<Constant>> map;
 
 public:
-
   template <typename T> uint32_t constantHash(const T &constant) {
     uint32_t acc = 0;
     acc ^= hash_u32(constant.getIs4S());
@@ -2350,8 +2349,11 @@ public:
 
   Constant &operator[](ObjRef<Constant> ref) { return store[ref]; }
   void destroy(FatObjRef<Constant> ref) { return store.destroy(ref); }
-  FatObjRef<Constant> resolve(ObjRef<Constant> ref) {
-    return store.resolve(ref);
+  ConstantRef resolve(ObjRef<Constant> ref) { return store.resolve(ref); }
+  ConstantRef resolve(DynObjRef ref) {
+    if (ref.isCustom())
+      return ConstantRef{ref};
+    return store.resolve(ref.as<ObjRef<Constant>>());
   }
   bool exists(ObjRef<Constant> ref) { return store.exists(ref); }
   auto numIDs() { return store.numIDs(); }

@@ -96,3 +96,23 @@ public:
 };
 
 template <typename U> MutArrayRef(U &u) -> MutArrayRef<typename U::value_type>;
+
+template <typename T, typename SizeT = uint32_t> struct ThinArrayRef {
+public:
+  using size_type = uint32_t;
+
+private:
+  size_type idx;
+  size_type len;
+
+public:
+  ArrayRef<T> resolve(ArrayRef<T> storage) {
+    return ArrayRef<T>{&storage[idx], len};
+  }
+  MutArrayRef<T> resolve(MutArrayRef<T> storage) {
+    return MutArrayRef<T>{&storage[idx], len};
+  }
+  size_type size() const { return len; }
+
+  constexpr static ThinArrayRef emptyRef() { return ThinArrayRef{0, 0}; }
+};

@@ -310,9 +310,8 @@ public:
   iterator insert(iterator it, const T &val) { return insert(it, T{val}); }
 
   iterator erase(iterator it) {
-    std::destroy_at(it);
     std::move(it + 1, end(), it);
-    --sz;
+    pop_back();
     return it;
   }
 
