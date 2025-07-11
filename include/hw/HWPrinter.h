@@ -1,4 +1,5 @@
 #pragma once
+#include "aig/AIG.h"
 #include "aig/IDs.h"
 #include "dyno/IDs.h"
 #include "dyno/InstrPrinter.h"
@@ -8,6 +9,7 @@
 #include "hw/IDs.h"
 #include "hw/Process.h"
 #include "op/IDs.h"
+#include <ostream>
 
 namespace dyno {
 
@@ -45,6 +47,8 @@ public:
                         DialectID{DIALECT_HW}});
     interfaces.registerVal<type::print_fn>(
         DIALECT_HW, static_cast<type::print_fn>(&HWPrinter::printHWType));
+    interfaces.registerVal(
+        DIALECT_AIG, static_cast<type::print_fn>(&HWPrinter::printAIGType));
   }
 
   bool printHWType(FatDynObjRef<> ref, bool def) {
@@ -87,6 +91,43 @@ public:
         }
         str << ")";
       }
+      break;
+    }
+    default:
+      return false;
+    }
+    return true;
+  }
+
+  // todo: in AIG dialect
+  bool printAIGType(FatDynObjRef<> ref, bool def) {
+    switch (ref.getTyID()) {
+    case AIG_AIG.type: {
+      str << "aig(\n";
+      indentPrint.addIndent();
+
+      auto &asAIG = ref.as<AIGObjRef>()->aig;
+      for (auto [idx, obj] : Range{asAIG.store.thin}.enumerate()) {
+        indentPrint.printIndent();
+        auto printOperand = [&](AIGNodeTRef node) {
+          if (node.invert())
+            str << "!";
+          if (node.isSpecial())
+            printRefOrUse(asAIG.store.fat.resolve(node).nonInverted());
+          else
+            str << "$" << node.idx();
+        };
+
+        printOperand(AIGNodeTRef{AIGObjID{(uint32_t)idx, false, false}});
+        str << " = node ";
+        printOperand(obj[0]);
+        str << ", ";
+        printOperand(obj[1]);
+        str << "\n";
+      }
+      indentPrint.removeIndent();
+      indentPrint.printIndent();
+      str << ")";
       break;
     }
     default:

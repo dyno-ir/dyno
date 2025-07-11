@@ -49,6 +49,21 @@ public:
     }
     assert(0 && "todo");
   }
+  void buildOr(WireRef out, HWValue lhs, HWValue rhs) {
+    if (lhs.is<WireRef>() && rhs.is<WireRef>()) {
+      uint32_t pos = wireToAIGNodeStorage.size();
+      auto numBits = *lhs.as<WireRef>().getNumBits();
+      for (uint i = 0; i < numBits; i++) {
+        auto node = aig.createNode(resolveWire(lhs.as<WireRef>())[i].inverted(),
+                                   resolveWire(rhs.as<WireRef>())[i].inverted())
+                        .inverted();
+        wireToAIGNodeStorage.emplace_back(node);
+      }
+      wireToAIGNode[out] = ThinArrayRef<AIGNodeTRef>{pos, numBits};
+      return;
+    }
+    assert(0 && "todo");
+  }
 
   MutArrayRef<AIGNodeTRef> buildInput(WireRef wire) {
     auto numBits = *wire.getNumBits();
@@ -77,6 +92,7 @@ public:
 class AIGConstructPass {
   HWContext &ctx;
   HWInstrBuilder build;
+  AIGObjRef aigRef;
 
   void handleInstr(InstrRef instr, AIGBuilder &abuild) {
     auto &aig = abuild.aig;
@@ -86,11 +102,12 @@ class AIGConstructPass {
     case *HW_LOAD: {
       build.setInsertPoint(instr);
       auto arr = abuild.buildInput(instr.as<LoadIRef>().value());
-      auto ibuild = build.buildInstrRaw(AIG_INPUT, arr.size() + 1);
+      auto ibuild = build.buildInstrRaw(AIG_INPUT, arr.size() + 2);
       for (auto ref : arr)
         ibuild.addRef(aig.store.resolve(ref).as<FatAIGNodeRef>());
       ibuild.other();
       ibuild.addRef(instr.as<LoadIRef>().value());
+      ibuild.addRef(aigRef);
       break;
     }
     case *HW_STORE: {
@@ -98,10 +115,12 @@ class AIGConstructPass {
         break;
       build.setInsertPoint(instr);
       auto arr = abuild.buildOutput(instr.as<StoreIRef>().value());
-      auto ibuild = build.buildInstrRaw(AIG_OUTPUT, arr.size() + 1);
+      auto ibuild = build.buildInstrRaw(AIG_OUTPUT, arr.size() + 2);
       ibuild.addRef(instr.as<StoreIRef>().value().as<WireRef>());
       for (auto ref : arr)
         ibuild.addRef(aig.store.resolve(ref).as<FatAIGNodeRef>());
+      ibuild.other();
+      ibuild.addRef(aigRef);
       break;
     }
 
@@ -112,15 +131,21 @@ class AIGConstructPass {
                       instr.other(1)->as<HWValue>());
       break;
     }
+    case *OP_OR: {
+      assert(instr.getNumOperands() == 3);
+      abuild.buildOr(instr.def(0)->as<WireRef>(), instr.other(0)->as<HWValue>(),
+                     instr.other(1)->as<HWValue>());
+      break;
+    }
     }
   }
 
   void runOnProc(ProcessIRef proc) {
-    auto aig = ctx.getAIGs().create();
+    aigRef = ctx.getAIGs().create();
 
-    AIGBuilder abuild{ctx, aig->aig};
+    AIGBuilder abuild{ctx, aigRef->aig};
     build.setInsertPoint(proc.block().begin());
-    build.buildInstrRaw(AIG_INSTR, 1).addRef(aig);
+    build.buildInstrRaw(AIG_GRAPH, 1).addRef(aigRef);
 
     for (auto instr : proc.block()) {
       handleInstr(instr, abuild);

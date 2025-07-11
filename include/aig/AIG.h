@@ -13,6 +13,8 @@
 
 namespace dyno {
 
+class AIGNodeTRef;
+
 class AIGObjID : public ObjID {
 public:
   constexpr static num_t FAT_ID_SPACE = 1u << 24;
@@ -38,9 +40,9 @@ public:
 };
 
 class AIGNode {
-  std::array<ObjID, 2> op;
-
 public:
+  std::array<AIGObjID, 2> op;
+
   AIGNode(AIGObjID lhs, AIGObjID rhs) : op{lhs, rhs} {}
   AIGNode() = default;
 
@@ -52,6 +54,8 @@ public:
   friend constexpr bool operator==(AIGNode lhs, AIGNode rhs) {
     return lhs.op == rhs.op;
   }
+
+  AIGNodeTRef operator[](uint idx);
 };
 
 class AIGNodeTRef : public ObjRef<AIGNode> {
@@ -68,12 +72,19 @@ public:
     rv.invert() = !rv.invert();
     return rv;
   }
+  AIGNodeTRef nonInverted() const {
+    AIGNodeTRef rv = *this;
+    rv.invert() = 0;
+    return rv;
+  }
 
   AIGNodeTRef(ObjID id) : ObjRef<AIGNode>(id) {}
   AIGNodeTRef(uint32_t idx, bool invert = false, bool custom = false)
       : ObjRef<AIGNode>(AIGObjID{idx, invert, custom}) {}
   AIGNodeTRef(ObjRef<AIGNode> ref) : ObjRef<AIGNode>(ref) {}
 };
+
+inline AIGNodeTRef AIGNode::operator[](uint i) { return op[i]; }
 
 class FatAIGNodeRef;
 
@@ -122,6 +133,17 @@ public:
   explicit operator AIGNodeRef() const {
     return AIGNodeRef{obj, &(*this)->node};
   }
+
+  FatAIGNodeRef inverted() const {
+    FatAIGNodeRef rv = *this;
+    AIGObjID::InvertField{rv.obj.num} = !AIGObjID::InvertField{rv.obj.num};
+    return rv;
+  }
+  FatAIGNodeRef nonInverted() const {
+    FatAIGNodeRef rv = *this;
+    AIGObjID::InvertField{rv.obj.num} = 0;
+    return rv;
+  }
 };
 inline bool AIGNodeRef::is_impl(FatAIGNodeRef) { return true; }
 inline AIGNodeRef::operator FatAIGNodeRef() const {
@@ -154,6 +176,9 @@ public:
     auto thin = AIGNodeTRef{index};
     return resolve(thin);
   }
+
+  auto begin() { return dedupeMap.container.begin(); }
+  auto end() { return dedupeMap.container.end(); }
 };
 template <typename BaseStore> class FatAIGNodeStore {
   BaseStore store;
@@ -194,10 +219,10 @@ public:
 };
 
 class AIGNodeStore {
+public:
   ThinAIGNodeStore thin;
   FatAIGNodeStore<NewDeleteObjStore<FatAIGNode>> fat;
 
-public:
   AIGNodeRef resolve(AIGNodeTRef ref) {
     if (ref.isSpecial()) [[unlikely]] {
       return fat.resolve(ref).as<AIGNodeRef>();
@@ -238,6 +263,8 @@ public:
   template <typename... Args>
   AIGObj(ObjRef<AIGObj>, Args... args) : aig(std::forward<Args>(args)...) {}
 };
+
+using AIGObjRef = FatObjRef<AIGObj>;
 
 template <> struct ObjTraits<AIGObj> {
   using FatRefT = FatObjRef<AIGObj>;

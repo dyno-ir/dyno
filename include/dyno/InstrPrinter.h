@@ -37,12 +37,12 @@ public:
 };
 
 class PrinterBase {
-  IndentPrinter indentPrint;
   DenseMap<DynObjRef, uint32_t> introduced;
 
   std::vector<bool> isDefault = std::vector<bool>(NUM_DIALECTS);
 
 protected:
+  IndentPrinter indentPrint;
   DebugInfo *debugInfo = nullptr;
 
 public:
