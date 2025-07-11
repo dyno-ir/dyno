@@ -15,8 +15,8 @@ using AIGOpcode = SpecificDialectOpcode<DialectID{DIALECT_AIG}>;
 // clang-format off
 #define TYPES(x) \
   x(AIG_AIG, 0 | TY_DEF_USE_START) \
-  x(AIG_FAT_NODE, 1 | TY_DEF_USE_START)
-// clang-format on
+  x(AIG_FAT_NODE, 1 | TY_DEF_USE_START) \
+  x(AIG_NODE, 2 | TY_DEF_USE_START) // clang-format on
 
 #define ENUM_EXPAND(ident, idx) ident = idx,
 

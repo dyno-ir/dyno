@@ -102,8 +102,8 @@ public:
   using size_type = uint32_t;
 
 private:
-  size_type idx;
-  size_type len;
+  size_type idx = 0;
+  size_type len = 0;
 
 public:
   ArrayRef<T> resolve(ArrayRef<T> storage) {
@@ -117,4 +117,5 @@ public:
   constexpr static ThinArrayRef emptyRef() { return ThinArrayRef{0, 0}; }
 
   ThinArrayRef(size_type idx, size_type len) : idx(idx), len(len) {}
+  ThinArrayRef() = default;
 };

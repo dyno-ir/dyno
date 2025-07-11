@@ -1883,13 +1883,16 @@ int main(int argc, char **argv) {
   pass3.config.mode = SSAConstructPass::Config::IMMEDIATE;
   pass3.run();
 
-  MuxTreeOptimizationPass muxOpt{ctx};
-  muxOpt.run();
+  //MuxTreeOptimizationPass muxOpt{ctx};
+  //muxOpt.run();
 
   print.reset();
   print.printCtx(ctx);
 
-  adcePass.run();
+  AIGConstructPass aigConstr{ctx};
+  aigConstr.run();
+
+  //adcePass.run();
 
   // LowerOpsPass lowerOps{ctx};
   // lowerOps.run();

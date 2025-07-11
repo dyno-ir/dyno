@@ -1,6 +1,7 @@
 #pragma once
 
 #include "aig/IDs.h"
+#include "dyno/IDImpl.h"
 #include "dyno/Instr.h"
 #include "dyno/NewDeleteObjStore.h"
 #include "dyno/Obj.h"
@@ -8,14 +9,14 @@
 #include "hw/Wire.h"
 #include "support/ArrayRef.h"
 #include "support/DedupeMap.h"
+#include "support/RTTI.h"
 
 namespace dyno {
 
 class AIGObjID : public ObjID {
 public:
-  constexpr static num_t FAT_ID_SPACE = 1 << 24;
-  constexpr static num_t FAT_ID_START =
-      std::numeric_limits<ObjID::num_t>::max() - FAT_ID_SPACE + 1;
+  constexpr static num_t FAT_ID_SPACE = 1u << 24;
+  constexpr static num_t FAT_ID_START = (1u << 30) - FAT_ID_SPACE;
   using ObjID::ObjID;
   using InvertField = BitField<ObjID::num_t, 1, 0>;
   using CustomField = BitField<ObjID::num_t, 1, 1>;
@@ -26,13 +27,14 @@ public:
   auto custom() { return CustomField{num}; }
   auto idx() { return IdxField{num}; }
   auto idx() const { return IdxFieldC{num}; }
-  bool isSpecial() const { return idx() > FAT_ID_START; }
+  bool isSpecial() const { return idx() >= FAT_ID_START; }
 
   AIGObjID(uint32_t idx, bool invert = false, bool custom = false) {
     this->idx() = idx;
     this->invert() = invert;
     this->custom() = custom;
   }
+  AIGObjID(ObjID obj) : ObjID(obj) {}
 };
 
 class AIGNode {
@@ -54,10 +56,11 @@ public:
 
 class AIGNodeTRef : public ObjRef<AIGNode> {
 public:
-  auto invert() { return AIGObjID{obj}.invert(); }
-  auto custom() { return AIGObjID{obj}.custom(); }
-  auto idx() { return AIGObjID{obj}.idx(); }
-  bool isSpecial() { return AIGObjID{obj}.isSpecial(); };
+  using ObjRef<AIGNode>::ObjRef;
+  auto invert() { return AIGObjID::InvertField{obj.num}; }
+  auto custom() { return AIGObjID::CustomField{obj.num}; }
+  auto idx() { return AIGObjID::IdxField{obj.num}; }
+  bool isSpecial() const { return AIGObjID{obj}.isSpecial(); };
   AIGObjID getObjID() const { return AIGObjID{obj}; }
 
   AIGNodeTRef inverted() const {
@@ -67,23 +70,29 @@ public:
   }
 
   AIGNodeTRef(ObjID id) : ObjRef<AIGNode>(id) {}
-
   AIGNodeTRef(uint32_t idx, bool invert = false, bool custom = false)
       : ObjRef<AIGNode>(AIGObjID{idx, invert, custom}) {}
+  AIGNodeTRef(ObjRef<AIGNode> ref) : ObjRef<AIGNode>(ref) {}
 };
 
 class FatAIGNodeRef;
 
-class AIGNodeRef : public AIGNodeTRef {
+class AIGNodeRef : public AIGNodeTRef, public ByValueRTTIUtilMixin<AIGNodeRef> {
   AIGNode *ptr;
 
 public:
+  using ByValueRTTIUtilMixin<AIGNodeRef>::as;
+  using ByValueRTTIUtilMixin<AIGNodeRef>::is;
+  using ByValueRTTIUtilMixin<AIGNodeRef>::dyn_as;
+
   AIGNode *operator->() { return ptr; }
   AIGNode &operator*() { return *ptr; }
   AIGNodeRef(AIGNodeTRef ref, AIGNode *ptr) : AIGNodeTRef(ref), ptr(ptr) {}
   AIGNode *getPtr() { return ptr; }
 
-  explicit operator FatAIGNodeRef();
+  explicit operator FatAIGNodeRef() const;
+  static bool is_impl(FatAIGNodeRef);
+  static bool is_impl(AIGNodeTRef) { return true; }
 };
 
 class FatAIGNode {
@@ -95,16 +104,28 @@ public:
   FatAIGNode(DynObjRef, AIGObjID lhs, AIGObjID rhs) : node(lhs, rhs) {}
 };
 
-class FatAIGNodeRef : public FatObjRef<FatAIGNode> {
+class FatAIGNodeRef : public FatObjRef<FatAIGNode>,
+                      public ByValueRTTIUtilMixin<FatAIGNodeRef> {
 public:
+  using ByValueRTTIUtilMixin<FatAIGNodeRef>::as;
+  using ByValueRTTIUtilMixin<FatAIGNodeRef>::is;
+  using ByValueRTTIUtilMixin<FatAIGNodeRef>::dyn_as;
   using FatObjRef<FatAIGNode>::FatObjRef;
-  explicit operator AIGNodeRef() { return AIGNodeRef{obj, &(*this)->node}; }
   FatAIGNodeRef(FatObjRef<FatAIGNode> ref) : FatObjRef<FatAIGNode>(ref) {}
   FatAIGNodeRef(ObjID obj, FatAIGNode *ptr) : FatObjRef<FatAIGNode>(obj, ptr) {}
 
-  static bool is_impl(AIGNodeRef ref) { return ref.isSpecial(); }
+  static bool is_impl(AIGNodeTRef ref) { return ref.isSpecial(); }
+  static bool is_impl(ObjRef<AIGNode> ref) {
+    return AIGNodeTRef{ref}.isSpecial();
+  }
+
+  explicit operator AIGNodeRef() const {
+    return AIGNodeRef{obj, &(*this)->node};
+  }
 };
-inline AIGNodeRef::operator FatAIGNodeRef() {
+inline bool AIGNodeRef::is_impl(FatAIGNodeRef) { return true; }
+inline AIGNodeRef::operator FatAIGNodeRef() const {
+
   assert(isSpecial());
   FatAIGNodeRef *ptr = reinterpret_cast<FatAIGNodeRef *>(
       reinterpret_cast<char *>(this->ptr) - offsetof(FatAIGNode, node));
@@ -112,8 +133,13 @@ inline AIGNodeRef::operator FatAIGNodeRef() {
 }
 
 template <> struct ObjTraits<FatAIGNode> {
-  using FatRefT = FatObjRef<FatAIGNode>;
+  using FatRefT = FatAIGNodeRef;
   static constexpr DialectType ty{AIG_FAT_NODE};
+};
+
+template <> struct ObjTraits<AIGNode> {
+  using FatRefT = AIGNodeRef;
+  static constexpr DialectType ty{AIG_NODE};
 };
 
 class ThinAIGNodeStore {
@@ -153,7 +179,7 @@ public:
 
   static FatAIGNodeRef transformOut(FatObjRef<FatAIGNode> ref,
                                     bool invert = false, bool custom = false) {
-    AIGObjID id{ref.getObjID(), invert, custom};
+    AIGObjID id{ref.getObjID() + AIGObjID::FAT_ID_START, invert, custom};
     return FatAIGNodeRef{FatObjRef<FatAIGNode>{id, ref.getPtr()}};
   }
 
@@ -208,6 +234,9 @@ class AIGObj {
 public:
   InstrDefUse defUse;
   AIG aig;
+
+  template <typename... Args>
+  AIGObj(ObjRef<AIGObj>, Args... args) : aig(std::forward<Args>(args)...) {}
 };
 
 template <> struct ObjTraits<AIGObj> {

@@ -1,6 +1,8 @@
 #pragma once
+#include "aig/AIG.h"
 #include "dyno/Constant.h"
 #include "dyno/IDs.h"
+#include "dyno/NewDeleteObjStore.h"
 #include "hw/DebugInfo.h"
 #include "hw/Module.h"
 #include "hw/SensList.h"
@@ -19,6 +21,7 @@ class HWContext {
   NewDeleteObjStore<Trigger> triggers;
   CFG cfg;
   NewDeleteObjStore<Instr> instrs;
+  NewDeleteObjStore<AIGObj> aigObjs;
 
 public:
   auto &getConstants() { return constants; }
@@ -30,6 +33,7 @@ public:
   auto &getInstrs() { return instrs; }
   auto &getCFG() { return cfg; }
   auto &getTriggers() { return triggers; }
+  auto &getAIGs() { return aigObjs; }
   DebugInfo dbgInfo;
 
   ModuleIRef createModule(std::string_view name) {
