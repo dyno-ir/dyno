@@ -12,8 +12,10 @@
 #include "hw/HWValue.h"
 #include "hw/LoadStore.h"
 #include "hw/Process.h"
+#include "op/IDs.h"
 #include "support/ArrayRef.h"
 #include "support/Bits.h"
+#include "support/Utility.h"
 #include <array>
 #include <limits>
 
@@ -35,34 +37,53 @@ public:
                  wireToAIGNodeStorage.end().base()});
   }
 
-  void buildAnd(WireRef out, HWValue lhs, HWValue rhs) {
-    if (lhs.is<WireRef>() && rhs.is<WireRef>()) {
-      uint32_t pos = wireToAIGNodeStorage.size();
-      auto numBits = *lhs.as<WireRef>().getNumBits();
-      for (uint i = 0; i < numBits; i++) {
-        auto node = aig.createNode(resolveWire(lhs.as<WireRef>())[i],
-                                   resolveWire(rhs.as<WireRef>())[i]);
-        wireToAIGNodeStorage.emplace_back(node);
-      }
-      wireToAIGNode[out] = ThinArrayRef<AIGNodeTRef>{pos, numBits};
-      return;
+  AIGNodeTRef resolveBit(HWValue val, uint bit) {
+    if (auto asWire = val.dyn_as<WireRef>())
+      return resolveWire(asWire)[bit];
+    else if (auto asConst = val.dyn_as<ConstantRef>())
+      // todo: what do we want to do with unknown values?
+      return asConst.getBit(bit).val ? aig.getOne() : aig.getZero();
+    dyno_unreachable("unknown type");
+  }
+
+  void buildNode(WireRef out, HWValue lhs, HWValue rhs, bool invertOut,
+                 bool invertLHS, bool invertRHS) {
+    uint32_t pos = wireToAIGNodeStorage.size();
+    auto numBits = *lhs.getNumBits();
+    for (uint i = 0; i < numBits; i++) {
+      AIGNodeTRef lhsNode = resolveBit(lhs, i);
+      AIGNodeTRef rhsNode = resolveBit(rhs, i);
+
+      lhsNode = invertLHS ? lhsNode.inverted() : lhsNode;
+      rhsNode = invertRHS ? rhsNode.inverted() : rhsNode;
+
+      auto node = aig.createNode(lhsNode, rhsNode);
+
+      node = invertOut ? node.inverted() : node;
+      wireToAIGNodeStorage.emplace_back(node);
     }
-    assert(0 && "todo");
+    wireToAIGNode[out] = ThinArrayRef<AIGNodeTRef>{pos, numBits};
+  }
+
+  void buildAnd(WireRef out, HWValue lhs, HWValue rhs) {
+    buildNode(out, lhs, rhs, false, false, false);
   }
   void buildOr(WireRef out, HWValue lhs, HWValue rhs) {
-    if (lhs.is<WireRef>() && rhs.is<WireRef>()) {
-      uint32_t pos = wireToAIGNodeStorage.size();
-      auto numBits = *lhs.as<WireRef>().getNumBits();
-      for (uint i = 0; i < numBits; i++) {
-        auto node = aig.createNode(resolveWire(lhs.as<WireRef>())[i].inverted(),
-                                   resolveWire(rhs.as<WireRef>())[i].inverted())
-                        .inverted();
-        wireToAIGNodeStorage.emplace_back(node);
-      }
-      wireToAIGNode[out] = ThinArrayRef<AIGNodeTRef>{pos, numBits};
-      return;
+    buildNode(out, lhs, rhs, true, true, true);
+  }
+
+  void buildExtTrunc(WireRef out, WireRef in, bool sign = false) {
+    auto inNumBits = *in.getNumBits();
+    auto outNumBits = *out.getNumBits();
+    wireToAIGNode[out] = ThinArrayRef<AIGNodeTRef>{
+        (uint32_t)wireToAIGNodeStorage.size(), outNumBits};
+    for (uint i = 0; i < std::min(inNumBits, outNumBits); i++) {
+      AIGNodeTRef node = resolveBit(in, i);
+      wireToAIGNodeStorage.emplace_back(node);
     }
-    assert(0 && "todo");
+    AIGNodeTRef extBit = sign ? resolveBit(in, inNumBits - 1) : aig.getZero();
+    for (uint i = inNumBits; i < outNumBits; i++)
+      wireToAIGNodeStorage.emplace_back(extBit);
   }
 
   MutArrayRef<AIGNodeTRef> buildInput(WireRef wire) {
@@ -135,6 +156,14 @@ class AIGConstructPass {
       assert(instr.getNumOperands() == 3);
       abuild.buildOr(instr.def(0)->as<WireRef>(), instr.other(0)->as<HWValue>(),
                      instr.other(1)->as<HWValue>());
+      break;
+    }
+
+    case *OP_TRUNC:
+    case *OP_SEXT:
+    case *OP_ZEXT: {
+      abuild.buildExtTrunc(instr.def(0)->as<WireRef>(),
+                           instr.other(0)->as<WireRef>(), instr.isOpc(OP_SEXT));
       break;
     }
     }

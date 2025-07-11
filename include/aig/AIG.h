@@ -101,6 +101,17 @@ public:
   AIGNodeRef(AIGNodeTRef ref, AIGNode *ptr) : AIGNodeTRef(ref), ptr(ptr) {}
   AIGNode *getPtr() { return ptr; }
 
+  AIGNodeRef inverted() const {
+    AIGNodeRef rv = *this;
+    rv.invert() = !rv.invert();
+    return rv;
+  }
+  AIGNodeRef nonInverted() const {
+    AIGNodeRef rv = *this;
+    rv.invert() = 0;
+    return rv;
+  }
+
   explicit operator FatAIGNodeRef() const;
   static bool is_impl(FatAIGNodeRef);
   static bool is_impl(AIGNodeTRef) { return true; }
@@ -252,6 +263,14 @@ public:
     // better not perform any logic in the output, so both inputs are just
     // the actual output value.
     return store.createSpecial(val.getObjID(), val.getObjID());
+  }
+
+  AIGNodeRef getZero() { return store.resolve(AIGNodeTRef{0, false, false}); }
+  AIGNodeRef getOne() { return getZero().inverted(); }
+
+  AIG() {
+    auto constZeroNode = store.create();
+    assert(constZeroNode.idx() == 0);
   }
 };
 
