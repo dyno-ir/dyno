@@ -1,7 +1,6 @@
 // Header guards explicitly unwanted!
-
 #ifndef HEADER
-#define HEADER enum DialectIDs {
+#define HEADER enum AIGOps {
 #endif
 
 #ifndef FOOTER
@@ -12,21 +11,15 @@
 #define ADD_OP(x) x
 #endif
 
-#ifndef LAST
-#define LAST ADD_OP(NUM_DIALECTS)
-#endif
 
 HEADER
 
-ADD_OP(DIALECT_CORE),
-ADD_OP(DIALECT_OP),
-ADD_OP(DIALECT_CUSTOM_0),
-ADD_OP(DIALECT_CUSTOM_1),
+ADD_OP(INSTR)
+ADD_OP(INPUT)
+ADD_OP(OUTPUT)
 
-LAST
 FOOTER
 
 #undef HEADER
 #undef FOOTER
 #undef ADD_OP
-#undef LAST

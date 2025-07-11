@@ -76,6 +76,8 @@
 #include <slang/syntax/SyntaxNode.h>
 #include <tuple>
 
+#include "hw/passes/AIGConstruct.h"
+
 using namespace dyno;
 
 class SlangErrorPrinter {

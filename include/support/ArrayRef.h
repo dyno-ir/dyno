@@ -115,4 +115,6 @@ public:
   size_type size() const { return len; }
 
   constexpr static ThinArrayRef emptyRef() { return ThinArrayRef{0, 0}; }
+
+  ThinArrayRef(size_type idx, size_type len) : idx(idx), len(len) {}
 };

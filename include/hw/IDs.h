@@ -11,7 +11,7 @@
 
 namespace dyno {
 
-enum HWDialectID : uint8_t { DIALECT_HW = DIALECT_CUSTOM };
+enum HWDialectID : uint8_t { DIALECT_HW = DIALECT_CUSTOM_0 };
 using HWType = SpecificDialectType<DialectID{DIALECT_HW}>;
 using HWOpcode = SpecificDialectOpcode<DialectID{DIALECT_HW}>;
 
