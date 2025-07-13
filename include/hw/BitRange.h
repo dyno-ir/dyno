@@ -81,11 +81,9 @@ template <typename Derived2>
 inline bool BitRangeMixin<Derived>::equalsWithDefaultSize(
     const BitRangeMixin<Derived> &lhs, const BitRangeMixin<Derived2> &rhs,
     Optional<uint32_t> defaultSize) {
-  if (!defaultSize)
+  if (!defaultSize || (!lhs.hasLen() && !rhs.hasLen()))
     return lhs == rhs;
-  assert(lhs.hasLen() ||
-         rhs.hasLen() &&
-             "length wildcard on both sides of BitRange comparison");
+
   if (!lhs.hasLen())
     return BitRange{lhs.cself().getAddr(),
                     ConstantRef::fromU32(*defaultSize)} == rhs;

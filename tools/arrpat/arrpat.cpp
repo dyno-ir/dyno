@@ -16,8 +16,8 @@
 #include <sstream>
 #include <string_view>
 
-constexpr auto Operators =
-    std::to_array({":", "$", "{", "}", "...", ",", "#", "(", ")", "->"});
+constexpr auto Operators = std::to_array(
+    {":", "$", "{", "}", "...", ",", "#", "(", ")", "->", ";", "="});
 enum OperatorEnum {
   _op_start = Lexer::TOK_OPS_START - 1,
   op_colon,
@@ -29,11 +29,14 @@ enum OperatorEnum {
   op_hash,
   op_rbropen,
   op_rbrclose,
-  op_rightarrow
+  op_rightarrow,
+  op_semicolon,
+  op_equalsign
 };
 
 #define FOR_KEYWORDS(func)                                                     \
-  func(match) func(requires) func(replace) func(anyorder) func(with) func(macro)
+  func(match) func(requires) func(replace) func(anyorder) func(with)           \
+      func(macro) func(defs)
 #define FUNC(x) #x,
 constexpr auto Keywords = std::to_array({FOR_KEYWORDS(FUNC)});
 #undef FUNC
@@ -78,8 +81,10 @@ struct MatchOperand : public Object {
 };
 
 struct MatchInstr : public Object {
-  uint32_t opcodeID;
+  dyno::Optional<uint32_t> opcodeNameID = dyno::nullopt;
+  SmallVec<uint32_t, 4> opcodeIDs;
   SmallVec<Object *, 4> operands;
+  uint32_t defOperands = 1;
 
   static bool is_impl(const Object &obj) { return obj.kind == INSTR; }
   MatchInstr() : Object(INSTR) {}
@@ -315,9 +320,29 @@ MatchAnyorder *parseAnyorder(Lexer &lexer) {
 
 MatchBlock *parseBlock(Lexer &lexer);
 MatchInstr *parseInstrImpl(Lexer &lexer) {
-  auto identIdx = lexer.popEnsure(Token::IDENTIFIER).ident.idx;
   auto *instr = instrAlloc.allocate();
-  instr->opcodeID = identIdx;
+
+  if (lexer.peekIs(Token::IDENTIFIER)) {
+    auto identIdx = lexer.Pop().ident.idx;
+    instr->opcodeIDs.emplace_back(identIdx);
+  } else if (lexer.peekIs(op_dollarsign)) {
+    lexer.Pop();
+    instr->opcodeNameID = lexer.popEnsure(Token::IDENTIFIER).ident.idx;
+    if (lexer.popIf(op_cbropen)) {
+      while (!lexer.peekIs(op_cbrclose)) {
+        instr->opcodeIDs.emplace_back(
+            lexer.popEnsure(Token::IDENTIFIER).ident.idx);
+        if (!lexer.popIf(op_comma))
+          break;
+      }
+      lexer.popEnsure(op_cbrclose);
+    }
+  }
+
+  if (lexer.popIf(kw_defs)) {
+    lexer.popEnsure(op_equalsign);
+    instr->defOperands = lexer.popEnsure(Token::INT_LITERAL).intLit.value;
+  }
 
   while (lexer.peekIs(op_dollarsign, op_cbropen, op_hash, op_rbropen,
                       kw_anyorder, Token::IDENTIFIER)) {
@@ -331,6 +356,7 @@ MatchInstr *parseInstrImpl(Lexer &lexer) {
     if (!lexer.popIf(op_comma))
       break;
   }
+  lexer.popIf(op_semicolon);
 
   return instr;
 }
@@ -430,16 +456,19 @@ struct BytecodeOp {
     LOOP_FOR, // len, register low, register idx
     CONTINUE,
     BREAK,
+    GOTO,
 
     REPLACE_ALL_USES,              // operand old, operand new
     CREATE_CONSTANT,               // dst reg, bigInt value
     CREATE_CONSTANT_LIKE_SIGNED,   // dst reg, like, uint32_t value
     CREATE_CONSTANT_LIKE_UNSIGNED, // dst reg, like, uint32_t value
     CREATE_INSTR,                  // opcode, size
+    CREATE_INSTR_LIKE,             // opcode, size
 
     APPEND_COPY, // list reg, src
 
     COPY_OPERANDS,        // instr dst, instr src, operand, operand_end
+    COPY_OPERAND,         // instr dst, instr src, operand, operand_end
     SET_OPERANDS_OTHER,   // instr
     DELETE,               // instr
     DELETE_IF_SINGLE_USE, // instr
@@ -456,6 +485,10 @@ struct BytecodeOp {
     struct {
       uint32_t len;
     } pushContinue;
+
+    struct {
+      uint32_t len;
+    } gotoOp;
 
     struct {
       uint32_t instr;
@@ -503,7 +536,11 @@ struct BytecodeOp {
       uint32_t dstInstr;
       uint32_t begin;
       uint32_t end;
-    } moveOperands;
+    } copyOperands;
+    struct {
+      uint32_t dstInstr;
+      uint32_t src;
+    } copyOperand;
 
     struct {
       uint32_t outReg;
@@ -530,6 +567,11 @@ struct BytecodeOp {
       uint32_t outReg;
       uint32_t opcode;
     } createInstr;
+
+    struct {
+      uint32_t outReg;
+      uint32_t likeReg;
+    } createInstrLike;
 
     struct {
       std::string_view str;
@@ -568,7 +610,7 @@ struct BytecodeOp {
   static BytecodeOp makeCopyOperand(uint32_t dstInstr, uint32_t operandBegin,
                                     uint32_t operandEnd) {
     return BytecodeOp{.opcode = COPY_OPERANDS,
-                      .moveOperands{dstInstr, operandBegin, operandEnd}};
+                      .copyOperands{dstInstr, operandBegin, operandEnd}};
   }
 };
 
@@ -895,7 +937,27 @@ struct CodeGen {
     visitedInstrs.insert(instr);
     size_t low = 0, high = instr->operands.size() - 1;
 
-    ops.emplace_back(BytecodeOp::makeCheckOpcode(instrReg, instr->opcodeID));
+    if (instr->opcodeIDs.size() == 1)
+      ops.emplace_back(
+          BytecodeOp::makeCheckOpcode(instrReg, instr->opcodeIDs.front()));
+    else if (instr->opcodeIDs.size() > 1) {
+      uint len = (instr->opcodeIDs.size() - 1) * 3 + 1;
+      for (auto [back, opc] : Range{instr->opcodeIDs}.mark_back()) {
+        if (!back)
+          ops.emplace_back(BytecodeOp{.opcode = BytecodeOp::PUSH_CONTINUE,
+                                      .pushContinue = {2}});
+        ops.emplace_back(BytecodeOp::makeCheckOpcode(instrReg, opc));
+        if (!back)
+          ops.emplace_back(
+              BytecodeOp{.opcode = BytecodeOp::GOTO, .gotoOp = {len - 3}});
+        len -= 3;
+      }
+    }
+
+    if (instr->opcodeNameID) {
+      vars.insert(*instr->opcodeNameID, Variable{instrReg, 0});
+    }
+
     auto [minOperands, maxOperands] = getMinMaxNumOperands(instr);
     if (maxOperands) {
       ops.emplace_back(BytecodeOp{.opcode = BytecodeOp::CHECK_SIZE_LE,
@@ -1024,7 +1086,7 @@ struct CodeGen {
       }
 
       ops.emplace_back(BytecodeOp{.opcode = BytecodeOp::COPY_OPERANDS,
-                                  .moveOperands{dstInstr, begin, end}});
+                                  .copyOperands{dstInstr, begin, end}});
 
       std::stringstream str;
       std::print(str, "RefRange{{r{}, r{}}}", begin, end);
@@ -1038,15 +1100,19 @@ struct CodeGen {
 
   void generateReplaceInstr(MatchInstr *instr) {
     auto dstInstr = makeReplInstr();
-    ops.emplace_back(BytecodeOp{.opcode = BytecodeOp::CREATE_INSTR,
-                                .createInstr{dstInstr, instr->opcodeID}});
 
     // todo: configurable #defs
-    uint numDefOperands = 1;
-    if (lexer.GetIdent(instr->opcodeID) == "HW_STORE")
-      numDefOperands = 0;
-    else if (lexer.GetIdent(instr->opcodeID) == "HW_STORE_DEFER")
-      numDefOperands = 0;
+    uint numDefOperands = instr->defOperands;
+    if (instr->opcodeIDs.size() == 1) {
+      ops.emplace_back(
+          BytecodeOp{.opcode = BytecodeOp::CREATE_INSTR,
+                     .createInstr{dstInstr, instr->opcodeIDs.front()}});
+    } else {
+      assert(instr->opcodeIDs.size() == 0);
+      auto it = vars.find(*instr->opcodeNameID);
+      ops.emplace_back(BytecodeOp{.opcode = BytecodeOp::CREATE_INSTR_LIKE,
+                                  .createInstr{dstInstr, it.val().operand}});
+    }
 
     for (auto [opIdx, op] : Range{instr->operands}.enumerate()) {
       if (opIdx == numDefOperands) {
@@ -1060,15 +1126,14 @@ struct CodeGen {
             dstInstr, var.val().operand, var.val().end));
       } else if (auto constant = op->dyn_as<MatchConstant>()) {
         if (constant->isUnsized) {
-
+          assert(0);
         } else {
           auto reg = makeConstant();
           ops.emplace_back(
               BytecodeOp{.opcode = BytecodeOp::CREATE_CONSTANT,
                          .createConstant = {reg, constant->bigInt}});
-          // todo: copy single
-          assert(0);
-          ops.emplace_back(BytecodeOp::makeCopyOperand(dstInstr, reg, reg + 1));
+          ops.emplace_back(BytecodeOp{.opcode = BytecodeOp::COPY_OPERAND,
+                                      .copyOperand = {dstInstr, reg}});
         }
       } else if (auto pack = op->dyn_as<MatchPack>()) {
         if (pack->objects.size() != 1)
@@ -1173,8 +1238,11 @@ struct CodeGen {
 
     for (auto [i, op] : Range{ops}.enumerate()) {
 
-      while (!indentStack.empty() && i == indentStack.back())
-        indentStack.pop_back();
+      uint *it;
+      while (!indentStack.empty() &&
+             (it = std::find(indentStack.begin(), indentStack.end(), i)) !=
+                 indentStack.end())
+        indentStack.erase(it);
 
       for (size_t i = 0; i < indentStack.size(); i++)
         std::print(str, "  ");
@@ -1184,6 +1252,11 @@ struct CodeGen {
         std::print(str, "PUSH_CONTINUE #{}\n", op.pushContinue.len);
 
         indentStack.emplace_back(i + op.pushContinue.len + 1);
+        break;
+      case BytecodeOp::GOTO:
+        std::print(str, "GOTO #{}\n", op.gotoOp.len);
+
+        indentStack.emplace_back(i + op.gotoOp.len + 1);
         break;
 
       case BytecodeOp::POP_CONTINUE:
@@ -1247,8 +1320,12 @@ struct CodeGen {
 
       case BytecodeOp::COPY_OPERANDS:
         std::print(str, "COPY_OPERANDS i{}, r{}, r{}\n",
-                   op.moveOperands.dstInstr, op.moveOperands.begin,
-                   op.moveOperands.end);
+                   op.copyOperands.dstInstr, op.copyOperands.begin,
+                   op.copyOperands.end);
+        break;
+      case BytecodeOp::COPY_OPERAND:
+        std::print(str, "COPY_OPERAND i{}, r{}\n", op.copyOperand.dstInstr,
+                   op.copyOperand.src);
         break;
 
       case BytecodeOp::SET_OPERANDS_OTHER:
@@ -1291,6 +1368,10 @@ struct CodeGen {
       case BytecodeOp::CREATE_INSTR:
         std::print(str, "CREATE_INSTR i{}, {}\n", op.createInstr.outReg,
                    lexer.GetIdent(op.createInstr.opcode));
+        break;
+      case BytecodeOp::CREATE_INSTR_LIKE:
+        std::print(str, "CREATE_INSTR_LIKE i{}, i{}\n",
+                   op.createInstrLike.outReg, op.createInstr.outReg);
         break;
 
       case BytecodeOp::GET_DEF_INSTR:
@@ -1397,17 +1478,26 @@ struct CPPBackend {
   }
 
   auto getNumOpsExpr(BytecodeOp *create) {
-    assert(create->opcode == BytecodeOp::CREATE_INSTR);
+    assert(create->opcode == BytecodeOp::CREATE_INSTR ||
+           create->opcode == BytecodeOp::CREATE_INSTR_LIKE);
     size_t idx = create - code.ops.begin().base();
     std::stringstream expr;
+
+    auto instrReg = create->opcode == BytecodeOp::CREATE_INSTR
+                        ? create->createInstr.outReg
+                        : create->createInstrLike.outReg;
 
     bool first = true;
     for (size_t i = idx + 1; i < code.ops.size(); i++) {
       if (code.ops[i].opcode == BytecodeOp::COPY_OPERANDS &&
-          code.ops[i].moveOperands.dstInstr == create->createInstr.outReg) {
+          code.ops[i].copyOperands.dstInstr == instrReg) {
         std::print(expr, "{}(r{}-r{})", first ? "" : "+",
-                   code.ops[i].moveOperands.end,
-                   code.ops[i].moveOperands.begin);
+                   code.ops[i].copyOperands.end,
+                   code.ops[i].copyOperands.begin);
+        first = false;
+      } else if (code.ops[i].opcode == BytecodeOp::COPY_OPERAND &&
+                 code.ops[i].copyOperand.dstInstr == instrReg) {
+        std::print(expr, "{}1", first ? "" : "+");
         first = false;
       }
     }
@@ -1432,8 +1522,15 @@ struct CPPBackend {
     };
     SmallVec<Continue, 4> contStack;
 
+    struct Goto {
+      uint32_t endIdx;
+      uint32_t id;
+    };
+    SmallVec<Goto, 4> gotoStack;
+
     uint loopIdCnt = 0;
     uint contIdCnt = 0;
+    uint gotoIdCnt = 0;
 
     auto getFailLabel = [&]() {
       std::stringstream str;
@@ -1475,11 +1572,23 @@ struct CPPBackend {
         loopStack.pop_back();
       }
 
+      while (!gotoStack.empty() && gotoStack.back().endIdx == i) {
+        std::print(os, "goto_{}_{}:;\n", patternIdx, gotoStack.back().id);
+        gotoStack.pop_back();
+      }
+
       switch (op.opcode) {
 
       case BytecodeOp::PUSH_CONTINUE: {
         contStack.emplace_back(uint32_t(op.pushContinue.len + i + 1),
                                uint32_t(contIdCnt++));
+        break;
+      }
+
+      case BytecodeOp::GOTO: {
+        gotoStack.emplace_back(uint32_t(op.gotoOp.len + i + 1),
+                               uint32_t(gotoIdCnt++));
+        std::print(os, "goto goto_{}_{};\n", patternIdx, gotoStack.back().id);
         break;
       }
 
@@ -1577,8 +1686,13 @@ struct CPPBackend {
 
       case BytecodeOp::COPY_OPERANDS: {
         std::print(os, "copyOperands(r{}, r{}, r{});\n",
-                   op.moveOperands.dstInstr, op.moveOperands.begin,
-                   op.moveOperands.end);
+                   op.copyOperands.dstInstr, op.copyOperands.begin,
+                   op.copyOperands.end);
+        break;
+      }
+      case BytecodeOp::COPY_OPERAND: {
+        std::print(os, "copyOperand(r{}, r{});\n", op.copyOperand.dstInstr,
+                   op.copyOperand.src);
         break;
       }
 
@@ -1587,8 +1701,8 @@ struct CPPBackend {
         break;
 
       case BytecodeOp::REPLACE_ALL_USES:
-        std::print(os, "replaceAllUses(replaced, r{}, r{});\n", op.replAllUses.oldOp,
-                   op.replAllUses.newOp);
+        std::print(os, "replaceAllUses(replaced, r{}, r{});\n",
+                   op.replAllUses.oldOp, op.replAllUses.newOp);
         break;
 
       case BytecodeOp::CREATE_CONSTANT:
@@ -1612,6 +1726,14 @@ struct CPPBackend {
         std::print(os, "auto r{} = build.buildInstrRaw({}, {});\n",
                    op.createInstr.outReg, lexer.GetIdent(op.createInstr.opcode),
                    getNumOpsExpr(&op).view());
+        break;
+      }
+
+      case BytecodeOp::CREATE_INSTR_LIKE: {
+        std::print(
+            os, "auto r{} = build.buildInstrRaw(r{}.getDialectOpcode(), {});\n",
+            op.createInstrLike.outReg, op.createInstrLike.likeReg,
+            getNumOpsExpr(&op).view());
         break;
       }
 
@@ -1672,7 +1794,8 @@ struct CPPBackend {
         std::print(os, "deleteF(matched, ctx, r{});\n", op.deleteI.instr);
         break;
       case BytecodeOp::DELETE_IF_SINGLE_USE:
-        std::print(os, "deleteIfSingleUse(matched, ctx, r{});\n", op.deleteI.instr);
+        std::print(os, "deleteIfSingleUse(matched, ctx, r{});\n",
+                   op.deleteI.instr);
         break;
 
       default:

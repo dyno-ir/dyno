@@ -3,11 +3,14 @@
 #include "dyno/Constant.h"
 #include "dyno/CustomInstr.h"
 #include "dyno/HierBlockIterator.h"
+#include "dyno/Opcode.h"
 #include "hw/HWAbstraction.h"
 #include "hw/HWContext.h"
 #include "hw/HWPrinter.h"
 #include "hw/HWValue.h"
 #include "hw/Wire.h"
+#include "hw/analysis/DemandedBits.h"
+#include "hw/analysis/KnownBits.h"
 #include "op/IDs.h"
 #include "op/StructuredControlFlow.h"
 #include "support/Debug.h"
@@ -22,16 +25,175 @@ bool generated(HWContext &ctx, SmallVecImpl<InstrRef> &matched,
 class InstCombinePass {
   HWContext &ctx;
   SmallVec<InstrRef, 128> worklist;
-
   SmallVec<InstrRef, 8> currentMatched;
   SmallVec<OperandRef, 4> currentReplaced;
-
   ConstantBuilder cbuild;
+
+  // todo: outside of pass
+  KnownBitsAnalysis knownBits;
+  DemandedBitsAnalysis demandedBits;
 
 public:
   using TaggedIRef = CustomInstrRef<InstrRef, uint64_t>;
 
 private:
+  bool knownBitsConstProp(InstrRef instr) {
+    auto wire = instr.def(0)->as<WireRef>();
+    auto known = knownBits.getKnownBits(wire);
+    if (known.getIs4S())
+      return false;
+    currentReplaced.emplace_back(instr.def(0));
+    wire.replaceAllUsesWith(cbuild.val(known).get());
+    return true;
+  }
+
+  bool reduceBitWidth(InstrRef instr) {
+    // todo: this only handles a leading bits known region. should be
+    // generalized to arbitrary regions.
+    // todo: div and mod?
+    uint32_t minLeading = UINT32_MAX;
+    uint32_t sumLeading = 0;
+    uint32_t absorbedLeading = 0;
+
+    WireRef outWire = instr.def(0)->as<WireRef>();
+    uint32_t originalBits = *outWire.getNumBits();
+
+    SmallVec<BigInt, 4> bigInts;
+
+    auto demanded = demandedBits.getDemandedBits(instr.def(0)->as<WireRef>());
+    auto numNonDemanded = BigInt::leadingZeros(demanded);
+    bool reduceViaOutputs = numNonDemanded != 0;
+    bool reduceViaInputs = true;
+
+    auto combineLeading = [&](BigInt &known) {
+      switch (*instr.getDialectOpcode()) {
+      case *OP_ADD: {
+        auto newLeading = BigInt::leadingZeros4SExact(known);
+        if (newLeading <= 1)
+          return false;
+        newLeading--;
+        minLeading = std::min(minLeading, newLeading);
+        break;
+      }
+
+      case *OP_MUL: {
+        auto newLeading = BigInt::leadingZeros4SExact(known);
+        if (newLeading <= 1)
+          return false;
+        sumLeading += newLeading;
+        auto fullBits = (instr.getNumOthers() * originalBits);
+        minLeading = originalBits - (fullBits - sumLeading);
+        break;
+      }
+      case *OP_AND:
+      case *OP_OR:
+      case *OP_XOR:
+      case *OP_XNOR: {
+        uint32_t newAbsorbed = 0;
+        if (instr.isOpc(OP_AND))
+          newAbsorbed = BigInt::leadingBits4SExact(known, FourState::S0);
+        else if (instr.isOpc(OP_OR))
+          newAbsorbed = BigInt::leadingBits4SExact(known, FourState::S1);
+
+        absorbedLeading = std::max(absorbedLeading, newAbsorbed);
+        auto newLeading = BigInt::leadingNonUnk(known);
+        // we can't early abort and/or because later operands might absorb
+        if (newLeading == 0 && !instr.isOpc(OP_AND, OP_OR))
+          return false;
+        minLeading =
+            std::max(absorbedLeading, std::min(minLeading, newLeading));
+        break;
+      }
+      }
+      return true;
+    };
+
+    for (auto op : instr.others()) {
+      auto known = knownBits.getKnownBits(op->as<HWValue>());
+      known.toStream(dbgs());
+      dbgs() << "\n";
+
+      bool cont = combineLeading(known);
+      if (!cont) {
+        reduceViaInputs = false;
+        break;
+      }
+
+      bigInts.emplace_back(known);
+    }
+
+    if (minLeading == 0)
+      reduceViaInputs = false;
+
+    if (!reduceViaInputs && !reduceViaOutputs)
+      return false;
+
+    uint32_t activeBits =
+        originalBits -
+        std::max(numNonDemanded, reduceViaInputs ? minLeading : 0);
+
+    bool sign = false;
+
+    WireRef intermWire = ctx.getWires().create(activeBits);
+
+    HWInstrBuilder build{ctx};
+    build.setInsertPoint(instr);
+    auto ibAdd =
+        build.buildInstrRaw(instr.getDialectOpcode(), instr.getNumOperands());
+    ibAdd.addRef(intermWire).other();
+
+    build.setInsertPoint(ibAdd.instr());
+
+    for (auto op : instr.others()) {
+      ibAdd.addRef(build.buildTrunc(activeBits, op->as<HWValue>()));
+    }
+
+    build.setInsertPoint(instr);
+
+    if (instr.isOpc(OP_AND, OP_OR, OP_XOR, OP_XNOR) && reduceViaInputs) {
+      for (auto &bigInt : bigInts) {
+        BigInt::rangeSelectOp4S(bigInt, bigInt, activeBits,
+                                originalBits - activeBits);
+      }
+      void (*func)(BigInt &, const BigInt &, const BigInt &);
+      switch (*instr.getDialectOpcode()) {
+      case *OP_AND:
+        func = BigInt::andOp4S<BigInt, BigInt>;
+        break;
+      case *OP_OR:
+        func = BigInt::orOp4S<BigInt, BigInt>;
+        break;
+      case *OP_XOR:
+        func = BigInt::xorOp4S<BigInt, BigInt>;
+        break;
+      case *OP_XNOR:
+        func = BigInt::xnorOp4S<BigInt, BigInt>;
+        break;
+      default:
+        dyno_unreachable("unknown opcode");
+      }
+      BigInt::reduce(bigInts[0], ArrayRef{bigInts}.drop_front(), func);
+      build.buildInstrRaw(HW_CONCAT, 3)
+          .addRef(outWire)
+          .other()
+          .addRef(cbuild.val(bigInts[0]).get())
+          .addRef(ibAdd.instr().def(0)->as<WireRef>());
+    } else {
+      DialectOpcode opc;
+      if (reduceViaInputs)
+        opc = sign ? OP_SEXT : OP_ZEXT;
+      else
+        opc = OP_ANYEXT;
+      build.buildInstrRaw(opc, 2).addRef(outWire).other().addRef(
+          ibAdd.instr().def(0)->as<WireRef>());
+    }
+
+    instr.def(0).replace(FatDynObjRef<>{nullref});
+    TaggedIRef{instr}.get() = 1;
+
+    return true;
+  }
+
   bool simplifyAndCanonicalizeCommOps(InstrRef root) {
     SmallVec<WireRef, 8> operands;
     SmallVec<ConstantRef, 8> constants;
@@ -64,7 +226,7 @@ private:
     if (constants.size() > 1) {
       cbuild.val(constants.front());
       switch (*root.getDialectOpcode()) {
-#define FUNC(hb, opc, cb)                                                      \
+#define FUNC(opc, hb, cb, bib)                                                 \
   case *opc:                                                                   \
     for (auto val : Range{constants}.drop_front())                             \
       cbuild.cb(val);                                                          \
@@ -184,38 +346,20 @@ private:
     return true;
   }
 
-  // bool simplifyWhile(InstrRef instr) {
-  //   auto asWhile = instr.as<WhileInstrRef>();
-  //   auto cond = asWhile.getCondBlock().as<BlockRef>();
-  //   assert(!cond.empty());
-  //   auto yield = cond.end().pred().instr();
-  //   assert(yield.isOpc(OP_YIELD));
-
-  //   auto boolCond = yield.operand(0)->as<HWValue>();
-  //   if (auto wire = boolCond.dyn_as<WireRef>()) {
-  //     auto defI = wire.getDefI();
-  //     if (defI.getNumOperands() != 3)
-  //       return false;
-
-  //     for (uint i = 1; i < 2; i++) {
-  //       auto op = defI.operand(i);
-  //       if (auto asWire = op->dyn_as<WireRef>();
-  //           asWire && asWire.getDefI().isOpc(OP_UNYIELD)) {
-
-  //       }
-  //     }
-  //   }
-
-  //   auto body = asWhile.getBodyBlock().as<BlockRef>();
-  // }
-
   bool manual(InstrRef instr) {
+
     switch (*instr.getDialectOpcode()) {
-#define LAMBDA(ib, opc, cb) case *opc:
+#define LAMBDA(opc, ib, cb, bib) case *opc:
       FOR_HW_COMM_OPS(LAMBDA)
 #undef LAMBDA
-      return simplifyAndCanonicalizeCommOps(instr);
+      if (simplifyAndCanonicalizeCommOps(instr))
+        return true;
     default:
+    }
+
+    if (instr.isOpc(OP_ADD, OP_MUL, OP_AND, OP_OR, OP_XOR, OP_XNOR)) {
+      if (reduceBitWidth(instr))
+        return true;
     }
 
     return false;

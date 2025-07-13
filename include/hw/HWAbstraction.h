@@ -127,7 +127,7 @@ public:
                       operands...);
   }
 
-#define COMM_OP(ident, opcode, constFunc)                                      \
+#define COMM_OP(opcode, ident, constFunc, bigIntFunc)                          \
   template <IsAnyHWValue T, IsAnyHWValue... Ts>                                \
   HWValue ident(T first, Ts... rest) {                                         \
     if constexpr (!(std::is_same_v<T, WireRef> ||                              \
@@ -143,14 +143,6 @@ public:
     rv->numBits = first.getNumBits();                                          \
     return rv;                                                                 \
   }
-
-#define FOR_HW_COMM_OPS(FUNC)                                                  \
-  FUNC(buildAdd, OP_ADD, add)                                                  \
-  FUNC(buildAnd, OP_AND, bitAND)                                               \
-  FUNC(buildOr, OP_OR, bitOR)                                                  \
-  FUNC(buildXor, OP_XOR, bitXOR)                                               \
-  FUNC(buildXNor, OP_XNOR, bitXNOR)                                            \
-  FUNC(buildMul, OP_MUL, mul)
 
   FOR_HW_COMM_OPS(COMM_OP)
 
@@ -210,7 +202,7 @@ public:
   //   return HWInstrRef{instr};
   // }
 
-#define BINOP(ident, opcode, constFunc)                                        \
+#define BINOP(opcode, ident, constFunc, bigIntFunc)                            \
   template <IsAnyHWValue LHS, IsAnyHWValue RHS>                                \
   HWValue ident(LHS lhs, RHS rhs) {                                            \
     if (lhs.template is<ConstantRef>() && rhs.template is<ConstantRef>()) {    \
@@ -224,16 +216,7 @@ public:
     return rv;                                                                 \
   }
 
-  BINOP(buildSub, OP_SUB, sub)
-  BINOP(buildUDiv, OP_UDIV, udiv)
-  BINOP(buildUMod, OP_UMOD, umod)
-  BINOP(buildSDiv, OP_SDIV, sdiv)
-  BINOP(buildSMod, OP_SMOD, smod)
-  BINOP(buildSLL, OP_SLL, shl)
-  BINOP(buildSRL, OP_SRL, lshr)
-  BINOP(buildSRA, OP_SRA, ashr)
-  BINOP(buildUPow, HW_UPOW, upow)
-  BINOP(buildSPow, HW_SPOW, spow)
+  FOR_HW_BIN_OPS(BINOP)
 
   template <IsAnyHWValue LHS, IsAnyHWValue RHS>
   HWValue buildICmp(LHS lhs, RHS rhs, BigInt::ICmpPred pred) {
@@ -281,7 +264,6 @@ public:
     return buildExt(newSize, value, true);
   }
   HWValue buildTrunc(uint32_t newSize, HWValue value) {
-
     if (auto asConst = value.dyn_as<ConstantRef>()) {
       assert(asConst.getNumBits() >= newSize);
       return ctx.constBuild()
@@ -289,9 +271,20 @@ public:
           .resize(newSize)
           .get();
     }
+    auto wire = value.as<WireRef>();
+    if (wire.getNumBits() == newSize)
+      return wire;
+    else if (wire.getDefI().isOpc(OP_TRUNC)) {
+      return buildTrunc(newSize, wire.getDefI().other(0)->as<HWValue>());
+    } else if (wire.getDefI().isOpc(OP_ZEXT, OP_SEXT)) {
+      auto src = wire.getDefI().other(0)->as<HWValue>();
+      if (*src.getNumBits() >= newSize)
+        return buildTrunc(newSize, src);
+      else
+        return buildExt(newSize, src, wire.getDefI().isOpc(OP_SEXT));
+    }
 
     auto ref = buildInstr(OP_TRUNC, true, value);
-
     assert(ref.defW().getNumBits().value_or(UINT32_MAX) > newSize);
     ref.defW()->numBits = newSize;
     return ref.defW();
@@ -536,11 +529,11 @@ public:
 
   WireRef buildLoad(RegisterRef reg, BitRange range = BitRange::full()) {
     HWInstrRef ref;
-    if (range == BitRange::full())
+    if (BitRange::equalsWithDefaultSize(range, BitRange::full(), reg->numBits))
       ref = buildInstr(HW_LOAD, true, reg);
     else
       ref = buildInstr(HW_LOAD, true, reg, range);
-    if (range == BitRange::full())
+    if (BitRange::equalsWithDefaultSize(range, BitRange::full(), reg->numBits))
       ref.defW()->numBits = reg->numBits;
     else if (auto asCRef = range.len.dyn_as<ConstantRef>())
       ref.defW()->numBits = asCRef.getExactVal();
@@ -553,11 +546,12 @@ public:
     assert(!(!defer && trigger) && "trigger on non-deferred store");
     auto opc = defer ? HW_STORE_DEFER : HW_STORE;
     if (trigger) {
-      if (range == BitRange::full())
+      if (BitRange::equalsWithDefaultSize(range, BitRange::full(),
+                                          reg->numBits))
         return buildInstr(opc, false, value, reg, trigger.oref());
       return buildInstr(opc, false, value, reg, range, trigger.oref());
     }
-    if (range == BitRange::full())
+    if (BitRange::equalsWithDefaultSize(range, BitRange::full(), reg->numBits))
       return buildInstr(opc, false, value, reg);
     return buildInstr(opc, false, value, reg, range);
   }

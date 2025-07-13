@@ -4,6 +4,7 @@
 #include "support/Ranges.h"
 #include "support/Utility.h"
 #include <array>
+#include <concepts>
 #include <cstddef>
 #include <cstdint>
 #include <iterator>
@@ -81,7 +82,10 @@ public:
     auto oldBuckets = getBuckets();
     auto oldCap = cap;
 
-    getBuckets() = new Bucket[cap *= 2]();
+    getBuckets() = (Bucket *)::operator new[](
+        sizeof(Bucket) * (cap *= 2), std::align_val_t(alignof(Bucket)));
+    std::uninitialized_default_construct_n(getBuckets(), cap);
+
     sz = 0;
 
     for (size_t i = 0; i < oldCap; i++) {
@@ -499,16 +503,21 @@ template <typename Base> class LargeSetMap : public Base {
 
 public:
   Bucket *&getBuckets() const { return const_cast<Bucket *&>(buckets); }
-  void deleteArr(Bucket *buckets) { ::operator delete[](buckets); }
+  void deleteArr(Bucket *buckets) {
+    ::operator delete[](buckets, std::align_val_t(alignof(Bucket)));
+  }
 
 public:
   // todo: copy/move construct
   LargeSetMap() : Base(1, 0) {
-    buckets = new Bucket[1]();
+    // asan does not support mixing of placement and regular new/delete
+    buckets = (Bucket *)::operator new[](sizeof(Bucket) * 1,
+                                         std::align_val_t(alignof(Bucket)));
+    std::uninitialized_default_construct_n(buckets, 1);
   }
   ~LargeSetMap() {
     this->Base::clearDelete();
-    ::operator delete[](buckets);
+    ::operator delete[](buckets, std::align_val_t(alignof(Bucket)));
   }
 };
 
@@ -522,7 +531,7 @@ public:
   void deleteArr(Bucket *buckets) {
     if (buckets == *arr)
       return;
-    ::operator delete[](buckets);
+    ::operator delete[](buckets, std::align_val_t(alignof(Bucket)));
   }
 
 public:
@@ -535,7 +544,7 @@ public:
   ~SmallSetMap() {
     if (isSmall())
       return;
-    ::operator delete[](buckets);
+    ::operator delete[](buckets, std::align_val_t(alignof(Bucket)));
   }
 };
 

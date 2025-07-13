@@ -1889,8 +1889,8 @@ int main(int argc, char **argv) {
   print.reset();
   print.printCtx(ctx);
 
-  AIGConstructPass aigConstr{ctx};
-  aigConstr.run();
+  //AIGConstructPass aigConstr{ctx};
+  //aigConstr.run();
 
   //adcePass.run();
 

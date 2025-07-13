@@ -41,6 +41,15 @@ public:
   const_reference back() { return ptr[sz - 1]; }
   const_reference front() { return ptr[0]; }
 
+  ArrayRef drop_front() const {
+    assert(sz >= 1);
+    return ArrayRef{ptr + 1, sz - 1};
+  }
+  ArrayRef drop_back() const {
+    assert(sz >= 1);
+    return ArrayRef{ptr, sz - 1};
+  }
+
   static constexpr ArrayRef emptyRef() { return ArrayRef{nullptr, size_t(0)}; }
 
   template <typename U> ArrayRef(const U &u) : ArrayRef(u.begin(), u.end()) {}
@@ -87,6 +96,15 @@ public:
 
   reference back() { return ptr[sz - 1]; }
   reference front() { return ptr[0]; }
+
+  MutArrayRef drop_front() const {
+    assert(sz >= 1);
+    return MutArrayRef{ptr + 1, sz - 1};
+  }
+  MutArrayRef drop_back() const {
+    assert(sz >= 1);
+    return MutArrayRef{ptr, sz - 1};
+  }
 
   static constexpr MutArrayRef emptyRef() {
     return MutArrayRef{nullptr, size_t(0)};

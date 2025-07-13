@@ -165,6 +165,83 @@ public:
   }
 };
 
+template <typename T> class mark_back_iterator {
+  T it;
+  T end;
+
+public:
+  using iterator_category = std::forward_iterator_tag;
+  using value_type = std::pair<bool, decltype(*it)>;
+  using pointer = value_type *;
+  using reference = value_type &;
+  using difference_type = std::iterator_traits<T>::difference_type;
+
+  mark_back_iterator() = default;
+  mark_back_iterator(T it, T end) : it(it), end(end) {}
+
+  value_type operator*() { return {std::next(it) == end, *it}; }
+
+  mark_back_iterator &operator++() {
+    ++it;
+    return *this;
+  }
+
+  mark_back_iterator operator++(int) {
+    mark_back_iterator tmp(*this);
+    ++(*this);
+    return tmp;
+  }
+
+  friend bool operator==(const mark_back_iterator &a,
+                         const mark_back_iterator &b) {
+    return a.it == b.it;
+  }
+
+  friend bool operator!=(const mark_back_iterator &a,
+                         const mark_back_iterator &b) {
+    return a.it != b.it;
+  }
+};
+
+template <typename T> class mark_front_iterator {
+  T it;
+  bool first;
+
+public:
+  using iterator_category = std::forward_iterator_tag;
+  using value_type = std::pair<bool, decltype(*it)>;
+  using pointer = value_type *;
+  using reference = value_type &;
+  using difference_type = std::iterator_traits<T>::difference_type;
+
+  mark_front_iterator() = default;
+  mark_front_iterator(T it, bool first) : it(it), first(first) {}
+
+  value_type operator*() { return {first, *it}; }
+
+  mark_front_iterator &operator++() {
+    first = false;
+    ++it;
+    return *this;
+  }
+
+  mark_front_iterator operator++(int) {
+    mark_back_iterator tmp(*this);
+    ++(*this);
+    return tmp;
+  }
+
+  friend bool operator==(const mark_front_iterator &a,
+                         const mark_front_iterator &b) {
+    return a.it == b.it;
+  }
+
+  friend bool operator!=(const mark_front_iterator &a,
+                         const mark_front_iterator &b) {
+    return a.it != b.it;
+  }
+};
+
 template <typename T, typename FilterT> class filter_iterator {
   T it;
   T itEnd;
@@ -305,6 +382,15 @@ public:
     auto rv = Range{*this};
     --rv.endIt;
     return rv;
+  }
+
+  auto mark_front() {
+    return ::Range{mark_front_iterator{beginIt, true},
+                   mark_front_iterator{endIt, false}};
+  }
+  auto mark_back() {
+    return ::Range{mark_back_iterator{beginIt, endIt},
+                   mark_back_iterator{endIt, endIt}};
   }
 
   template <typename TransformT> auto transform(TransformT transformF) {

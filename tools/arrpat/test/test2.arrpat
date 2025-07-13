@@ -58,17 +58,17 @@ replace {
 
 // store with superfluous indexing
 match {
-  HW_STORE $val, $reg, #'0, $len:const_like_reg_len($reg)
+  $opc{HW_STORE, HW_STORE_DEFER} $val, $reg, #'0, $len:const_like_reg_len($reg)
 }
 replace {
-  HW_STORE $val, $reg
+  $opc defs=0 $val, $reg
 }
 
 match {
   HW_STORE_DEFER $val, $reg, #'0, $len:const_like_reg_len($reg), $trig
 }
 replace {
-  HW_STORE_DEFER $val, $reg, $trig
+  HW_STORE_DEFER defs=0 $val, $reg, $trig
 }
 
 // concat with zero length constant
@@ -90,9 +90,29 @@ macro const_len_of $obj -> $rv [{
   $rv = c;
 }]
 
-// todo others
+macro const_len_of_minus1 $obj -> $rv [{
+  FatDynObjRef<> c = ConstantRef::fromU32(*(*$obj.begin())->as<HWValue>().getNumBits() - 1);
+  $rv = c;
+}]
+
+// we need check duplicates of these. dyno dsl pattern matching should fix.
+macro chk_const_diff_lens $self, $lhs, $rhs [{
+  auto lhsBits = *(*$lhs.begin())->as<HWValue>().getNumBits();
+  auto rhsBits = *(*$rhs.begin())->as<HWValue>().getNumBits();
+  FatDynObjRef<> diff = ConstantRef::fromU32(lhsBits - rhsBits);
+  if ((*$self.begin())->as<FatDynObjRef<>>() != diff)
+    goto $fail;
+}]
+macro chk_const_len_of_minus1 $self, $obj [{
+  FatDynObjRef<> c = ConstantRef::fromU32(*(*$obj.begin())->as<HWValue>().getNumBits() - 1);
+  if ((*$self.begin())->as<FatDynObjRef<>>() != c)
+    goto $fail;
+}]
+
+
+// trunc(ext()) patterns
 match {
-  OP_ZEXT $ext, $x
+  $opc{OP_ZEXT, OP_SEXT, OP_ANYEXT} $ext, $x
   OP_TRUNC $out, $ext:HW_WIRE
 }
 with [{
@@ -104,6 +124,79 @@ with [{
 replace {
   OP_TRUNC $out, $x
 }
+
+match {
+  $opc{OP_ZEXT, OP_SEXT, OP_ANYEXT} $ext, $x
+  OP_TRUNC $out, $ext:HW_WIRE
+}
+with [{
+  auto inBits = (*$x.begin())->as<HWValue>().getNumBits();
+  auto outBits = (*$out.begin())->as<WireRef>().getNumBits();
+  if (!(*outBits == *inBits))
+    goto $fail;
+}]
+replace $out -> $x
+
+match {
+  $opc{OP_ZEXT, OP_SEXT, OP_ANYEXT} $ext, $x
+  OP_TRUNC $out, $ext:HW_WIRE
+}
+with [{
+  auto inBits = (*$x.begin())->as<HWValue>().getNumBits();
+  auto outBits = (*$out.begin())->as<WireRef>().getNumBits();
+  if (!(*outBits > *inBits))
+    goto $fail;
+}]
+replace {
+  $opc $out, $x
+}
+
+
+
+// trunc(load())
+match {
+  HW_LOAD $val, $reg
+  OP_TRUNC $x, $val:HW_WIRE
+}
+with [{
+  if ((*$val.begin())->as<WireRef>().getNumUses() != 1)
+    goto $fail;
+}]
+replace {
+  HW_LOAD $x, $reg, #32'h0, const_len_of($x)
+}
+
+match {
+  HW_LOAD $val, $reg, $offs, $len
+  OP_TRUNC $x, $val:HW_WIRE
+}
+with [{
+  if ((*$val.begin())->as<WireRef>().getNumUses() != 1)
+    goto $fail;
+}]
+replace {
+  HW_LOAD $x, $reg, $offs, const_len_of($x)
+}
+
+
+
+
+match {
+  HW_CONCAT $out, #'0, $x
+}
+replace {
+  OP_ZEXT $out, $x
+}
+
+match {
+  HW_SPLICE $sign, $x, $splice_offs:chk_const_len_of_minus1($x), #32'd1
+  HW_REPEAT $temp, $sign:HW_WIRE, $repeat_cnt:chk_const_diff_lens($out, $x)
+  HW_CONCAT $out, $temp, $x
+}
+replace {
+  OP_SEXT $out, $x
+}
+
 
 match {
   OP_TRUNC $out, $in:CORE_CONSTANT

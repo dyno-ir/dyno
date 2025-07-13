@@ -4,6 +4,7 @@
 #include <climits>
 #include <concepts>
 #include <cstdint>
+#include <limits>
 #include <type_traits>
 
 template <std::unsigned_integral T>
@@ -34,6 +35,13 @@ template <typename T> constexpr T bit_mask_zeros(unsigned n, unsigned pos = 0) {
 
 template <typename T> constexpr T bit_mask_ms_nbits(unsigned nbits) {
   return bit_mask_ones<T>(nbits, (bit_mask_sz<T> - nbits));
+}
+
+template <typename T> constexpr T sign_extend(T num, unsigned bits) {
+  assert(bits != 0);
+  using S = std::make_signed_t<T>;
+  unsigned shamt = (bit_mask_sz<T> - bits);
+  return S(num << shamt) >> shamt;
 }
 
 template <typename T> constexpr unsigned clog2(T val) {

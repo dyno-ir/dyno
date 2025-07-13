@@ -23,6 +23,9 @@ static void copyOperands(InstrBuilder &build, FatDynObjRef<> *begin,
   for (auto it = begin; it != end; it++)
     build.addRef(*it);
 }
+static void copyOperand(InstrBuilder &build, FatDynObjRef<> ref) {
+  build.addRef(ref);
+}
 
 static InstrRef getDefInstr(InstrRef::iterator use) {
   return (*use)->as<WireRef>().getDefI();
