@@ -1250,8 +1250,8 @@ public:
       // for some reason Slang sometimes omits implicit conversions (?)
       // maybe just for self-determined operands?
       if (auto width = expr.type->getBitstreamWidth(); width && width != 1) {
-        lhsVal = build.buildUpsize(lhsVal, width, lhs->type->isSigned());
-        rhsVal = build.buildUpsize(rhsVal, width, rhs->type->isSigned());
+        lhsVal = build.buildResize(lhsVal, width, lhs->type->isSigned());
+        rhsVal = build.buildResize(rhsVal, width, rhs->type->isSigned());
       }
 
       switch (binop.op) {
@@ -1880,22 +1880,16 @@ int main(int argc, char **argv) {
 
   icomb.run();
 
-  pass3.config.mode = SSAConstructPass::Config::IMMEDIATE;
-  pass3.run();
-
   //MuxTreeOptimizationPass muxOpt{ctx};
   //muxOpt.run();
-
-  print.reset();
-  print.printCtx(ctx);
 
   //AIGConstructPass aigConstr{ctx};
   //aigConstr.run();
 
   //adcePass.run();
 
-  // LowerOpsPass lowerOps{ctx};
-  // lowerOps.run();
+  LowerOpsPass lowerOps{ctx};
+  lowerOps.run();
 
   print.reset();
   print.printCtx(ctx);
