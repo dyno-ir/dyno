@@ -1880,16 +1880,18 @@ int main(int argc, char **argv) {
 
   icomb.run();
 
-  //MuxTreeOptimizationPass muxOpt{ctx};
-  //muxOpt.run();
-
-  //AIGConstructPass aigConstr{ctx};
-  //aigConstr.run();
-
-  //adcePass.run();
+  // MuxTreeOptimizationPass muxOpt{ctx};
+  // muxOpt.run();
 
   LowerOpsPass lowerOps{ctx};
   lowerOps.run();
+  print.reset();
+  print.printCtx(ctx);
+
+  AIGConstructPass aigConstr{ctx};
+  aigConstr.run();
+
+  // adcePass.run();
 
   print.reset();
   print.printCtx(ctx);

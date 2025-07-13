@@ -21,14 +21,9 @@ class LowerOpsPass {
   SmallVec<InstrRef, 32> worklist;
   ObjMapVec<Instr, bool> destroyMap;
 
-  void lowerAdd(InstrRef add) {
-    const uint maxCompressIns = 3;
-
-    if (add.getNumOperands() <= 2)
-      return;
-
+  auto getOperandAndDelays(InstrRef instr, bool sort) {
     SmallVec<std::pair<HWValue, uint32_t>, 8> operands;
-    for (auto op : add.others()) {
+    for (auto op : instr.others()) {
       Optional<uint32_t> delayEst = nullopt;
       if (op->is<ConstantRef>())
         delayEst = 0;
@@ -38,11 +33,21 @@ class LowerOpsPass {
       }
       operands.emplace_back(op->as<HWValue>(), delayEst.value_or(UINT32_MAX));
     }
-    if (operands.size() > maxCompressIns)
+    if (sort)
       std::sort(operands.begin(), operands.end(),
                 [](const auto &lhs, const auto &rhs) {
                   return lhs.second > rhs.second;
                 });
+    return operands;
+  }
+
+  void lowerAdd(InstrRef add) {
+    const uint maxCompressIns = 3;
+
+    if (add.getNumOthers() <= 2)
+      return;
+
+    auto operands = getOperandAndDelays(add, add.getNumOthers() > 3);
 
     build.setInsertPoint(HWInstrRef{add}.iter(ctx));
     auto numBits = *add.def(0)->as<WireRef>().getNumBits();
@@ -85,7 +90,49 @@ class LowerOpsPass {
     ibuild.addRef(operands[1].first);
 
     add.def(0).replace(FatDynObjRef<>{nullref});
-    build.destroyInstr(add);
+    destroyMap[add] = 1;
+  }
+
+  void lowerBitwise(InstrRef instr) {
+    const uint maxFactor = 2;
+
+    if (instr.getNumOthers() <= 2)
+      return;
+
+    auto operands = getOperandAndDelays(instr, instr.getNumOthers() > 2);
+
+    build.setInsertPoint(HWInstrRef{instr}.iter(ctx));
+    auto numBits = *instr.def(0)->as<WireRef>().getNumBits();
+    InstrRef last;
+    while (operands.size() > 1) {
+      auto compressIns = std::min(maxFactor, operands.size());
+      auto ibuild =
+          build.buildInstrRaw(instr.getDialectOpcode(), 1 + compressIns);
+      auto sum = ctx.getWires().create(numBits);
+      ibuild.addRef(sum);
+      ibuild.other();
+      uint32_t worstDelay = 0;
+      for (size_t i = 0; i < compressIns; i++) {
+        auto [val, dl] = operands.pop_back_val();
+        ibuild.addRef(val);
+        worstDelay = dl;
+      }
+      auto comprDelay = delay.getDefDelay(ibuild.instr().def(0), nullptr);
+      if (!comprDelay)
+        worstDelay = UINT32_MAX;
+      else if (worstDelay != UINT32_MAX)
+        worstDelay += *comprDelay;
+
+      auto it =
+          std::find_if(operands.begin(), operands.end(), [&](const auto &pair) {
+            return pair.second < worstDelay;
+          });
+      operands.insert(it, std::make_pair(sum, worstDelay));
+      last = ibuild.instr();
+    }
+
+    instr.def(0)->as<WireRef>().replaceAllUsesWith(last.def(0)->as<HWValue>());
+    destroyMap[instr] = 1;
   }
 
   // probably a good idea to express this and stuff like shift in terms of high
@@ -154,7 +201,7 @@ class LowerOpsPass {
       out = invertResult ? build.buildXNor(carryWire) : carryWire;
     }
     instr.def(0)->as<WireRef>().replaceAllUsesWith(out);
-    build.destroyInstr(instr);
+    destroyMap[instr] = 1;
   }
 
   HWValue shiftByConstant(DialectOpcode opcode, HWValue value, uint32_t shamt) {
@@ -212,9 +259,33 @@ class LowerOpsPass {
                   build.buildSplice(value, BitRange{valueBits - 1, 1}),
                   ConstantRef::fromU32(oobBits))
             : cbuild.zeroLike(value).get();
-    build.buildMux(oob, oobVal, shiftVal);
-    instr.def(0)->as<WireRef>().replaceAllUsesWith(shiftVal);
-    build.destroyInstr(instr);
+    instr.def(0)->as<WireRef>().replaceAllUsesWith(
+        build.buildMux(oob, oobVal, shiftVal));
+    destroyMap[instr] = 1;
+  }
+
+  void lowerEqualityICMP(InstrRef instr) {
+    auto lhs = instr.other(0)->as<HWValue>();
+    auto rhs = instr.other(1)->as<HWValue>();
+    auto bits = *lhs.getNumBits();
+
+    build.setInsertPoint(instr);
+    auto bitsMask = instr.isOpc(OP_ICMP_NE) ? build.buildXor(lhs, rhs)
+                                            : build.buildXNor(lhs, rhs);
+    auto ibOR =
+        build.buildInstrRaw(instr.isOpc(OP_ICMP_NE) ? OP_OR : OP_AND, 1 + bits);
+
+    build.setInsertPoint(ibOR.instr());
+
+    ibOR.addRef(instr.def(0)->as<WireRef>()).other();
+    instr.def(0).replace(FatDynObjRef<>{nullref});
+
+    for (uint i = 0; i < bits; i++) {
+      auto bit = build.buildSplice(bitsMask, BitRange{i, 1});
+      ibOR.addRef(bit);
+    }
+
+    destroyMap[instr] = 1;
   }
 
   void runOnInstr(InstrRef instr) {
@@ -233,6 +304,18 @@ class LowerOpsPass {
       lowerOrderingICMP(instr);
       break;
 
+    case *OP_ICMP_EQ:
+    case *OP_ICMP_NE:
+      lowerEqualityICMP(instr);
+      break;
+
+    case *OP_AND:
+    case *OP_OR:
+    case *OP_XOR:
+    case *OP_XNOR:
+      lowerBitwise(instr);
+      break;
+
     case *OP_SLL:
     case *OP_SRL:
     case *OP_SRA:
@@ -246,7 +329,8 @@ public:
     auto isLoweringInstr = [](InstrRef instr) {
       return instr.isOpc(OP_ADD, OP_ICMP_ULT, OP_ICMP_SLT, OP_ICMP_ULE,
                          OP_ICMP_SLE, OP_ICMP_UGT, OP_ICMP_SGT, OP_ICMP_UGE,
-                         OP_ICMP_SGE, OP_SLL, OP_SRL, OP_SRA);
+                         OP_ICMP_SGE, OP_SLL, OP_SRL, OP_SRA, OP_ICMP_EQ,
+                         OP_ICMP_NE, OP_AND, OP_OR, OP_XOR, OP_XNOR);
     };
 
     destroyMap.resize(ctx.getInstrs().numIDs());

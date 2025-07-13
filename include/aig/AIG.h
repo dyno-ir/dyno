@@ -140,6 +140,7 @@ public:
   static bool is_impl(ObjRef<AIGNode> ref) {
     return AIGNodeTRef{ref}.isSpecial();
   }
+  using FatObjRef<FatAIGNode>::is_impl;
 
   explicit operator AIGNodeRef() const {
     return AIGNodeRef{obj, &(*this)->node};
@@ -257,6 +258,31 @@ public:
       std::swap(lhs, rhs);
     return store.create(lhs.getObjID(), rhs.getObjID());
   }
+
+  AIGNodeRef createAND(AIGNodeTRef lhs, AIGNodeTRef rhs) {
+    return createNode(lhs, rhs);
+  }
+  AIGNodeRef createOR(AIGNodeTRef lhs, AIGNodeTRef rhs) {
+    return createNode(lhs.inverted(), rhs.inverted()).inverted();
+  }
+  AIGNodeRef createNAND(AIGNodeTRef lhs, AIGNodeTRef rhs) {
+    return createNode(lhs, rhs).inverted();
+  }
+  AIGNodeRef createNOR(AIGNodeTRef lhs, AIGNodeTRef rhs) {
+    return createNode(lhs.inverted(), rhs.inverted());
+  }
+  AIGNodeRef createMUX(AIGNodeTRef sel, AIGNodeTRef trueV, AIGNodeTRef falseV) {
+    return createOR(createAND(sel, trueV), createAND(sel.inverted(), falseV));
+  }
+  AIGNodeRef createXOR(AIGNodeTRef lhs, AIGNodeTRef rhs) {
+    return createOR(createAND(lhs, rhs.inverted()),
+                    createAND(lhs.inverted(), rhs));
+  }
+  AIGNodeRef createXNOR(AIGNodeTRef lhs, AIGNodeTRef rhs) {
+    return createNOR(createAND(lhs, rhs.inverted()),
+                     createAND(lhs.inverted(), rhs));
+  }
+  AIGNodeTRef createNOT(AIGNodeTRef lhs) { return lhs.inverted(); }
 
   FatAIGNodeRef createInput() { return store.createSpecial(); }
   FatAIGNodeRef createOutput(AIGNodeTRef val) {

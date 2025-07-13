@@ -30,6 +30,7 @@ public:
     delay.set(OP_TRUNC, 0);
     delay.set(HW_CONCAT, 0);
     delay.set(HW_REPEAT, 0);
+    delay.set(HW_SPLICE, 0);
     delay.set(HW_MUX, 2);
     delay.set(HW_ADD_COMPRESS, 2);
   }
