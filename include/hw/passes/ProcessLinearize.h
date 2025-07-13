@@ -11,7 +11,6 @@
 #include "hw/analysis/RegisterValue.h"
 #include "support/Debug.h"
 #include "support/DenseMap.h"
-#include "support/DenseSet.h"
 #include "support/DynBitSet.h"
 #include "support/Utility.h"
 #include <algorithm>

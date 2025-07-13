@@ -110,8 +110,6 @@ private:
 
     for (auto op : instr.others()) {
       auto known = knownBits.getKnownBits(op->as<HWValue>());
-      known.toStream(dbgs());
-      dbgs() << "\n";
 
       bool cont = combineLeading(known);
       if (!cont) {
