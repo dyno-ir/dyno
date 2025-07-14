@@ -25,6 +25,7 @@
 #include "hw/passes/SSAConstruct.h"
 #include "hw/passes/SeqToComb.h"
 #include "hw/passes/TriggerDedupe.h"
+#include "hw/run/HWInterpreter.h"
 #include "slang/ast/ASTVisitor.h"
 #include "slang/ast/Compilation.h"
 #include "slang/ast/Expression.h"
@@ -64,6 +65,7 @@
 #include "slang/text/SourceLocation.h"
 #include "slang/text/SourceManager.h"
 #include "support/Bits.h"
+#include "support/ErrorRecovery.h"
 #include "support/SmallVec.h"
 #include "support/Utility.h"
 #include <algorithm>
@@ -1152,9 +1154,8 @@ public:
 
   ConstantRef toDynoConstant(const slang::SVInt &svint) {
     ConstantRef ref;
-    std::span<const uint32_t> data{
-        reinterpret_cast<const uint32_t *>(svint.getRawPtr()),
-        2 * svint.getNumWords()};
+    ArrayRef data{reinterpret_cast<const uint32_t *>(svint.getRawPtr()),
+                  2 * svint.getNumWords()};
     if (!svint.hasUnknown()) {
       ref = ConstantBuilder{ctx.getConstants()}.raw(
           (unsigned)svint.getBitWidth(), data);

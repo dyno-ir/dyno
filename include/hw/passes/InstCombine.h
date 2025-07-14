@@ -170,7 +170,7 @@ private:
       default:
         dyno_unreachable("unknown opcode");
       }
-      BigInt::reduce(bigInts[0], ArrayRef{bigInts}.drop_front(), func);
+      BigInt::reduce(bigInts[0], Range{bigInts}.drop_front(), func);
       build.buildInstrRaw(HW_CONCAT, 3)
           .addRef(outWire)
           .other()

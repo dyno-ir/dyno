@@ -50,6 +50,8 @@ public:
     return ArrayRef{ptr, sz - 1};
   }
 
+  const_pointer data() { return ptr; }
+
   static constexpr ArrayRef emptyRef() { return ArrayRef{nullptr, size_t(0)}; }
 
   template <typename U> ArrayRef(const U &u) : ArrayRef(u.begin(), u.end()) {}
@@ -105,6 +107,8 @@ public:
     assert(sz >= 1);
     return MutArrayRef{ptr, sz - 1};
   }
+
+  pointer data() { return ptr; }
 
   static constexpr MutArrayRef emptyRef() {
     return MutArrayRef{nullptr, size_t(0)};

@@ -16,6 +16,7 @@
 #include <iomanip>
 #include <ios>
 #include <iostream>
+#include <iterator>
 #include <ostream>
 #include <span>
 #include <string>
@@ -342,7 +343,9 @@ public:
   uint32_t getRawNumBits() const { return bits; }
   uint8_t getExtend() const { return Extend{field}; }
   uint8_t getIs4S() const { return Custom{field}; }
-  std::span<uint32_t> getWords() const { return std::span<uint32_t>(); };
+  MutArrayRef<uint32_t> getWords() const {
+    return MutArrayRef<uint32_t>::emptyRef();
+  };
   PatBigInt(uint32_t bits, uint8_t pattern, uint8_t custom = 0) : bits(bits) {
     Extend{field} = pattern;
     Custom{field} = custom;
@@ -393,8 +396,8 @@ public:
   constexpr uint32_t getRawNumBits() const { return numBits; }
   constexpr uint8_t getExtend() const { return Extend{field}; }
   constexpr uint8_t getIs4S() const { return Custom{field}; }
-  constexpr std::span<uint32_t> getWords() { return words; }
-  constexpr std::span<const uint32_t> getWords() const { return words; }
+  constexpr MutArrayRef<uint32_t> getWords() { return words; }
+  constexpr ArrayRef<uint32_t> getWords() const { return words; }
 
 private:
   constexpr BigIntBase(uint32_t numBits, uint32_t numWords, uint8_t extend,
@@ -465,9 +468,8 @@ public:
     return BigIntBase{bits, round_up_div(bits, WordBits), 0, 0};
   }
 
-  constexpr static BigIntBase fromRaw(std::span<const uint32_t> data,
-                                      uint32_t bits, uint8_t extend,
-                                      uint8_t custom) {
+  constexpr static BigIntBase fromRaw(ArrayRef<uint32_t> data, uint32_t bits,
+                                      uint8_t extend, uint8_t custom) {
     auto rv = BigIntBase{bits, (uint32_t)data.size(), extend, custom};
     std::copy(data.begin(), data.end(), rv.words.begin());
     rv.normalize();
@@ -797,7 +799,7 @@ public:
                                  uint32_t newSize, uint8_t extendPat = 0) {
 
     auto copyIfDifferent = [&]() {
-      if (lhs.getWords().begin().base() != out.getWords().begin().base())
+      if (lhs.getWords().begin() != out.getWords().begin())
         std::copy_n(lhs.getWords().begin(),
                     std::min(lhs.getNumWords(), out.getNumWords()),
                     out.getWords().begin());
@@ -1725,7 +1727,7 @@ public:
 
   // String Ops
   constexpr static std::optional<BigIntBase>
-  parseHex(std::span<const char> digits) {
+  parseHex(ArrayRef<const char> digits) {
     BigIntBase out = BigIntBase::ofLen(digits.size() * 4);
     size_t i = digits.size() - 1;
     for (const char digit : digits) {
@@ -1747,7 +1749,7 @@ public:
     return out;
   }
   constexpr static std::optional<BigIntBase>
-  parseDec(std::span<const char> digits) {
+  parseDec(ArrayRef<const char> digits) {
     BigIntBase out = BigIntBase::ofLen(0);
     BigIntBase base = BigIntBase::fromU64Pruned(10);
 
@@ -2100,14 +2102,21 @@ public:
                                    : ParseVlogResult::UNSIZED);
   }
 
-  template <BigIntAPI T0,
-            std::invocable<BigInt &, const BigInt, const BigInt> FuncT>
-  static BigIntBase reduce(BigInt &acc, ArrayRef<T0> list, FuncT func) {
-    assert(!list.empty());
-    for (auto &num : list) {
+  template <typename T, std::invocable<BigInt &, const BigInt &,
+                                       const std::iter_value_t<T> &>
+                            FuncT>
+  static void reduce(BigInt &acc, Range<T> list, FuncT func) {
+    for (auto num : list) {
       func(acc, acc, num);
     }
-    return acc;
+  }
+
+  template <typename T,
+            std::invocable<const BigInt &, const std::iter_value_t<T> &> FuncT>
+  static void reduce(BigInt &acc, Range<T> list, FuncT func) {
+    for (auto num : list) {
+      acc = func(acc, num);
+    }
   }
 
 private:
@@ -2196,10 +2205,10 @@ private:
 static constexpr CBigInt operator""_b(const char *str) {
   std::optional<CBigInt> rv = std::nullopt;
   if (str[0] == '0' && str[1] == 'x') {
-    rv = CBigInt::parseHex(std::span<const char>{
-        str + 2, std::char_traits<char>::length(str) - 2});
+    rv = CBigInt::parseHex(
+        ArrayRef<const char>{str + 2, std::char_traits<char>::length(str) - 2});
   } else
-    rv = CBigInt::parseDec(std::span{str, std::char_traits<char>::length(str)});
+    rv = CBigInt::parseDec(ArrayRef{str, std::char_traits<char>::length(str)});
   assert(rv && "invalid str literal");
   return *rv;
 }
@@ -2417,10 +2426,9 @@ public:
   //   return zero(t.getNumBits());
   // }
 
-  std::span<const uint32_t> getWords() const {
-    return isInline()
-               ? std::span<const uint32_t>{&obj.num, 1}
-               : std::span<const uint32_t>{ptr->trailing(), getNumWords()};
+  ArrayRef<uint32_t> getWords() const {
+    return isInline() ? ArrayRef<uint32_t>{&obj.num, 1}
+                      : ArrayRef<uint32_t>{ptr->trailing(), getNumWords()};
   }
   uint8_t getExtend() const {
     return isInline() ? customField<ExtPattern>() : ptr->getExtend();
@@ -2489,6 +2497,55 @@ public:
   auto numIDs() { return store.numIDs(); }
 };
 
+class GenericBigIntRef : public BigIntMixin<GenericBigIntRef> {
+  friend class Constant;
+  friend class ConstantStore;
+  friend class BigIntMixin<PatBigInt>;
+  friend class BigIntBase<SmallVec<uint32_t, 4>>;
+  friend class BigIntBase<CexprVec<uint32_t, 16>>;
+
+  union {
+    ArrayRef<uint32_t> words;
+    uint32_t inlineWord;
+  };
+  uint32_t numBits;
+  uint8_t field;
+
+public:
+  template <typename T> using Extend = BitField<T, BigIntExtendBits, 0>;
+  template <typename T>
+  using Custom = BitField<T, BigIntCustomBits, BigIntExtendBits>;
+  template <typename T>
+  using Inline = BitField<T, 1, BigIntExtendBits + BigIntCustomBits>;
+
+  constexpr unsigned getNumWords() const {
+    return Inline{field} ? 1 : words.size();
+  }
+  constexpr uint32_t getRawNumBits() const { return numBits; }
+  constexpr uint8_t getExtend() const { return Extend{field}; }
+  constexpr uint8_t getIs4S() const { return Custom{field}; }
+  constexpr ArrayRef<uint32_t> getWords() const {
+    return Inline{field} ? ArrayRef{&inlineWord, 1} : words;
+  }
+
+  explicit GenericBigIntRef(const BigInt &bigInt)
+      : words(bigInt.getWords()), numBits(bigInt.getRawNumBits()), field(0) {
+    Extend{field} = bigInt.getExtend();
+    Custom{field} = bigInt.getIs4S();
+    Inline{field} = 0;
+  }
+  explicit GenericBigIntRef(ConstantRef ref)
+      : numBits(ref.getRawNumBits()), field(0) {
+    Extend{field} = ref.getExtend();
+    Custom{field} = ref.getIs4S();
+    Inline{field} = ref.isInline();
+    if (ref.isInline())
+      inlineWord = ref.getWords()[0];
+    else
+      words = ref.getWords();
+  }
+};
+
 template <typename T> class ConstantBuilderBase {
 protected:
   ConstantStore &store;
@@ -2507,7 +2564,7 @@ public:
       cur.setExtend(bit_mask_ones<uint32_t>(BigIntExtendBits));
     return *this;
   }
-  ConstantBuilderBase &raw(unsigned bits, std::span<const uint32_t> data,
+  ConstantBuilderBase &raw(unsigned bits, ArrayRef<uint32_t> data,
                            uint8_t extend = 0, uint8_t custom = 0) {
     cur = BigInt::fromRaw(data, bits, extend, custom);
     return *this;

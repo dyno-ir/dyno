@@ -7,9 +7,11 @@
 #include "hw/HWValue.h"
 #include "hw/analysis/DelayAnalysis.h"
 #include "op/IDs.h"
+#include "support/Bits.h"
 #include "support/ErrorRecovery.h"
 #include "support/Utility.h"
 #include <cstdint>
+#include <iterator>
 namespace dyno {
 
 class LowerOpsPass {
@@ -21,7 +23,7 @@ class LowerOpsPass {
   SmallVec<InstrRef, 32> worklist;
   ObjMapVec<Instr, bool> destroyMap;
 
-  auto getOperandAndDelays(InstrRef instr, bool sort) {
+  auto getOperandsSortedByDelay(InstrRef instr) {
     SmallVec<std::pair<HWValue, uint32_t>, 8> operands;
     for (auto op : instr.others()) {
       Optional<uint32_t> delayEst = nullopt;
@@ -33,23 +35,60 @@ class LowerOpsPass {
       }
       operands.emplace_back(op->as<HWValue>(), delayEst.value_or(UINT32_MAX));
     }
-    if (sort)
-      std::sort(operands.begin(), operands.end(),
-                [](const auto &lhs, const auto &rhs) {
-                  return lhs.second > rhs.second;
-                });
+    std::sort(operands.begin(), operands.end(),
+              [](const auto &lhs, const auto &rhs) {
+                return lhs.second > rhs.second;
+              });
     return operands;
   }
 
-  void lowerAdd(InstrRef add) {
+  // given sorted list of operand/delay returns the idx of single bit operand
+  // with maximum delay if it exists, otherwise nullref. "single bit" means
+  // actually 1 bit wire or zero extended from one bit.
+  Optional<uint32_t>
+  findMaxDelaySingleBit(ArrayRef<std::pair<HWValue, uint32_t>> sorted) {
+    auto begin = std::make_reverse_iterator(sorted.end());
+    auto end = std::make_reverse_iterator(sorted.begin());
+    auto it =
+        std::find_if(begin, end, [&](const std::pair<HWValue, uint32_t> &pair) {
+          if (auto wire = pair.first.dyn_as<WireRef>()) {
+            if (wire.getNumBits() == 1)
+              return true;
+            if (wire.getDefI().isOpc(OP_ZEXT) &&
+                wire.getDefI().other(0)->as<HWValue>().getNumBits() == 1)
+              return true;
+          }
+          if (auto asConst = pair.first.dyn_as<ConstantRef>()) {
+            return asConst.valueEquals(1);
+          }
+          return false;
+        });
+
+    if (it == end)
+      return nullopt;
+
+    return &*it - sorted.begin();
+  }
+
+  void lowerMultiInputAdd(InstrRef add) {
     const uint maxCompressIns = 3;
 
     if (add.getNumOthers() <= 2)
       return;
 
-    auto operands = getOperandAndDelays(add, add.getNumOthers() > 3);
-
     build.setInsertPoint(HWInstrRef{add}.iter(ctx));
+
+    auto operands = getOperandsSortedByDelay(add);
+    HWValue carryBit = nullref;
+    uint32_t carryBitDelay = 0;
+    {
+      auto carryBitIdx = findMaxDelaySingleBit(operands);
+      if (carryBitIdx) {
+        std::tie(carryBit, carryBitDelay) = operands[*carryBitIdx];
+        operands.erase(operands.begin() + *carryBitIdx);
+      }
+    }
+
     auto numBits = *add.def(0)->as<WireRef>().getNumBits();
     while (operands.size() > 2) {
       auto compressIns = std::min(maxCompressIns, operands.size());
@@ -84,13 +123,96 @@ class LowerOpsPass {
       operands[pos + 1] = std::make_pair(sum, worstDelay);
     }
 
-    auto ibuild = build.buildInstrRaw(OP_ADD, 3);
-    ibuild.addRef(add.def(0)->as<WireRef>()).other();
-    ibuild.addRef(operands[0].first);
-    ibuild.addRef(operands[1].first);
+    if (carryBit) {
+      auto ibuild = build.buildInstrRaw(HW_ADD_CARRY, 4);
+      ibuild.addRef(add.def(0)->as<WireRef>()).other();
+      ibuild.addRef(operands[0].first);
+      ibuild.addRef(operands[1].first);
+      ibuild.addRef(build.buildTrunc(1, carryBit));
+    } else {
+      auto ibuild = build.buildInstrRaw(OP_ADD, 3);
+      ibuild.addRef(add.def(0)->as<WireRef>()).other();
+      ibuild.addRef(operands[0].first);
+      ibuild.addRef(operands[1].first);
+    }
 
     add.def(0).replace(FatDynObjRef<>{nullref});
     destroyMap[add] = 1;
+  }
+
+  struct AddPair {
+    HWValue gen;
+    HWValue prop;
+  };
+
+  AddPair combineAddPairs(const AddPair &lhs, const AddPair &rhs) {
+    return AddPair{build.buildOr(lhs.gen, build.buildAnd(lhs.prop, rhs.gen)),
+                   build.buildAnd(lhs.prop, rhs.prop)};
+  }
+
+  void lowerAddBrentKung(MutArrayRef<AddPair> pairs) {
+    uint32_t bits = pairs.size();
+    uint32_t step = 2;
+    // 1. build sparse reduction tree
+    while (step <= bits) {
+      uint32_t shift = step / 2;
+      for (uint32_t i = step - 1; i < bits; i += step) {
+        pairs[i] = combineAddPairs(pairs[i], pairs[i - shift]);
+      }
+      step *= 2;
+    }
+    uint32_t clogBits = clog2(bits);
+    uint32_t bitsPow2 = 1u << clogBits;
+    step = bitsPow2 / 2;
+
+    // 2. fixup the bits that were left out in every step
+    while (step > 1) {
+      uint32_t shift = step / 2;
+      for (int i = bitsPow2 - shift - 1; i >= (int)step; i -= step) {
+        if (i >= (int)pairs.size())
+          continue;
+        pairs[i] = combineAddPairs(pairs[i], pairs[i - shift]);
+      }
+      step /= 2;
+    }
+  }
+
+  void lowerAdd(InstrRef instr) {
+    auto lhs = instr.other(0)->as<HWValue>();
+    auto rhs = instr.other(1)->as<HWValue>();
+
+    build.setInsertPoint(instr);
+
+    HWValue gen = build.buildAnd(lhs, rhs);
+    HWValue prop = build.buildXor(lhs, rhs);
+    uint32_t bits = *lhs.getNumBits();
+
+    SmallVec<AddPair, 32> arr;
+    arr.reserve(bits);
+    for (uint32_t i = 0; i < bits; i++) {
+      HWValue propBit = build.buildSplice(prop, BitRange{i, 1});
+      HWValue genBit = build.buildSplice(gen, BitRange{i, 1});
+      arr.emplace_back(genBit, propBit);
+    }
+
+    SmallVec<AddPair, 32> processed(arr);
+    lowerAddBrentKung(processed);
+
+    auto ibCC = build.buildInstrRaw(HW_CONCAT, 1 + bits);
+    build.setInsertPoint(ibCC.instr());
+    ibCC.addRef(instr.def(0)->as<WireRef>()).other();
+    for (uint32_t i = bits; i-- > 0;) {
+      HWValue sum;
+      if (i == 0)
+        sum = arr[0].prop;
+      else {
+        sum = build.buildXor(arr[i].prop, processed[i - 1].gen);
+      }
+      ibCC.addRef(sum);
+    }
+
+    instr.def(0).replace(FatDynObjRef<>{nullref});
+    destroyMap[instr] = 1;
   }
 
   void lowerBitwise(InstrRef instr) {
@@ -99,7 +221,7 @@ class LowerOpsPass {
     if (instr.getNumOthers() <= 2)
       return;
 
-    auto operands = getOperandAndDelays(instr, instr.getNumOthers() > 2);
+    auto operands = getOperandsSortedByDelay(instr);
 
     build.setInsertPoint(HWInstrRef{instr}.iter(ctx));
     auto numBits = *instr.def(0)->as<WireRef>().getNumBits();
@@ -291,7 +413,10 @@ class LowerOpsPass {
   void runOnInstr(InstrRef instr) {
     switch (*instr.getDialectOpcode()) {
     case *OP_ADD:
-      lowerAdd(instr);
+      if (instr.getNumOthers() >= 3)
+        lowerMultiInputAdd(instr);
+      else
+        lowerAdd(instr);
       break;
     case *OP_ICMP_ULT:
     case *OP_ICMP_SLT:
