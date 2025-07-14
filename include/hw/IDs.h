@@ -66,7 +66,6 @@ template <> struct DialectTraits<DIALECT_HW> {
   FUNC(OP_AND, buildAnd, bitAND, BigInt::andOp4S)                              \
   FUNC(OP_OR, buildOr, bitOR, BigInt::orOp4S)                                  \
   FUNC(OP_XOR, buildXor, bitXOR, BigInt::xorOp4S)                              \
-  FUNC(OP_XNOR, buildXNor, bitXNOR, BigInt::xnorOp4S)                          \
   FUNC(OP_MUL, buildMul, mul, BigInt::mulOp4S)
 
 #define FOR_HW_BIN_OPS(FUNC)                                                   \

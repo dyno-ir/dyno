@@ -23,7 +23,7 @@ public:
     delay.set(OP_AND, 1);
     delay.set(OP_OR, 1);
     delay.set(OP_XOR, 2);
-    delay.set(OP_XNOR, 2);
+    delay.set(OP_NOT, 0);
     delay.set(OP_SEXT, 0);
     delay.set(OP_ZEXT, 0);
     delay.set(OP_ANYEXT, 0);

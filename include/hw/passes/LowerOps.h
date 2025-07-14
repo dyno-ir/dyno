@@ -321,7 +321,7 @@ private:
 
     build.setInsertPoint(build.insert.pred());
     ibuild.addRef(lhs);
-    ibuild.addRef(build.buildXNor(rhs));
+    ibuild.addRef(build.buildNot(rhs));
     ibuild.addRef(ConstantRef::fromBool(1));
 
     build.setInsertPoint(instr);
@@ -329,11 +329,9 @@ private:
     HWValue out;
     if (isSigned) {
       HWValue signBit = build.buildSplice(sumWire, BitRange{numBits - 1, 1});
-      out = invertResult ? build.buildXNor(signBit, carryWire)
-                         : build.buildXor(signBit, carryWire);
-    } else {
-      out = invertResult ? build.buildXNor(carryWire) : carryWire;
+      out = build.buildXor(signBit, carryWire);
     }
+    out = invertResult ? build.buildNot(carryWire) : carryWire;
     instr.def(0)->as<WireRef>().replaceAllUsesWith(out);
     destroyMap[instr] = 1;
   }
@@ -404,15 +402,21 @@ private:
     auto bits = *lhs.getNumBits();
 
     build.setInsertPoint(instr);
-    auto bitsMask = instr.isOpc(OP_ICMP_NE) ? build.buildXor(lhs, rhs)
-                                            : build.buildXNor(lhs, rhs);
-    auto ibOR =
-        build.buildInstrRaw(instr.isOpc(OP_ICMP_NE) ? OP_OR : OP_AND, 1 + bits);
+    auto bitsMask = build.buildXor(lhs, rhs);
+    auto ibOR = build.buildInstrRaw(OP_OR, 1 + bits);
 
-    build.setInsertPoint(ibOR.instr());
-
-    ibOR.addRef(instr.def(0)->as<WireRef>()).other();
+    if (instr.isOpc(OP_ICMP_EQ)) {
+      auto tmp = ctx.getWires().create(1);
+      ibOR.addRef(tmp);
+      build.buildInstrRaw(OP_NOT, 2)
+          .addRef(instr.def(0)->as<WireRef>())
+          .other()
+          .addRef(tmp);
+    } else {
+      ibOR.addRef(instr.def(0)->as<WireRef>()).other();
+    }
     instr.def(0).replace(FatDynObjRef<>{nullref});
+    build.setInsertPoint(ibOR.instr());
 
     for (uint i = 0; i < bits; i++) {
       auto bit = build.buildSplice(bitsMask, BitRange{i, 1});
@@ -452,7 +456,6 @@ private:
     case *OP_AND:
     case *OP_OR:
     case *OP_XOR:
-    case *OP_XNOR:
       lowerBitwise(instr);
       break;
 
@@ -480,7 +483,7 @@ public:
       if (instr.isOpc(OP_SLL, OP_SRL, OP_SRA))
         return config.lowerShift;
 
-      if (instr.isOpc(OP_AND, OP_OR, OP_XOR, OP_XNOR))
+      if (instr.isOpc(OP_AND, OP_OR, OP_XOR))
         return config.lowerMultiInputBitwise;
 
       return false;

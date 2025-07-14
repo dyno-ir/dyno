@@ -58,7 +58,7 @@ if (r6 != r2) goto fail_0;
 
   FatDynObjRef<> constant = cbuild.val("1'h1"_bv).resize(*(*Range{r1, r3}.begin())->as<WireRef>().getNumBits(), false).get();
   RefRange{r21, r22} = constant;
-auto r17 = build.buildInstrRaw(OP_XNOR, (r19-r18)+(r12-r11));
+auto r17 = build.buildInstrRaw(OP_NOT, (r19-r18)+(r12-r11));
 copyOperands(r17, r18, r19);
 r17.other();
 copyOperands(r17, r11, r12);
@@ -116,7 +116,7 @@ r10 = std::next(r9);
 
   FatDynObjRef<> constant = cbuild.val("1'h1"_bv).resize(*(*Range{r1, r3}.begin())->as<WireRef>().getNumBits(), false).get();
   RefRange{r15, r16} = constant;
-auto r11 = build.buildInstrRaw(OP_XNOR, (r13-r12)+(r10-r9));
+auto r11 = build.buildInstrRaw(OP_NOT, (r13-r12)+(r10-r9));
 copyOperands(r11, r12, r13);
 r11.other();
 copyOperands(r11, r9, r10);

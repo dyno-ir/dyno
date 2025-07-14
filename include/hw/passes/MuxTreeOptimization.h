@@ -1312,7 +1312,7 @@ class MuxTreeOptimizationPass {
       for (auto lit : clause) {
         auto [val, inv] = getLiteralVal(tree, lit);
         if (inv)
-          val = build.buildXNor(val).as<WireRef>();
+          val = build.buildNot(val).as<WireRef>();
         orOperands.emplace_back(val);
       }
       if (orOperands.size() == 1)

@@ -162,6 +162,13 @@ public:
       break;
     }
 
+    case *OP_NOT: {
+      auto &out = wireVals[instr.def(0)->as<WireRef>()];
+      auto val = getValue(instr.other(0)->as<HWValue>());
+      BigInt::notOp4S(out, val);
+      break;
+    }
+
     case *OP_SEXT:
     case *OP_ZEXT:
     case *OP_TRUNC: {

@@ -87,8 +87,7 @@ private:
       }
       case *OP_AND:
       case *OP_OR:
-      case *OP_XOR:
-      case *OP_XNOR: {
+      case *OP_XOR: {
         uint32_t newAbsorbed = 0;
         if (instr.isOpc(OP_AND))
           newAbsorbed = BigInt::leadingBits4SExact(known, FourState::S0);
@@ -153,7 +152,7 @@ private:
 
     build.setInsertPoint(instr);
 
-    if (instr.isOpc(OP_AND, OP_OR, OP_XOR, OP_XNOR) && reduceViaInputs) {
+    if (instr.isOpc(OP_AND, OP_OR, OP_XOR) && reduceViaInputs) {
       for (auto &bigInt : bigInts) {
         BigInt::rangeSelectOp4S(bigInt, bigInt, activeBits,
                                 originalBits - activeBits);
@@ -168,9 +167,6 @@ private:
         break;
       case *OP_XOR:
         func = BigInt::xorOp4S<BigInt, BigInt>;
-        break;
-      case *OP_XNOR:
-        func = BigInt::xnorOp4S<BigInt, BigInt>;
         break;
       default:
         dyno_unreachable("unknown opcode");
@@ -283,7 +279,6 @@ private:
           oldDefW.replaceAllUsesWith(cbuild.one(*oldDefW->numBits).get());
           return true;
         }
-        case *OP_XNOR:
         case *OP_AND: {
           oldDefW.replaceAllUsesWith(cbuild.ones(*oldDefW->numBits).get());
           return true;
@@ -303,16 +298,6 @@ private:
           oldDefW.replaceAllUsesWith(constants[0]);
         else
           oldDefW.replaceAllUsesWith(operands[0]);
-        return true;
-      case *OP_XNOR:
-        if (constants.size() == 1)
-          oldDefW.replaceAllUsesWith(cbuild.val(constants[0]).bitNOT().get());
-        else {
-          // while weird this is actually the best way to represent the this
-          // currently.
-          TaggedIRef{root}.get() = 0;
-          return false;
-        }
         return true;
       }
       dyno_unreachable("no 1-ary output value");
@@ -359,7 +344,7 @@ private:
     default:
     }
 
-    if (instr.isOpc(OP_ADD, OP_MUL, OP_AND, OP_OR, OP_XOR, OP_XNOR)) {
+    if (instr.isOpc(OP_ADD, OP_MUL, OP_AND, OP_OR, OP_XOR)) {
       if (reduceBitWidth(instr))
         return true;
     }

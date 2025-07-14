@@ -514,6 +514,15 @@ public:
     return rv;
   }
 
+  HWValue buildNot(HWValue value) {
+    if (auto asConst = value.dyn_as<ConstantRef>()) {
+      return ctx.constBuild().val(asConst).bitNOT().get();
+    }
+    auto rv = buildInstr(OP_NOT, true, value).defW();
+    rv->numBits = value.getNumBits();
+    return rv;
+  }
+
   HWValue buildCLOG2(HWValue value) {
     if (auto asConst = value.dyn_as<ConstantRef>()) {
       auto tmp = asConst - BigInt::fromU64(1, asConst.getNumBits());

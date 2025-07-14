@@ -145,7 +145,7 @@ struct DemandedBitsAnalysis {
     case *OP_AND:
     case *OP_OR:
     case *OP_XOR:
-    case *OP_XNOR:
+    case *OP_NOT:
       return instr.def(0)->as<WireRef>();
       break;
 

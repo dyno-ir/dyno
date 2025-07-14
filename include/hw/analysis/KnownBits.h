@@ -88,6 +88,17 @@ public:
         LAMBDA(HW_CONCAT, _, _, BigInt::concatOp4S)
 #undef LAMBDA
 
+      case *OP_NOT: {
+        if (frame.idx == 0) {
+          stack.emplace_back(instr.other(0)->as<HWValue>(), 0);
+          frame.idx++;
+        } else {
+          BigInt::notOp4S(retVal.val, retVal.val);
+          stack.pop_back();
+        }
+        break;
+      }
+
       case *OP_TRUNC: {
         if (frame.idx == 0) {
           stack.emplace_back(instr.other(0)->as<HWValue>(), 0);

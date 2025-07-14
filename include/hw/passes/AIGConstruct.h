@@ -238,17 +238,9 @@ class AIGConstructPass {
                       instr.other(1)->as<HWValue>());
       break;
     }
-    case *OP_XNOR: {
-      if (instr.getNumOperands() == 1) {
-        abuild.buildNOT(instr.def(0)->as<WireRef>(),
-                        instr.other(0)->as<HWValue>());
-      } else {
-        assert(instr.getNumOperands() == 3);
-        abuild.buildXNOR(instr.def(0)->as<WireRef>(),
-                         instr.other(0)->as<HWValue>(),
-                         instr.other(1)->as<HWValue>());
-      }
-      break;
+    case *OP_NOT: {
+      abuild.buildNOT(instr.def(0)->as<WireRef>(),
+                      instr.other(0)->as<HWValue>());
     }
     case *HW_MUX: {
       assert(instr.getNumOperands() == 4);

@@ -19,7 +19,7 @@ match {
   OP_ADD $res, anyorder($subRes:HW_WIRE, $others...)
 }
 replace {
-  OP_XNOR $temp2:wire_like($subRes), $rhs
+  OP_NOT $temp2:wire_like($subRes), $rhs
   OP_ADD $res, $others..., $lhs, $temp2, constant_like(#1'b1, $res)
 }
 
@@ -29,7 +29,7 @@ match {
   OP_SUB $res, $temp:HW_WIRE, $rhs
 }
 replace {
-  OP_XNOR $temp2:wire_like($temp), $rhs
+  OP_NOT $temp2:wire_like($temp), $rhs
   OP_ADD $res, $others..., $temp2, constant_like(#1'b1, $res)
 }
 

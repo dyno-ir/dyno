@@ -1242,7 +1242,7 @@ public:
         val = build.buildXor(lhsVal, rhsVal);
         break;
       case slang::ast::BinaryOperator::BinaryXnor:
-        val = build.buildXNor(lhsVal, rhsVal);
+        val = build.buildNot(build.buildXor(lhsVal, rhsVal));
         break;
       case slang::ast::BinaryOperator::Equality:
         val = build.buildICmp(lhsVal, rhsVal, BigInt::ICMP_EQ);

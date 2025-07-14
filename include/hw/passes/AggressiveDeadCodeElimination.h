@@ -240,6 +240,8 @@ class AggressiveDeadCodeEliminationPass {
     case *HW_ADD_CARRY: {
       if (instrMap[instr])
         break;
+      for (auto def : instr.defs())
+        wireMap[def->as<WireRef>()] = 1;
       for (auto use : instr.others()) {
         visitHWValue(use->as<HWValue>());
       }
