@@ -237,6 +237,15 @@ class AggressiveDeadCodeEliminationPass {
       break;
     }
 
+    case *HW_ADD_CARRY: {
+      if (instrMap[instr])
+        break;
+      for (auto use : instr.others()) {
+        visitHWValue(use->as<HWValue>());
+      }
+      break;
+    }
+
     default: {
       if (instrMap[instr])
         break;

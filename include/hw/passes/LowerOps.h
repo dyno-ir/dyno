@@ -23,6 +23,18 @@ class LowerOpsPass {
   SmallVec<InstrRef, 32> worklist;
   ObjMapVec<Instr, bool> destroyMap;
 
+public:
+  struct Config {
+    bool lowerMultiInputAdd = true;
+    bool lowerMultiInputBitwise = true;
+    bool lowerSimpleAdd = true;
+    bool lowerEqualityICMP = true;
+    bool lowerOrderingICMP = true;
+    bool lowerShift = true;
+  };
+  Config config;
+
+private:
   auto getOperandsSortedByDelay(InstrRef instr) {
     SmallVec<std::pair<HWValue, uint32_t>, 8> operands;
     for (auto op : instr.others()) {
@@ -413,10 +425,13 @@ class LowerOpsPass {
   void runOnInstr(InstrRef instr) {
     switch (*instr.getDialectOpcode()) {
     case *OP_ADD:
-      if (instr.getNumOthers() >= 3)
-        lowerMultiInputAdd(instr);
-      else
-        lowerAdd(instr);
+      if (instr.getNumOthers() >= 3) {
+        if (config.lowerMultiInputAdd)
+          lowerMultiInputAdd(instr);
+      } else {
+        if (config.lowerSimpleAdd)
+          lowerAdd(instr);
+      }
       break;
     case *OP_ICMP_ULT:
     case *OP_ICMP_SLT:
@@ -451,11 +466,24 @@ class LowerOpsPass {
 
 public:
   void run() {
-    auto isLoweringInstr = [](InstrRef instr) {
-      return instr.isOpc(OP_ADD, OP_ICMP_ULT, OP_ICMP_SLT, OP_ICMP_ULE,
-                         OP_ICMP_SLE, OP_ICMP_UGT, OP_ICMP_SGT, OP_ICMP_UGE,
-                         OP_ICMP_SGE, OP_SLL, OP_SRL, OP_SRA, OP_ICMP_EQ,
-                         OP_ICMP_NE, OP_AND, OP_OR, OP_XOR, OP_XNOR);
+    auto isLoweringInstr = [&](InstrRef instr) {
+      if (instr.isOpc(OP_ADD))
+        return config.lowerMultiInputAdd || config.lowerSimpleAdd;
+
+      if (instr.isOpc(OP_ICMP_ULT, OP_ICMP_SLT, OP_ICMP_ULE, OP_ICMP_SLE,
+                      OP_ICMP_UGT, OP_ICMP_SGT, OP_ICMP_UGE, OP_ICMP_SGE))
+        return config.lowerOrderingICMP;
+
+      if (instr.isOpc(OP_ICMP_EQ, OP_ICMP_NE))
+        return config.lowerEqualityICMP;
+
+      if (instr.isOpc(OP_SLL, OP_SRL, OP_SRA))
+        return config.lowerShift;
+
+      if (instr.isOpc(OP_AND, OP_OR, OP_XOR, OP_XNOR))
+        return config.lowerMultiInputBitwise;
+
+      return false;
     };
 
     destroyMap.resize(ctx.getInstrs().numIDs());

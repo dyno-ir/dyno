@@ -81,6 +81,10 @@ struct DemandedBitsAnalysis {
         demanded = BigInt::fromI64(-1, size);
         return;
       }
+      if (isMostOptimistic()) {
+        demanded = BigInt::fromI64(0, size);
+        return;
+      }
       assert(demanded.getNumBits() == size);
     }
 
@@ -96,8 +100,7 @@ struct DemandedBitsAnalysis {
       case *OP_ZEXT:
       case *OP_ANYEXT:
         demanded.resizeOp(demanded, demanded,
-                          *instr.other(0)->as<HWValue>().getNumBits(),
-                          instr.isOpc(OP_SEXT) ? 0b11 : 0);
+                          *instr.other(0)->as<HWValue>().getNumBits());
         break;
 
       case *HW_CONCAT: {

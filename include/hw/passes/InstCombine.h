@@ -110,6 +110,7 @@ private:
 
     for (auto op : instr.others()) {
       auto known = knownBits.getKnownBits(op->as<HWValue>());
+      assert(known.getNumBits() == originalBits);
 
       bool cont = combineLeading(known);
       if (!cont) {
@@ -129,6 +130,10 @@ private:
     uint32_t activeBits =
         originalBits -
         std::max(numNonDemanded, reduceViaInputs ? minLeading : 0);
+    activeBits = std::max(activeBits, 1u);
+    if (activeBits == originalBits)
+      return false;
+    assert(activeBits < originalBits);
 
     bool sign = false;
 
@@ -345,7 +350,6 @@ private:
   }
 
   bool manual(InstrRef instr) {
-
     switch (*instr.getDialectOpcode()) {
 #define LAMBDA(opc, ib, cb, bib) case *opc:
       FOR_HW_COMM_OPS(LAMBDA)
@@ -359,6 +363,10 @@ private:
       if (reduceBitWidth(instr))
         return true;
     }
+
+    if (instr.getNumDefs() == 1 && instr.def(0)->is<WireRef>())
+      if (knownBitsConstProp(instr))
+        return true;
 
     return false;
   }

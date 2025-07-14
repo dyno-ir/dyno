@@ -470,6 +470,9 @@ public:
 
   constexpr static BigIntBase fromRaw(ArrayRef<uint32_t> data, uint32_t bits,
                                       uint8_t extend, uint8_t custom) {
+    auto maxWords = round_up_div(bits, WordBits);
+    if (data.size() > maxWords)
+      data = ArrayRef{data.data(), maxWords};
     auto rv = BigIntBase{bits, (uint32_t)data.size(), extend, custom};
     std::copy(data.begin(), data.end(), rv.words.begin());
     rv.normalize();
@@ -480,6 +483,10 @@ public:
   constexpr static BigIntBase fromRaw(SmallVecImpl<uint32_t> &&data,
                                       uint32_t bits, uint8_t extend,
                                       uint8_t custom) {
+    auto maxWords = round_up_div(bits, WordBits);
+    if (data.size() > maxWords)
+      data.downsize(maxWords);
+
     auto rv = BigIntBase{};
     rv.words = std::move(data);
     rv.numBits = bits;
@@ -702,7 +709,7 @@ public:
     }
 
     // may be negative.
-    int64_t zeroBits = val.getRawNumBits() - (val.getNumWords() * WordBits);
+    int32_t zeroBits = val.getRawNumBits() - (val.getNumWords() * WordBits);
     uint32_t lastWord = val.getWords()[val.getNumWords() - 1];
     if (lastWord == 0)
       return zeroBits + WordBits;
@@ -1278,13 +1285,13 @@ public:
       return;
     }
 
-    size_t outNumWords = rhsExtWords + lhs.getNumWords();
+    out.numBits = lhs.getRawNumBits() + rhsBits;
+    uint32_t outNumWords = rhsExtWords + std::max(1u, lhs.getNumWords());
     if ((rhsBits % 32) && (lhs.getRawNumBits() % 32) &&
-        (rhsBits % 32) + (lhs.getRawNumBits() % 32) < 32)
+        (rhsBits % 32) + (lhs.getRawNumBits() % 32) <= 32)
       outNumWords--;
 
     out.words.resize(outNumWords);
-    out.numBits = lhs.getRawNumBits() + rhsBits;
 
     do {
       // edge case rhs == out.
@@ -1389,7 +1396,9 @@ public:
     return ((lhs ^ rhs) | lhsX | rhsX);
   }
   static constexpr uint32_t xnor_4state(uint32_t lhs, uint32_t rhs) {
-    return ~xor_4state(lhs, rhs);
+    uint32_t val = xor_4state(lhs, rhs);
+    val ^= ~(val >> 1);
+    return val;
   }
   static constexpr uint32_t or_4state(uint32_t lhs, uint32_t rhs) {
     uint32_t lhsSC = n_equal_mask<2>(lhs, REP01);
@@ -2136,6 +2145,7 @@ private:
   }
 
   constexpr void normalize() {
+    assert(words.size() <= getExtNumWords());
     if (getNumWords() * bit_mask_sz<uint32_t> < numBits)
       prune();
     else if (getNumWords() * bit_mask_sz<uint32_t> >= numBits) {
@@ -2438,7 +2448,7 @@ public:
   }
   unsigned getNumWords() const { return isInline() ? 1 : ptr->getNumWords(); };
 
-  uint getRawNumBits() const {
+  uint32_t getRawNumBits() const {
     return customField<IsInline>() ? customField<NBits>() : ptr->numBits;
   };
 
