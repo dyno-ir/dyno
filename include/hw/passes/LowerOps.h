@@ -26,8 +26,9 @@ class LowerOpsPass {
 public:
   struct Config {
     bool lowerMultiInputAdd = true;
-    bool lowerMultiInputBitwise = true;
     bool lowerSimpleAdd = true;
+    bool lowerSub = true;
+    bool lowerMultiInputBitwise = true;
     bool lowerEqualityICMP = true;
     bool lowerOrderingICMP = true;
     bool lowerShift = true;
@@ -275,15 +276,15 @@ private:
   void lowerOrderingICMP(InstrRef instr) {
     auto numBits = *instr.other(0)->as<HWValue>().getNumBits();
     build.setInsertPoint(instr);
-    auto ibuild = build.buildInstrRaw(HW_ADD_CARRY, 5);
-    auto carryWire = ctx.getWires().create(1);
-    ibuild.addRef(carryWire);
+    auto ibuild = build.buildInstrRaw(OP_SUB, 3);
     auto sumWire = ctx.getWires().create(numBits);
     ibuild.addRef(sumWire);
     ibuild.other();
 
-    HWValue lhs = instr.other(0)->as<HWValue>();
-    HWValue rhs = instr.other(1)->as<HWValue>();
+    build.setInsertPoint(ibuild.instr());
+
+    HWValue lhs = build.buildZExt(numBits + 1, instr.other(0)->as<HWValue>());
+    HWValue rhs = build.buildZExt(numBits + 1, instr.other(1)->as<HWValue>());
     bool invertResult = false;
     bool isSigned = false;
     switch (*instr.getDialectOpcode()) {
@@ -318,17 +319,15 @@ private:
     default:
       dyno_unreachable("unknown opcode");
     }
-
-    build.setInsertPoint(build.insert.pred());
     ibuild.addRef(lhs);
-    ibuild.addRef(build.buildNot(rhs));
-    ibuild.addRef(ConstantRef::fromBool(1));
+    ibuild.addRef(rhs);
 
     build.setInsertPoint(instr);
 
+    auto carryWire = build.buildSplice(sumWire, BitRange{numBits - 1, 1});
     HWValue out;
     if (isSigned) {
-      HWValue signBit = build.buildSplice(sumWire, BitRange{numBits - 1, 1});
+      HWValue signBit = build.buildSplice(sumWire, BitRange{numBits - 2, 1});
       out = build.buildXor(signBit, carryWire);
     }
     out = invertResult ? build.buildNot(carryWire) : carryWire;
@@ -426,6 +425,17 @@ private:
     destroyMap[instr] = 1;
   }
 
+  void lowerSub(InstrRef instr) {
+    // simple situations like here inline DSL would be nice
+    build.setInsertPoint(instr);
+    auto lhs = instr.other(0)->as<HWValue>();
+    auto rhs = instr.other(1)->as<HWValue>();
+    auto addRes =
+        build.buildAdd(lhs, build.buildNot(rhs), cbuild.oneLike(lhs).get());
+    instr.def(0)->as<WireRef>().replaceAllUsesWith(addRes);
+    destroyMap[instr] = 1;
+  }
+
   void runOnInstr(InstrRef instr) {
     switch (*instr.getDialectOpcode()) {
     case *OP_ADD:
@@ -437,6 +447,11 @@ private:
           lowerAdd(instr);
       }
       break;
+
+    case *OP_SUB:
+      lowerSub(instr);
+      break;
+
     case *OP_ICMP_ULT:
     case *OP_ICMP_SLT:
     case *OP_ICMP_ULE:
@@ -472,6 +487,9 @@ public:
     auto isLoweringInstr = [&](InstrRef instr) {
       if (instr.isOpc(OP_ADD))
         return config.lowerMultiInputAdd || config.lowerSimpleAdd;
+
+      if (instr.isOpc(OP_SUB))
+        return config.lowerSub;
 
       if (instr.isOpc(OP_ICMP_ULT, OP_ICMP_SLT, OP_ICMP_ULE, OP_ICMP_SLE,
                       OP_ICMP_UGT, OP_ICMP_SGT, OP_ICMP_UGE, OP_ICMP_SGE))

@@ -257,6 +257,20 @@ public:
     ref.defW()->numBits = newSize;
     return ref.defW();
   }
+  HWValue buildExt(uint32_t newSize, HWValue value, DialectOpcode type) {
+    if (auto asConst = value.dyn_as<ConstantRef>()) {
+      assert(asConst.getNumBits() <= newSize);
+      return ctx.constBuild()
+          .val(value.as<ConstantRef>())
+          .resize(newSize, type.is(OP_SEXT))
+          .get();
+    }
+    auto ref = buildInstr(type, true, value);
+    assert(ref.defW().getNumBits().value_or(0) < newSize);
+    ref.defW()->numBits = newSize;
+    return ref.defW();
+  }
+
   HWValue buildZExt(uint32_t newSize, HWValue value) {
     return buildExt(newSize, value, false);
   }

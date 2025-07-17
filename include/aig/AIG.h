@@ -10,10 +10,12 @@
 #include "support/ArrayRef.h"
 #include "support/DedupeMap.h"
 #include "support/RTTI.h"
+#include "support/Utility.h"
 
 namespace dyno {
 
 class AIGNodeTRef;
+class FatAIGNodeRef;
 
 class AIGObjID : public ObjID {
 public:
@@ -82,11 +84,11 @@ public:
   AIGNodeTRef(uint32_t idx, bool invert = false, bool custom = false)
       : ObjRef<AIGNode>(AIGObjID{idx, invert, custom}) {}
   AIGNodeTRef(ObjRef<AIGNode> ref) : ObjRef<AIGNode>(ref) {}
+
+  static bool is_impl(FatAIGNodeRef);
 };
 
 inline AIGNodeTRef AIGNode::operator[](uint i) { return op[i]; }
-
-class FatAIGNodeRef;
 
 class AIGNodeRef : public AIGNodeTRef, public ByValueRTTIUtilMixin<AIGNodeRef> {
   AIGNode *ptr;
@@ -145,6 +147,7 @@ public:
   explicit operator AIGNodeRef() const {
     return AIGNodeRef{obj, &(*this)->node};
   }
+  explicit operator AIGNodeTRef() const { return AIGNodeTRef{obj}; }
 
   FatAIGNodeRef inverted() const {
     FatAIGNodeRef rv = *this;
@@ -156,8 +159,15 @@ public:
     AIGObjID::InvertField{rv.obj.num} = 0;
     return rv;
   }
+  AIGObjID getObjID() {
+    AIGObjID aigObj{obj};
+    if (!aigObj.isSpecial())
+      dyno_unreachable("invalid");
+    return aigObj;
+  }
 };
 inline bool AIGNodeRef::is_impl(FatAIGNodeRef) { return true; }
+inline bool AIGNodeTRef::is_impl(FatAIGNodeRef) { return true; }
 inline AIGNodeRef::operator FatAIGNodeRef() const {
 
   assert(isSpecial());
@@ -189,8 +199,20 @@ public:
     return resolve(thin);
   }
 
-  auto begin() { return dedupeMap.container.begin(); }
-  auto end() { return dedupeMap.container.end(); }
+  auto objs() {
+    return Range{dedupeMap.container}.transform(
+        [](uint32_t idx, AIGNode &node) {
+          auto ref = AIGNodeTRef{idx, false, false};
+          if (ref.isSpecial())
+            dyno_unreachable("ids oob");
+          return AIGNodeRef{ref, &node};
+        });
+  }
+
+  auto begin() { return objs().begin(); }
+  auto end() { return objs().end(); }
+  ObjID::num_t numIDs() { return dedupeMap.container.size(); }
+  uint32_t size() { return dedupeMap.size(); }
 };
 template <typename BaseStore> class FatAIGNodeStore {
   BaseStore store;
@@ -228,6 +250,8 @@ public:
     return transformOut(store.resolve(transformIn(ref)), ref.invert(),
                         ref.custom());
   }
+
+  ObjID::num_t numIDs() { return store.numIDs(); }
 };
 
 class AIGNodeStore {
@@ -252,6 +276,8 @@ public:
 class AIG {
 public:
   AIGNodeStore store;
+  std::vector<FatAIGNodeRef> inputs;
+  std::vector<FatAIGNodeRef> outputs;
 
   AIGNodeRef createNode(AIGNodeTRef lhs, AIGNodeTRef rhs) {
     if (lhs.getObjID() > rhs.getObjID())
@@ -284,12 +310,20 @@ public:
   }
   AIGNodeTRef createNOT(AIGNodeTRef lhs) { return lhs.inverted(); }
 
-  FatAIGNodeRef createInput() { return store.createSpecial(); }
+  FatAIGNodeRef createInput() {
+    auto node = store.createSpecial();
+    inputs.emplace_back(node);
+    return node;
+  }
   FatAIGNodeRef createOutput(AIGNodeTRef val) {
     // better not perform any logic in the output, so both inputs are just
     // the actual output value.
-    return store.createSpecial(val.getObjID(), val.getObjID());
+    auto node = store.createSpecial(val.getObjID(), val.getObjID());
+    outputs.emplace_back(node);
+    return node;
   }
+
+  auto gates() { return store.thin.objs().drop_front(); }
 
   AIGNodeRef getZero() { return store.resolve(AIGNodeTRef{0, false, false}); }
   AIGNodeRef getOne() { return getZero().inverted(); }

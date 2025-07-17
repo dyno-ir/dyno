@@ -429,6 +429,7 @@ public:
       this->words[0] = repeatExtend(other.getExtend());
     std::copy(other.getWords().begin(), other.getWords().end(),
               this->getWords().begin());
+    normalize();
     return *this;
   }
 
@@ -1285,10 +1286,11 @@ public:
       return;
     }
 
-    out.numBits = lhs.getRawNumBits() + rhsBits;
+    auto lhsBits = lhs.getRawNumBits();
+    out.numBits = lhsBits + rhsBits;
     uint32_t outNumWords = rhsExtWords + std::max(1u, lhs.getNumWords());
-    if ((rhsBits % 32) && (lhs.getRawNumBits() % 32) &&
-        (rhsBits % 32) + (lhs.getRawNumBits() % 32) <= 32)
+    if ((rhsBits % 32) && (lhsBits % 32) &&
+        (rhsBits % 32) + (lhsBits % 32) <= 32)
       outNumWords--;
 
     out.words.resize(outNumWords);
@@ -1490,12 +1492,26 @@ public:
     Custom{field} = 1;
   }
   template <auto Func4S, auto Func2S, typename T0, typename T1>
-  static void bitwiseOp4S(BigIntBase &out, const T0 &lhs, const T1 &rhs) {
-    if (!lhs.getIs4S() && !rhs.getIs4S()) {
-      Func2S(out, lhs, rhs);
+  static void bitwiseOp4S(BigIntBase &out, const T0 &lhsMayAlias,
+                          const T1 &rhs) {
+    if (!lhsMayAlias.getIs4S() && !rhs.getIs4S()) {
+      Func2S(out, lhsMayAlias, rhs);
       return;
     }
+    const T0 *lhsPtr = &lhsMayAlias;
+    BigIntBase lhsCopy;
+
+    if constexpr (std::is_same_v<BigIntBase, T0>) {
+      if (&out == &lhsMayAlias && !lhsMayAlias.getIs4S()) {
+        lhsCopy = lhsMayAlias;
+        lhsPtr = &lhsCopy;
+      }
+    }
+
+    const T0 &lhs = *lhsPtr;
+
     out.words.resize(std::max(lhs.getNumWords(), rhs.getNumWords()));
+    out.numBits = std::max(lhs.getRawNumBits(), rhs.getRawNumBits());
 
     uint32_t hasUnk = 0;
 
@@ -1507,6 +1523,7 @@ public:
       hasUnk |= outV & REP10;
     }
 
+    Custom{out.field} = 1;
     Extend{out.field} =
         Func4S(lhs.getIs4S() ? lhs.getExtend() : unpack_bits(lhs.getExtend()),
                rhs.getIs4S() ? rhs.getExtend() : unpack_bits(rhs.getExtend())) &
@@ -2137,7 +2154,7 @@ private:
 
   constexpr void setLastWordBitsToPattern(uint8_t pattern) {
     // truncate last word and fill with extend.
-    if (getRawNumBits() % 32 != 0) {
+    if (words.size() == getExtNumWords() && getRawNumBits() % 32 != 0) {
       auto mask = (1 << (getRawNumBits() % 32)) - 1;
       words.back() &= mask;
       words.back() |= (~mask & repeatExtend(pattern));
@@ -2145,7 +2162,8 @@ private:
   }
 
   constexpr void normalize() {
-    assert(words.size() <= getExtNumWords());
+    assert(words.size() <= getExtNumWords() ||
+           (numBits == 0 && words.size() == 1));
     if (getNumWords() * bit_mask_sz<uint32_t> < numBits)
       prune();
     else if (getNumWords() * bit_mask_sz<uint32_t> >= numBits) {

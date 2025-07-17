@@ -19,7 +19,7 @@ struct SimpleDebugInfo {
   }
 
   void addToInstr(HWContext &ctx, InstrRef instr) {
-    ctx.dbgInfo.addSrcLoc(instr, name, beginLine, beginCol, endLine, endCol);
+    ctx.sourceLocInfo.addSrcLoc(instr, name, beginLine, beginCol, endLine, endCol);
   }
 
   bool isStartEntry() { return isNewEntry; }
@@ -34,7 +34,7 @@ struct CopyDebugInfo {
   static CopyDebugInfo empty() { return CopyDebugInfo{true, nullref}; }
 
   void addToInstr(HWContext &ctx, InstrRef instr) {
-    ctx.dbgInfo.copyDebugInfo(src, instr);
+    ctx.sourceLocInfo.copyDebugInfo(src, instr);
   }
 
   bool isStartEntry() { return isNewEntry; }

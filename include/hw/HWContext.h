@@ -34,7 +34,8 @@ public:
   auto &getCFG() { return cfg; }
   auto &getTriggers() { return triggers; }
   auto &getAIGs() { return aigObjs; }
-  DebugInfo dbgInfo;
+  SourceLocInfo<Instr> sourceLocInfo;
+  ValueNameInfo<Register> regNameInfo;
 
   ModuleIRef createModule(std::string_view name) {
     auto moduleRef = modules.create(std::string(name));
@@ -102,7 +103,7 @@ public:
 
   HWContext() {
     instrs.destroyHooks.emplace_back(
-        [&](InstrRef instr) { dbgInfo.resetDebugInfo(instr); });
+        [&](InstrRef instr) { sourceLocInfo.resetDebugInfo(instr); });
   }
 };
 

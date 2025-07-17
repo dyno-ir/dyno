@@ -92,7 +92,7 @@ public:
       build.addRef(ref);
     }
 
-    ctx.dbgInfo.copyDebugInfo(srcInstr, copyInstr);
+    ctx.sourceLocInfo.copyDebugInfo(srcInstr, copyInstr);
     return copyInstr;
   }
 

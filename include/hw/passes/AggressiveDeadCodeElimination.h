@@ -237,6 +237,7 @@ class AggressiveDeadCodeEliminationPass {
       break;
     }
 
+    case *HW_ADD_COMPRESS:
     case *HW_ADD_CARRY: {
       if (instrMap[instr])
         break;

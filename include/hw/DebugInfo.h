@@ -43,51 +43,55 @@ struct DebugSourceLoc {
   // maybe even have a genvar idx or smth
 };
 
-struct DebugName {
-  uint32_t name;
-  uint32_t srcOffs;
-  uint32_t dstOffs;
-  uint32_t len;
+class StringDedupeMap {
+  std::unordered_map<std::string_view, uint32_t> stringMap;
+  MixedSizeSlabAllocator<> strtab{sizeof(char)};
+
+public:
+  uint32_t getCanonicalIdx(std::string_view str) {
+    if (auto it = stringMap.find(str); it != stringMap.end())
+      return it->second;
+
+    auto idx = strtab.allocate(str.size() + 1);
+    auto *ptr = reinterpret_cast<char *>(strtab.resolve(idx));
+    std::copy(str.begin(), str.end(), ptr);
+    ptr[str.size()] = '\0';
+
+    auto copy = std::string_view{ptr, str.size() + 1};
+    stringMap.insert(std::make_pair(copy, idx));
+    return idx;
+  }
+
+  const char *getCanonical(std::string_view str) {
+    return reinterpret_cast<char *>(strtab.resolve(getCanonicalIdx(str)));
+  }
+
+  const char *get(uint32_t idx) {
+    return reinterpret_cast<char *>(strtab.resolve(idx));
+  }
 };
 
-struct ValueDebugInfo {
-  SmallVec<DebugName, 1> names;
-};
-
-class DebugInfo {
+template <typename InstrT> class SourceLocInfo {
   DedupeMap<DebugSourceLocImpl, SlabAllocator<DebugSourceLocImpl>,
             DebugSourceLocImpl::hash>
       srcLocDedupe;
   ObjMapVec<Instr, SmallVec<uint32_t, 1>> instrMap;
-
-  std::unordered_map<std::string_view, uint32_t> stringMap;
-  std::vector<char> strtab;
-
-  uint32_t addToStrtab(std::string_view str) {
-    if (auto it = stringMap.find(str); it != stringMap.end()) {
-      return it->second;
-    }
-
-    uint32_t pos = strtab.size();
-    strtab.resize(pos + str.size() + 1);
-    std::copy(str.begin(), str.end(), strtab.begin() + pos);
-    strtab.back() = 0;
-    return pos;
-  }
+  StringDedupeMap strDedupe;
 
 public:
-  void addSrcLoc(ObjRef<Instr> instr, std::string_view name, uint32_t beginLine,
-                 uint32_t beginCol, uint32_t endLine, uint32_t endCol) {
+  void addSrcLoc(ObjRef<InstrT> instr, std::string_view name,
+                 uint32_t beginLine, uint32_t beginCol, uint32_t endLine,
+                 uint32_t endCol) {
 
-    DebugSourceLocImpl loc{addToStrtab(name), beginLine, beginCol, endLine,
-                           endCol};
+    DebugSourceLocImpl loc{strDedupe.getCanonicalIdx(name), beginLine, beginCol,
+                           endLine, endCol};
     uint32_t idx = srcLocDedupe.getCanonicalIndex(loc);
     instrMap.get_ensure(instr).emplace_back(idx);
   }
 
-  const char *getStringVal(uint32_t i) { return &strtab[i]; }
+  const char *getStringVal(uint32_t i) { return strDedupe.get(i); }
 
-  auto getSourceLocs(ObjRef<Instr> instr) {
+  auto getSourceLocs(ObjRef<InstrT> instr) {
     auto lambda = [this](size_t, uint32_t idx) {
       auto impl = srcLocDedupe.container[idx];
       return DebugSourceLoc{getStringVal(impl.fileName), impl.beginLine,
@@ -99,12 +103,12 @@ public:
     return Range{instrMap[instr]}.transform(lambda);
   }
 
-  void resetDebugInfo(ObjRef<Instr> instr) {
+  void resetDebugInfo(ObjRef<InstrT> instr) {
     if (instrMap.inRange(instr))
       instrMap[instr].clear();
   }
 
-  void copyDebugInfo(ObjRef<Instr> src, ObjRef<Instr> dst) {
+  void copyDebugInfo(ObjRef<InstrT> src, ObjRef<InstrT> dst) {
     if (!instrMap.inRange(src) || instrMap[src].empty())
       return;
     auto &vec = instrMap.get_ensure(dst);
@@ -116,4 +120,23 @@ public:
     }
   }
 };
+
+template <typename ValueObj> class ValueNameInfo {
+  StringDedupeMap strDedupe;
+  ObjMapVec<ValueObj, SmallVec<uint32_t, 1>> valueMap;
+
+  using RefT = ObjRef<Register>;
+
+public:
+  void addName(RefT ref, std::string_view name) {
+    auto nameIdx = strDedupe.getCanonicalIdx(name);
+    valueMap.get_ensure(ref).emplace_back(nameIdx);
+  }
+
+  auto getNames(RefT ref) {
+    return Range{valueMap.get_ensure(ref)}.transform(
+        [&](size_t, uint32_t idx) { return strDedupe.get(idx); });
+  }
+};
+
 }; // namespace dyno

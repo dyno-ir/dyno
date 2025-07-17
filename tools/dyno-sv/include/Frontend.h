@@ -365,6 +365,7 @@ public:
         }
         auto reg = build.buildPort(module, ptype);
         reg->numBits = ps->getType().getBitstreamWidth();
+        ctx.regNameInfo.addName(reg, ps->name);
 
       } else if (auto asIFS = port->as_if<slang::ast::InterfacePortSymbol>()) {
         // this runs if you have a port in your param list.
@@ -372,19 +373,26 @@ public:
         auto &ifInstance =
             asIFS->getConnection().first->as<slang::ast::InstanceSymbol>();
         auto ifVars = extractIFModuleVarsPorts(ifInstance.body);
+
+        std::string ifName{asIFS->name};
+
         for (auto ifVar : ifVars) {
           auto reg = build.buildPort(module, HW_REF_REGISTER_INSTR);
           reg->numBits = ifVar->getType().getBitstreamWidth();
+          ctx.regNameInfo.addName(reg, (ifName + std::string{ifVar->name}).c_str());
         }
       }
     }
 
     // if the current module is an interface, expose all its vars as ports.
-    if (node.isInterface())
+    if (node.isInterface()) {
+      std::string ifName{node.name};
       for (auto ifPort : extractIFModuleVars(body)) {
         auto reg = build.buildPort(module, HW_REF_REGISTER_INSTR);
         reg->numBits = ifPort->getType().getBitstreamWidth();
+        ctx.regNameInfo.addName(reg, (ifName + std::string{ifPort->name}).c_str());
       }
+    }
     visitDefault(node);
   }
 
@@ -438,21 +446,24 @@ public:
     }
   }
 
-  RegisterRef makeReg(uint32_t size) {
+  RegisterRef makeReg(uint32_t size, std::string_view name = {}) {
     build.pushInsertPoint(regsBackIt.succ());
     auto reg = build.buildRegister();
     regsBackIt = build.insert.pred();
     reg->numBits = size;
     build.popInsertPoint();
+    if (!name.empty())
+      ctx.regNameInfo.addName(reg, name);
     return reg;
   }
 
   RegisterRef makeOrFindReg(const slang::ast::Symbol &symb) {
-    uint32_t numBits = symb.getDeclaredType()->getType().getBitstreamWidth();
-    auto reg = vars.findOrInsert(&symb, [&] { return makeReg(numBits); })
-                   .second.val()
-                   .as<RegisterRef>();
     assert(symb.getDeclaredType());
+    uint32_t numBits = symb.getDeclaredType()->getType().getBitstreamWidth();
+    auto reg =
+        vars.findOrInsert(&symb, [&] { return makeReg(numBits, symb.name); })
+            .second.val()
+            .as<RegisterRef>();
     return reg;
   }
 
@@ -1393,10 +1404,11 @@ public:
     case slang::ast::ExpressionKind::NamedValue: {
       auto const &nval = expr.as<slang::ast::ValueExpressionBase>();
       auto [found, sig] = vars.findOrInsert(&nval.symbol, [&] {
-        return nval.getConstant() ? RegisterOrConstantRef{toDynoConstant(
-                                        nval.getConstant()->integer())}
-                                  : RegisterOrConstantRef{makeReg(
-                                        nval.type->getBitstreamWidth())};
+        return nval.getConstant()
+                   ? RegisterOrConstantRef{toDynoConstant(
+                         nval.getConstant()->integer())}
+                   : RegisterOrConstantRef{makeReg(
+                         nval.type->getBitstreamWidth(), nval.symbol.name)};
       });
 
       if (auto reg = sig.val().dyn_as<RegisterRef>())

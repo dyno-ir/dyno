@@ -2,6 +2,7 @@
 
 #include "hw/HWContext.h"
 #include "hw/HWPrinter.h"
+#include "hw/passes/ABC.h"
 #include "hw/passes/AIGConstruct.h"
 #include "hw/passes/AggressiveDeadCodeElimination.h"
 #include "hw/passes/FunctionInline.h"
@@ -31,6 +32,7 @@ class PassPipeline {
   AggressiveDeadCodeEliminationPass agressiveDCE{ctx};
   LowerOpsPass lowerOps{ctx};
   AIGConstructPass aigConstr{ctx};
+  ABCPass abc{ctx};
 
 public:
   bool printAfterAll = false;
@@ -64,11 +66,12 @@ public:
   }
 
   void runLoweringPipeline() {
-    // lower compares to sub and re-run instcombine
+    // lower compares and sub and re-run instcombine
     lowerOps.config = LowerOpsPass::Config{
         .lowerMultiInputAdd = false,
-        .lowerMultiInputBitwise = false,
         .lowerSimpleAdd = false,
+        .lowerSub = true,
+        .lowerMultiInputBitwise = false,
         .lowerEqualityICMP = false,
         .lowerOrderingICMP = true,
         .lowerShift = false,
@@ -79,8 +82,9 @@ public:
     // lower everything that can still go through instcombine
     lowerOps.config = LowerOpsPass::Config{
         .lowerMultiInputAdd = true,
-        .lowerMultiInputBitwise = false,
         .lowerSimpleAdd = false,
+        .lowerSub = true,
+        .lowerMultiInputBitwise = false,
         .lowerEqualityICMP = true,
         .lowerOrderingICMP = true,
         .lowerShift = true,
@@ -91,8 +95,9 @@ public:
     // lower the rest without re-running instcombine.
     lowerOps.config = LowerOpsPass::Config{
         .lowerMultiInputAdd = true,
-        .lowerMultiInputBitwise = true,
         .lowerSimpleAdd = true,
+        .lowerSub = true,
+        .lowerMultiInputBitwise = true,
         .lowerEqualityICMP = true,
         .lowerOrderingICMP = true,
         .lowerShift = true,
@@ -101,6 +106,7 @@ public:
     runPass(agressiveDCE);
 
     runPass(aigConstr);
+    runPass(abc);
   }
 
 public:

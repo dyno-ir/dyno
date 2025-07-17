@@ -29,7 +29,7 @@ public:
     std::print(os, "digraph aig {{");
 
     for (auto [idx, node] : Range{aig.store.thin}.enumerate()) {
-      for (auto &op : node.op)
+      for (auto &op : node->op)
         std::print(os, "{} -> {}{}\n", (uint)op.idx(), idx,
                    op.invert() ? "[style=dotted]" : "");
     }

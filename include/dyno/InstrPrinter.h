@@ -7,6 +7,8 @@
 #include "dyno/Obj.h"
 #include "hw/DebugInfo.h"
 #include "support/DenseMap.h"
+#include "support/RTTI.h"
+#include "support/Utility.h"
 #include <dyno/Instr.h>
 #include <dyno/Interface.h>
 #include <initializer_list>
@@ -37,13 +39,43 @@ public:
 };
 
 class PrinterBase {
-  DenseMap<DynObjRef, uint32_t> introduced;
+
+  struct IntroducedName : public RTTIUtilMixin<IntroducedName> {
+    enum Type : uint8_t { NUMERIC, STRING };
+    Type type;
+
+    std::string str() const {
+      switch (type) {
+      case NUMERIC:
+        return std::to_string(this->storage.numeric);
+      case STRING:
+        return this->storage.string;
+      }
+      dyno_unreachable("unknown type");
+    }
+
+    IntroducedName() = default;
+
+    IntroducedName(uint32_t numeric)
+        : type(NUMERIC), storage{.numeric = numeric} {}
+    IntroducedName(const char *string)
+        : type(STRING), storage{.string = string} {}
+
+  protected:
+    union {
+      uint32_t numeric;
+      const char *string;
+    } storage;
+  };
+
+  DenseMap<DynObjRef, IntroducedName> introduced;
+  uint32_t numericNameCnt = 0;
 
   std::vector<bool> isDefault = std::vector<bool>(NUM_DIALECTS);
 
 protected:
   IndentPrinter indentPrint;
-  DebugInfo *debugInfo = nullptr;
+  SourceLocInfo<Instr> *sourceLocInfo = nullptr;
 
 public:
   Interface<DialectInfo> dialectI;
@@ -57,7 +89,8 @@ protected:
   struct opc {
     using print_fn = bool (PrinterBase::*)(FatDynObjRef<> ref, bool def);
   };
-  Interfaces<NUM_DIALECTS, type::print_fn, opc::print_fn> interfaces;
+  using name_fn = const char *(PrinterBase::*)(FatDynObjRef<> ref);
+  Interfaces<NUM_DIALECTS, type::print_fn, opc::print_fn, name_fn> interfaces;
 
 public:
   std::ostream &str;
@@ -110,37 +143,50 @@ public:
     str << '(' << ref.getCustom() << ')';
   }
 
+  std::pair<bool, IntroducedName &> introduceNameFor(FatDynObjRef<> ref) {
+    DynObjRef noCustom = ref;
+    noCustom.clearCustom();
+    auto [found, it] = introduced.findOrInsert(noCustom, [&] -> IntroducedName {
+      if (auto func = interfaces.getVal<name_fn>(ref.getDialectID())) {
+        if (const char *name = (this->*func)(ref))
+          return IntroducedName{name};
+      }
+      return IntroducedName{numericNameCnt++};
+    });
+    return {found, it.val()};
+  }
+
+
   void printRefOrUse(FatDynObjRef<> ref) {
     if (ref.getObjID() == ObjID::invalid() && !ref.getCustom()) {
       str << "nullref";
       return;
     }
 
-    DynObjRef noCustom = ref;
-    noCustom.clearCustom();
+    auto [found, name] = introduceNameFor(ref);
 
     if (Operand::isDefUseOperand(ref)) {
-      auto [found, it] = introduced.findOrInsert(noCustom, introduced.size());
-      str << '%' << it.val();
+      str << '%' << name.str();
       if (!found) {
         str << ":?";
         printUse(ref);
       }
       return;
     }
+
+    DynObjRef noCustom = ref;
+    noCustom.clearCustom();
     auto it = introduced.find(noCustom);
     if (it) {
-      str << '%' << it.val();
+      str << '%' << it.val().str();
     } else {
       printUse(ref);
     }
   }
 
   void introduce(FatDynObjRef<> ref) {
-    DynObjRef noCustom = ref;
-    noCustom.clearCustom();
-    auto [found, it] = introduced.findOrInsert(noCustom, introduced.size());
-    str << '%' << it.val() << ":";
+    auto [found, name] = introduceNameFor(ref);
+    str << '%' << name.str() << ":";
   }
 
   void introduceAndPrintDef(FatDynObjRef<> ref) {
@@ -168,10 +214,11 @@ public:
   }
 
   void tryPrintSrcLoc(ObjRef<Instr> instr) {
-    if (!debugInfo)
+    if (!sourceLocInfo)
       return;
     bool any = false;
-    for (auto [i, loc] : Range{debugInfo->getSourceLocs(instr)}.enumerate()) {
+    for (auto [i, loc] :
+         Range{sourceLocInfo->getSourceLocs(instr)}.enumerate()) {
       any = true;
       if (i == 0)
         str << "// ";

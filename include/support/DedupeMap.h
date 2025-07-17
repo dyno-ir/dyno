@@ -33,4 +33,5 @@ public:
     return rv;
   }
   const T &getCanonical(const T &t) { return container[getCanonicalIndex(t)]; }
+  uint32_t size() { return map.size(); }
 };

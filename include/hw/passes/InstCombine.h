@@ -204,9 +204,37 @@ private:
     bool change = false;
     while (!stack.empty()) {
       auto instr = stack.pop_back_val();
+      // std::optional<DialectOpcode> extendType = std::nullopt;
+      // uint32_t extendBits;
+      // auto defWire = instr.def(0)->as<WireRef>();
+
+      // if (oldDefW.getNumBits() != defWire.getNumBits()) {
+      //   assert(*oldDefW.getNumBits() > *defWire.getNumBits());
+      //   auto extendInstr = defWire.getSingleUse()->instr();
+      //   auto extendWire = extendInstr.def(0)->as<WireRef>();
+      //   extendBits = *extendWire.getNumBits();
+      //   auto thisBits = *defWire.getNumBits();
+      //   if (extendBits > thisBits)
+      //     extendType = extendInstr.getDialectOpcode();
+      // }
+      // auto expandIfNecessary = [&](HWValue value) {
+      //   if (!extendType)
+      //     return value;
+      //   return HWInstrBuilder{ctx, ctx.getCFG()[root]}.buildExt(
+      //       extendBits, value, *extendType);
+      // };
+
       for (auto operand : instr.others()) {
         if (auto asWire = operand->dyn_as<WireRef>()) {
           auto defI = asWire.getSingleDef()->instr();
+
+          // // eagerly fuse other ops even if done on fewer bits. expectation
+          // // is that optimizer can nicely handle extends on operands.
+          // if (defI.isOpc(OP_ZEXT, OP_SEXT, OP_ANYEXT) &&
+          //     asWire.hasSingleUse()) {
+          //   asWire = defI.other(0)->as<WireRef>();
+          //   defI = asWire.getDefI();
+          // }
           if (defI.isOpc(opc) && asWire.hasSingleUse()) {
             stack.emplace_back(defI);
             currentMatched.emplace_back(defI);
@@ -214,6 +242,7 @@ private:
             change = true;
             continue;
           }
+
           operands.emplace_back(operand->as<WireRef>());
           continue;
         }
@@ -335,6 +364,10 @@ private:
   }
 
   bool manual(InstrRef instr) {
+    if (instr.getNumDefs() == 1 && instr.def(0)->is<WireRef>())
+      if (knownBitsConstProp(instr))
+        return true;
+
     switch (*instr.getDialectOpcode()) {
 #define LAMBDA(opc, ib, cb, bib) case *opc:
       FOR_HW_COMM_OPS(LAMBDA)
@@ -348,10 +381,6 @@ private:
       if (reduceBitWidth(instr))
         return true;
     }
-
-    if (instr.getNumDefs() == 1 && instr.def(0)->is<WireRef>())
-      if (knownBitsConstProp(instr))
-        return true;
 
     return false;
   }
@@ -396,7 +425,7 @@ private:
 
   void oldInstrHook(InstrRef old, ArrayRef<InstrRef> newInstrs) {
     for (auto newInstr : newInstrs)
-      ctx.dbgInfo.copyDebugInfo(old, newInstr);
+      ctx.sourceLocInfo.copyDebugInfo(old, newInstr);
   }
 
   void replacedUseHook(OperandRef replaced) {

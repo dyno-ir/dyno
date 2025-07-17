@@ -1,4 +1,5 @@
 #pragma once
+#include "support/Bits.h"
 #include "support/SmallVec.h"
 #include <cstddef>
 #include <memory>
@@ -8,10 +9,9 @@ class SlabAllocatorBase {
 public:
   using size_type = SizeT;
 
-private:
+protected:
   const size_type elemsPerSlab;
   const size_type elemSize;
-  size_type numElems;
   size_type remElems;
   SmallVec<char *, 4> slabs;
 
@@ -25,7 +25,7 @@ private:
   }
 
 public:
-  void *operator[](size_t i) {
+  void *operator[](SizeT i) {
     return slabs[i / elemsPerSlab] + elemSize * (i % elemsPerSlab);
   }
 
@@ -34,15 +34,13 @@ public:
       makeSlab();
     auto rv = slabs.back() + elemSize * (elemsPerSlab - remElems);
     remElems--;
-    numElems++;
     return rv;
   }
 
-  size_type size() const { return numElems; }
+  size_type size() const { return slabs.size() * elemsPerSlab - remElems; }
 
-  SlabAllocatorBase(size_t elemSize)
-      : elemsPerSlab(slab_size / elemSize), elemSize(elemSize), numElems(0),
-        remElems(0) {}
+  SlabAllocatorBase(SizeT elemSize)
+      : elemsPerSlab(slab_size / elemSize), elemSize(elemSize), remElems(0) {}
 
   ~SlabAllocatorBase() {
     for (auto *ptr : slabs)
@@ -70,10 +68,53 @@ public:
   size_type size() const { return base.size(); }
 
   ~SlabAllocator() {
-    for (size_t i = 0; i < base.size(); i++) {
+    for (size_type i = 0; i < base.size(); i++) {
       std::destroy_at(reinterpret_cast<T *>(base[i]));
     }
   }
 
   SlabAllocator() : base(sizeof(T)) {}
 };
+
+template <typename SizeT = uint32_t, SizeT slab_size = 8 * 4096>
+class MixedSizeSlabAllocator : private SlabAllocatorBase<SizeT, slab_size> {
+public:
+  using Base = SlabAllocatorBase<SizeT, slab_size>;
+  using size_type = SizeT;
+
+protected:
+  using Base::elemSize;
+  using Base::elemsPerSlab;
+  using Base::makeSlab;
+  using Base::remElems;
+  using Base::slabs;
+
+  // allocated sizes are a multiple of elemSizeMult. May be one, just to improve
+  // address space for uint32_t indices.
+public:
+  MixedSizeSlabAllocator(SizeT elemSizeMult = alignof(std::max_align_t))
+      : Base(elemSizeMult) {}
+
+  void *allocate() = delete;
+
+  // allocate a number of words. returns idx, resolvable to ptr via resolve
+  size_type allocate(size_type sz) {
+    assert(sz && "empty alloc?");
+    if (remElems < sz) [[unlikely]]
+      makeSlab();
+    auto rv = size();
+    // auto ptr = slabs.back() + elemSize * (elemsPerSlab - remElems);
+    remElems -= sz;
+    return rv;
+  }
+
+  // allocate a number of bytes. returns idx, resolvable to ptr via resolve
+  size_type allocate_nbytes(size_type nbytes) {
+    return allocate(round_up_div(nbytes, elemSize));
+  }
+
+  void *resolve(size_type idx) { return Base::operator[](idx); }
+
+  size_type size() { return this->Base::size(); }
+};
+
