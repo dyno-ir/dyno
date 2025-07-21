@@ -187,14 +187,14 @@ class AIGConstructPass {
   HWContext &ctx;
   HWInstrBuilder build;
   AIGObjRef aigRef;
+  ObjMapVec<Instr, bool> destroyMap;
 
   void handleInstr(InstrRef instr, AIGBuilder &abuild) {
     auto &aig = abuild.aig;
     switch (*instr.getDialectOpcode()) {
-    // probably have to rework I/O. ideally have I/O agnostic of node-fatness.
-    // i.e. AIG_IN/AIG_OUT can just reference random nodes.
     case *HW_LOAD: {
       build.setInsertPoint(instr);
+      build.setInsertPoint(build.insert.succ());
       auto arr = abuild.buildInput(instr.as<LoadIRef>().value());
       auto ibuild = build.buildInstrRaw(AIG_INPUT, arr.size() + 2);
       for (auto ref : arr)
@@ -202,11 +202,12 @@ class AIGConstructPass {
       ibuild.other();
       ibuild.addRef(instr.as<LoadIRef>().value());
       ibuild.addRef(aigRef);
-      break;
+      return;
     }
+    case *HW_STORE_DEFER:
     case *HW_STORE: {
       if (!instr.as<StoreIRef>().value().is<WireRef>())
-        break;
+        return;
       build.setInsertPoint(instr);
       auto arr = abuild.buildOutput(instr.as<StoreIRef>().value());
       auto ibuild = build.buildInstrRaw(AIG_OUTPUT, arr.size() + 2);
@@ -215,7 +216,7 @@ class AIGConstructPass {
         ibuild.addRef(aig.store.resolve(ref).as<FatAIGNodeRef>());
       ibuild.other();
       ibuild.addRef(aigRef);
-      break;
+      return;
     }
 
     case *OP_AND: {
@@ -241,6 +242,7 @@ class AIGConstructPass {
     case *OP_NOT: {
       abuild.buildNOT(instr.def(0)->as<WireRef>(),
                       instr.other(0)->as<HWValue>());
+      break;
     }
     case *HW_MUX: {
       assert(instr.getNumOperands() == 4);
@@ -268,7 +270,11 @@ class AIGConstructPass {
                            instr.other(0)->as<WireRef>(), instr.isOpc(OP_SEXT));
       break;
     }
+    default:
+      return;
     }
+    instr.def(0).replace(FatDynObjRef<>{nullref});
+    destroyMap[instr] = 1;
   }
 
   void runOnProc(ProcessIRef proc) {
@@ -291,8 +297,20 @@ class AIGConstructPass {
 
 public:
   void run() {
+    destroyMap.resize(ctx.getInstrs().numIDs());
+
+    ctx.getInstrs().createHooks.emplace_back(
+        [&](InstrRef ref) { destroyMap.get_ensure(ref) = 0; });
+
     for (auto mod : ctx.getModules()) {
       runOnModule(mod.iref());
+    }
+    ctx.getInstrs().createHooks.pop_back();
+
+    for (auto [obj, destroy] : destroyMap) {
+      if (!destroy || !ctx.getInstrs().exists(obj))
+        continue;
+      build.destroyInstr(ctx.getInstrs().resolve(obj));
     }
   }
 

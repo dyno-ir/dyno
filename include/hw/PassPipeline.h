@@ -11,6 +11,7 @@
 #include "hw/passes/LoopSimplify.h"
 #include "hw/passes/LowerOps.h"
 #include "hw/passes/ModuleInline.h"
+#include "hw/passes/ParseLiberty.h"
 #include "hw/passes/ProcessLinearize.h"
 #include "hw/passes/SSAConstruct.h"
 #include "hw/passes/SeqToComb.h"
@@ -33,6 +34,7 @@ class PassPipeline {
   LowerOpsPass lowerOps{ctx};
   AIGConstructPass aigConstr{ctx};
   ABCPass abc{ctx};
+  ParseLibertyPass parseLiberty{ctx};
 
 public:
   bool printAfterAll = false;
@@ -46,6 +48,9 @@ public:
   }
 
   void runOptPipeline() {
+    std::print(std::cerr, "\n\nInitial IR:\n");
+    HWPrinter{std::cerr}.printCtx(ctx);
+
     runPass(funcInline);
     runPass(moduleInline);
     runPass(triggerDedupe);
@@ -61,6 +66,8 @@ public:
     runPass(agressiveDCE);
 
     runPass(linearizeControlFlow);
+    ssaConstr.config.mode = SSAConstructPass::Config::IMMEDIATE;
+    runPass(ssaConstr);
     runPass(instCombine);
     runPass(agressiveDCE);
   }
@@ -69,6 +76,7 @@ public:
     // lower compares and sub and re-run instcombine
     lowerOps.config = LowerOpsPass::Config{
         .lowerMultiInputAdd = false,
+        .lowerAddCompress = false,
         .lowerSimpleAdd = false,
         .lowerSub = true,
         .lowerMultiInputBitwise = false,
@@ -82,6 +90,7 @@ public:
     // lower everything that can still go through instcombine
     lowerOps.config = LowerOpsPass::Config{
         .lowerMultiInputAdd = true,
+        .lowerAddCompress = false,
         .lowerSimpleAdd = false,
         .lowerSub = true,
         .lowerMultiInputBitwise = false,
@@ -95,6 +104,7 @@ public:
     // lower the rest without re-running instcombine.
     lowerOps.config = LowerOpsPass::Config{
         .lowerMultiInputAdd = true,
+        .lowerAddCompress = true,
         .lowerSimpleAdd = true,
         .lowerSub = true,
         .lowerMultiInputBitwise = true,
@@ -106,7 +116,13 @@ public:
     runPass(agressiveDCE);
 
     runPass(aigConstr);
+    runPass(agressiveDCE);
+
+    runPass(parseLiberty);
     runPass(abc);
+    runPass(instCombine);
+    runPass(agressiveDCE);
+
   }
 
 public:

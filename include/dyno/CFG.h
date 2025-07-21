@@ -204,9 +204,8 @@ public:
 
   size_t size() { return ptr->instrs.size() - 1; }
 
-  iterator begin() { return {*this, ptr->instrs[0].next}; }
-
-  iterator end() { return {*this, 0}; }
+  iterator begin() const { return {*this, ptr->instrs[0].next}; }
+  iterator end() const { return {*this, 0}; }
 
   iterator_unordered begin_unordered() { return {*this, ptr->instrs[0].next}; }
 

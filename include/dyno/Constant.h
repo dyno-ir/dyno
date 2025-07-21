@@ -346,7 +346,8 @@ public:
   MutArrayRef<uint32_t> getWords() const {
     return MutArrayRef<uint32_t>::emptyRef();
   };
-  PatBigInt(uint32_t bits, uint8_t pattern, uint8_t custom = 0) : bits(bits) {
+  PatBigInt(uint32_t bits, uint8_t pattern, uint8_t custom = 0)
+      : bits(bits), field(0) {
     Extend{field} = pattern;
     Custom{field} = custom;
   }
@@ -358,7 +359,9 @@ public:
     return PatBigInt{2 * bits, FourState::SZ, 1};
   }
   static constexpr PatBigInt fromFourState(FourState state, uint bits) {
-    return PatBigInt{state.isUnk() ? bits * 2 : bits, state, state.isUnk()};
+    return PatBigInt{state.isUnk() ? bits * 2 : bits,
+                     state == FourState::S1 ? FourState::SX : state,
+                     state.isUnk()};
   }
   template <BigIntAPI T>
   static constexpr PatBigInt fromSign(const T &lhs, uint bits) {

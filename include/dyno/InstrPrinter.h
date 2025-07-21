@@ -156,16 +156,14 @@ public:
     return {found, it.val()};
   }
 
-
   void printRefOrUse(FatDynObjRef<> ref) {
     if (ref.getObjID() == ObjID::invalid() && !ref.getCustom()) {
       str << "nullref";
       return;
     }
 
-    auto [found, name] = introduceNameFor(ref);
-
     if (Operand::isDefUseOperand(ref)) {
+      auto [found, name] = introduceNameFor(ref);
       str << '%' << name.str();
       if (!found) {
         str << ":?";
@@ -221,25 +219,22 @@ public:
          Range{sourceLocInfo->getSourceLocs(instr)}.enumerate()) {
       any = true;
       if (i == 0)
-        str << "// ";
+        str << "  [";
       else
         str << ", ";
       if (loc.beginLine == loc.endLine) {
-        std::print(str, "{}:{}:{}-{}", loc.fileName, loc.beginLine,
+        std::print(str, "\"{}:{}:{}-{}\"", loc.fileName, loc.beginLine,
                    loc.beginCol, loc.endCol);
       } else {
-        std::print(str, "{}:{}.{}-{}.{}", loc.fileName, loc.beginLine,
+        std::print(str, "\"{}:{}.{}-{}.{}\"", loc.fileName, loc.beginLine,
                    loc.beginCol, loc.endLine, loc.endCol);
       }
     }
-    if (any) {
-      str << "\n";
-      indentPrint.printIndent();
-    }
+    if (any)
+      str << "]";
   }
 
   void printInstr(InstrRef instr) {
-    tryPrintSrcLoc(instr);
     printOpcodeDefault(instr);
     str << ' ';
 
@@ -266,6 +261,7 @@ public:
       }
     }
 
+    tryPrintSrcLoc(instr);
     str << '\n';
   }
 };

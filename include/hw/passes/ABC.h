@@ -1,6 +1,9 @@
 #pragma once
 #include "aig/AIG.h"
+#include "hw/HWAbstraction.h"
 #include "hw/HWContext.h"
+#include "hw/HWInstr.h"
+#include "support/ErrorRecovery.h"
 #include <fstream>
 
 namespace dyno {
@@ -60,6 +63,163 @@ public:
   }
 
   BLIF_Printer(HWContext &ctx, std::ostream &os) : ctx(ctx), os(os) {}
+};
+
+class BLIF_Parser {
+  HWContext &ctx;
+  std::istream &is;
+
+  template <char Delim = ' '> class SplitIterator {
+    const char *ptr;
+    size_t len;
+
+    void prime() {
+      while (ptr[len] != Delim && ptr[len] != '\0')
+        len++;
+    }
+
+  public:
+    SplitIterator(const char *ptr) : ptr(ptr), len(0) { prime(); }
+
+    SplitIterator &operator++() {
+      if (ptr[len] == '\0')
+        ptr += len;
+      else {
+        ptr += len + 1;
+        while (*ptr == Delim)
+          ++ptr;
+      }
+      len = 0;
+      prime();
+
+      return *this;
+    }
+
+    SplitIterator operator++(int) {
+      auto tmp{*this};
+      ++*this;
+      return tmp;
+    }
+
+    friend bool operator==(SplitIterator lhs, SplitIterator rhs) {
+      return lhs.ptr == rhs.ptr;
+    }
+
+    std::string_view operator*() const { return std::string_view{ptr, len}; }
+  };
+
+  auto split(const std::string &str) {
+    auto begin = SplitIterator<' '>{str.begin().base()};
+    auto end = SplitIterator<' '>{str.end().base()};
+    return Range{begin, end};
+  }
+
+public:
+  BLIF_Parser(HWContext &ctx, std::istream &is) : ctx(ctx), is(is) {}
+
+  /*
+    Imports techmapped BLIF. Each gate turns into a standard cell instance.
+    Using instances implies we're using dyno Registers to communicate between
+    instances, which gets weird at times. Alternative would be creating a new
+    type of instance that uses wires and lives inside the processes. Also not
+    and ideal solution though.
+  */
+  void parse(AIGObjRef aigObj, ModuleIRef parentMod) {
+    std::string line;
+    std::unordered_map<std::string, RegisterRef> names;
+    std::unordered_map<std::string, ModuleRef> modules;
+
+    for (auto mod : ctx.getModules())
+      modules[mod->name] = mod;
+
+    HWInstrBuilder build{ctx};
+    HWInstrBuilder regBuild{ctx};
+    regBuild.setInsertPoint(parentMod.regs_end());
+
+    while (std::getline(is, line), !line.empty()) {
+      while (line.ends_with('\\')) {
+        std::string rem;
+        std::getline(is, rem);
+        line = line.substr(0, line.size() - 1) + rem;
+      }
+
+      // we're dealing with AIG input/output
+
+      if (line.starts_with(".inputs")) {
+        for (auto [i, tok] : split(line).drop_front().enumerate()) {
+          auto def = *aigObj->aig.inputs[i]->defUse.getSingleDef();
+          auto defI = def.instr();
+          build.setInsertPoint(defI);
+          assert(defI.isOpc(AIG_INPUT));
+          // def is an AIG input
+          auto inputVal = defI.other(0)->as<HWValue>();
+          uint index = def - defI.def_begin();
+          auto reg = regBuild.buildRegister(1);
+          build.buildStore(reg,
+                           build.buildSplice(inputVal, BitRange{index, 1}));
+
+          // create reg with copy of the val
+          names.insert(std::make_pair(tok, reg));
+        }
+      }
+
+      SmallVec<HWValue, 4> outputBitArr;
+      InstrRef lastDefI = nullref;
+
+      auto makeConcat = [&]() {
+        auto newVal = build.buildConcat(outputBitArr);
+        assert(lastDefI.def(0)->as<WireRef>()->numBits == outputBitArr.size());
+        lastDefI.def(0)->as<WireRef>().replaceAllUsesWith(newVal);
+        outputBitArr.clear();
+      };
+
+      if (line.starts_with(".outputs")) {
+        for (auto [i, tok] : split(line).drop_front().enumerate()) {
+          auto def = *aigObj->aig.outputs[i]->defUse.getSingleDef();
+          auto defI = def.instr();
+          if (lastDefI != defI) {
+            if (lastDefI)
+              makeConcat();
+            lastDefI = defI;
+            build.setInsertPoint(defI);
+          }
+
+          assert(defI.isOpc(AIG_OUTPUT));
+          auto reg = regBuild.buildRegister(1);
+          outputBitArr.emplace_back(build.buildLoad(reg));
+
+          names.insert(std::make_pair(tok, reg));
+        }
+        makeConcat();
+        assert(outputBitArr.size() == 0);
+      }
+
+      build.setInsertPoint(parentMod.block().end());
+
+      if (line.starts_with(".gate")) {
+        SmallVec<RegisterRef, 8> ports;
+        ModuleRef mod;
+        for (auto [front, tok] : split(line).drop_front().mark_front()) {
+          if (front) {
+            mod = modules.find(std::string(tok))->second;
+            continue;
+          }
+          auto eqIdx = tok.find('=');
+          if (eqIdx == std::string::npos)
+            report_fatal_error("BLIF format");
+          auto tokStr = std::string(tok.begin() + eqIdx + 1, tok.end());
+          auto reg = names.find(tokStr);
+          if (reg == names.end()) {
+            reg =
+                names.insert(std::make_pair(tokStr, regBuild.buildRegister(1)))
+                    .first;
+          }
+          ports.emplace_back(reg->second);
+        }
+        build.buildInstance(mod, ports);
+      }
+    }
+  }
 };
 
 class AIGERPrinter {
@@ -123,9 +283,20 @@ class ABCPass {
     // std::ofstream aigerFile{"aiger.aag"};
     // AIGERPrinter aigPrint{ctx, aigerFile};
     // aigPrint.print(aigRef);
-    std::ofstream blifFile{"aig.blif"};
-    BLIF_Printer print{ctx, blifFile};
-    print.print(aigRef);
+    {
+      std::ofstream blifFile{"aig.blif"};
+      BLIF_Printer print{ctx, blifFile};
+      print.print(aigRef);
+    }
+    system("yosys-abc -q \"read_blif aig.blif; read_lib -w "
+           "sky130_fd_sc_hd__tt_025C_1v80.lib; strash; &get -n; &fraig -x; "
+           "&put; scorr; dc2; dretime; strash; &get -n; &dch -f; &nf; &put;"
+           "print_stats; write_blif "
+           "mapped.blif\"");
+
+    std::ifstream mappedFile{"mapped.blif"};
+    BLIF_Parser parse{ctx, mappedFile};
+    parse.parse(aigRef, HWInstrRef{aigInstr}.parentMod(ctx));
   }
 
   void runOnProc(ProcessIRef proc) {

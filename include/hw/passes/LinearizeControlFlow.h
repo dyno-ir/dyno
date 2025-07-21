@@ -128,17 +128,20 @@ class LinearizeControlFlowPass {
       return copyAndPushYieldVals(self, old, insert, yields);
     };
 
-    uint labels = 0;
-    bool hasDefault = false;
+    Optional<uint32_t> defaultIdx = nullopt;
+    for (auto [i, yieldInstr] :
+         Range{instr.block()}.as<CaseInstrRef>().enumerate()) {
+      if (yieldInstr.isOpc(OP_CASE_DEFAULT)) {
+        defaultIdx = i;
+        break;
+      }
+    }
 
     auto insertIter = BlockRef_iterator<true>{HWInstrRef{instr}.iter(ctx)};
     auto endIter = insertIter.succ();
-    for (auto yieldInstr :
-         Range{instr.block().begin(), instr.block().end()}.as<CaseInstrRef>()) {
+    for (auto yieldInstr : Range{instr.block()}.as<CaseInstrRef>()) {
       copier.deepCopyInstrs(yieldInstr.block().begin(), insertIter, copyHook);
       insertIter = endIter.pred();
-      labels += yieldInstr.getNumOthers();
-      hasDefault = yieldInstr.getNumOthers() == 0;
     }
     uint numCaseBlocks = instr.block().size();
     assert(yields.size() % numCaseBlocks == 0 &&
@@ -149,31 +152,40 @@ class LinearizeControlFlowPass {
     build.setInsertPoint(endIter);
 
     auto token = autoDebugInfo.addWithToken(instr);
+    assert(numYieldValues == 0 || defaultIdx);
 
-    for (auto [i, yieldVal] : Range{instr.yieldValues()}.enumerate()) {
-      Optional<uint32_t> defaultIdx = nullopt;
-      auto ibuild = build.buildInstrRaw(HW_SELECT, 2 + labels * 2 + hasDefault);
-      ibuild.addRef(yieldVal->as<WireRef>());
-      yieldVal.replace(FatDynObjRef<>{nullref});
-      ibuild.other();
-      ibuild.addRef(instr.cond()->as<HWValue>());
-      for (auto [j, caseInstr] :
-           Range{instr.block().begin(), instr.block().end()}
-               .as<CaseInstrRef>()
-               .enumerate()) {
-        if (caseInstr.getNumOthers() == 0) {
-          assert(!defaultIdx && "multiple defaults");
-          defaultIdx = j;
-        } else {
-          for (auto sel : caseInstr.others()) {
-            ibuild.addRef(sel->as<HWValue>());
-            ibuild.addRef(yields[j * numYieldValues + i]);
-          }
-        }
+    for (auto [j, caseInstr] :
+         Range{instr.block()}.as<CaseInstrRef>().enumerate()) {
+      if (j == defaultIdx)
+        continue;
+
+      auto pred = BigInt::ICMP_CEQ;
+      if (caseInstr.isOpc(HW_CASE_Z))
+        pred = BigInt::ICMP_CZEQ;
+      else if (caseInstr.isOpc(HW_CASE_X))
+        pred = BigInt::ICMP_CXEQ;
+
+      auto orIB = build.buildInstrRaw(OP_OR, 1 + caseInstr.getNumOthers());
+      auto selWire = ctx.getWires().create(1);
+      orIB.addRef(selWire).other();
+      assert(caseInstr.getNumOthers() != 0);
+      build.setInsertPoint(orIB.instr());
+      for (auto cond : caseInstr.others()) {
+        orIB.addRef(build.buildICmp(instr.cond()->as<HWValue>(),
+                                    cond->as<HWValue>(), pred));
       }
-      assert(!!defaultIdx == hasDefault);
-      if (defaultIdx)
-        ibuild.addRef(yields[*defaultIdx * numYieldValues + i]);
+      build.setInsertPoint(endIter);
+
+      for (uint i = 0; i < instr.getNumYieldValues(); i++) {
+        HWValue iter =
+            j == 0 ? yields[*defaultIdx * numYieldValues + i] : yields[i];
+        HWValue newVal = yields[j * numYieldValues + i];
+        yields[i] = build.buildMux(selWire, newVal, iter);
+      }
+    }
+
+    for (auto [i, yieldVal] : instr.yieldValues().enumerate()) {
+      yieldVal->as<WireRef>().replaceAllUsesWith(yields[i]);
     }
 
     build.destroyInstr(instr);

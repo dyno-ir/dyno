@@ -39,13 +39,13 @@ class ModuleInlinePass {
     uint portIndex = 0;
     auto inlineHook = [&](DeepCopier *self, InstrRef src,
                           BlockRef_iterator<true> dstIt) {
-      if (src.isOpc(HW_INPUT_REGISTER_INSTR, HW_OUTPUT_REGISTER_INSTR,
-                    HW_INOUT_REGISTER_INSTR, HW_REF_REGISTER_INSTR)) {
+      if (src.isOpc(HW_INPUT_REGISTER_DEF, HW_OUTPUT_REGISTER_DEF,
+                    HW_INOUT_REGISTER_DEF, HW_REF_REGISTER_DEF)) {
         auto portReg = instance.operand(1 + portIndex++)->as<RegisterRef>();
         self->oldToNewMap.insert(src.def(0)->fat(), portReg);
         return true;
       }
-      if (src.isOpc(HW_REGISTER_INSTR)) {
+      if (src.isOpc(HW_REGISTER_DEF)) {
         HWInstrBuilder build{ctx};
         build.setInsertPoint(parentMod.regs_end());
         auto reg = build.buildRegister(src.as<RegisterIRef>().oref().getNumBits());

@@ -1,5 +1,7 @@
 #pragma once
 
+#include "aig/AIG.h"
+#include "aig/IDs.h"
 #include "dyno/ObjMap.h"
 #include "hw/HWAbstraction.h"
 #include "hw/HWContext.h"
@@ -42,7 +44,7 @@ class AggressiveDeadCodeEliminationPass {
       case *HW_INSTANCE: {
         ModuleRef mod = instr.other(0)->as<ModuleRef>();
         uint idx = (use - instr.other_begin()) - 1;
-        if (mod->ports[idx].portType == HW_INPUT_REGISTER_INSTR)
+        if (mod->ports[idx].portType == HW_INPUT_REGISTER_DEF)
           break;
         worklist.emplace_back(instr);
         break;
@@ -51,7 +53,7 @@ class AggressiveDeadCodeEliminationPass {
       case *HW_LOAD:
         break;
 
-      case *HW_TRIGGER_INSTR:
+      case *HW_TRIGGER_DEF:
         break;
 
       default:
@@ -76,9 +78,9 @@ class AggressiveDeadCodeEliminationPass {
 
   void markParentProc(InstrRef instr) {
     auto block = HWInstrRef{instr}.parentBlock(ctx);
-    if (block.defI().isOpc(HW_INIT_PROCESS_INSTR, HW_COMB_PROCESS_INSTR,
-                           HW_SEQ_PROCESS_INSTR, HW_LATCH_PROCESS_INSTR,
-                           HW_FINAL_PROCESS_INSTR)) {
+    if (block.defI().isOpc(HW_INIT_PROCESS_DEF, HW_COMB_PROCESS_DEF,
+                           HW_SEQ_PROCESS_DEF, HW_LATCH_PROCESS_DEF,
+                           HW_FINAL_PROCESS_DEF)) {
       instrMap[block.defI()] = 1;
     }
   }
@@ -86,24 +88,28 @@ class AggressiveDeadCodeEliminationPass {
   void visitInstr(InstrRef instr) {
     markParentProc(instr);
     switch (*instr.getDialectOpcode()) {
-    case *HW_REGISTER_INSTR:
-    case *HW_INPUT_REGISTER_INSTR:
-    case *HW_OUTPUT_REGISTER_INSTR:
-    case *HW_INOUT_REGISTER_INSTR:
-    case *HW_REF_REGISTER_INSTR: {
+    case *HW_REGISTER_DEF:
+    case *HW_INPUT_REGISTER_DEF:
+    case *HW_OUTPUT_REGISTER_DEF:
+    case *HW_INOUT_REGISTER_DEF:
+    case *HW_REF_REGISTER_DEF: {
       visitRegister(instr.as<RegisterIRef>());
       break;
     }
 
     case *OP_IF: {
+      if (instrMap[instr])
+        break;
       auto asIf = instr.as<IfInstrRef>();
-      if (!instrMap[instr])
-        visitHWValue(asIf.getCondValue()->as<WireRef>());
+      // if (!instrMap[instr])
+      visitHWValue(asIf.getCondValue()->as<WireRef>());
       InstrRef yieldInstrT = asIf.getInnerYieldTrue();
       InstrRef yieldInstrF = asIf.getInnerYieldFalse();
       for (uint i = 0; i < asIf.getNumYieldValues(); i++) {
-        if (!wireMap[asIf.getYieldValue(i)->as<WireRef>()])
-          continue;
+        // if (!wireMap[asIf.getYieldValue(i)->as<WireRef>()])
+        //   continue;
+        wireMap[asIf.getYieldValue(i)->as<WireRef>()] = 1;
+
         if (yieldInstrT)
           visitHWValue(yieldInstrT.operand(i)->as<HWValue>());
         if (yieldInstrF)
@@ -226,7 +232,7 @@ class AggressiveDeadCodeEliminationPass {
       break;
     }
 
-    case *HW_TRIGGER_INSTR: {
+    case *HW_TRIGGER_DEF: {
       auto asTrigger = instr.as<TriggerIRef>();
       for (auto reg : asTrigger.others()) {
         auto iref = reg->as<RegisterRef>().iref();
@@ -249,6 +255,27 @@ class AggressiveDeadCodeEliminationPass {
       break;
     }
 
+    case *AIG_OUTPUT: {
+      worklist.emplace_back(
+          instr.other(0)->as<AIGObjRef>()->defUse.getSingleDef()->instr());
+      break;
+    }
+
+    case *AIG_INPUT: {
+      visitHWValue(instr.other(0)->as<HWValue>());
+      break;
+    }
+
+    case *AIG_GRAPH: {
+      if (instrMap[instr])
+        break;
+      auto asAIGObj = instr.def(0)->as<AIGObjRef>();
+      // AIG depends on all its inputs
+      for (auto use : asAIGObj->defUse.uses())
+        if (use.instr().isOpc(AIG_INPUT))
+          worklist.emplace_back(use.instr());
+    }
+
     default: {
       if (instrMap[instr])
         break;
@@ -265,8 +292,8 @@ class AggressiveDeadCodeEliminationPass {
   void initialWorklist(ModuleIRef module) {
     // initially, only i/os are live
     for (auto instr : module.block()) {
-      if (instr.isOpc(HW_INPUT_REGISTER_INSTR, HW_OUTPUT_REGISTER_INSTR,
-                      HW_INOUT_REGISTER_INSTR, HW_REF_REGISTER_INSTR)) {
+      if (instr.isOpc(HW_INPUT_REGISTER_DEF, HW_OUTPUT_REGISTER_DEF,
+                      HW_INOUT_REGISTER_DEF, HW_REF_REGISTER_DEF)) {
         worklist.emplace_back(instr);
         continue;
       }
@@ -290,11 +317,11 @@ class AggressiveDeadCodeEliminationPass {
       auto instr = ctx.getInstrs().resolve(obj);
 
       switch (*instr.getDialectOpcode()) {
-      case *HW_INIT_PROCESS_INSTR:
-      case *HW_COMB_PROCESS_INSTR:
-      case *HW_SEQ_PROCESS_INSTR:
-      case *HW_LATCH_PROCESS_INSTR:
-      case *HW_FINAL_PROCESS_INSTR: {
+      case *HW_INIT_PROCESS_DEF:
+      case *HW_COMB_PROCESS_DEF:
+      case *HW_SEQ_PROCESS_DEF:
+      case *HW_LATCH_PROCESS_DEF:
+      case *HW_FINAL_PROCESS_DEF: {
         blockDestroyMap[instr.as<ProcessIRef>().block()] = 1;
         break;
       }

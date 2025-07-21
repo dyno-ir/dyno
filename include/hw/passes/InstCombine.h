@@ -47,6 +47,10 @@ private:
     return true;
   }
 
+  void deleteMatchedInstr(InstrRef instr) {
+    currentMatched.emplace_back(instr);
+  }
+
   bool reduceBitWidth(InstrRef instr) {
     // todo: this only handles a leading bits known region. should be
     // generalized to arbitrary regions.
@@ -188,8 +192,7 @@ private:
     }
 
     instr.def(0).replace(FatDynObjRef<>{nullref});
-    TaggedIRef{instr}.get() = 1;
-
+    deleteMatchedInstr(instr);
     return true;
   }
 
@@ -237,8 +240,7 @@ private:
           // }
           if (defI.isOpc(opc) && asWire.hasSingleUse()) {
             stack.emplace_back(defI);
-            currentMatched.emplace_back(defI);
-            TaggedIRef{defI}.get() = 1;
+            deleteMatchedInstr(defI);
             change = true;
             continue;
           }
@@ -268,7 +270,7 @@ private:
       switch (*root.getDialectOpcode()) {
       case *OP_OR:
         if (constants[0].valueEqualsS(-1)) {
-          TaggedIRef{root}.get() = 1;
+          deleteMatchedInstr(root);
           oldDefW.replaceAllUsesWith(cbuild.ones(*oldDefW->numBits).get());
           return true;
         }
@@ -281,7 +283,7 @@ private:
         break;
       case *OP_AND:
         if (constants[0].valueEquals(0)) {
-          TaggedIRef{root}.get() = 1;
+          deleteMatchedInstr(root);
           oldDefW.replaceAllUsesWith(cbuild.zero(*oldDefW->numBits).get());
           return true;
         }
@@ -294,21 +296,23 @@ private:
       }
     }
 
-    TaggedIRef{root}.get() = 1;
     if (operands.size() + constants.size() <= 1) {
       if (operands.size() + constants.size() == 0) {
         switch (*root.getDialectOpcode()) {
         case *OP_XOR:
         case *OP_ADD:
         case *OP_OR: {
+          deleteMatchedInstr(root);
           oldDefW.replaceAllUsesWith(cbuild.zero(*oldDefW->numBits).get());
           return true;
         }
         case *OP_MUL: {
+          deleteMatchedInstr(root);
           oldDefW.replaceAllUsesWith(cbuild.one(*oldDefW->numBits).get());
           return true;
         }
         case *OP_AND: {
+          deleteMatchedInstr(root);
           oldDefW.replaceAllUsesWith(cbuild.ones(*oldDefW->numBits).get());
           return true;
         }
@@ -323,6 +327,7 @@ private:
       case *OP_OR:
       case *OP_XOR:
       case *OP_MUL:
+        deleteMatchedInstr(root);
         if (constants.size() == 1)
           oldDefW.replaceAllUsesWith(constants[0]);
         else
@@ -333,9 +338,9 @@ private:
     }
 
     if (!change) {
-      TaggedIRef{root}.get() = 0;
       return false;
     }
+    deleteMatchedInstr(root);
     HWInstrBuilder build{ctx};
     build.setInsertPoint(ctx.getCFG()[root]);
 
@@ -357,9 +362,6 @@ private:
     if (!constants.empty())
       ibuild.addRef(constants[0]);
 
-    // todo: delete non-root
-    for (auto op : root)
-      op.replace(FatDynObjRef<>{nullref});
     return true;
   }
 
@@ -424,8 +426,11 @@ private:
   }
 
   void oldInstrHook(InstrRef old, ArrayRef<InstrRef> newInstrs) {
+    TaggedIRef{old}.get() = 1;
     for (auto newInstr : newInstrs)
       ctx.sourceLocInfo.copyDebugInfo(old, newInstr);
+    for (auto op : old)
+      op.replace(FatDynObjRef<>{nullref});
   }
 
   void replacedUseHook(OperandRef replaced) {
@@ -454,7 +459,6 @@ private:
 
       auto newInstrs = ArrayRef<InstrRef>{worklist.begin() + lastWorklistSize,
                                           worklist.end()};
-      oldInstrHook(instr, newInstrs);
       for (auto instr : currentMatched) {
         oldInstrHook(instr, newInstrs);
       }

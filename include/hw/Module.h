@@ -62,11 +62,11 @@ public:
     // todo: decent impl via block defrag
     while (it != block().end()) {
       switch (it.instr().getDialectOpcode().raw()) {
-      case HW_INPUT_REGISTER_INSTR.raw():
-      case HW_OUTPUT_REGISTER_INSTR.raw():
-      case HW_INOUT_REGISTER_INSTR.raw():
-      case HW_REF_REGISTER_INSTR.raw():
-      case HW_REGISTER_INSTR.raw():
+      case HW_INPUT_REGISTER_DEF.raw():
+      case HW_OUTPUT_REGISTER_DEF.raw():
+      case HW_INOUT_REGISTER_DEF.raw():
+      case HW_REF_REGISTER_DEF.raw():
+      case HW_REGISTER_DEF.raw():
         it++;
         continue;
       default:
@@ -81,10 +81,10 @@ public:
     auto it = block().begin();
     while (it != block().end()) {
       switch (it.instr().getDialectOpcode().raw()) {
-      case HW_INPUT_REGISTER_INSTR.raw():
-      case HW_OUTPUT_REGISTER_INSTR.raw():
-      case HW_INOUT_REGISTER_INSTR.raw():
-      case HW_REF_REGISTER_INSTR.raw():
+      case HW_INPUT_REGISTER_DEF.raw():
+      case HW_OUTPUT_REGISTER_DEF.raw():
+      case HW_INOUT_REGISTER_DEF.raw():
+      case HW_REF_REGISTER_DEF.raw():
         it++;
         continue;
       default:
@@ -110,7 +110,7 @@ public:
   auto comb_procs() {
     return Range{regs_end(), block().end()}
         .filter(
-            [](InstrRef instr) { return instr.isOpc(HW_COMB_PROCESS_INSTR); })
+            [](InstrRef instr) { return instr.isOpc(HW_COMB_PROCESS_DEF); })
         .as<ProcessIRef>();
   }
 

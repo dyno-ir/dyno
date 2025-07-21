@@ -1,10 +1,13 @@
 #pragma once
 
 #include "dyno/Constant.h"
+#include "dyno/Obj.h"
+#include "hw/AutoDebugInfo.h"
 #include "hw/HWAbstraction.h"
 #include "hw/HWContext.h"
 #include "hw/HWInstr.h"
 #include "hw/HWValue.h"
+#include "hw/IDs.h"
 #include "hw/analysis/DelayAnalysis.h"
 #include "op/IDs.h"
 #include "support/Bits.h"
@@ -23,9 +26,12 @@ class LowerOpsPass {
   SmallVec<InstrRef, 32> worklist;
   ObjMapVec<Instr, bool> destroyMap;
 
+  AutoCopyDebugInfoStack autoDebugInfo;
+
 public:
   struct Config {
     bool lowerMultiInputAdd = true;
+    bool lowerAddCompress = true;
     bool lowerSimpleAdd = true;
     bool lowerSub = true;
     bool lowerMultiInputBitwise = true;
@@ -151,6 +157,37 @@ private:
 
     add.def(0).replace(FatDynObjRef<>{nullref});
     destroyMap[add] = 1;
+  }
+
+  void lowerAddCompress(InstrRef instr) {
+    assert(instr.getNumOperands() == 5 && "only 3 input compress implemented");
+
+    build.setInsertPoint(instr);
+
+    auto valA = instr.other(0)->as<HWValue>();
+    auto valB = instr.other(1)->as<HWValue>();
+    auto valC = instr.other(2)->as<HWValue>();
+
+    auto ibXOR = build.buildInstrRaw(OP_XOR, 4);
+    ibXOR.addRef(instr.def(0)->as<WireRef>());
+    ibXOR.other();
+    ibXOR.addRef(valA);
+    ibXOR.addRef(valB);
+    ibXOR.addRef(valC);
+
+    auto temp =
+        build.buildOr(build.buildAnd(valA, valB), build.buildAnd(valA, valC),
+                      build.buildAnd(valB, valC));
+
+    build.buildInstrRaw(OP_SLL, 3)
+        .addRef(instr.def(1)->as<WireRef>())
+        .other()
+        .addRef(temp)
+        .addRef(cbuild.oneLike(temp).get());
+
+    instr.def(0).replace(FatDynObjRef<>{nullref});
+    instr.def(1).replace(FatDynObjRef<>{nullref});
+    destroyMap[instr] = 1;
   }
 
   struct AddPair {
@@ -365,6 +402,8 @@ private:
         report_fatal_error("shift amount too large");
       auto val = shiftByConstant(instr.getDialectOpcode(), value, *shamtC);
       instr.def(0)->as<WireRef>().replaceAllUsesWith(val);
+      destroyMap[instr] = 1;
+      return;
     }
 
     auto valueBits = *value.getNumBits();
@@ -412,8 +451,9 @@ private:
           .other()
           .addRef(tmp);
     } else {
-      ibOR.addRef(instr.def(0)->as<WireRef>()).other();
+      ibOR.addRef(instr.def(0)->as<WireRef>());
     }
+    ibOR.other();
     instr.def(0).replace(FatDynObjRef<>{nullref});
     build.setInsertPoint(ibOR.instr());
 
@@ -437,6 +477,8 @@ private:
   }
 
   void runOnInstr(InstrRef instr) {
+    auto token = autoDebugInfo.addWithToken(instr);
+
     switch (*instr.getDialectOpcode()) {
     case *OP_ADD:
       if (instr.getNumOthers() >= 3) {
@@ -446,6 +488,10 @@ private:
         if (config.lowerSimpleAdd)
           lowerAdd(instr);
       }
+      break;
+
+    case *HW_ADD_COMPRESS:
+      lowerAddCompress(instr);
       break;
 
     case *OP_SUB:
@@ -488,6 +534,9 @@ public:
       if (instr.isOpc(OP_ADD))
         return config.lowerMultiInputAdd || config.lowerSimpleAdd;
 
+      if (instr.isOpc(HW_ADD_COMPRESS))
+        return config.lowerAddCompress;
+
       if (instr.isOpc(OP_SUB))
         return config.lowerSub;
 
@@ -507,6 +556,7 @@ public:
       return false;
     };
 
+    destroyMap.clear();
     destroyMap.resize(ctx.getInstrs().numIDs());
     ctx.getInstrs().createHooks.emplace_back([&](InstrRef ref) {
       if (isLoweringInstr(ref))
@@ -532,7 +582,7 @@ public:
     }
   }
   explicit LowerOpsPass(HWContext &ctx)
-      : ctx(ctx), build(ctx), cbuild(ctx.getConstants()) {}
+      : ctx(ctx), build(ctx), cbuild(ctx.getConstants()), autoDebugInfo(ctx) {}
 };
 
 }; // namespace dyno

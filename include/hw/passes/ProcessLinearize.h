@@ -51,9 +51,9 @@ class ProcessLinearizePass {
   bool ignoredKind(ProcessIRef iref) {
     switch (config.kind) {
     case Config::COMB:
-      return !iref.isOpc(HW_COMB_PROCESS_INSTR);
+      return !iref.isOpc(HW_COMB_PROCESS_DEF);
     case Config::INIT:
-      return !iref.isOpc(HW_SEQ_PROCESS_INSTR);
+      return !iref.isOpc(HW_SEQ_PROCESS_DEF);
     }
     dyno_unreachable("invalid kind");
   };
@@ -70,12 +70,12 @@ public:
 
     for (auto reg : module.regs()) {
       bool regIsAnyInput =
-          reg.isOpc(HW_INPUT_REGISTER_INSTR, HW_INOUT_REGISTER_INSTR,
-                    HW_REF_REGISTER_INSTR);
+          reg.isOpc(HW_INPUT_REGISTER_DEF, HW_INOUT_REGISTER_DEF,
+                    HW_REF_REGISTER_DEF);
 
       bool regIsAnyOutput =
-          reg.isOpc(HW_OUTPUT_REGISTER_INSTR, HW_INOUT_REGISTER_INSTR,
-                    HW_REF_REGISTER_INSTR);
+          reg.isOpc(HW_OUTPUT_REGISTER_DEF, HW_INOUT_REGISTER_DEF,
+                    HW_REF_REGISTER_DEF);
 
       RegisterRegions writeRegions{*reg.getNumBits()};
 
@@ -96,11 +96,11 @@ public:
         case HW_INSTANCE.raw(): {
           auto other = instr.other(0)->as<ModuleRef>();
           bool isInputFromInst = other->ports[access.getNum() - 1].portType.is(
-              HW_INOUT_REGISTER_INSTR, HW_OUTPUT_REGISTER_INSTR,
-              HW_REF_REGISTER_INSTR);
+              HW_INOUT_REGISTER_DEF, HW_OUTPUT_REGISTER_DEF,
+              HW_REF_REGISTER_DEF);
           bool isOutputToInst = other->ports[access.getNum() - 1].portType.is(
-              HW_INOUT_REGISTER_INSTR, HW_INPUT_REGISTER_INSTR,
-              HW_REF_REGISTER_INSTR);
+              HW_INOUT_REGISTER_DEF, HW_INPUT_REGISTER_DEF,
+              HW_REF_REGISTER_DEF);
 
           regIsAnyInput |= isInputFromInst;
           regIsAnyOutput |= isOutputToInst;
@@ -113,7 +113,7 @@ public:
         case HW_STORE_DEFER.raw():
           break;
 
-        case HW_TRIGGER_INSTR.raw():
+        case HW_TRIGGER_DEF.raw():
           break;
 
         default:

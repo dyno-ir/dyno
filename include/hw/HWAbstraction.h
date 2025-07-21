@@ -581,7 +581,7 @@ public:
 
   RegisterRef buildRegister(Optional<uint32_t> bitSize = nullopt) {
     auto regRef = RegisterRef{ctx.getRegs().create(bitSize)};
-    auto regInstr = InstrRef{ctx.getInstrs().create(1, HW_REGISTER_INSTR)};
+    auto regInstr = InstrRef{ctx.getInstrs().create(1, HW_REGISTER_DEF)};
     InstrBuilder{regInstr}.addRef(regRef);
     insertInstr(regInstr);
     return regRef;
@@ -598,23 +598,23 @@ public:
   }
 
   RegisterRef buildInputPort(ModuleIRef module) {
-    return buildPort(module, HW_INPUT_REGISTER_INSTR);
+    return buildPort(module, HW_INPUT_REGISTER_DEF);
   }
   RegisterRef buildOutputPort(ModuleIRef module) {
-    return buildPort(module, HW_OUTPUT_REGISTER_INSTR);
+    return buildPort(module, HW_OUTPUT_REGISTER_DEF);
   }
   RegisterRef buildInoutPort(ModuleIRef module) {
-    return buildPort(module, HW_INOUT_REGISTER_INSTR);
+    return buildPort(module, HW_INOUT_REGISTER_DEF);
   }
   RegisterRef buildRefPort(ModuleIRef module) {
-    return buildPort(module, HW_REF_REGISTER_INSTR);
+    return buildPort(module, HW_REF_REGISTER_DEF);
   }
 
-  ProcessIRef buildProcess(HWOpcode type = HW_COMB_PROCESS_INSTR,
+  ProcessIRef buildProcess(HWOpcode type = HW_COMB_PROCESS_DEF,
                            TriggerIRef trigger = nullref) {
-    assert(type == HW_INIT_PROCESS_INSTR || type == HW_COMB_PROCESS_INSTR ||
-           type == HW_SEQ_PROCESS_INSTR || type == HW_FINAL_PROCESS_INSTR ||
-           type == HW_LATCH_PROCESS_INSTR);
+    assert(type == HW_INIT_PROCESS_DEF || type == HW_COMB_PROCESS_DEF ||
+           type == HW_SEQ_PROCESS_DEF || type == HW_FINAL_PROCESS_DEF ||
+           type == HW_LATCH_PROCESS_DEF);
     auto procRef = ctx.getProcs().create();
     auto procInstRef =
         ProcessIRef{ctx.getInstrs().create(2 + (trigger != nullref), type)};
@@ -631,7 +631,7 @@ public:
   // HWInstrRef buildEventDelay(RegisterRef dReg, RegisterRef qReg,
   //                            const SensList &sens) {
   //   auto instrRef = ProcessIRef{
-  //       ctx.getInstrs().create(3 + sens.signals.size(), HW_TRIGGER_INSTR)};
+  //       ctx.getInstrs().create(3 + sens.signals.size(), HW_TRIGGER_DEF)};
   //   insertInstr(instrRef);
   //   InstrBuilder build{instrRef};
   //   build.other().addRef(dReg).addRef(qReg).addRef(
@@ -649,7 +649,7 @@ public:
       return nullref;
 
     auto instrRef = TriggerIRef{
-        ctx.getInstrs().create(1 + list.signals.size(), HW_TRIGGER_INSTR)};
+        ctx.getInstrs().create(1 + list.signals.size(), HW_TRIGGER_DEF)};
     insertInstr(instrRef);
     TriggerRef trigRef = TriggerRef{ctx.getTriggers().create()};
 
@@ -986,7 +986,7 @@ public:
 
   auto buildFunc() {
     auto funcRef = FunctionRef{ctx.getFuncs().create()};
-    auto funcInstr = FunctionIRef{ctx.getInstrs().create(2, OP_FUNC_INSTR)};
+    auto funcInstr = FunctionIRef{ctx.getInstrs().create(2, OP_FUNCTION_DEF)};
     insertInstr(funcInstr);
 
     InstrBuilder{funcInstr}.addRef(funcRef).addRef(ctx.createBlock());

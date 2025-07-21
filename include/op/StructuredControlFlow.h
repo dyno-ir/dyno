@@ -70,7 +70,7 @@ class SwitchInstrRef : public InstrRef {
 public:
   using InstrRef::InstrRef;
 
-  auto block() { return this->def(0)->as<BlockRef>(); }
+  BlockRef block() { return this->def(0)->as<BlockRef>(); }
   auto yieldValues() { return Range{this->def_begin() + 1, this->def_end()}; }
   auto cond() { return this->other(0); }
 

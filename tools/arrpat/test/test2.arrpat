@@ -8,9 +8,48 @@ macro constant_like $val, $other -> $rv [{
   FatDynObjRef<> constant = cbuild.val($val).resize(*(*$other.begin())->as<WireRef>().getNumBits(), false).get();
   $rv = constant;
 }]
+macro constant_like_anyorder_obj $val, $other -> $rv [{
+  FatDynObjRef<> constant = cbuild.val($val).resize(*(*$other.begin()).as<WireRef>().getNumBits(), false).get();
+  $rv = constant;
+}]
 macro wire_like $other -> $rv [{
   FatDynObjRef<> w = ctx.getWires().create((*$other.begin())->as<WireRef>().getNumBits()); $rv = w;
 }]
+macro wire_like2 $other -> $rv [{
+  FatDynObjRef<> w2 = ctx.getWires().create((*$other.begin())->as<WireRef>().getNumBits()); $rv = w2;
+}]
+macro const_like_reg_len $op, $reg [{
+  auto asConstant = (*$op.begin())->dyn_as<ConstantRef>();
+  if (!asConstant) goto $fail;
+  if (!asConstant.valueEquals(*(*$reg.begin())->as<RegisterRef>().getNumBits()))
+    goto $fail;
+}]
+macro const_like_value_len $op, $wire [{
+  auto asConstant = (*$op.begin())->dyn_as<ConstantRef>();
+  if (!asConstant) goto $fail;
+  if (!asConstant.valueEquals(*(*$wire.begin())->as<HWValue>().getNumBits()))
+    goto $fail;
+}]
+macro const_len_of $obj -> $rv [{
+  FatDynObjRef<> c = ConstantRef::fromU32(*(*$obj.begin())->as<HWValue>().getNumBits());
+  $rv = c;
+}]
+
+macro const_len_of_minus1 $obj -> $rv [{
+  FatDynObjRef<> c = ConstantRef::fromU32(*(*$obj.begin())->as<HWValue>().getNumBits() - 1);
+  $rv = c;
+}]
+
+match {
+  HW_MUX $out, #1'b1, $a, $b
+}
+replace $out -> $a
+
+match {
+  HW_MUX $out, #1'b0, $a, $b
+}
+replace $out -> $b
+
 
 // # ADD/SUB rules
 // sub to add negated
@@ -41,13 +80,46 @@ replace {
   OP_ADD $out, $lhs, const_negate($rhs)
 }
 
-macro const_like_reg_len $op, $reg [{
-  auto asConstant = (*$op.begin())->dyn_as<ConstantRef>();
-  if (!asConstant) goto $fail;
-  if (!asConstant.valueEquals(*(*$reg.begin())->as<RegisterRef>().getNumBits()))
-    goto $fail;
-}]
+// todo: more than two operands in first add
+match {
+  OP_ADD $temp, $negatedA, $negatedB
+  OP_NOT $temp2, $temp:HW_WIRE
+  OP_ADD $out, anyorder($temp2:HW_WIRE, $others...)
+}
+replace {
+  OP_NOT $a:wire_like($negatedA), $negatedA
+  OP_NOT $b:wire_like2($negatedB), $negatedB
+  OP_ADD $out, $a, $b, $others..., constant_like(#1'b1, $negatedA)
+}
 
+// Sink add thru MUX
+// todo: reverse matching for certain regions to allow matching MUX the other way around
+match {
+  OP_ADD $sum0, anyorder($x, $gated)
+  HW_MUX $mux_val, $disable, $x:HW_WIRE, $sum0:HW_WIRE
+  OP_ADD $out, anyorder($mux_val:HW_WIRE, $others...)
+}
+replace {
+  HW_MUX $gated_mux:wire_like($x), $disable, constant_like(#1'b0, $sum0), $gated
+  OP_ADD $out, $x, $gated_mux, $others...
+}
+
+
+
+// patterns like this would be dope
+// match {
+//   OP_AND $first_sum, $first_args...
+//   OP_ZEXT $first_sum_ext, $first_sum:HW_WIRE
+//   OP_AND $sum, anyorder($first_sum_ext:HW_WIRE, $second_args...)
+// }
+// replace {
+//   (OP_ZEXT $ext_first_args:wire_like($first_args), $first_args)...
+//   OP_AND $sum, $ext_first_args..., $second_args...
+// }
+
+
+
+// # LOAD/STORE opt
 // load with superfluous indexing
 match {
   HW_LOAD $out, $reg, #'0, $len:const_like_reg_len($reg)
@@ -71,6 +143,9 @@ replace {
   HW_STORE_DEFER defs=0 $val, $reg, $trig
 }
 
+
+
+// CONCAT OPT
 // concat with zero length constant
 match {
   HW_CONCAT $out, $pre..., #0', $post...
@@ -85,15 +160,21 @@ match {
 replace $out -> $x
 
 
-macro const_len_of $obj -> $rv [{
-  FatDynObjRef<> c = ConstantRef::fromU32(*(*$obj.begin())->as<HWValue>().getNumBits());
-  $rv = c;
-}]
 
-macro const_len_of_minus1 $obj -> $rv [{
-  FatDynObjRef<> c = ConstantRef::fromU32(*(*$obj.begin())->as<HWValue>().getNumBits() - 1);
-  $rv = c;
-}]
+// Splice Opt
+match {
+  HW_SPLICE $out, $in, #32'b0, $len:const_like_value_len($in)
+}
+replace $out -> $in
+
+match {
+  HW_SPLICE $out, $in, #32'b0, $other_len
+}
+replace {
+  OP_TRUNC $out, $in
+}
+// todo: C++ patterns for defragmenting splices
+
 
 // we need check duplicates of these. dyno dsl pattern matching should fix.
 macro chk_const_diff_lens $self, $lhs, $rhs [{
@@ -108,6 +189,7 @@ macro chk_const_len_of_minus1 $self, $obj [{
   if ((*$self.begin())->as<FatDynObjRef<>>() != c)
     goto $fail;
 }]
+
 
 
 // trunc(ext()) patterns
@@ -180,7 +262,7 @@ replace {
 
 
 
-
+// CONCAT -> sext/zext
 match {
   HW_CONCAT $out, #'0, $x
 }
@@ -191,11 +273,72 @@ replace {
 match {
   HW_SPLICE $sign, $x, $splice_offs:chk_const_len_of_minus1($x), #32'd1
   HW_REPEAT $temp, $sign:HW_WIRE, $repeat_cnt:chk_const_diff_lens($out, $x)
-  HW_CONCAT $out, $temp, $x
+  HW_CONCAT $out, $temp:HW_WIRE, $x
 }
 replace {
   OP_SEXT $out, $x
 }
+
+
+
+// ICMP Opt
+match {
+  OP_ICMP_EQ $out, $in, #1'b0
+}
+replace {
+  OP_NOT $out, $in
+}
+
+match {
+  OP_ICMP_EQ $out, $in, #1'b1
+}
+replace $out -> $in
+
+match {
+  OP_ICMP_NE $out, $in, #1'b1
+}
+replace {
+  OP_NOT $out, $in
+}
+
+match {
+  OP_ICMP_NE $out, $in, #1'b0
+}
+replace $out -> $in
+
+
+
+// NOT Opt
+match {
+  OP_NOT $inv, $x
+  OP_NOT $id, $inv:HW_WIRE
+}
+replace $id -> $x
+
+match {
+  OP_SUB $inv, #'0, $x
+  OP_SUB $id, #'0, $inv:HW_WIRE
+}
+replace $id -> $x
+
+
+// reverse negated cond IF
+// impossible without reverse (can't match last)
+// match {
+//   OP_IF defs=2 $true_bl:CORE_BLOCK, $false_bl:CORE_BLOCK, $inputs..., $cond:HW_WIRE
+// }
+
+
+
+// Mux Opt
+match {
+  OP_NOT $cond, $cond_inv
+  HW_MUX $out, $cond:HW_WIRE, $lhs, $rhs
+}
+replace {
+  HW_MUX $out, $cond_inv, $rhs, $lhs
+}
+
 
 
 match {

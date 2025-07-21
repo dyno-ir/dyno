@@ -39,9 +39,9 @@ public:
   BlockRef block() const { return def(1)->as<BlockRef>(); }
 
   static bool is_impl(const FatObjRef<Instr> &instr) {
-    return InstrRef{instr}.isOpc(HW_COMB_PROCESS_INSTR, HW_INIT_PROCESS_INSTR,
-                                 HW_SEQ_PROCESS_INSTR, HW_FINAL_PROCESS_INSTR,
-                                 HW_LATCH_PROCESS_INSTR);
+    return InstrRef{instr}.isOpc(HW_COMB_PROCESS_DEF, HW_INIT_PROCESS_DEF,
+                                 HW_SEQ_PROCESS_DEF, HW_FINAL_PROCESS_DEF,
+                                 HW_LATCH_PROCESS_DEF);
   }
   static bool is_impl(const FatDynObjRef<> &ref) {
     if (auto asInstr = ref.dyn_as<InstrRef>())

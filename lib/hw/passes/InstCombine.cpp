@@ -33,9 +33,9 @@ static InstrRef getDefInstr(InstrRef::iterator use) {
 
 static void deleteF(SmallVecImpl<InstrRef> &matched, HWContext &ctx,
                     InstrRef ref) {
-  for (auto op : ref)
-    op.replace(FatDynObjRef<>{nullref});
-  InstCombinePass::TaggedIRef{ref}.get() = 1;
+  //for (auto op : ref)
+  //  op.replace(FatDynObjRef<>{nullref});
+  //InstCombinePass::TaggedIRef{ref}.get() = 1;
   matched.emplace_back(ref);
 }
 

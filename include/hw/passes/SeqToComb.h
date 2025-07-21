@@ -20,7 +20,7 @@ public:
   using TaggedRegRef = CustomInstrRef<RegisterIRef, uint64_t>;
 
   void runOnProc(ModuleIRef mod, ProcessIRef proc) {
-    if (!proc.isOpc(HW_SEQ_PROCESS_INSTR))
+    if (!proc.isOpc(HW_SEQ_PROCESS_DEF))
       return;
 
     auto trigger = proc.other(0)->as<TriggerRef>().iref();
@@ -95,8 +95,8 @@ public:
 
     SmallVec<ProcessIRef, 32> destroyList;
     for (auto proc : module.procs()) {
-      if (proc.isOpc(HW_SEQ_PROCESS_INSTR)) {
-        auto newProc = ctx.getInstrs().create(2, HW_COMB_PROCESS_INSTR);
+      if (proc.isOpc(HW_SEQ_PROCESS_DEF)) {
+        auto newProc = ctx.getInstrs().create(2, HW_COMB_PROCESS_DEF);
         InstrBuilder ibuild{newProc};
         ibuild.addRef(proc.operand(0)->fat());
         proc.operand(0).replace(FatDynObjRef<>{nullref});

@@ -54,7 +54,7 @@ public:
   BlockRef getBlock() { return this->def(1)->as<BlockRef>(); }
 
   static bool is_impl(const FatObjRef<Instr> &ref) {
-    return InstrRef{ref}.isOpc(OP_FUNC_INSTR);
+    return InstrRef{ref}.isOpc(OP_FUNCTION_DEF);
   }
   static bool is_impl(const FatDynObjRef<> &ref) {
     if (auto asInstr = ref.dyn_as<InstrRef>())

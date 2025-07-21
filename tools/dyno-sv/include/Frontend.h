@@ -351,16 +351,16 @@ public:
         HWOpcode ptype;
         switch (ps->direction) {
         case slang::ast::ArgumentDirection::In:
-          ptype = HW_INPUT_REGISTER_INSTR;
+          ptype = HW_INPUT_REGISTER_DEF;
           break;
         case slang::ast::ArgumentDirection::Out:
-          ptype = HW_OUTPUT_REGISTER_INSTR;
+          ptype = HW_OUTPUT_REGISTER_DEF;
           break;
         case slang::ast::ArgumentDirection::InOut:
-          ptype = HW_INOUT_REGISTER_INSTR;
+          ptype = HW_INOUT_REGISTER_DEF;
           break;
         case slang::ast::ArgumentDirection::Ref:
-          ptype = HW_REF_REGISTER_INSTR;
+          ptype = HW_REF_REGISTER_DEF;
           break;
         }
         auto reg = build.buildPort(module, ptype);
@@ -377,7 +377,7 @@ public:
         std::string ifName{asIFS->name};
 
         for (auto ifVar : ifVars) {
-          auto reg = build.buildPort(module, HW_REF_REGISTER_INSTR);
+          auto reg = build.buildPort(module, HW_REF_REGISTER_DEF);
           reg->numBits = ifVar->getType().getBitstreamWidth();
           ctx.regNameInfo.addName(reg, (ifName + std::string{ifVar->name}).c_str());
         }
@@ -388,7 +388,7 @@ public:
     if (node.isInterface()) {
       std::string ifName{node.name};
       for (auto ifPort : extractIFModuleVars(body)) {
-        auto reg = build.buildPort(module, HW_REF_REGISTER_INSTR);
+        auto reg = build.buildPort(module, HW_REF_REGISTER_DEF);
         reg->numBits = ifPort->getType().getBitstreamWidth();
         ctx.regNameInfo.addName(reg, (ifName + std::string{ifPort->name}).c_str());
       }
@@ -413,7 +413,7 @@ public:
         if (auto *asPS = port->as_if<slang::ast::PortSymbol>()) {
           vars.insert(asPS->internalSymbol, fDynoMod->ports[i].reg);
           if (auto *init = asPS->getInitializer()) {
-            auto proc = build.buildProcess(HW_INIT_PROCESS_INSTR);
+            auto proc = build.buildProcess(HW_INIT_PROCESS_DEF);
             build.pushInsertPoint(proc.block().end());
             build.buildStore(fDynoMod->ports[i].reg,
                              handle_expr(*init)->proGetValue(build));
@@ -495,7 +495,7 @@ public:
         auto reg = makeOrFindReg(asVar);
 
         if (auto *init = asVar.getInitializer()) {
-          auto proc = build.buildProcess(HW_INIT_PROCESS_INSTR);
+          auto proc = build.buildProcess(HW_INIT_PROCESS_DEF);
           build.pushInsertPoint(proc.block().begin());
           build.buildStore(reg, handle_expr(*init)->proGetValue(build));
           build.popInsertPoint();
@@ -507,7 +507,7 @@ public:
 
         auto reg = makeOrFindReg(asNet);
         if (auto *init = asNet.getInitializer()) {
-          auto proc = build.buildProcess(HW_COMB_PROCESS_INSTR);
+          auto proc = build.buildProcess(HW_COMB_PROCESS_DEF);
           build.pushInsertPoint(proc.block().begin());
           build.buildStore(reg, handle_expr(*init)->proGetValue(build));
           build.popInsertPoint();
@@ -703,11 +703,11 @@ public:
 
       sens.signals.emplace_back(
           std::make_pair(it.val().as<RegisterRef>(), mode));
+
       break;
     }
     case slang::ast::TimingControlKind::EventList: {
       auto &asEvtList = timing.as<slang::ast::EventListControl>();
-      SensList sens;
       for (auto sub : asEvtList.events) {
         handle_timing(*sub, sens);
       }
@@ -734,10 +734,10 @@ public:
     HWOpcode opc;
     switch (block.procedureKind) {
     case slang::ast::ProceduralBlockKind::Initial:
-      opc = HW_INIT_PROCESS_INSTR;
+      opc = HW_INIT_PROCESS_DEF;
       break;
     case slang::ast::ProceduralBlockKind::Final:
-      opc = HW_FINAL_PROCESS_INSTR;
+      opc = HW_FINAL_PROCESS_DEF;
       break;
     case slang::ast::ProceduralBlockKind::Always: {
       bool seq =
@@ -745,17 +745,17 @@ public:
             return pair.second == SensMode::NEGEDGE ||
                    pair.second == SensMode::POSEDGE;
           });
-      opc = seq ? HW_SEQ_PROCESS_INSTR : HW_COMB_PROCESS_INSTR;
+      opc = seq ? HW_SEQ_PROCESS_DEF : HW_COMB_PROCESS_DEF;
       break;
     }
     case slang::ast::ProceduralBlockKind::AlwaysComb:
-      opc = HW_COMB_PROCESS_INSTR;
+      opc = HW_COMB_PROCESS_DEF;
       break;
     case slang::ast::ProceduralBlockKind::AlwaysLatch:
-      opc = HW_LATCH_PROCESS_INSTR;
+      opc = HW_LATCH_PROCESS_DEF;
       break;
     case slang::ast::ProceduralBlockKind::AlwaysFF:
-      opc = HW_SEQ_PROCESS_INSTR;
+      opc = HW_SEQ_PROCESS_DEF;
       break;
     }
 
@@ -956,7 +956,7 @@ public:
           labels[idx] = handle_expr(*expr)->proGetValue(build);
 
         build.pushInsertPoint(swInstr.block().end());
-        auto caseInstr = build.buildCase(labels);
+        auto caseInstr = build.buildCase(labels, opc);
         build.popInsertPoint();
 
         build.pushInsertPoint(caseInstr.block().end());

@@ -122,11 +122,11 @@ public:
   TriggerRef oref() { return def(0)->as<TriggerRef>(); }
 
   static bool is_impl(FatObjRef<Instr> ref) {
-    return InstrRef{ref}.isOpc(HW_TRIGGER_INSTR);
+    return InstrRef{ref}.isOpc(HW_TRIGGER_DEF);
   }
   static bool is_impl(FatDynObjRef<> ref) {
     if (auto iref = ref.dyn_as<InstrRef>())
-      return iref.isOpc(HW_TRIGGER_INSTR);
+      return iref.isOpc(HW_TRIGGER_DEF);
     return false;
   }
 };

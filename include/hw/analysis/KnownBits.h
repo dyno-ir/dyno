@@ -46,8 +46,7 @@ class KnownBitsAnalysis {
 
   void pushNextOrReturn(Frame &frame, InstrRef instr) {
     if (frame.idx != instr.getNumOthers()) {
-      stack.emplace_back(instr.other(frame.idx)->as<HWValue>(), 0);
-      frame.idx++;
+      stack.emplace_back(instr.other(frame.idx++)->as<HWValue>(), 0);
     } else {
       retVal = stack.back().acc;
       stack.pop_back();
@@ -90,8 +89,8 @@ public:
 
       case *OP_NOT: {
         if (frame.idx == 0) {
-          stack.emplace_back(instr.other(0)->as<HWValue>(), 0);
           frame.idx++;
+          stack.emplace_back(instr.other(0)->as<HWValue>(), 0);
         } else {
           BigInt::notOp4S(retVal.val, retVal.val);
           stack.pop_back();
@@ -101,8 +100,8 @@ public:
 
       case *OP_TRUNC: {
         if (frame.idx == 0) {
-          stack.emplace_back(instr.other(0)->as<HWValue>(), 0);
           frame.idx++;
+          stack.emplace_back(instr.other(0)->as<HWValue>(), 0);
         } else {
           BigInt::resizeOp4S(retVal.val, retVal.val, *wire.getNumBits());
           stack.pop_back();
@@ -112,8 +111,8 @@ public:
       case *OP_SEXT:
       case *OP_ZEXT: {
         if (frame.idx == 0) {
-          stack.emplace_back(instr.other(0)->as<HWValue>(), 0);
           frame.idx++;
+          stack.emplace_back(instr.other(0)->as<HWValue>(), 0);
         } else {
           uint delta = *wire.getNumBits() - retVal.val.getNumBits();
           PatBigInt lhs = instr.isOpc(OP_ZEXT)
