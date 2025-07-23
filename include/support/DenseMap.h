@@ -1,9 +1,12 @@
 #pragma once
+#include "support/Bits.h"
 #include "support/DenseMapInfo.h"
 #include "support/InlineStorage.h"
 #include "support/Ranges.h"
+#include "support/TemplateUtil.h"
 #include "support/Utility.h"
 #include <array>
+#include <bit>
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
@@ -60,11 +63,13 @@ public:
     size_type offset = 1;
     while (true) {
 
+#ifdef _DEBUG_
       if (assertNotExist)
         if (auto entryIndex = getBuckets()[bucketIndex].find(k);
             entryIndex != Bucket::entriesPerBucket) {
           dyno_unreachable("key exists");
         }
+#endif
 
       if (auto emptyIndex = getBuckets()[bucketIndex].findEmptyOrTombstone();
           emptyIndex != Bucket::entriesPerBucket) {
@@ -100,7 +105,8 @@ public:
   template <std::invocable<Bucket *, size_type> T>
   bool growIfOversized(T &&reinsertFunc) {
     auto max = cap * Bucket::entriesPerBucket;
-    if (sz > (max / 2) + (max / 4)) {
+    auto pct = (max / 2) + (max / 4) + (max / 8) + (max / 16) + (max / 32);
+    if (sz >= pct) {
       grow(reinsertFunc);
       return true;
     }
@@ -447,13 +453,66 @@ public:
 };
 
 template <typename K, typename size_type = uint32_t> struct DenseSetBucket {
-  static constexpr size_type entriesPerBucket = 8;
+#define SIMD_DENSE_MAP 1
+#if defined(__clang__) && SIMD_DENSE_MAP
+#ifdef __AVX512F__
+  static constexpr size_type simdWidth = 64;
+#elifdef __AVX__
+  static constexpr size_type simdWidth = 32;
+#else
+  static constexpr size_type simdWidth = 16;
+#endif
+  static constexpr size_type entriesPerBucket =
+      std::max(simdWidth / size_type(sizeof(K)), size_type(1));
+
+  static constexpr size_t vector_len =
+      std::min(std::max(simdWidth / size_type(sizeof(K)), size_type(1)),
+               entriesPerBucket);
+
   // buckets are searched linearly
   // keys are contiguous for SIMD compare
   // values are still here for better locality though
+  std::array<K, entriesPerBucket> keys alignas(vector_len * sizeof(K));
+
+  template <bool Inverse, typename... Args>
+  size_type findVec(size_type cur = ~0, Args... k) {
+    using key_unsigned = uint_of_size<sizeof(K)>::type;
+    typedef key_unsigned key_vec __attribute__((ext_vector_type(vector_len)));
+    typedef bool bool_vec __attribute__((ext_vector_type(vector_len)));
+    using mask_unsigned = uint_of_size<sizeof(bool_vec)>::type;
+    using key_vec_ptr = key_vec *;
+    key_vec_ptr keys_arr = reinterpret_cast<key_vec_ptr>(keys.data());
+
+    assert(entriesPerBucket % vector_len == 0);
+    assert(vector_len <= 64);
+    cur++;
+
+    for (size_t i = cur / vector_len; i < entriesPerBucket / vector_len; i++) {
+      bool_vec mask =
+          (__builtin_convertvector(
+               (keys_arr[i] == ((key_vec)std::bit_cast<key_unsigned>(k))),
+               bool_vec) |
+           ...);
+      if constexpr (Inverse)
+        mask = ~mask;
+      mask_unsigned uns = std::bit_cast<mask_unsigned>(mask);
+      uns &= bit_mask_zeros<mask_unsigned>(cur % vector_len);
+      if (uns != 0) [[likely]]
+        return __builtin_ctzl(uns);
+      cur = 0;
+    }
+    return entriesPerBucket;
+  }
+#else
+  static constexpr size_type entriesPerBucket = 1;
   std::array<K, entriesPerBucket> keys;
+#endif
 
   size_type getNextValid(size_type cur) {
+#if defined(__clang__) && SIMD_DENSE_MAP
+    return findVec<true>(cur, DenseMapInfo<K>::getEmptyKey(),
+                         DenseMapInfo<K>::getTombstoneKey());
+#else
     // todo: vectorize manually
     for (size_type i = cur + 1; i < keys.size(); i++) {
       if (!DenseMapInfo<K>::isEqual(keys[i], DenseMapInfo<K>::getEmptyKey()) &&
@@ -463,18 +522,27 @@ template <typename K, typename size_type = uint32_t> struct DenseSetBucket {
     }
     // invalid
     return entriesPerBucket;
+#endif
   }
 
   size_type find(const K &k, size_type cur = ~0) {
+#if defined(__clang__) && SIMD_DENSE_MAP
+    return findVec<false>(cur, k);
+#else
     // todo: vectorize manually
     for (size_type i = cur + 1; i < keys.size(); i++) {
       if (DenseMapInfo<K>::isEqual(keys[i], k))
         return i;
     }
     return entriesPerBucket;
+#endif
   }
 
   size_type findEmptyOrTombstone(size_type cur = ~0) {
+#if defined(__clang__) && SIMD_DENSE_MAP
+    return findVec<false>(cur, DenseMapInfo<K>::getEmptyKey(),
+                          DenseMapInfo<K>::getTombstoneKey());
+#else
     // todo: vectorize manually
     for (size_type i = cur + 1; i < keys.size(); i++) {
       if (DenseMapInfo<K>::isEqual(keys[i], DenseMapInfo<K>::getEmptyKey()) ||
@@ -482,6 +550,7 @@ template <typename K, typename size_type = uint32_t> struct DenseSetBucket {
         return i;
     }
     return entriesPerBucket;
+#endif
   }
 
   void setKeysEmpty() {

@@ -162,18 +162,19 @@ public:
           names.insert(std::make_pair(tok, reg));
         }
       }
-
-      SmallVec<HWValue, 4> outputBitArr;
-      InstrRef lastDefI = nullref;
-
-      auto makeConcat = [&]() {
-        auto newVal = build.buildConcat(outputBitArr);
-        assert(lastDefI.def(0)->as<WireRef>()->numBits == outputBitArr.size());
-        lastDefI.def(0)->as<WireRef>().replaceAllUsesWith(newVal);
-        outputBitArr.clear();
-      };
-
       if (line.starts_with(".outputs")) {
+        SmallVec<HWValue, 4> outputBitArr;
+        InstrRef lastDefI = nullref;
+
+        auto makeConcat = [&]() {
+          std::reverse(outputBitArr.begin(), outputBitArr.end());
+          auto newVal = build.buildConcat(outputBitArr);
+          assert(lastDefI.def(0)->as<WireRef>()->numBits ==
+                 outputBitArr.size());
+          lastDefI.def(0)->as<WireRef>().replaceAllUsesWith(newVal);
+          outputBitArr.clear();
+        };
+
         for (auto [i, tok] : split(line).drop_front().enumerate()) {
           auto def = *aigObj->aig.outputs[i]->defUse.getSingleDef();
           auto defI = def.instr();

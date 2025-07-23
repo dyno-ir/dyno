@@ -168,9 +168,10 @@ public:
   void printCtx(HWContext &ctx) {
     sourceLocInfo = &ctx.sourceLocInfo;
     regNames = &ctx.regNameInfo;
-    for (auto instr : ctx.getInstrs()) {
-      if (InstrRef{instr}.isOpc(HW_MODULE_INSTR))
-        printInstr(InstrRef{instr});
+    for (auto mod : ctx.getModules()) {
+      if (mod.iref().isOpc(HW_STDCELL_DEF))
+        continue;
+      printInstr(mod.iref());
     }
     regNames = nullptr;
     sourceLocInfo = nullptr;

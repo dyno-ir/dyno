@@ -109,8 +109,7 @@ public:
   }
   auto comb_procs() {
     return Range{regs_end(), block().end()}
-        .filter(
-            [](InstrRef instr) { return instr.isOpc(HW_COMB_PROCESS_DEF); })
+        .filter([](InstrRef instr) { return instr.isOpc(HW_COMB_PROCESS_DEF); })
         .as<ProcessIRef>();
   }
 
@@ -127,7 +126,7 @@ public:
   }
 
   static bool is_impl(FatObjRef<Instr> ref) {
-    return InstrRef{ref}.isOpc(HW_MODULE_INSTR);
+    return InstrRef{ref}.isOpc(HW_MODULE_DEF, HW_STDCELL_DEF);
   }
 };
 

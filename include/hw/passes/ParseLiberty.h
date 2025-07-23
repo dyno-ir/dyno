@@ -134,7 +134,8 @@ public:
       if (object->params.size() != 1 ||
           object->params.front().type != Token::STRING_LITERAL)
         err();
-      auto mod = ctx.createModule(object->params[0].strLit.value);
+      auto mod =
+          ctx.createModule(object->params[0].strLit.value, HW_STDCELL_DEF);
       HWInstrBuilder build{ctx};
       build.setInsertPoint(mod.block().end());
 

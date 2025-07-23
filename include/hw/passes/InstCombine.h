@@ -8,6 +8,7 @@
 #include "hw/HWContext.h"
 #include "hw/HWPrinter.h"
 #include "hw/HWValue.h"
+#include "hw/LoadStore.h"
 #include "hw/Wire.h"
 #include "hw/analysis/DemandedBits.h"
 #include "hw/analysis/KnownBits.h"
@@ -365,6 +366,66 @@ private:
     return true;
   }
 
+  bool storeValConstProp(StoreIRef instr) {
+    if (instr.hasRange())
+      return false;
+
+    HWValueOrReg ref = nullref;
+    if (auto asConst = instr.value().dyn_as<ConstantRef>())
+      ref = asConst;
+    else if (auto asWire = instr.value().dyn_as<WireRef>()) {
+      if (instr.isOpc(HW_STORE_DEFER))
+        return false;
+      if (!asWire.getDefI().isOpc(HW_LOAD))
+        return false;
+      auto load = asWire.getDefI().as<LoadIRef>();
+      if (load.hasRange())
+        return false;
+      ref = load.reg();
+    }
+
+    RegisterRef reg = instr.reg();
+    if (!reg.iref().isOpc(HW_REGISTER_DEF)) {
+      if (!ref.is<RegisterRef>())
+        return false;
+      ref.as<RegisterRef>().replaceAllUsesWith(reg);
+      currentMatched.emplace_back(instr);
+      return true;
+    }
+
+    SmallVec<OperandRef, 4> uses;
+    for (auto use : reg.uses()) {
+      if (use.instr().isOpc(HW_STORE, HW_STORE_DEFER)) {
+        if (use.instr() != instr) {
+          return false;
+        }
+        continue;
+      }
+      // can't do const prop on instance ports.
+      if (ref.is<ConstantRef>() && use.instr().isOpc(HW_INSTANCE)) {
+        return false;
+      }
+      uses.emplace_back(use);
+    }
+
+    if (ref.is<RegisterRef>()) {
+      for (auto use : uses) {
+        use.replace(ref);
+        currentReplaced.emplace_back(use);
+      }
+    } else {
+      assert(ref.is<ConstantRef>());
+      for (auto use : uses) {
+        currentMatched.emplace_back(use.instr());
+        use.instr().def(0)->as<WireRef>().replaceAllUsesWith(
+            ref, [&](OperandRef r) { currentReplaced.emplace_back(r); });
+      }
+    }
+
+    currentMatched.emplace_back(instr);
+    return true;
+  }
+
   bool manual(InstrRef instr) {
     if (instr.getNumDefs() == 1 && instr.def(0)->is<WireRef>())
       if (knownBitsConstProp(instr))
@@ -376,7 +437,15 @@ private:
 #undef LAMBDA
       if (simplifyAndCanonicalizeCommOps(instr))
         return true;
+      break;
+
+    case *HW_STORE:
+    case *HW_STORE_DEFER: {
+      if (storeValConstProp(instr.as<StoreIRef>()))
+        return true;
+    }
     default:
+      break;
     }
 
     if (instr.isOpc(OP_ADD, OP_MUL, OP_AND, OP_OR, OP_XOR)) {
