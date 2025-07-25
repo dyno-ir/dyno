@@ -27,8 +27,8 @@ class FlipFlopInferencePass {
     if (!instr.isOpc(HW_MUX))
       return std::pair(nullref, 0);
     auto mtree = muxTreeAnalysis.analyzeMuxTree(instr);
+    muxTreeAnalysis.printMuxTree(ctx, &mtree);
     muxTreeAnalysis.dedupeMuxTreeOutputs(&mtree);
-
     muxTreeAnalysis.printMuxTree(ctx, &mtree);
 
     SmallVec<std::pair<SmallBoolExprCNF, uint>, 2> resetExprs;
@@ -144,8 +144,7 @@ class FlipFlopInferencePass {
           .addRef(resetValue);
 
     build.setInsertPoint(storeI);
-    // todo: kill mux tree entry of reset value.
-    build.buildStore(dReg, storeI.value());
+    build.buildStore(dReg, dValue);
     build.destroyInstr(storeI);
 
     return true;

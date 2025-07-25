@@ -350,7 +350,8 @@ public:
 };
 
 template <typename T, unsigned N>
-inline SmallVec<T, N>::SmallVec(std::initializer_list<T> list)
-    : SmallVec(list.size()) {
-  std::copy(list.begin(), list.end(), this->begin());
+inline SmallVec<T, N>::SmallVec(std::initializer_list<T> list) : SmallVec() {
+  this->reserve(list.size());
+  for (auto &elem : list)
+    this->emplace_back(elem);
 }

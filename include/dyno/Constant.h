@@ -322,6 +322,18 @@ public:
     assert(rv && "would truncate");
     return *rv;
   }
+
+  constexpr bool allBitsUndef() const {
+    if (!self().getIs4S())
+      return false;
+    if (self().isExtended() && !FourState{self().getExtend()}.isUnk())
+      return false;
+    for (auto word : self().getWords()) {
+      if ((word & repeatBits(0b10U, 2)) != repeatBits(0b10U, 2))
+        return false;
+    }
+    return true;
+  }
 };
 
 class PatBigInt : public BigIntMixin<PatBigInt> {
@@ -365,8 +377,8 @@ public:
   }
   template <BigIntAPI T>
   static constexpr PatBigInt fromSign(const T &lhs, uint bits) {
-    return PatBigInt{lhs.getIs4S() ? 2u * bits : bits, lhs.getSignBit(),
-                     lhs.getIs4S()};
+    return PatBigInt{lhs.getIs4S() ? 2u * bits : bits,
+                     lhs.getExtendPatFromSignBit(), lhs.getIs4S()};
   }
 };
 

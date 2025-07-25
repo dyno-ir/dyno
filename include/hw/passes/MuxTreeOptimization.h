@@ -66,31 +66,12 @@ class MuxTreeOptimizationPass {
   // those left, it just selects the single boolean signal as close to 50/50 as
   // possible.
   SmallBoolExprCNF getBestMUXExpr(MuxTree *tree) {
-    uint maxNumSingleton = 0;
-    uint maxNumSingletonIdx;
-    for (auto [idx, entry] : Range{tree->entries}.enumerate()) {
-      auto inv = entry.expr.negated2(tree->conditions.size());
-      inv.simplify(tree->conditions.size());
-
-      uint numSingleton = 0;
-      for (auto clause : inv.clauses())
-        if (clause.size() == 1)
-          numSingleton++;
-
-      if (numSingleton > maxNumSingleton) {
-        maxNumSingletonIdx = idx;
-        maxNumSingleton = numSingleton;
-      }
-    }
-    if (maxNumSingleton != 0) {
-      return tree->entries[maxNumSingletonIdx].expr;
-    }
-
-    dbgs() << "no singletons found, instead selecting max entropy single bit\n";
 
     uint bestLitIdx = 0;
     uint bestTotal = 0;
     double bestRatio = 0.0;
+
+    std::vector<bool> binTreeCompat(tree->entries.size());
 
     for (uint litIdx = 0; litIdx < tree->conditions.size(); litIdx++) {
       SmallBoolExprCNF testExpr;
@@ -98,17 +79,17 @@ class MuxTreeOptimizationPass {
           BoolExprLiteral{uint16_t(litIdx), 0, true});
       SmallBoolExprCNF testExprInv = testExpr.negated2(tree->conditions.size());
 
-      uint numTrue = 0;
-      uint numFalse = 0;
+      SmallVec<uint, 8> trueExprs;
+      SmallVec<uint, 8> falseExprs;
 
-      for (auto &entry : tree->entries) {
+      for (auto [entryIdx, entry] : Range{tree->entries}.enumerate()) {
         SmallBoolExprCNF cond = entry.expr;
         cond.addAsGlobalAND(testExpr);
         // dbgs() << "checking true case: ";
         // cond.dump();
         auto trueRes = cond.simplify(tree->conditions.size());
         if (trueRes.has_value() && trueRes.value() == false) {
-          numFalse++;
+          falseExprs.emplace_back(entryIdx);
           continue;
         }
         cond = entry.expr;
@@ -117,10 +98,25 @@ class MuxTreeOptimizationPass {
         // cond.dump();
         auto falseRes = cond.simplify(tree->conditions.size());
         if (falseRes.has_value() && falseRes.value() == false) {
-          numTrue++;
+          trueExprs.emplace_back(entryIdx);
           continue;
         }
       }
+
+      // if an entry ever appears grouped with others it is "binary tree
+      // compatible" (information on it can be gained incrementally using
+      // well-formed bin-tree splits).
+      auto markBinTreeCompat = [&](ArrayRef<uint> arr) {
+        if (arr.size() <= 1)
+          return;
+        for (auto idx : arr)
+          binTreeCompat[idx] = 1;
+      };
+      markBinTreeCompat(trueExprs);
+      markBinTreeCompat(falseExprs);
+
+      uint numTrue = trueExprs.size();
+      uint numFalse = falseExprs.size();
 
       uint total = numTrue + numFalse;
       uint totalUnadj = total;
@@ -133,11 +129,20 @@ class MuxTreeOptimizationPass {
 
       double ratio = (double)numTrue / total;
       ratio = std::min(ratio, 1.0 - ratio);
-      if (bestTotal < totalUnadj || (bestTotal <= totalUnadj && ratio > bestRatio)) {
+      if (bestTotal < totalUnadj ||
+          (bestTotal <= totalUnadj && ratio > bestRatio)) {
         bestLitIdx = litIdx;
         bestTotal = totalUnadj;
         bestRatio = ratio;
       }
+    }
+
+    for (auto [idx, btreeCompat] : Range{binTreeCompat}.enumerate()) {
+      if (btreeCompat)
+        continue;
+      dbgs() << "entry #" << idx
+             << " is not bin tree compatible. peeling off.\n";
+      return tree->entries[idx].expr;
     }
 
     SmallBoolExprCNF selExpr;
@@ -201,17 +206,26 @@ class MuxTreeOptimizationPass {
 
     printMuxTree(tree);
     if (tree->entries.size() == 2) {
-      return build.buildMux(getExprVal(tree, tree->entries[0].expr),
-                            ctx.resolveObj(tree->entries[0].output),
-                            ctx.resolveObj(tree->entries[1].output));
+      auto trueV = ctx.resolveObj(tree->entries[0].output);
+      auto falseV = ctx.resolveObj(tree->entries[1].output);
+      if (auto asConst = trueV.dyn_as<ConstantRef>();
+          asConst && asConst.allBitsUndef())
+        return falseV;
+      if (auto asConst = falseV.dyn_as<ConstantRef>();
+          asConst && asConst.allBitsUndef())
+        return trueV;
+      return build.buildMux(getExprVal(tree, tree->entries[0].expr), trueV,
+                            falseV);
     }
 
     auto selExpr = getBestMUXExpr(tree);
+
     DEBUG("MuxTreeOptimization", {
       dbgs() << "splitting tree on: ";
       selExpr.dump();
     });
     dbgs() << "\n\n";
+    auto selExprNeg = selExpr.negated2(tree->conditions.size());
 
     MuxTree *left = muxTreeAlloc.allocate();
     MuxTree *right = muxTreeAlloc.allocate();
@@ -234,7 +248,7 @@ class MuxTreeOptimizationPass {
       // decide whether to put entry in left, right or both.
       assert(!entry.expr.isUnsat());
       auto [ifTrueRem, trueBrSat, ifFalseRem, falseBrSat] =
-          entry.expr.evalWithBoundVars2(entry.expr, selExpr,
+          entry.expr.evalWithBoundVars2(entry.expr, selExpr, selExprNeg,
                                         tree->conditions.size());
 
       if (!trueBrSat && !falseBrSat)
@@ -276,6 +290,13 @@ class MuxTreeOptimizationPass {
     else
       rightVal = lowerMuxTreeSimple(right);
 
+    if (auto asConst = leftVal.dyn_as<ConstantRef>();
+        asConst && asConst.allBitsUndef())
+      return rightVal;
+    if (auto asConst = rightVal.dyn_as<ConstantRef>();
+        asConst && asConst.allBitsUndef())
+      return leftVal;
+
     auto sel = getExprVal(tree, selExpr);
     return build.buildMux(sel, rightVal, leftVal);
   }
@@ -294,6 +315,7 @@ class MuxTreeOptimizationPass {
         auto muxtree = analysis.analyzeMuxTree(
             instr, [&](InstrRef ref) { visitedMap[ref] = 1; });
         analysis.simplifyConditions(&muxtree);
+        printMuxTree(&muxtree);
         analysis.dedupeMuxTreeOutputs(&muxtree);
         printMuxTree(&muxtree);
         auto wire = lowerMuxTreeSimple(&muxtree);

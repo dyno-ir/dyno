@@ -16,7 +16,11 @@ public:
   }
   // todo: get rid of ctx params via global directory.
   auto iter(HWContext &ctx) { return ctx.getCFG()[this->as<ObjRef<Instr>>()]; }
-  BlockRef parentBlock(HWContext &ctx) { return iter(ctx).blockRef(); }
+  BlockRef parentBlock(HWContext &ctx) {
+    return ctx.getCFG().contains(this->as<ObjRef<Instr>>())
+               ? iter(ctx).blockRef()
+               : nullref;
+  }
   FatRefUnion<ProcessIRef, FunctionIRef> parent(HWContext &ctx) {
     while (true) {
       auto block = parentBlock(ctx);

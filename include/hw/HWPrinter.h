@@ -8,6 +8,7 @@
 #include "dyno/Opcode.h"
 #include "hw/DebugInfo.h"
 #include "hw/HWAbstraction.h"
+#include "hw/HWContext.h"
 #include "hw/IDs.h"
 #include "hw/Process.h"
 #include "op/IDs.h"
@@ -176,10 +177,20 @@ public:
     regNames = nullptr;
     sourceLocInfo = nullptr;
   }
+
+  using Printer::printInstr;
+  void printInstr(InstrRef instr, HWContext &ctx) {
+    sourceLocInfo = &ctx.sourceLocInfo;
+    regNames = &ctx.regNameInfo;
+    printInstr(instr);
+    regNames = nullptr;
+    sourceLocInfo = nullptr;
+  }
 };
 
 void dumpCtx(HWContext &ctx);
 void dumpInstr(InstrRef instr);
+void dumpInstr(InstrRef instr, HWContext &ctx);
 void dumpObj(FatDynObjRef<> obj);
 
 }; // namespace dyno

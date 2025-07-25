@@ -11,6 +11,7 @@ template <typename Object> class DestroyMap {
   using ThinRefT = ObjRef<RefT>;
 
 public:
+  void resize(size_t sz) { destroyVec.resize(sz); }
   void mark(RefT ref) { destroyVec[ref] = 1; }
   bool isMarked(RefT ref) const { return destroyVec[ref]; }
 

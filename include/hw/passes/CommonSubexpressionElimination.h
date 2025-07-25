@@ -1,0 +1,181 @@
+#pragma once
+
+#include "dyno/Constant.h"
+#include "dyno/DestroyMap.h"
+#include "dyno/HierBlockIterator.h"
+#include "dyno/IDs.h"
+#include "dyno/Instr.h"
+#include "dyno/Obj.h"
+#include "hw/HWAbstraction.h"
+#include "hw/HWContext.h"
+#include "hw/HWInstr.h"
+#include "hw/HWPrinter.h"
+#include "hw/IDs.h"
+#include "op/IDs.h"
+#include "support/Bits.h"
+#include "support/Debug.h"
+#include "support/DenseMultimap.h"
+#include "support/Utility.h"
+namespace dyno {
+
+class CSEDedupeMap {
+  HWContext &ctx;
+  DenseMultimap<uint32_t, ObjRef<Instr>> instrDedupeMap;
+
+  uint32_t hashOperand(OperandRef operand) {
+    return DenseMapInfo<DynObjRef>::getHashValue(operand->thin());
+  }
+  uint32_t hashInstr(InstrRef instr) {
+    uint32_t acc = 0;
+    acc = hash_combine(acc, hash_u32(instr.getDialectOpcode().raw()));
+    for (auto op : instr.others())
+      acc = hash_combine(acc, hashOperand(op));
+    return acc;
+  }
+
+  static bool instrDeepEqual(InstrRef lhs, InstrRef rhs) {
+    if (lhs.getNumOperands() != rhs.getNumOperands())
+      return false;
+    if (lhs.getNumDefs() != rhs.getNumDefs())
+      return false;
+    if (lhs.getDialectOpcode() != rhs.getDialectOpcode())
+      return false;
+
+    for (size_t i = 0; i < lhs.getNumOthers(); i++)
+      if (lhs.other(i)->thin() != rhs.other(i)->thin())
+        return false;
+
+    return true;
+  }
+
+public:
+  InstrRef findOrInsert(InstrRef instr) {
+    uint32_t hash = hashInstr(instr);
+    auto it = instrDedupeMap.find(hash);
+    for (; it != instrDedupeMap.end(); it = instrDedupeMap.find_next(it)) {
+      auto otherI = ctx.getInstrs().resolve(it.val());
+      if (!instrDeepEqual(instr, otherI))
+        continue;
+      return otherI;
+    }
+    instrDedupeMap.insert(hash, instr);
+    return nullref;
+  }
+
+  void clear() { instrDedupeMap.clear(); }
+
+  CSEDedupeMap(HWContext &ctx) : ctx(ctx) {}
+};
+
+class CommonSubexpressionEliminationPass {
+  HWContext &ctx;
+  CSEDedupeMap map;
+  DestroyMap<Instr> instrDestroy;
+
+  static bool ignoreForCSE(InstrRef instr) {
+    return instr.isOpc(HW_STORE, HW_STORE_DEFER, HW_ASSERT_DEFER, OP_ASSERT,
+                       HW_PRINT_DEFER, HW_PRINT, OP_IF, OP_WHILE, OP_DO_WHILE,
+                       OP_FOR, OP_CALL, OP_SWITCH, OP_YIELD, OP_UNYIELD);
+  }
+
+  template <typename T> auto findFirstShared(ArrayRef<T> a, ArrayRef<T> b) {
+    for (size_t i = 0; i < a.size(); i++)
+      for (size_t j = 0; j < b.size(); j++)
+        if (a[i] == b[j])
+          return std::pair<size_t, size_t>(i, j);
+    dyno_unreachable("no common element");
+  }
+
+  void runOnInstr(InstrRef instr) {
+    auto other = map.findOrInsert(instr);
+    if (!other)
+      return;
+
+    // assuming other comes first. this is gonna be tricky for worklist-based
+    // approach, order might be flipped and we don't have a quick way to find
+    // which is first.
+    for (auto [i, def] : instr.defs().enumerate())
+      def->as<WireRef>().replaceAllUsesWith(other.def(i)->as<WireRef>());
+    instrDestroy.mark(instr);
+
+    BlockRef otherBl = HWInstrRef{other}.parentBlock(ctx);
+    BlockRef instrBl = HWInstrRef{instr}.parentBlock(ctx);
+    if (otherBl == instrBl) {
+      DEBUG("CSE", {
+        dbgs() << "merging in same block:\n";
+        dumpInstr(instr);
+        dumpInstr(other);
+      })
+      return;
+    }
+
+    auto buildStack = [&](BlockRef block, SmallVecImpl<OperandRef> &stack) {
+      while (true) {
+        stack.emplace_back(*block.def());
+        auto parent = HWInstrRef{block.defI()}.parentBlock(ctx);
+        if (!parent)
+          break;
+        block = parent;
+      }
+    };
+
+    SmallVec<OperandRef, 4> otherStack{*other.begin()};
+    buildStack(otherBl, otherStack);
+    SmallVec<OperandRef, 4> instrStack{*instr.begin()};
+    buildStack(instrBl, instrStack);
+    auto [otherIdx, instrIdx] = findFirstShared(
+        ArrayRef{otherStack}.drop_front(), ArrayRef{instrStack}.drop_front());
+    InstrRef otherPred = otherStack[otherIdx].instr();
+    InstrRef instrPred = instrStack[instrIdx].instr();
+    auto block = HWInstrRef{otherPred}.parentBlock(ctx);
+
+    DEBUG("CSE", {
+      dbgs() << "merging in different blocks:\n";
+      dumpInstr(instr, ctx);
+      dumpInstr(other, ctx);
+      dbgs() << "this pred:\n";
+      dumpInstr(instrPred, ctx);
+      dbgs() << "other pred:\n";
+      dumpInstr(otherPred, ctx);
+      dbgs() << "first parent block:\n";
+      dumpInstr(block.defI(), ctx);
+    })
+
+    for (auto it = block.begin(); it != block.end(); ++it) {
+      if (*it == otherPred || *it == instrPred) {
+        ctx.getCFG()[other].erase();
+        it.insertPrev(other);
+        return;
+      }
+    }
+    dyno_unreachable("")
+  }
+
+  void runOnProcess(ProcessIRef proc) {
+    for (auto instr : HierBlockRange{proc.block()})
+      if (!ignoreForCSE(instr)) {
+        runOnInstr(instr);
+      }
+  }
+
+  void runOnModule(ModuleIRef mod) {
+    for (auto proc : mod.procs())
+      runOnProcess(proc);
+  }
+
+public:
+  void run() {
+    map.clear();
+    instrDestroy.resize(ctx.getInstrs().numIDs());
+    for (auto mod : ctx.getModules()) {
+      runOnModule(mod.iref());
+    }
+    HWInstrBuilder build{ctx};
+    instrDestroy.apply(ctx.getInstrs(),
+                       [&](InstrRef ref) { build.destroyInstr(ref); });
+  }
+  explicit CommonSubexpressionEliminationPass(HWContext &ctx)
+      : ctx(ctx), map(ctx) {}
+};
+
+}; // namespace dyno

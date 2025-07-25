@@ -142,8 +142,11 @@ class AggressiveDeadCodeEliminationPass {
       }
       for (auto yieldInstr : asSwitch.caseYields())
         instrMap[yieldInstr] = 1;
-      for (auto instr : asSwitch.block())
+      for (auto instr : asSwitch.block()) {
+        for (auto use : instr.others())
+          visitHWValue(use->as<HWValue>());
         instrMap[instr] = 1;
+      }
       break;
     }
 

@@ -5,6 +5,7 @@
 #include "hw/passes/ABC.h"
 #include "hw/passes/AIGConstruct.h"
 #include "hw/passes/AggressiveDeadCodeElimination.h"
+#include "hw/passes/CommonSubexpressionElimination.h"
 #include "hw/passes/FlipFlopInference.h"
 #include "hw/passes/FunctionInline.h"
 #include "hw/passes/InstCombine.h"
@@ -40,6 +41,7 @@ class PassPipeline {
   ParseLibertyPass parseLiberty{ctx};
   FlipFlopInferencePass flipFlopInference{ctx};
   MuxTreeOptimizationPass muxTreeOpt{ctx};
+  CommonSubexpressionEliminationPass cse{ctx};
 
 public:
   bool printAfterAll = false;
@@ -69,6 +71,7 @@ public:
     runPass(instCombine);
     runPass(loopSimplify);
     runPass(agressiveDCE);
+    runPass(cse);
   }
 
   void runLoweringPipeline() {
@@ -80,6 +83,7 @@ public:
     runPass(agressiveDCE);
 
     runPass(flipFlopInference);
+    runPass(cse);
     runPass(muxTreeOpt);
     runPass(agressiveDCE);
 

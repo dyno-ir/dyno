@@ -1100,7 +1100,7 @@ class HWInstrBuilderStack : public HWInstrBuilder {
 
 public:
   using HWInstrBuilder::HWInstrBuilder;
-  template<any_of<BlockRef_iterator_base, InstrRef> T>
+  template <any_of<BlockRef_iterator_base, InstrRef> T>
   void pushInsertPoint(T newInsertPoint) {
     stack.emplace_back(insert);
     setInsertPoint(newInsertPoint);

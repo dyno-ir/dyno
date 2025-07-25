@@ -186,7 +186,7 @@ struct SmallBoolExprCNF {
           uint rem = nonMarkedLen - numDeleted;
           if (rem == 0) {
             // unsat
-            this->literals.clear();
+            makeUnsat();
             return false;
           }
           if (rem == 1) {
@@ -410,13 +410,17 @@ struct SmallBoolExprCNF {
         if (!lit.isMarked())
           this->literals[outputIdx++] = lit;
       }
-      if (pos == outputIdx)
+      if (pos == outputIdx) {
+        makeUnsat();
         return false;
+      }
       this->literals[pos].clauseBegin = true;
     }
 
-    if (outputIdx == 0)
+    if (outputIdx == 0) {
+      makeTrue();
       return true;
+    }
 
     // DEBUG("MuxTreeOptimization", {
     //   std::print(dbgs(), "simplified condition from {} to {} literals\n",
@@ -440,8 +444,7 @@ struct SmallBoolExprCNF {
         auto &slot = known[clause.front().id];
         if (slot) {
           if (*slot != val) {
-            // unsat
-            this->literals.clear();
+            makeUnsat();
             return false;
           }
           if (!prune)
@@ -476,8 +479,10 @@ struct SmallBoolExprCNF {
 
     if (checkSAT) {
       auto sat = satSolve(numLiterals);
-      if (!sat)
+      if (!sat) {
+        makeUnsat();
         return false;
+      }
     }
 
     auto hashClause = [](ClauseRef clause) {
@@ -524,8 +529,10 @@ struct SmallBoolExprCNF {
     }
     literals.downsize(outIdx);
 
-    if (outIdx == 0)
+    if (outIdx == 0) {
+      makeTrue();
       return true;
+    }
 
     return std::nullopt;
   }
@@ -551,7 +558,7 @@ struct SmallBoolExprCNF {
         auto &slot = known[clause.front().id];
         if (slot) {
           if (*slot != val) {
-            this->literals.clear();
+            makeUnsat();
             return false;
           }
         }
@@ -565,11 +572,14 @@ struct SmallBoolExprCNF {
         }
       }
     }
-    auto rv = simplifyImpl(numLiterals, known, keepClause);
-    if (rv.has_value())
-      return *rv;
-
     SmallBoolExprCNF copy = *this;
+
+    auto rv = simplifyImpl(numLiterals, known, keepClause);
+    if (rv.has_value()) {
+      if (rv.value() == true)
+        *this = copy;
+      return *rv;
+    }
 
     // just pick first literal, no heuristic
     literals.emplace_back(literals[0]);
@@ -577,8 +587,9 @@ struct SmallBoolExprCNF {
 
     auto ifTrue = satSolve(numLiterals);
     *this = copy;
-    if (ifTrue)
+    if (ifTrue) {
       return true;
+    }
 
     literals.emplace_back(literals[0]);
     literals.back().inverse = !literals.back().inverse;
@@ -586,15 +597,35 @@ struct SmallBoolExprCNF {
 
     auto ifFalse = satSolve(numLiterals);
     *this = copy;
-    if (ifFalse)
+    if (ifFalse) {
       return true;
+    }
 
+    makeUnsat();
     return false;
   }
 
   bool isUnsat() const { return literals.size() == 0; }
+  bool isTrue() const { return literals.size() == 1 && literals[0].isMarked(); }
+
+  void makeTrue() {
+    literals = {BoolExprLiteral{0, 0, 1}};
+    literals.front().mark();
+  }
+  void makeUnsat() { literals.clear(); }
 
   auto negated2(uint numLiterals) {
+    if (isTrue()) {
+      SmallBoolExprCNF rv;
+      rv.makeUnsat();
+      return rv;
+    }
+    if (isUnsat()) {
+      SmallBoolExprCNF rv;
+      rv.makeTrue();
+      return rv;
+    }
+
     uint64_t count = 1;
     SmallVec<ClauseRef, 8> clauseVec;
     for (auto clause : clauses()) {
@@ -618,8 +649,14 @@ struct SmallBoolExprCNF {
       }
       exprOut.literals[pos].clauseBegin = true;
 
-      if (exprOut.literals.size() > 1024)
-        exprOut.simplify(numLiterals);
+      if (exprOut.literals.size() > 1024) {
+        auto sat = exprOut.simplify(numLiterals);
+        if (sat.has_value() && sat.value() == true)
+          exprOut.literals.clear();
+        if (sat.has_value() && sat.value() == false) {
+          return exprOut;
+        }
+      }
     }
 
     return exprOut;
@@ -700,27 +737,50 @@ struct SmallBoolExprCNF {
   }
 
   void addAsGlobalAND(const SmallBoolExprCNF &other) {
+    if (isUnsat() || other.isUnsat()) {
+      makeUnsat();
+      return;
+    }
+    if (isTrue()) {
+      *this = other;
+    }
+    if (other.isTrue()) {
+      return;
+    }
+
     literals.push_back_range(Range{other.literals});
   }
   void addAsGlobalOR(SmallBoolExprCNF &other, uint numLiterals) {
-    if (literals.size() == 0) {
+    if (isTrue())
+      return;
+    if (isUnsat()) {
       *this = other;
       return;
     }
+    if (other.isTrue()) {
+      *this = other;
+      return;
+    }
+    if (other.isUnsat()) {
+      return;
+    }
+
     // todo properly
+    this->dump();
     auto lhs = this->negated2(numLiterals);
-    // lhs.dump();
+    lhs.dump();
     lhs.simplify(numLiterals);
-    // lhs.dump();
+    lhs.dump();
+
     auto rhs = other.negated2(numLiterals);
-    // rhs.dump();
+    rhs.dump();
     rhs.simplify(numLiterals);
-    // rhs.dump();
+    rhs.dump();
 
     lhs.addAsGlobalAND(rhs);
-    // lhs.dump();
+    lhs.dump();
     lhs.simplify(numLiterals);
-    // lhs.dump();
+    lhs.dump();
 
     *this = lhs.negated2(numLiterals);
     // this->dump();
@@ -729,18 +789,13 @@ struct SmallBoolExprCNF {
   }
 
   auto evalWithBoundVars2(SmallBoolExprCNF &orig, SmallBoolExprCNF &expr,
-                          uint numLiterals) {
+                          SmallBoolExprCNF &exprNeg, uint numLiterals) {
     SmallBoolExprCNF outTrue = orig;
     auto trueBranchRes = outTrue.simplifyWith(expr, numLiterals);
     bool trueBranchSat = !trueBranchRes.has_value() || trueBranchRes.value();
 
-    // todo: cache negated
-    SmallBoolExprCNF exprNeg = expr.negated2(numLiterals);
     exprNeg.simplify(numLiterals);
     SmallBoolExprCNF outFalse = orig;
-
-    exprNeg.dump();
-    outFalse.dump();
 
     auto falseBranchRes = outFalse.simplifyWith(exprNeg, numLiterals);
     bool falseBranchSat = !falseBranchRes.has_value() || falseBranchRes.value();
@@ -824,25 +879,23 @@ public:
       }
       return;
     } else if (instr.isOpc(OP_AND)) {
+      cond.makeTrue();
       for (auto op : instr.others()) {
         analyzeCond(muxtree, cond, op->as<WireRef>());
       }
       return;
     } else if (instr.isOpc(OP_NOT)) {
-      SmallBoolExprCNF subExpr;
-      analyzeCond(muxtree, subExpr, instr.other(0)->as<WireRef>());
-      subExpr = subExpr.negated2(muxtree->conditions.size());
-      subExpr.simplify(muxtree->conditions.size());
-      cond.addAsGlobalAND(subExpr);
+      analyzeCond(muxtree, cond, instr.other(0)->as<WireRef>());
+      cond = cond.negated2(muxtree->conditions.size());
+      cond.simplify(muxtree->conditions.size());
       return;
     } else if (instr.isOpc(OP_OR)) {
-      SmallBoolExprCNF expr;
+      cond.makeUnsat();
       for (auto op : instr.others()) {
         SmallBoolExprCNF subExpr;
         analyzeCond(muxtree, subExpr, op->as<WireRef>());
-        expr.addAsGlobalOR(subExpr, muxtree->conditions.size());
+        cond.addAsGlobalOR(subExpr, muxtree->conditions.size());
       }
-      cond.addAsGlobalAND(expr);
       return;
     } else if (instr.isOpc(HW_SPLICE)) {
       if (auto offs = instr.other(1)->dyn_as<ConstantRef>()) {
@@ -881,6 +934,7 @@ public:
       auto [val, idx] = worklist.back();
       if (val.is<ConstantRef>()) {
         SmallBoolExprCNF expr;
+        expr.makeTrue();
         for (auto &prefix : prefixes)
           expr.addAsGlobalAND(prefix);
         muxtree->entries.emplace_back(expr, val.as<FatDynObjRef<>>());
@@ -890,6 +944,7 @@ public:
       auto asWire = val.as<WireRef>();
       if (!asWire.getSingleDef()->instr().isOpc(HW_MUX)) {
         SmallBoolExprCNF expr;
+        expr.makeTrue();
         for (auto &prefix : prefixes)
           expr.addAsGlobalAND(prefix);
         muxtree->entries.emplace_back(SmallBoolExprCNF{expr},
