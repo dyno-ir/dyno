@@ -5,17 +5,20 @@
 #include "hw/passes/ABC.h"
 #include "hw/passes/AIGConstruct.h"
 #include "hw/passes/AggressiveDeadCodeElimination.h"
+#include "hw/passes/FlipFlopInference.h"
 #include "hw/passes/FunctionInline.h"
 #include "hw/passes/InstCombine.h"
 #include "hw/passes/LinearizeControlFlow.h"
 #include "hw/passes/LoopSimplify.h"
 #include "hw/passes/LowerOps.h"
 #include "hw/passes/ModuleInline.h"
+#include "hw/passes/MuxTreeOptimization.h"
 #include "hw/passes/ParseLiberty.h"
 #include "hw/passes/ProcessLinearize.h"
 #include "hw/passes/SSAConstruct.h"
 #include "hw/passes/SeqToComb.h"
 #include "hw/passes/TriggerDedupe.h"
+
 namespace dyno {
 
 class PassPipeline {
@@ -35,6 +38,8 @@ class PassPipeline {
   AIGConstructPass aigConstr{ctx};
   ABCPass abc{ctx};
   ParseLibertyPass parseLiberty{ctx};
+  FlipFlopInferencePass flipFlopInference{ctx};
+  MuxTreeOptimizationPass muxTreeOpt{ctx};
 
 public:
   bool printAfterAll = false;
@@ -64,15 +69,20 @@ public:
     runPass(instCombine);
     runPass(loopSimplify);
     runPass(agressiveDCE);
+  }
+
+  void runLoweringPipeline() {
 
     runPass(linearizeControlFlow);
     ssaConstr.config.mode = SSAConstructPass::Config::IMMEDIATE;
     runPass(ssaConstr);
     runPass(instCombine);
     runPass(agressiveDCE);
-  }
 
-  void runLoweringPipeline() {
+    runPass(flipFlopInference);
+    runPass(muxTreeOpt);
+    runPass(agressiveDCE);
+
     // lower compares and sub and re-run instcombine
     lowerOps.config = LowerOpsPass::Config{
         .lowerMultiInputAdd = false,
@@ -122,7 +132,6 @@ public:
     runPass(abc);
     runPass(instCombine);
     runPass(agressiveDCE);
-
   }
 
 public:

@@ -37,9 +37,10 @@ public:
   SourceLocInfo<Instr> sourceLocInfo;
   ValueNameInfo<Register> regNameInfo;
 
-  ModuleIRef createModule(std::string_view name) {
+  ModuleIRef createModule(std::string_view name,
+                          DialectOpcode defOpc = HW_MODULE_DEF) {
     auto moduleRef = modules.create(std::string(name));
-    auto moduleInstr = InstrRef{instrs.create(2, HW_MODULE_INSTR)};
+    auto moduleInstr = InstrRef{instrs.create(2, defOpc)};
 
     InstrBuilder{moduleInstr}.addRef(moduleRef).addRef(createBlock());
     return moduleInstr;

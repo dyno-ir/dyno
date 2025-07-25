@@ -33,6 +33,10 @@ public:
   void replaceAllUsesWith(FatDynObjRef<> ref) {
     self().replaceAllUsesWith(ref);
   }
+  template <std::invocable<OperandRef> Callback>
+  void replaceAllUsesWith(FatDynObjRef<> newRef, Callback &&func) {
+    self().replaceAllUsesWith(newRef, std::move(func));
+  }
 };
 
 }; // namespace dyno

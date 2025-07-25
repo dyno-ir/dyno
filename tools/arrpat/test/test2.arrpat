@@ -175,6 +175,21 @@ replace {
 }
 // todo: C++ patterns for defragmenting splices
 
+match {
+  OP_TRUNC $trunc, $in
+  HW_SPLICE $out, $in,            $old_addr:CORE_CONSTANT,   $old_len:CORE_CONSTANT,
+                  $trunc:HW_WIRE, $trunc_addr:CORE_CONSTANT, $trunc_len:CORE_CONSTANT
+}
+with [{
+  if (!(*$old_addr.begin())->as<ConstantRef>().valueEquals(*(*$trunc.begin())->as<WireRef>().getNumBits()))
+    goto $fail;
+  if (!(*$trunc_addr.begin())->as<ConstantRef>().valueEquals(0))
+    goto $fail;
+  if ((*$out.begin())->as<WireRef>().getNumBits() != (*$in.begin())->as<WireRef>().getNumBits())
+    goto $fail;
+}]
+replace $out -> $in
+
 
 // we need check duplicates of these. dyno dsl pattern matching should fix.
 macro chk_const_diff_lens $self, $lhs, $rhs [{
@@ -329,6 +344,17 @@ replace $id -> $x
 // }
 
 
+/*
+// DeMorgan (n operand patterns...)
+match {
+  OP_NOT $x_neg, $x
+  OP_NOT $y_neg, $y
+  OP_AND $out_neg, $x, $y
+}
+replace {
+
+}
+*/
 
 // Mux Opt
 match {
@@ -339,6 +365,24 @@ replace {
   HW_MUX $out, $cond_inv, $rhs, $lhs
 }
 
+/*
+// these might hinder MUX tree analysis. skip for now, maybe support in mux tree analysis at some
+match {
+  HW_MUX $out, $cond, #'1, $rhs
+}
+replace {
+  OP_SEXT $temp:wire_like($out), $cond
+  OP_OR $out, $temp, $rhs
+}
+
+match {
+  HW_MUX $out, $cond, $rhs, #'0
+}
+replace {
+  OP_SEXT $temp:wire_like($out), $cond
+  OP_AND $out, $temp, $rhs
+}
+*/
 
 
 match {

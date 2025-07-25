@@ -49,6 +49,7 @@ private:
   }
 
   void deleteMatchedInstr(InstrRef instr) {
+    TaggedIRef{instr}.get() = 1;
     currentMatched.emplace_back(instr);
   }
 
@@ -389,7 +390,7 @@ private:
       if (!ref.is<RegisterRef>())
         return false;
       ref.as<RegisterRef>().replaceAllUsesWith(reg);
-      currentMatched.emplace_back(instr);
+      deleteMatchedInstr(instr);
       return true;
     }
 
@@ -416,13 +417,13 @@ private:
     } else {
       assert(ref.is<ConstantRef>());
       for (auto use : uses) {
-        currentMatched.emplace_back(use.instr());
+        deleteMatchedInstr(use.instr());
         use.instr().def(0)->as<WireRef>().replaceAllUsesWith(
             ref, [&](OperandRef r) { currentReplaced.emplace_back(r); });
       }
     }
 
-    currentMatched.emplace_back(instr);
+    deleteMatchedInstr(instr);
     return true;
   }
 
@@ -495,11 +496,12 @@ private:
   }
 
   void oldInstrHook(InstrRef old, ArrayRef<InstrRef> newInstrs) {
-    TaggedIRef{old}.get() = 1;
     for (auto newInstr : newInstrs)
       ctx.sourceLocInfo.copyDebugInfo(old, newInstr);
-    for (auto op : old)
-      op.replace(FatDynObjRef<>{nullref});
+    if (TaggedIRef{old}.get())
+      for (auto op : old) {
+        op.replace(FatDynObjRef<>{nullref});
+      }
   }
 
   void replacedUseHook(OperandRef replaced) {

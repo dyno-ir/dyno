@@ -4,6 +4,7 @@
 #include "hw/HWContext.h"
 #include "hw/HWInstr.h"
 #include "support/ErrorRecovery.h"
+#include "support/Utility.h"
 #include <fstream>
 
 namespace dyno {
@@ -126,15 +127,13 @@ public:
   */
   void parse(AIGObjRef aigObj, ModuleIRef parentMod) {
     std::string line;
-    std::unordered_map<std::string, RegisterRef> names;
+    std::unordered_map<std::string, WireRef> names;
     std::unordered_map<std::string, ModuleRef> modules;
 
     for (auto mod : ctx.getModules())
       modules[mod->name] = mod;
 
     HWInstrBuilder build{ctx};
-    HWInstrBuilder regBuild{ctx};
-    regBuild.setInsertPoint(parentMod.regs_end());
 
     while (std::getline(is, line), !line.empty()) {
       while (line.ends_with('\\')) {
@@ -142,8 +141,6 @@ public:
         std::getline(is, rem);
         line = line.substr(0, line.size() - 1) + rem;
       }
-
-      // we're dealing with AIG input/output
 
       if (line.starts_with(".inputs")) {
         for (auto [i, tok] : split(line).drop_front().enumerate()) {
@@ -154,12 +151,10 @@ public:
           // def is an AIG input
           auto inputVal = defI.other(0)->as<HWValue>();
           uint index = def - defI.def_begin();
-          auto reg = regBuild.buildRegister(1);
-          build.buildStore(reg,
-                           build.buildSplice(inputVal, BitRange{index, 1}));
 
           // create reg with copy of the val
-          names.insert(std::make_pair(tok, reg));
+          names.insert(std::make_pair(
+              tok, build.buildSplice(inputVal, BitRange{index, 1})));
         }
       }
       if (line.starts_with(".outputs")) {
@@ -186,22 +181,25 @@ public:
           }
 
           assert(defI.isOpc(AIG_OUTPUT));
-          auto reg = regBuild.buildRegister(1);
-          outputBitArr.emplace_back(build.buildLoad(reg));
+          auto wire = ctx.getWires().create(1);
+          outputBitArr.emplace_back(wire);
 
-          names.insert(std::make_pair(tok, reg));
+          names.insert(std::make_pair(tok, wire));
         }
         makeConcat();
         assert(outputBitArr.size() == 0);
       }
 
-      build.setInsertPoint(parentMod.block().end());
-
       if (line.starts_with(".gate")) {
-        SmallVec<RegisterRef, 8> ports;
+        auto aigInstr = aigObj->defUse.getSingleDef()->instr();
+        build.setInsertPoint(HWInstrRef{aigInstr}.parentBlock(ctx).end());
+
+        SmallVec<WireRef, 4> defs;
+        SmallVec<WireRef, 8> uses;
+
         ModuleRef mod;
-        for (auto [front, tok] : split(line).drop_front().mark_front()) {
-          if (front) {
+        for (auto [i, tok] : split(line).drop_front().enumerate()) {
+          if (i == 0) {
             mod = modules.find(std::string(tok))->second;
             continue;
           }
@@ -209,15 +207,23 @@ public:
           if (eqIdx == std::string::npos)
             report_fatal_error("BLIF format");
           auto tokStr = std::string(tok.begin() + eqIdx + 1, tok.end());
-          auto reg = names.find(tokStr);
-          if (reg == names.end()) {
-            reg =
-                names.insert(std::make_pair(tokStr, regBuild.buildRegister(1)))
+          auto wire = names.find(tokStr);
+          if (wire == names.end()) {
+            wire =
+                names.insert(std::make_pair(tokStr, ctx.getWires().create(1)))
                     .first;
           }
-          ports.emplace_back(reg->second);
+
+          if (mod->ports[i - 1].portType.is(HW_INPUT_REGISTER_DEF))
+            uses.emplace_back(wire->second);
+          else if (mod->ports[i - 1].portType.is(HW_OUTPUT_REGISTER_DEF))
+            defs.emplace_back(wire->second);
+          else
+            dyno_unreachable("unexpected port type");
         }
-        build.buildInstance(mod, ports);
+        auto ib = build.buildInstrRaw(HW_STDCELL_INSTANCE,
+                                      1 + defs.size() + uses.size());
+        ib.addRefs(defs).other().addRef(mod).addRefs(uses);
       }
     }
   }

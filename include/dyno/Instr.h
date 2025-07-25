@@ -632,6 +632,12 @@ public:
     return *this;
   }
 
+  template <typename T> InstrBuilder &addRefs(T range) {
+    for (auto elem : range)
+      addRef(elem);
+    return *this;
+  }
+
   InstrRef instr() const { return op.instr(); }
 };
 

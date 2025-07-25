@@ -3,6 +3,7 @@
 #include "aig/AIG.h"
 #include "aig/IDs.h"
 #include "dyno/ObjMap.h"
+#include "hw/FlipFlop.h"
 #include "hw/HWAbstraction.h"
 #include "hw/HWContext.h"
 #include "hw/HWInstr.h"
@@ -55,6 +56,13 @@ class AggressiveDeadCodeEliminationPass {
 
       case *HW_TRIGGER_DEF:
         break;
+
+      case *HW_FLIP_FLOP: {
+        if (use - instr.begin() != 3)
+          break;
+        worklist.emplace_back(instr);
+        break;
+      }
 
       default:
         dyno_unreachable("unknown access instr");
@@ -274,6 +282,34 @@ class AggressiveDeadCodeEliminationPass {
       for (auto use : asAIGObj->defUse.uses())
         if (use.instr().isOpc(AIG_INPUT))
           worklist.emplace_back(use.instr());
+      break;
+    }
+
+    case *HW_STDCELL_INSTANCE: {
+      if (instrMap[instr])
+        break;
+      for (auto def : instr.defs())
+        visitHWValue(def->as<HWValue>());
+      for (auto use : instr.others().drop_front()) {
+        visitHWValue(use->as<HWValue>());
+      }
+      break;
+    }
+
+    case *HW_FLIP_FLOP: {
+      if (instrMap[instr])
+        break;
+      auto asFF = instr.as<FlipFlopIRef>();
+      worklist.emplace_back(asFF.clk().iref());
+      worklist.emplace_back(asFF.d().iref());
+      if (asFF.hasClkEn()) {
+        worklist.emplace_back(asFF.clkEn().iref());
+      }
+      if (asFF.hasRst()) {
+        worklist.emplace_back(asFF.rst().iref());
+        visitHWValue(asFF.rstVal());
+      }
+      break;
     }
 
     default: {

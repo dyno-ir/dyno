@@ -24,3 +24,6 @@ template <> struct uint_of_size<8> {
 template <> struct uint_of_size<16> {
   using type = __uint128_t;
 };
+
+template <class T, class... U>
+concept any_of = std::disjunction_v<std::is_convertible<T, U>...>;
