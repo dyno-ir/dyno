@@ -8,6 +8,7 @@
 #include "hw/HWContext.h"
 #include "hw/HWPrinter.h"
 #include "hw/HWValue.h"
+#include "hw/IDs.h"
 #include "hw/LoadStore.h"
 #include "hw/Wire.h"
 #include "hw/analysis/DemandedBits.h"
@@ -389,6 +390,8 @@ private:
     if (!reg.iref().isOpc(HW_REGISTER_DEF)) {
       if (!ref.is<RegisterRef>())
         return false;
+      if (!ref.as<RegisterRef>().iref().isOpc(HW_REGISTER_DEF))
+        return false; // nothing to be done if both are ports.
       ref.as<RegisterRef>().replaceAllUsesWith(reg);
       deleteMatchedInstr(instr);
       return true;

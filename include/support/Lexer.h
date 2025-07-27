@@ -115,7 +115,7 @@ public:
 };
 
 template <bool ParseNumberLiterals = true, bool ParseInlineCode = true,
-          bool IgnoreBackslash = true>
+          bool IgnoreBackslash = true, bool CPPStyleComments = true>
 struct Lexer {
   const std::string path;
   const std::string src;
@@ -169,23 +169,25 @@ public:
         i++;
       }
 
-      // Single Line Comment
-      if (srcC[i] == '/' && srcC[i + 1] == '/') {
-        while (i < len && srcC[i] != '\n')
-          i++;
-        continue;
-      }
-
-      /* Multi-line
-         Comment  */
-      if (srcC[i] == '/' && srcC[i + 1] == '*') {
-        i += 2;
-        while (i < len && !(srcC[i - 2] == '*' && src[i - 1] == '/')) {
-          if (srcC[i - 2] == '\n')
-            lineNumber++;
-          i++;
+      if (CPPStyleComments) {
+        // Single Line Comment
+        if (srcC[i] == '/' && srcC[i + 1] == '/') {
+          while (i < len && srcC[i] != '\n')
+            i++;
+          continue;
         }
-        continue;
+
+        /* Multi-line
+           Comment  */
+        if (srcC[i] == '/' && srcC[i + 1] == '*') {
+          i += 2;
+          while (i < len && !(srcC[i - 2] == '*' && src[i - 1] == '/')) {
+            if (srcC[i - 2] == '\n')
+              lineNumber++;
+            i++;
+          }
+          continue;
+        }
       }
 
       if (IgnoreBackslash) {

@@ -308,9 +308,9 @@ class AggressiveDeadCodeEliminationPass {
       if (asFF.hasClkEn()) {
         worklist.emplace_back(asFF.clkEn().iref());
       }
-      if (asFF.hasRst()) {
-        worklist.emplace_back(asFF.rst().iref());
-        visitHWValue(asFF.rstVal());
+      for (uint i = 0; i < asFF.numRsts(); i++) {
+        worklist.emplace_back(asFF.rst(i).iref());
+        visitHWValue(asFF.rstVal(i));
       }
       break;
     }

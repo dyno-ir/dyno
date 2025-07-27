@@ -1,6 +1,8 @@
 #pragma once
 #include "hw/HWAbstraction.h"
 #include "hw/HWContext.h"
+#include "hw/IDs.h"
+#include "hw/SensList.h"
 #include "support/ErrorRecovery.h"
 #include "support/Lexer.h"
 #include "support/SlabAllocator.h"
@@ -107,9 +109,234 @@ public:
   LibertyParser(LibertyLexer &lexer) : lexer(lexer), blockStore() {}
 };
 
+template <std::invocable<std::string_view> FuncT> class LibertyExprParser {
+  std::string_view expr;
+  size_t i = 0;
+  HWInstrBuilder &build;
+  FuncT nameLookupFunc;
+
+  HWValue parseTerminal() {
+    while (isspace(expr[i]))
+      i++;
+    switch (expr[i++]) {
+    case '!':
+      return build.buildNot(parseExpr());
+    case '0':
+      return ConstantRef::fromBool(false);
+    case '1':
+      return ConstantRef::fromBool(true);
+    default: {
+      i--;
+      bool inQuotes = false;
+      if (expr[i] == '\\' && expr[i + 1] == '\"') {
+        inQuotes = true;
+        i += 2;
+      }
+      uint start = i;
+      while (i != expr.size() && (isalnum(expr[i]) || expr[i] == '_'))
+        i++;
+      auto sub = expr.substr(start, i - start);
+      if (inQuotes) {
+        if (expr[i] != '\\' || expr[i + 1] != '\"')
+          report_fatal_error("liberty expr format \"\\\"\" delimit error");
+      }
+      RegisterRef reg = nameLookupFunc(sub);
+      return build.buildLoad(reg);
+    }
+    case '(': {
+      auto rv = parseExpr();
+      checkChar(')');
+      return rv;
+    }
+    }
+  }
+
+  void checkChar(char c) {
+    if (expr[i] != c)
+      report_fatal_error("liberty format");
+    i++;
+  }
+  template <typename... Values> bool charIs(char c, Values... values) {
+    return ((c == values) || ...);
+  }
+
+  HWValue parseExpr(uint minPrec = 0) {
+    auto lhs = parseTerminal();
+    while (1) {
+      if (i == expr.size())
+        return lhs;
+      switch (expr[i++]) {
+
+      case '\'': {
+        return build.buildNot(lhs);
+      }
+
+      case '^': {
+        if (3 < minPrec)
+          return lhs;
+        return build.buildXor(lhs, parseExpr(3));
+      }
+      case ' ': {
+        uint j = 0;
+        while ((i + j < expr.size() - 1) && expr[i + j] == ' ')
+          j++;
+        // try to match a real operator, only treat space as AND if none found.
+        if (charIs(expr[i + j], '&', '*', '^', '|', '+'))
+          break;
+        i += j + 1;
+        [[fallthrough]];
+      }
+      case '&':
+      case '*': {
+        if (2 < minPrec)
+          return lhs;
+        lhs = build.buildAnd(lhs, parseExpr(2));
+        break;
+      }
+
+      case '+':
+      case '|': {
+        if (1 < minPrec)
+          return lhs;
+        lhs = build.buildOr(lhs, parseExpr(1));
+        break;
+      }
+
+      default:
+        i--;
+        return lhs;
+      }
+    }
+  }
+
+public:
+  HWValue parseExpr(std::string_view expr) {
+    i = 0;
+    this->expr = expr;
+    return parseExpr();
+  }
+  LibertyExprParser(HWInstrBuilder &build, FuncT nameLookupFunc)
+      : build(build), nameLookupFunc(nameLookupFunc) {}
+};
+
 class LibertyToDyno {
   HWContext &ctx;
   LibertyLexer &lexer;
+
+  void err() { report_fatal_error("liberty format error"); };
+
+  void handleFF(LibertyParser::Block *block, HWInstrBuilderStack &build,
+                HWInstrBuilder &regBuild, ArrayRef<RegisterRef> outs) {
+
+#define ATTRS_RSTVAL(x) x(clear_preset_var1) x(clear_preset_var2)
+#define ATTRS_BEXPR(x)                                                         \
+  x(clear) x(clocked_on) x(clocked_on_also) x(next_state) x(preset)
+#define ATTRS(x) ATTRS_BEXPR(x) ATTRS_RSTVAL(x)
+#define LAMBDA(x) const uint32_t kw_##x = lexer.GetIdentIdx(#x);
+    ATTRS(LAMBDA)
+#undef LAMBDA
+
+    auto proc = build.buildProcess();
+    build.pushInsertPoint(proc.block().end());
+
+    struct AbstractFF {
+#define LAMBDA(x) HWValue val_##x = nullref;
+      ATTRS_BEXPR(LAMBDA)
+#undef LAMBDA
+#define LAMBDA(x) char val_##x = 0;
+      ATTRS_RSTVAL(LAMBDA)
+#undef LAMBDA
+    };
+
+    AbstractFF ff;
+    auto handleRstval = [&](char &out, Token val) {
+      std::string_view str;
+      if (val.type == Token::IDENTIFIER)
+        str = lexer.GetIdent(val.ident.idx);
+      else if (val.type == Token::STRING_LITERAL)
+        str = val.strLit.value;
+      else
+        err();
+
+      if (str.size() != 1 || (str[0] != 'L' && str[0] != 'H' && str[0] != 'N' &&
+                              str[0] != 'T' && str[0] != 'X'))
+        err();
+
+      out = str[0];
+    };
+
+    auto handleExpr = [&](HWValue &out, Token val) {
+      if (val.type != Token::STRING_LITERAL)
+        err();
+      out = parseExpr(val.strLit.value, build);
+    };
+
+    for (auto var : block->vars) {
+      if (var.name.type != Token::IDENTIFIER)
+        err();
+
+#define LAMBDA(x)                                                              \
+  if (var.name.ident.idx == kw_##x) {                                          \
+    handleRstval(ff.val_##x, var.val);                                         \
+  }
+      ATTRS_RSTVAL(LAMBDA)
+#undef LAMBDA
+#define LAMBDA(x)                                                              \
+  if (var.name.ident.idx == kw_##x) {                                          \
+    handleExpr(ff.val_##x, var.val);                                           \
+  }
+      ATTRS_BEXPR(LAMBDA)
+#undef LAMBDA
+    }
+
+    if (!ff.val_next_state)
+      err();
+    HWValue val = ff.val_next_state;
+
+    if (!ff.val_clocked_on)
+      err();
+    SensList sens;
+
+    auto clkReg = regBuild.buildRegister(1);
+    build.buildStore(clkReg, ff.val_clocked_on);
+    sens.signals.emplace_back(clkReg, SensMode::POSEDGE);
+    if (ff.val_clocked_on_also)
+      report_fatal_error("liberty format: clocked_on_also unsupported");
+    auto addClear = [&]() {
+      if (ff.val_clear) {
+        auto clrReg = regBuild.buildRegister(1);
+        build.buildStore(clrReg, ff.val_clear);
+        sens.signals.emplace_back(clrReg, SensMode::POSEDGE);
+        val = build.buildMux(ff.val_clear, ConstantRef::fromBool(0), val);
+      }
+    };
+    auto addPreset = [&]() {
+      if (ff.val_preset) {
+        auto presetReg = regBuild.buildRegister(1);
+        build.buildStore(presetReg, ff.val_preset);
+        sens.signals.emplace_back(presetReg, SensMode::POSEDGE);
+        val = build.buildMux(ff.val_preset, ConstantRef::fromBool(1), val);
+      }
+    };
+    addClear();
+    addPreset();
+
+    auto trig = regBuild.buildTrigger(sens);
+    regBuild.setInsertPoint(trig);
+    build.buildStore(outs[0], val, BitRange::full(), true, trig);
+  }
+
+  std::unordered_map<std::string_view, RegisterRef> portNameMap;
+  HWValue parseExpr(std::string_view expr, HWInstrBuilder &build) {
+    auto exprParse = LibertyExprParser{build, [&](std::string_view ident) {
+                                         auto it = portNameMap.find(ident);
+                                         if (it == portNameMap.end())
+                                           report_fatal_error(
+                                               "liberty format: unknown ident");
+                                         return it->second;
+                                       }};
+    return exprParse.parseExpr(expr);
+  }
 
 public:
   void copyIntoCtx(LibertyParser::Block *block) {
@@ -121,11 +348,16 @@ public:
     uint32_t kwPin = lexer.GetIdentIdx("pin");
     uint32_t kwDirection = lexer.GetIdentIdx("direction");
     uint32_t kwFunction = lexer.GetIdentIdx("function");
-
-    auto err = []() { report_fatal_error("liberty format error"); };
+    uint32_t kwFF = lexer.GetIdentIdx("ff");
+    uint32_t kwLatch = lexer.GetIdentIdx("latch");
 
     if (block->name != kwLibrary)
       err();
+    HWInstrBuilderStack build{ctx};
+
+    SmallVec<std::pair<RegisterRef, Token>, 16> funcList;
+    SmallVec<std::tuple<RegisterRef, RegisterRef, LibertyParser::Block *>, 16>
+        ffList;
 
     for (auto *object : block->blocks) {
       if (object->name != kwCell)
@@ -136,10 +368,32 @@ public:
         err();
       auto mod =
           ctx.createModule(object->params[0].strLit.value, HW_STDCELL_DEF);
-      HWInstrBuilder build{ctx};
+
       build.setInsertPoint(mod.block().end());
+      portNameMap.clear();
 
       for (auto sub : object->blocks) {
+        if (sub->name == kwFF || sub->name == kwLatch) {
+          SmallVec<RegisterRef, 2> outs;
+          for (auto param : sub->params) {
+            if (param.type != Token::STRING_LITERAL)
+              err();
+            auto reg = build.buildRegister(1);
+            ctx.regNameInfo.addName(reg, param.strLit.value);
+            portNameMap.emplace(param.strLit.value, reg);
+            outs.emplace_back(reg);
+          }
+
+          if (sub->name == kwLatch)
+            continue;
+
+          if (outs.size() == 0)
+            err();
+          ffList.emplace_back(outs[0], outs.size() == 1 ? nullref : outs[1],
+                              sub);
+          continue;
+        }
+
         if (sub->name != kwPin)
           continue;
         std::optional<Token> direction = std::nullopt;
@@ -161,6 +415,7 @@ public:
           if (!opt || opt->type != Token::STRING_LITERAL)
             err();
         };
+
         fmtCheck(direction);
         RegisterRef port;
         if (direction->strLit.value == "input")
@@ -176,14 +431,35 @@ public:
             sub->params[0].type != Token::STRING_LITERAL)
           break;
         port->numBits = 1;
+        portNameMap.insert(std::make_pair(sub->params[0].strLit.value, port));
         ctx.regNameInfo.addName(port, sub->params[0].strLit.value);
+
+        if (function) {
+          fmtCheck(function);
+          funcList.emplace_back(port, *function);
+        }
+      }
+
+      while (!funcList.empty()) {
+        auto [port, function] = funcList.pop_back_val();
+        build.pushInsertPoint(build.buildProcess().block().begin());
+        auto val = parseExpr(function.strLit.value, build);
+        build.buildStore(port, val);
+        build.popInsertPoint();
+      }
+
+      while (!ffList.empty()) {
+        auto [out0, out1, block] = ffList.pop_back_val();
+        HWInstrBuilder regBuild{ctx};
+        regBuild.setInsertPoint(mod.regs_end());
+        handleFF(block, build, regBuild, std::to_array({out0, out1}));
       }
     }
   }
 
 public:
   LibertyToDyno(HWContext &ctx, LibertyLexer &lexer) : ctx(ctx), lexer(lexer) {}
-};
+}; // namespace dyno
 
 class ParseLibertyPass {
   HWContext &ctx;

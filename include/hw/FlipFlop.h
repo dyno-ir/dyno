@@ -18,31 +18,34 @@ public:
   uint32_t clkPolarity() { return operand(1)->as<ConstantRef>().getExactVal(); }
   RegisterRef d() { return operand(2)->as<RegisterRef>(); }
   RegisterRef q() { return operand(3)->as<RegisterRef>(); }
+
   bool hasClkEn() const {
-    return (getNumOperands() == numBaseOperands + numClkEnOperands) ||
-           (getNumOperands() ==
-            numBaseOperands + numClkEnOperands + numRstOperands);
+    return ((getNumOperands() - numBaseOperands) % numRstOperands != 0);
   }
-  bool hasRst() const {
-    return (getNumOperands() == numBaseOperands + numRstOperands) ||
-           (getNumOperands() ==
-            numBaseOperands + numClkEnOperands + numRstOperands);
+  uint numRsts() const {
+    return ((getNumOperands() - numBaseOperands -
+             (hasClkEn() ? numClkEnOperands : 0)) /
+            numRstOperands);
   }
 
 private:
-  uint rstBase() const {
-    return hasClkEn() ? numBaseOperands + numClkEnOperands : numBaseOperands;
+  uint rstBase(uint i = 0) const {
+    return (hasClkEn() ? (numBaseOperands + numClkEnOperands)
+                       : numBaseOperands) +
+           i * numRstOperands;
   }
-  uint clkEnBase() const {
-    return hasRst() ? numBaseOperands + numRstOperands : numBaseOperands;
-  }
+  uint clkEnBase() const { return numBaseOperands; }
 
 public:
-  RegisterRef rst() { return operand(rstBase() + 0)->as<RegisterRef>(); }
-  uint32_t rstPolarity() {
-    return operand(rstBase() + 1)->as<ConstantRef>().getExactVal();
+  RegisterRef rst(uint i = 0) {
+    return operand(rstBase(i) + 0)->as<RegisterRef>();
   }
-  ConstantRef rstVal() { return operand(rstBase() + 2)->as<ConstantRef>(); }
+  uint32_t rstPolarity(uint i = 0) {
+    return operand(rstBase(i) + 1)->as<ConstantRef>().getExactVal();
+  }
+  ConstantRef rstVal(uint i = 0) {
+    return operand(rstBase(i) + 2)->as<ConstantRef>();
+  }
 
   RegisterRef clkEn() { return operand(clkEnBase() + 0)->as<RegisterRef>(); }
   uint32_t clkEnPolarity() {
