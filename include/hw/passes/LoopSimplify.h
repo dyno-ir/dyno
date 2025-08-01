@@ -416,7 +416,7 @@ class LoopSimplifyPass {
 
 public:
   void run() {
-    for (auto mod : ctx.getModules()) {
+    for (auto mod : ctx.activeModules()) {
       runOnModule(mod.iref());
     }
   }

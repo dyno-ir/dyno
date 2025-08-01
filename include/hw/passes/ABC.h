@@ -1,8 +1,12 @@
 #pragma once
 #include "aig/AIG.h"
+#include "dyno/DestroyMap.h"
 #include "hw/HWAbstraction.h"
 #include "hw/HWContext.h"
 #include "hw/HWInstr.h"
+#include "hw/IDs.h"
+#include "hw/LoadStore.h"
+#include "hw/Process.h"
 #include "support/ErrorRecovery.h"
 #include "support/Utility.h"
 #include <fstream>
@@ -125,13 +129,14 @@ public:
     type of instance that uses wires and lives inside the processes. Also not
     and ideal solution though.
   */
-  void parse(AIGObjRef aigObj, ModuleIRef parentMod) {
+  void parse(AIGObjRef aigObj) {
     std::string line;
     std::unordered_map<std::string, WireRef> names;
     std::unordered_map<std::string, ModuleRef> modules;
 
-    for (auto mod : ctx.getModules())
+    for (auto mod : ctx.getModules()) {
       modules[mod->name] = mod;
+    }
 
     HWInstrBuilder build{ctx};
 
@@ -283,6 +288,7 @@ public:
 
 class ABCPass {
   HWContext &ctx;
+  DestroyMap<Instr> destroyMap;
 
   void runOnAIG(InstrRef aigInstr) {
     auto aigRef = aigInstr.def(0)->as<AIGObjRef>();
@@ -303,7 +309,7 @@ class ABCPass {
 
     std::ifstream mappedFile{"mapped.blif"};
     BLIF_Parser parse{ctx, mappedFile};
-    parse.parse(aigRef, HWInstrRef{aigInstr}.parentMod(ctx));
+    parse.parse(aigRef);
   }
 
   void runOnProc(ProcessIRef proc) {
@@ -311,6 +317,14 @@ class ABCPass {
       if (instr.isOpc(AIG_GRAPH))
         runOnAIG(instr);
     }
+
+    HWInstrBuilder build{ctx};
+    build.setInsertPoint(proc);
+    auto ib = build.buildInstrRaw(HW_NETLIST_PROCESS_DEF, 2);
+    ib.addRef(proc.proc()).addRef(proc.block());
+    proc.def(0).replace(FatDynObjRef<>{nullref});
+    proc.def(1).replace(FatDynObjRef<>{nullref});
+    destroyMap.mark(proc);
   }
 
   void runOnModule(ModuleIRef module) {
@@ -321,9 +335,17 @@ class ABCPass {
 
 public:
   void run() {
-    for (auto mod : ctx.getModules()) {
+    destroyMap.clear();
+    destroyMap.resize(ctx.getInstrs().numIDs());
+
+    auto tok = destroyMap.registerCreateHook(ctx.getInstrs());
+    for (auto mod : ctx.activeModules()) {
       runOnModule(mod.iref());
     }
+
+    destroyMap.apply(ctx.getInstrs(), [&](InstrRef ref) {
+      HWInstrBuilder{ctx}.destroyInstr(ref);
+    });
   }
   explicit ABCPass(HWContext &ctx) : ctx(ctx) {}
 };

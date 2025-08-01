@@ -366,6 +366,23 @@ replace {
 }
 
 /*
+// todo: multi-bit, reverse matching on the or
+match {
+  OP_AND $outA, anyorder($mask:HW_WIRE, $valA)
+  OP_NOT $mask_inv, $mask
+  OP_AND $outB, anyorder($mask_inv:HW_WIRE, $valB)
+  OP_OR $out, /*fixme: should also support reverse*/ $outB:HW_WIRE, $outA:HW_WIRE
+}
+with [{
+  if (*(*$out.begin())->as<WireRef>().getNumBits() != 1)
+    goto $fail;
+}]
+replace {
+  HW_MUX $out, $mask, $valA, $valB
+}
+*/
+
+/*
 // these might hinder MUX tree analysis. skip for now, maybe support in mux tree analysis at some
 match {
   HW_MUX $out, $cond, #'1, $rhs

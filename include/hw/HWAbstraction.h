@@ -37,6 +37,10 @@ public:
   HWInstrBuilder(HWContext &ctx, BlockRef_iterator<true> insert)
       : ctx(ctx), insert(insert) {}
 
+  HWInstrBuilder(HWContext &ctx, InstrRef insert) : ctx(ctx) {
+    setInsertPoint(insert);
+  }
+
   HWInstrBuilder(HWContext &ctx) : ctx(ctx), insert() {}
 
   void insertInstr(InstrRef instr) { insert.insertPrev(instr); }
@@ -614,7 +618,7 @@ public:
                            TriggerIRef trigger = nullref) {
     assert(type == HW_INIT_PROCESS_DEF || type == HW_COMB_PROCESS_DEF ||
            type == HW_SEQ_PROCESS_DEF || type == HW_FINAL_PROCESS_DEF ||
-           type == HW_LATCH_PROCESS_DEF);
+           type == HW_LATCH_PROCESS_DEF || type == HW_NETLIST_PROCESS_DEF);
     auto procRef = ctx.getProcs().create();
     auto procInstRef =
         ProcessIRef{ctx.getInstrs().create(2 + (trigger != nullref), type)};

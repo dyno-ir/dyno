@@ -6,7 +6,9 @@
 #include "hw/passes/AIGConstruct.h"
 #include "hw/passes/AggressiveDeadCodeElimination.h"
 #include "hw/passes/CommonSubexpressionElimination.h"
+#include "hw/passes/DumpVerilog.h"
 #include "hw/passes/FlipFlopInference.h"
+#include "hw/passes/FlipFlopMapping.h"
 #include "hw/passes/FunctionInline.h"
 #include "hw/passes/InstCombine.h"
 #include "hw/passes/LinearizeControlFlow.h"
@@ -16,6 +18,7 @@
 #include "hw/passes/MuxTreeOptimization.h"
 #include "hw/passes/ParseLiberty.h"
 #include "hw/passes/ProcessLinearize.h"
+#include "hw/passes/RemoveBuffers.h"
 #include "hw/passes/SSAConstruct.h"
 #include "hw/passes/SeqToComb.h"
 #include "hw/passes/TriggerDedupe.h"
@@ -42,6 +45,8 @@ class PassPipeline {
   FlipFlopInferencePass flipFlopInference{ctx};
   MuxTreeOptimizationPass muxTreeOpt{ctx};
   CommonSubexpressionEliminationPass cse{ctx};
+  FlipFlopMappingPass ffMap{ctx};
+  RemoveBuffersPass removeBufs{ctx};
 
 public:
   bool printAfterAll = false;
@@ -74,8 +79,34 @@ public:
     runPass(cse);
   }
 
+  void runLibertyPipeline() {
+    SmallVec<ModuleRef, 4> original;
+    for (auto mod : ctx.activeModules()) {
+      original.emplace_back(mod);
+      mod->ignore = true;
+    }
+
+    auto old = printAfterAll;
+    printAfterAll = true;
+    runPass(parseLiberty);
+    runPass(agressiveDCE);
+    runPass(cse);
+    runPass(instCombine);
+    runPass(agressiveDCE);
+    printAfterAll = old;
+
+    // todo properly
+    for (auto mod : ctx.activeModules())
+      mod->ignore = 1;
+    for (auto mod : original)
+      mod->ignore = 0;
+  }
+
   void runLoweringPipeline() {
 
+    processLinearize.config.retainInnerDeps = 0;
+    processLinearize.config.retainIODeps = 0;
+    runPass(processLinearize);
     runPass(linearizeControlFlow);
     ssaConstr.config.mode = SSAConstructPass::Config::IMMEDIATE;
     runPass(ssaConstr);
@@ -115,6 +146,12 @@ public:
     runPass(lowerOps);
     runPass(instCombine);
 
+    runLibertyPipeline();
+    runPass(ffMap);
+    runPass(ssaConstr);
+    runPass(instCombine);
+    runPass(agressiveDCE);
+
     // lower the rest without re-running instcombine.
     lowerOps.config = LowerOpsPass::Config{
         .lowerMultiInputAdd = true,
@@ -131,11 +168,15 @@ public:
 
     runPass(aigConstr);
     runPass(agressiveDCE);
-
-    runPass(parseLiberty);
     runPass(abc);
     runPass(instCombine);
     runPass(agressiveDCE);
+    runPass(removeBufs);
+  }
+
+  void dumpVerilog(std::ostream &os) {
+    DumpVerilogPass dumpVerilog{ctx, os};
+    dumpVerilog.run();
   }
 
 public:

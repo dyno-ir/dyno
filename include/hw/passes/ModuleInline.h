@@ -48,7 +48,8 @@ class ModuleInlinePass {
       if (src.isOpc(HW_REGISTER_DEF)) {
         HWInstrBuilder build{ctx};
         build.setInsertPoint(parentMod.regs_end());
-        auto reg = build.buildRegister(src.as<RegisterIRef>().oref().getNumBits());
+        auto reg =
+            build.buildRegister(src.as<RegisterIRef>().oref().getNumBits());
         self->oldToNewMap.insert(src.def(0)->fat(), reg);
         return true;
       }
@@ -75,7 +76,7 @@ public:
   void run() {
     markSubModules();
     SmallVec<HWInstrRef, 32> worklist;
-    for (auto mod : ctx.getModules()) {
+    for (auto mod : ctx.activeModules()) {
       for (auto use : mod->defUse.uses()) {
         auto modUsed = HWInstrRef{use.instr()}.parentMod(ctx);
         if (!isSubModule[modUsed.mod()]) {
@@ -88,7 +89,7 @@ public:
       inlineInstance(inst);
     }
 
-    for (auto mod : ctx.getModules()) {
+    for (auto mod : ctx.activeModules()) {
       if (isSubModule[mod])
         deleteRec(mod.iref());
     }

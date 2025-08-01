@@ -91,6 +91,9 @@ class CommonSubexpressionEliminationPass {
     if (!other)
       return;
 
+    assert(HWInstrRef{other}.parentProc(ctx) ==
+           HWInstrRef{instr}.parentProc(ctx));
+
     // assuming other comes first. this is gonna be tricky for worklist-based
     // approach, order might be flipped and we don't have a quick way to find
     // which is first.
@@ -128,6 +131,7 @@ class CommonSubexpressionEliminationPass {
     InstrRef otherPred = otherStack[otherIdx].instr();
     InstrRef instrPred = instrStack[instrIdx].instr();
     auto block = HWInstrRef{otherPred}.parentBlock(ctx);
+    assert(block == HWInstrRef{instrPred}.parentBlock(ctx));
 
     DEBUG("CSE", {
       dbgs() << "merging in different blocks:\n";
@@ -143,15 +147,19 @@ class CommonSubexpressionEliminationPass {
 
     for (auto it = block.begin(); it != block.end(); ++it) {
       if (*it == otherPred || *it == instrPred) {
+        if (*it == other)
+          return;
         ctx.getCFG()[other].erase();
         it.insertPrev(other);
         return;
       }
     }
+
     dyno_unreachable("")
   }
 
   void runOnProcess(ProcessIRef proc) {
+    map.clear();
     for (auto instr : HierBlockRange{proc.block()})
       if (!ignoreForCSE(instr)) {
         runOnInstr(instr);
@@ -165,14 +173,14 @@ class CommonSubexpressionEliminationPass {
 
 public:
   void run() {
-    map.clear();
     instrDestroy.resize(ctx.getInstrs().numIDs());
-    for (auto mod : ctx.getModules()) {
+    for (auto mod : ctx.activeModules()) {
       runOnModule(mod.iref());
     }
     HWInstrBuilder build{ctx};
     instrDestroy.apply(ctx.getInstrs(),
                        [&](InstrRef ref) { build.destroyInstr(ref); });
+    instrDestroy.clear();
   }
   explicit CommonSubexpressionEliminationPass(HWContext &ctx)
       : ctx(ctx), map(ctx) {}

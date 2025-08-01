@@ -797,7 +797,7 @@ public:
       createHooks.emplace_back(
           [&](InstrRef ref) { isNewInstr.get_ensure(ref) = true; });
 
-    for (auto mod : Range{ctx.getModules()}.as<ModuleRef>()) {
+    for (auto mod : ctx.activeModules()) {
       runOnModule(mod.iref());
     }
 

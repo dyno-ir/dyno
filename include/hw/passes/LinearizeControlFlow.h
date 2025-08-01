@@ -5,6 +5,7 @@
 #include "hw/DeepCopy.h"
 #include "hw/HWAbstraction.h"
 #include "hw/HWContext.h"
+#include "hw/HWPrinter.h"
 #include "hw/HWValue.h"
 #include "hw/IDs.h"
 #include "hw/Wire.h"
@@ -159,7 +160,8 @@ class LinearizeControlFlowPass {
       if (j == defaultIdx)
         continue;
 
-      auto pred = BigInt::ICMP_CEQ;
+      // auto pred = BigInt::ICMP_CEQ;
+      auto pred = BigInt::ICMP_EQ; // fixme
       if (caseInstr.isOpc(HW_CASE_Z))
         pred = BigInt::ICMP_CZEQ;
       else if (caseInstr.isOpc(HW_CASE_X))
@@ -242,6 +244,7 @@ class LinearizeControlFlowPass {
         continue;
       case *OP_IF:
         linearizeIf(instr);
+        dumpCtx(ctx);
         break;
       case *OP_SWITCH:
         linearizeSwitch(instr.as<SwitchInstrRef>());
@@ -260,8 +263,9 @@ class LinearizeControlFlowPass {
 
 public:
   void run() {
-    for (auto module : ctx.getModules())
+    for (auto module : ctx.activeModules()) {
       runOnModule(module.iref());
+    }
   }
   explicit LinearizeControlFlowPass(HWContext &ctx)
       : ctx(ctx), copier(ctx), build(ctx), autoDebugInfo(ctx) {}

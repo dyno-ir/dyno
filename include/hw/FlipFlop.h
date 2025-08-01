@@ -2,6 +2,7 @@
 
 #include "dyno/Constant.h"
 #include "hw/HWInstr.h"
+#include "support/Utility.h"
 namespace dyno {
 
 class FlipFlopIRef : public OpcodeInstrRef<HWInstrRef, HW_FLIP_FLOP> {
@@ -50,6 +51,46 @@ public:
   RegisterRef clkEn() { return operand(clkEnBase() + 0)->as<RegisterRef>(); }
   uint32_t clkEnPolarity() {
     return operand(clkEnBase() + 1)->as<ConstantRef>().getExactVal();
+  }
+
+  void flipPolarity(OperandRef ref) {
+    auto pol = (ref + 1);
+    assert(pol->is<ConstantRef>() && pol->as<ConstantRef>().getNumBits() == 1);
+    pol.replace(ConstantRef::fromBool(!pol->as<ConstantRef>().getExactVal()));
+  }
+  uint32_t getPolarity(OperandRef ref) {
+    auto pol = (ref + 1);
+    assert(pol->is<ConstantRef>() && pol->as<ConstantRef>().getNumBits() == 1);
+    return pol->as<ConstantRef>().getExactVal();
+  }
+
+  enum UseType {
+    CLOCK,
+    D,
+    Q,
+    ENABLE,
+    RESET_BEGIN,
+    RESET_0 = RESET_BEGIN,
+    RESET_1 = RESET_BEGIN + numRstOperands,
+    RESET_2 = RESET_BEGIN + 2 * numRstOperands,
+    RESET_END = RESET_BEGIN +
+                ((InstrRef::max_others - numBaseOperands - numClkEnOperands) /
+                 numRstOperands)
+  };
+  UseType classifyUse(OperandRef use) {
+    assert(use.instr() == *this);
+    uint idx = use - other_begin();
+    if (idx == 0)
+      return CLOCK;
+    if (idx == 2)
+      return D;
+    if (idx == 3)
+      return Q;
+    if (hasClkEn() && idx == clkEnBase())
+      return ENABLE;
+    if (numRsts() > 0 && (idx - rstBase()) % numRstOperands == 0)
+      return UseType(RESET_BEGIN + ((idx - rstBase()) / numRstOperands));
+    dyno_unreachable("invalid operand");
   }
 };
 

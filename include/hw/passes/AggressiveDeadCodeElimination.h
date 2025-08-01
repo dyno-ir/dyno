@@ -88,7 +88,7 @@ class AggressiveDeadCodeEliminationPass {
     auto block = HWInstrRef{instr}.parentBlock(ctx);
     if (block.defI().isOpc(HW_INIT_PROCESS_DEF, HW_COMB_PROCESS_DEF,
                            HW_SEQ_PROCESS_DEF, HW_LATCH_PROCESS_DEF,
-                           HW_FINAL_PROCESS_DEF)) {
+                           HW_FINAL_PROCESS_DEF, HW_NETLIST_PROCESS_DEF)) {
       instrMap[block.defI()] = 1;
     }
   }
@@ -110,7 +110,7 @@ class AggressiveDeadCodeEliminationPass {
         break;
       auto asIf = instr.as<IfInstrRef>();
       // if (!instrMap[instr])
-      visitHWValue(asIf.getCondValue()->as<WireRef>());
+      visitHWValue(asIf.getCondValue()->as<HWValue>());
       InstrRef yieldInstrT = asIf.getInnerYieldTrue();
       InstrRef yieldInstrF = asIf.getInnerYieldFalse();
       for (uint i = 0; i < asIf.getNumYieldValues(); i++) {
@@ -360,7 +360,8 @@ class AggressiveDeadCodeEliminationPass {
       case *HW_COMB_PROCESS_DEF:
       case *HW_SEQ_PROCESS_DEF:
       case *HW_LATCH_PROCESS_DEF:
-      case *HW_FINAL_PROCESS_DEF: {
+      case *HW_FINAL_PROCESS_DEF:
+      case *HW_NETLIST_PROCESS_DEF: {
         blockDestroyMap[instr.as<ProcessIRef>().block()] = 1;
         break;
       }

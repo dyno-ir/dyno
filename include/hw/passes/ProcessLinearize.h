@@ -38,6 +38,7 @@ class ProcessLinearizePass {
 
   ObjMapVec<Process, Custom> map;
 
+public:
   struct Config {
     bool retainIODeps = true;
     bool retainInnerDeps = false;
@@ -46,6 +47,7 @@ class ProcessLinearizePass {
   };
   Config config;
 
+private:
   HWContext &ctx;
 
   bool ignoredKind(ProcessIRef iref) {
@@ -53,7 +55,7 @@ class ProcessLinearizePass {
     case Config::COMB:
       return !iref.isOpc(HW_COMB_PROCESS_DEF);
     case Config::INIT:
-      return !iref.isOpc(HW_SEQ_PROCESS_DEF);
+      return !iref.isOpc(HW_INIT_PROCESS_DEF);
     }
     dyno_unreachable("invalid kind");
   };
@@ -69,13 +71,11 @@ public:
     uint outputIdxCnt = 0;
 
     for (auto reg : module.regs()) {
-      bool regIsAnyInput =
-          reg.isOpc(HW_INPUT_REGISTER_DEF, HW_INOUT_REGISTER_DEF,
-                    HW_REF_REGISTER_DEF);
+      bool regIsAnyInput = reg.isOpc(
+          HW_INPUT_REGISTER_DEF, HW_INOUT_REGISTER_DEF, HW_REF_REGISTER_DEF);
 
-      bool regIsAnyOutput =
-          reg.isOpc(HW_OUTPUT_REGISTER_DEF, HW_INOUT_REGISTER_DEF,
-                    HW_REF_REGISTER_DEF);
+      bool regIsAnyOutput = reg.isOpc(
+          HW_OUTPUT_REGISTER_DEF, HW_INOUT_REGISTER_DEF, HW_REF_REGISTER_DEF);
 
       RegisterRegions writeRegions{*reg.getNumBits()};
 
@@ -395,8 +395,9 @@ public:
   }
 
   void run() {
+    map.clear();
     map.resize(ctx.getProcs().numIDs());
-    for (auto mod : ctx.getModules()) {
+    for (auto mod : ctx.activeModules()) {
       runOnModule(ModuleRef{mod}.iref());
     }
   }

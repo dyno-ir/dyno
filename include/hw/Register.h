@@ -50,14 +50,37 @@ public:
   auto &getNumBits() { return oref().getNumBits(); }
 
   static bool is_impl(FatObjRef<Instr> instr) {
-    return InstrRef{instr}.isOpc(
-        HW_REGISTER_DEF, HW_INPUT_REGISTER_DEF, HW_OUTPUT_REGISTER_DEF,
-        HW_INOUT_REGISTER_DEF, HW_REF_REGISTER_DEF);
+    return InstrRef{instr}.isOpc(HW_REGISTER_DEF, HW_INPUT_REGISTER_DEF,
+                                 HW_OUTPUT_REGISTER_DEF, HW_INOUT_REGISTER_DEF,
+                                 HW_REF_REGISTER_DEF);
   }
   static bool is_impl(FatDynObjRef<> ref) {
     if (auto asInstr = ref.dyn_as<InstrRef>())
       return is_impl(asInstr);
     return false;
+  }
+
+  InstrRef getSingleStore() {
+    InstrRef rv = nullref;
+    for (auto use : oref().uses()) {
+      if (use.instr().isOpc(HW_STORE, HW_STORE_DEFER)) {
+        if (rv)
+          return nullref;
+        rv = use.instr();
+      }
+    }
+    return rv;
+  }
+  InstrRef getSingleLoad() {
+    InstrRef rv = nullref;
+    for (auto use : oref().uses()) {
+      if (use.instr().isOpc(HW_LOAD)) {
+        if (rv)
+          return nullref;
+        rv = use.instr();
+      }
+    }
+    return rv;
   }
 };
 

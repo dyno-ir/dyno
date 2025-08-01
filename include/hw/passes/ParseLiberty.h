@@ -6,6 +6,7 @@
 #include "support/ErrorRecovery.h"
 #include "support/Lexer.h"
 #include "support/SlabAllocator.h"
+#include "support/Utility.h"
 #include <fstream>
 #include <iterator>
 #include <variant>
@@ -295,35 +296,76 @@ class LibertyToDyno {
 
     if (!ff.val_clocked_on)
       err();
-    SensList sens;
 
     auto clkReg = regBuild.buildRegister(1);
     build.buildStore(clkReg, ff.val_clocked_on);
-    sens.signals.emplace_back(clkReg, SensMode::POSEDGE);
+    auto dReg = regBuild.buildRegister(1);
+
     if (ff.val_clocked_on_also)
       report_fatal_error("liberty format: clocked_on_also unsupported");
+
+    bool clearPrio = false;
+    if (ff.val_clear && ff.val_preset) {
+      char other;
+      if (ff.val_clear_preset_var1 == 'L') {
+        clearPrio = true;
+        other = 'H';
+      } else if (ff.val_clear_preset_var1 == 'H') {
+        clearPrio = false;
+        other = 'L';
+      } else
+        report_fatal_error("liberty parse: unsupported val_clear_preset_var1");
+
+      if (outs.size() == 2)
+        if (ff.val_clear_preset_var2 != other)
+          report_fatal_error(
+              "liberty parse: unsupported val_clear_preset_var2");
+    }
+
+    build.buildStore(dReg, val);
+
+    auto ib = regBuild.buildInstrRaw(HW_FLIP_FLOP, 4 + 3 * !!ff.val_clear +
+                                                       3 * !!ff.val_preset);
+    regBuild.setInsertPoint(ib.instr());
+    ib.other()
+        .addRef(clkReg)
+        .addRef(ConstantRef::fromBool(1))
+        .addRef(dReg)
+        .addRef(outs[0]);
+
     auto addClear = [&]() {
       if (ff.val_clear) {
         auto clrReg = regBuild.buildRegister(1);
         build.buildStore(clrReg, ff.val_clear);
-        sens.signals.emplace_back(clrReg, SensMode::POSEDGE);
-        val = build.buildMux(ff.val_clear, ConstantRef::fromBool(0), val);
+        ib.addRef(clrReg)
+            .addRef(ConstantRef::fromBool(1))
+            .addRef(ConstantRef::fromBool(0));
       }
     };
     auto addPreset = [&]() {
       if (ff.val_preset) {
         auto presetReg = regBuild.buildRegister(1);
         build.buildStore(presetReg, ff.val_preset);
-        sens.signals.emplace_back(presetReg, SensMode::POSEDGE);
-        val = build.buildMux(ff.val_preset, ConstantRef::fromBool(1), val);
+        ib.addRef(presetReg)
+            .addRef(ConstantRef::fromBool(1))
+            .addRef(ConstantRef::fromBool(1));
       }
     };
-    addClear();
-    addPreset();
 
-    auto trig = regBuild.buildTrigger(sens);
-    regBuild.setInsertPoint(trig);
-    build.buildStore(outs[0], val, BitRange::full(), true, trig);
+    if (clearPrio) {
+      addClear();
+      addPreset();
+    } else {
+      addPreset();
+      addClear();
+    }
+
+    build.popInsertPoint();
+    if (outs.size() == 2) {
+      build.pushInsertPoint(build.buildProcess().block().end());
+      build.buildStore(outs[1], build.buildNot(build.buildLoad(outs[0])));
+      build.popInsertPoint();
+    }
   }
 
   std::unordered_map<std::string_view, RegisterRef> portNameMap;

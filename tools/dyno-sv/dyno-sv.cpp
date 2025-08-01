@@ -38,9 +38,10 @@ int main(int argc, char **argv) {
 
   std::cout << "\n\n\n";
 
-
   PassPipeline pipeline{ctx};
   pipeline.printAfterAll = true;
   pipeline.runOptPipeline();
   pipeline.runLoweringPipeline();
+  std::ofstream of{"dump.v"};
+  pipeline.dumpVerilog(of);
 }

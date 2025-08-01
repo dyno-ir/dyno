@@ -8,6 +8,7 @@
 #include "hw/DebugInfo.h"
 #include "support/DenseMap.h"
 #include "support/RTTI.h"
+#include "support/TempBind.h"
 #include "support/Utility.h"
 #include <dyno/Instr.h>
 #include <dyno/Interface.h>
@@ -39,7 +40,7 @@ public:
 };
 
 class PrinterBase {
-
+public:
   struct IntroducedName : public RTTIUtilMixin<IntroducedName> {
     enum Type : uint8_t { NUMERIC, STRING };
     Type type;
@@ -68,6 +69,7 @@ class PrinterBase {
     } storage;
   };
 
+private:
   DenseMap<DynObjRef, IntroducedName> introduced;
   uint32_t numericNameCnt = 0;
 
@@ -75,7 +77,7 @@ class PrinterBase {
 
 protected:
   IndentPrinter indentPrint;
-  SourceLocInfo<Instr> *sourceLocInfo = nullptr;
+  TempBindPtr<SourceLocInfo<Instr>> sourceLocInfo;
 
 public:
   Interface<DialectInfo> dialectI;

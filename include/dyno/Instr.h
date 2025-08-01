@@ -15,6 +15,7 @@
 #include <dyno/Interface.h>
 #include <dyno/Obj.h>
 #include <iterator>
+#include <limits>
 #include <support/InlineStorage.h>
 #include <support/Ranges.h>
 #include <utility>
@@ -257,6 +258,10 @@ public:
   using FatObjRef<Instr>::FatObjRef;
   explicit constexpr InstrRef(FatObjRef<Instr> instrRef)
       : FatObjRef<Instr>(instrRef) {}
+  constexpr static size_t max_operands =
+      (size_t)std::numeric_limits<decltype(custom)>::max() + 1ull;
+  constexpr static size_t max_defs = max_operands;
+  constexpr static size_t max_others = max_operands;
 
   class iterator {
     OperandRef ref;

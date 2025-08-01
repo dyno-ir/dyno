@@ -182,6 +182,7 @@ class MuxTreeOptimizationPass {
       sel = andOperands[0];
     else {
       auto wire = build.buildInstr(OP_AND, true, ArrayRef{andOperands}).defW();
+      wire->numBits = 1;
       sel = wire;
     }
 
@@ -338,7 +339,7 @@ public:
     ctx.getInstrs().createHooks.emplace_back(
         [&](InstrRef ref) { visitedMap.get_ensure(ref) = 1; });
 
-    for (auto mod : ctx.getModules()) {
+    for (auto mod : ctx.activeModules()) {
       runOnModule(mod.iref());
     }
   }

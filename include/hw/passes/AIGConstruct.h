@@ -189,33 +189,82 @@ class AIGConstructPass {
   AIGObjRef aigRef;
   ObjMapVec<Instr, bool> destroyMap;
 
+  void buildAIGInputInstr(WireRef wire, AIGBuilder &abuild) {
+    auto &aig = abuild.aig;
+    auto arr = abuild.buildInput(wire);
+    auto ibuild = build.buildInstrRaw(AIG_INPUT, arr.size() + 2);
+    for (auto ref : arr)
+      ibuild.addRef(aig.store.resolve(ref).as<FatAIGNodeRef>());
+    ibuild.other();
+    ibuild.addRef(wire);
+    ibuild.addRef(aigRef);
+  }
+  void buildAIGOutputInstr(WireRef wire, AIGBuilder &abuild) {
+    for (auto def : wire.defs())
+      if (def.instr().isOpc(AIG_OUTPUT))
+        return;
+    for (auto use : wire.uses())
+      if (use.instr().isOpc(AIG_INPUT))
+        return;
+    auto &aig = abuild.aig;
+    auto arr = abuild.buildOutput(wire);
+    auto ibuild = build.buildInstrRaw(AIG_OUTPUT, arr.size() + 2);
+    ibuild.addRef(wire);
+    for (auto ref : arr)
+      ibuild.addRef(aig.store.resolve(ref).as<FatAIGNodeRef>());
+    ibuild.other();
+    ibuild.addRef(aigRef);
+  }
+
   void handleInstr(InstrRef instr, AIGBuilder &abuild) {
     auto &aig = abuild.aig;
     switch (*instr.getDialectOpcode()) {
-    case *HW_LOAD: {
-      build.setInsertPoint(instr);
-      build.setInsertPoint(build.insert.succ());
-      auto arr = abuild.buildInput(instr.as<LoadIRef>().value());
-      auto ibuild = build.buildInstrRaw(AIG_INPUT, arr.size() + 2);
-      for (auto ref : arr)
-        ibuild.addRef(aig.store.resolve(ref).as<FatAIGNodeRef>());
-      ibuild.other();
-      ibuild.addRef(instr.as<LoadIRef>().value());
-      ibuild.addRef(aigRef);
+    // case *HW_LOAD: {
+    //   build.setInsertPoint(instr);
+    //   build.setInsertPoint(build.insert.succ());
+    //   auto arr = abuild.buildInput(instr.as<LoadIRef>().value());
+    //   auto ibuild = build.buildInstrRaw(AIG_INPUT, arr.size() + 2);
+    //   for (auto ref : arr)
+    //     ibuild.addRef(aig.store.resolve(ref).as<FatAIGNodeRef>());
+    //   ibuild.other();
+    //   ibuild.addRef(instr.as<LoadIRef>().value());
+    //   ibuild.addRef(aigRef);
+    //   return;
+    // }
+    // case *HW_STORE_DEFER:
+    // case *HW_STORE: {
+    //   if (!instr.as<StoreIRef>().value().is<WireRef>())
+    //     return;
+    //   build.setInsertPoint(instr);
+    //   auto arr = abuild.buildOutput(instr.as<StoreIRef>().value());
+    //   auto ibuild = build.buildInstrRaw(AIG_OUTPUT, arr.size() + 2);
+    //   ibuild.addRef(instr.as<StoreIRef>().value().as<WireRef>());
+    //   for (auto ref : arr)
+    //     ibuild.addRef(aig.store.resolve(ref).as<FatAIGNodeRef>());
+    //   ibuild.other();
+    //   ibuild.addRef(aigRef);
+    //   return;
+    // }
+
+    // Keep all unmatched instructions, just pipe their defs/uses in/out of the
+    // AIG as IOs.
+    case *AIG_INPUT:
+    case *AIG_OUTPUT:
       return;
-    }
-    case *HW_STORE_DEFER:
-    case *HW_STORE: {
-      if (!instr.as<StoreIRef>().value().is<WireRef>())
-        return;
+
+    default: {
       build.setInsertPoint(instr);
-      auto arr = abuild.buildOutput(instr.as<StoreIRef>().value());
-      auto ibuild = build.buildInstrRaw(AIG_OUTPUT, arr.size() + 2);
-      ibuild.addRef(instr.as<StoreIRef>().value().as<WireRef>());
-      for (auto ref : arr)
-        ibuild.addRef(aig.store.resolve(ref).as<FatAIGNodeRef>());
-      ibuild.other();
-      ibuild.addRef(aigRef);
+      for (auto use : instr.others()) {
+        if (auto asWire = use->dyn_as<WireRef>())
+          buildAIGOutputInstr(asWire, abuild);
+      }
+
+      build.insert = std::next(build.insert);
+
+      for (auto def : instr.defs()) {
+        if (auto asWire = def->dyn_as<WireRef>())
+          buildAIGInputInstr(asWire, abuild);
+      }
       return;
     }
 
@@ -270,8 +319,8 @@ class AIGConstructPass {
                            instr.other(0)->as<WireRef>(), instr.isOpc(OP_SEXT));
       break;
     }
-    default:
-      return;
+      // default:
+      //   return;
     }
     instr.def(0).replace(FatDynObjRef<>{nullref});
     destroyMap[instr] = 1;
@@ -302,7 +351,7 @@ public:
     ctx.getInstrs().createHooks.emplace_back(
         [&](InstrRef ref) { destroyMap.get_ensure(ref) = 0; });
 
-    for (auto mod : ctx.getModules()) {
+    for (auto mod : ctx.activeModules()) {
       runOnModule(mod.iref());
     }
     ctx.getInstrs().createHooks.pop_back();

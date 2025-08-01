@@ -116,7 +116,7 @@ public:
   }
 
   void run() {
-    for (auto mod : Range{ctx.getModules()}.as<ModuleRef>()) {
+    for (auto mod : ctx.activeModules()) {
       runOnModule(mod.iref());
     }
   }

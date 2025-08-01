@@ -91,7 +91,11 @@ class FlipFlopInferencePass {
     if (trigger->size() > 3)
       report_fatal_error("too many sensitivities on flip flop");
     bool hasReset = trigger->size() != 1;
-    bool hasIFF = trigger->size() == 3 && trigger->getMode(1) == SensMode::IFF;
+    bool hasIFF =
+        trigger->size() == 3 && (trigger->getMode(1) == SensMode::IFF ||
+                                 trigger->getMode(1) == SensMode::IFFN);
+    if (!hasIFF && trigger->size() == 3)
+      report_fatal_error("too many sensitivities!");
 
     std::pair<RegisterRef, bool> clkReg;
     std::pair<RegisterRef, bool> rstReg;
@@ -161,7 +165,7 @@ class FlipFlopInferencePass {
 
 public:
   void run() {
-    for (auto mod : ctx.getModules()) {
+    for (auto mod : ctx.activeModules()) {
       runOnModule(mod.iref());
     }
   }

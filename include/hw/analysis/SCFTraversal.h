@@ -8,24 +8,27 @@ inline void traverseSCFPreorder(IFunc ifunc, BFunc bfunc,
                                 BlockRef currentBlock) {
   bfunc(currentBlock);
   for (auto instr : currentBlock) {
-    ifunc(instr);
     switch (*instr.getDialectOpcode()) {
     case *OP_IF: {
+      ifunc(instr);
       traverseSCFPreorder(ifunc, bfunc, instr.as<IfInstrRef>().getTrueBlock());
       traverseSCFPreorder(ifunc, bfunc, instr.as<IfInstrRef>().getFalseBlock());
       break;
     }
     case *OP_SWITCH: {
+      ifunc(instr);
       for (auto caseInstr : instr.as<SwitchInstrRef>().block()) {
         traverseSCFPreorder(ifunc, bfunc, caseInstr.as<CaseInstrRef>().block());
       }
       break;
     }
     case *OP_DO_WHILE: {
+      ifunc(instr);
       traverseSCFPreorder(ifunc, bfunc, instr.as<DoWhileInstrRef>().getBlock());
       break;
     }
     case *OP_WHILE: {
+      ifunc(instr);
       traverseSCFPreorder(ifunc, bfunc,
                           instr.as<WhileInstrRef>().getCondBlock());
       traverseSCFPreorder(ifunc, bfunc,
@@ -33,6 +36,7 @@ inline void traverseSCFPreorder(IFunc ifunc, BFunc bfunc,
       break;
     }
     case *OP_FOR: {
+      ifunc(instr);
       traverseSCFPreorder(ifunc, bfunc, instr.as<ForInstrRef>().getBlock());
       break;
     }

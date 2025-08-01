@@ -102,6 +102,10 @@ public:
     }
   }
 
+  auto activeModules() {
+    return Range{modules}.filter([](ModuleRef ref) { return !ref->ignore; });
+  }
+
   HWContext() {
     instrs.destroyHooks.emplace_back(
         [&](InstrRef instr) { sourceLocInfo.resetDebugInfo(instr); });

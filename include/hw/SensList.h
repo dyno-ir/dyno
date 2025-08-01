@@ -5,6 +5,7 @@
 #include "hw/Register.h"
 #include "support/ArrayRef.h"
 #include "support/Bits.h"
+#include "support/Utility.h"
 #include <cstdint>
 
 namespace dyno {
@@ -14,6 +15,7 @@ enum class SensMode : uint8_t {
   NEGEDGE,
   ANYEDGE,
   IFF,
+  IFFN,
   NUM_SENS_MODES
 };
 
@@ -78,6 +80,30 @@ public:
   SensMode getMode(size_t i) {
     assert(i < numModes);
     return SensMode((sensModes >> (BitsPerMode * i)) & ModeMask);
+  }
+  void inverseMode(size_t i) {
+    assert(i < numModes);
+    SensMode newMode;
+    switch (getMode(i)) {
+    case SensMode::POSEDGE:
+      newMode = SensMode::NEGEDGE;
+      break;
+    case SensMode::NEGEDGE:
+      newMode = SensMode::POSEDGE;
+      break;
+    case SensMode::ANYEDGE:
+      newMode = SensMode::ANYEDGE;
+      break;
+    case SensMode::IFF:
+      newMode = SensMode::IFFN;
+      break;
+    case SensMode::IFFN:
+      newMode = SensMode::IFF;
+      break;
+    default:
+      dyno_unreachable("unknown sens mode");
+    }
+    setMode(i, newMode);
   }
   void setMode(size_t i, SensMode sensMode) {
     assert(i < numModes);

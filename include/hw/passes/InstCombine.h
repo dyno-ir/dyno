@@ -4,6 +4,7 @@
 #include "dyno/CustomInstr.h"
 #include "dyno/HierBlockIterator.h"
 #include "dyno/Opcode.h"
+#include "hw/FlipFlop.h"
 #include "hw/HWAbstraction.h"
 #include "hw/HWContext.h"
 #include "hw/HWPrinter.h"
@@ -52,6 +53,11 @@ private:
   void deleteMatchedInstr(InstrRef instr) {
     TaggedIRef{instr}.get() = 1;
     currentMatched.emplace_back(instr);
+  }
+
+  void replaceUses(WireRef wire, HWValue newVal) {
+    wire.replaceAllUsesWith(
+        newVal, [&](OperandRef ref) { currentReplaced.emplace_back(ref); });
   }
 
   bool reduceBitWidth(InstrRef instr) {
@@ -193,6 +199,80 @@ private:
       build.buildInstrRaw(opc, 2).addRef(outWire).other().addRef(
           ibAdd.instr().def(0)->as<WireRef>());
     }
+
+    instr.def(0).replace(FatDynObjRef<>{nullref});
+    deleteMatchedInstr(instr);
+    return true;
+  }
+
+  bool reduceBitWidthICMP(InstrRef instr) {
+    uint32_t minLeading = UINT32_MAX;
+
+    WireRef outWire = instr.def(0)->as<WireRef>();
+    uint32_t bits = *instr.other(0)->as<HWValue>().getNumBits();
+
+    SmallVec<BigInt, 2> inputKnownBits;
+
+    auto combineLeading = [&](BigInt &known) {
+      auto newLeading = BigInt::leadingNonUnk(known);
+      if (newLeading <= 1)
+        return false;
+      minLeading = std::min(minLeading, newLeading);
+      return true;
+    };
+
+    for (auto op : instr.others()) {
+      auto known = knownBits.getKnownBits(op->as<HWValue>());
+      if (!combineLeading(known))
+        return false;
+      inputKnownBits.emplace_back(known);
+    }
+
+    if (minLeading == 0)
+      return false;
+
+    uint32_t activeBits = bits - minLeading;
+    assert(activeBits > 0 && "constprop should have handled this");
+    if (activeBits == bits)
+      return false;
+    assert(activeBits < bits);
+
+    for (auto &bigInt : inputKnownBits) {
+      BigInt::rangeSelectOp4S(bigInt, bigInt, activeBits,
+                              bigInt.getNumBits() - activeBits);
+    }
+    bool equal = true;
+    for (auto &bigInt : Range{inputKnownBits}.drop_front()) {
+      if (bigInt != inputKnownBits.front()) {
+        equal = false;
+        break;
+      }
+    }
+    if (!equal) {
+      if (instr.isOpc(OP_ICMP_EQ, OP_ICMP_NE)) {
+        replaceUses(outWire, ConstantRef::fromBool(instr.isOpc(OP_ICMP_NE)));
+        return true;
+      }
+      BigInt::ICmpPred pred =
+          BigInt::ICmpPred(instr.getOpcode().num - OP_ICMP_EQ.opc.num);
+      assert(pred >= BigInt::ICmpPred::ICMP_EQ &&
+             pred <= BigInt::ICmpPred::ICMP_SGE);
+      replaceUses(outWire, ConstantRef::fromBool(BigInt::icmpOp(
+                               inputKnownBits[0], inputKnownBits[1], pred)));
+      return true;
+    }
+
+    HWInstrBuilder build{ctx};
+
+    build.setInsertPoint(instr);
+    auto ibAdd =
+        build.buildInstrRaw(instr.getDialectOpcode(), instr.getNumOperands());
+    ibAdd.addRef(outWire).other();
+    build.setInsertPoint(ibAdd.instr());
+    for (auto op : instr.others()) {
+      ibAdd.addRef(build.buildTrunc(activeBits, op->as<HWValue>()));
+    }
+    build.setInsertPoint(instr);
 
     instr.def(0).replace(FatDynObjRef<>{nullref});
     deleteMatchedInstr(instr);
@@ -371,15 +451,25 @@ private:
   bool storeValConstProp(StoreIRef instr) {
     if (instr.hasRange())
       return false;
-
     HWValueOrReg ref = nullref;
+    bool inverse = false;
     if (auto asConst = instr.value().dyn_as<ConstantRef>())
       ref = asConst;
     else if (auto asWire = instr.value().dyn_as<WireRef>()) {
       if (instr.isOpc(HW_STORE_DEFER))
         return false;
+
+      if (asWire.getDefI().isOpc(OP_NOT)) {
+        inverse = true;
+        HWValue op = asWire.getDefI().other(0)->as<HWValue>();
+        if (!op.is<WireRef>())
+          return false;
+        asWire = op.as<WireRef>();
+      }
+
       if (!asWire.getDefI().isOpc(HW_LOAD))
         return false;
+
       auto load = asWire.getDefI().as<LoadIRef>();
       if (load.hasRange())
         return false;
@@ -387,11 +477,15 @@ private:
     }
 
     RegisterRef reg = instr.reg();
+    // If the reg we're storing to is a port of some kind try replacing the
+    // other way around.
     if (!reg.iref().isOpc(HW_REGISTER_DEF)) {
       if (!ref.is<RegisterRef>())
         return false;
       if (!ref.as<RegisterRef>().iref().isOpc(HW_REGISTER_DEF))
         return false; // nothing to be done if both are ports.
+      if (inverse)
+        return false;
       ref.as<RegisterRef>().replaceAllUsesWith(reg);
       deleteMatchedInstr(instr);
       return true;
@@ -405,20 +499,61 @@ private:
         }
         continue;
       }
-      // can't do const prop on instance ports.
-      if (ref.is<ConstantRef>() && use.instr().isOpc(HW_INSTANCE)) {
+      // can't do const prop on instances
+      if (ref.is<ConstantRef>() &&
+          use.instr().isOpc(HW_INSTANCE, HW_TRIGGER_DEF, HW_FLIP_FLOP,
+                            HW_LATCH)) {
         return false;
       }
+      // can only do inversion on storage elements
+      if (inverse && use.instr().isOpc(HW_INSTANCE))
+        return false;
       uses.emplace_back(use);
     }
+
+    auto inverseUse = [&](OperandRef use) {
+      auto instr = use.instr();
+      HWInstrBuilder build{ctx, instr};
+      build.insert = build.insert.succ();
+      switch (*instr.getDialectOpcode()) {
+      case *HW_LOAD: {
+        auto defW = instr.def(0)->as<WireRef>();
+        defW.replaceAllUsesWith(build.buildNot(defW), [&](OperandRef r) {
+          currentReplaced.emplace_back(r);
+        });
+        break;
+      }
+
+      case *HW_TRIGGER_DEF: {
+        auto asTrigger = instr.as<TriggerIRef>();
+        uint idx = use - instr.other_begin();
+        asTrigger.oref()->inverseMode(idx);
+        break;
+      }
+
+      case *HW_FLIP_FLOP: {
+        auto asFF = instr.as<FlipFlopIRef>();
+        asFF.flipPolarity(use);
+        break;
+      }
+
+      case *HW_LATCH: // todo;
+
+      default:
+        dyno_unreachable("register use polarity can't be inverted");
+      }
+    };
 
     if (ref.is<RegisterRef>()) {
       for (auto use : uses) {
         use.replace(ref);
+        if (inverse)
+          inverseUse(use);
         currentReplaced.emplace_back(use);
       }
     } else {
       assert(ref.is<ConstantRef>());
+      assert(!inverse);
       for (auto use : uses) {
         deleteMatchedInstr(use.instr());
         use.instr().def(0)->as<WireRef>().replaceAllUsesWith(
@@ -454,6 +589,15 @@ private:
 
     if (instr.isOpc(OP_ADD, OP_MUL, OP_AND, OP_OR, OP_XOR)) {
       if (reduceBitWidth(instr))
+        return true;
+    }
+
+    if (instr.isOpc(OP_ICMP_EQ, OP_ICMP_NE, /*OP_ICMP_CEQ, OP_ICMP_CNE,
+                    OP_ICMP_WEQ, OP_ICMP_WNE, OP_ICMP_CZEQ, OP_ICMP_CZNE,
+                    OP_ICMP_CXEQ, OP_ICMP_CXNE,*/
+                    OP_ICMP_ULT, OP_ICMP_SLT, OP_ICMP_ULE, OP_ICMP_SLE,
+                    OP_ICMP_UGT, OP_ICMP_SGT, OP_ICMP_UGE, OP_ICMP_SGE)) {
+      if (reduceBitWidthICMP(instr))
         return true;
     }
 
@@ -565,7 +709,7 @@ public:
     ctx.getInstrs().createHooks.emplace_back(
         [&](InstrRef ref) { worklist.emplace_back(ref); });
 
-    for (auto mod : ctx.getModules()) {
+    for (auto mod : ctx.activeModules()) {
       runOnModule(mod.iref());
     }
 

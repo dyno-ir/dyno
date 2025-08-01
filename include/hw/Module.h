@@ -19,6 +19,7 @@ class Module {
 public:
   InstrDefUse defUse;
   std::string name;
+  bool ignore = false;
 
   struct Port {
     RegisterRef reg;

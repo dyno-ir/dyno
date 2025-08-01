@@ -12,6 +12,7 @@
 #include "hw/IDs.h"
 #include "hw/Process.h"
 #include "op/IDs.h"
+#include "support/TempBind.h"
 #include <fstream>
 #include <ostream>
 
@@ -44,9 +45,9 @@ class HWPrinter : public Printer {
   Interface<TyInfo> tyI{tyIs.data()};
   Interface<OpcodeInfo> opcI{opcodeIs.data()};
 
-  ValueNameInfo<Register> *regNames = nullptr;
-
 public:
+  TempBindPtr<ValueNameInfo<Register>> regNames;
+
   HWPrinter(std::ostream &str)
       : Printer(str, dialectIs.data(), tyIs.data(), opcodeIs.data()) {
     setDefaultDialects({DialectID{DIALECT_CORE}, DialectID{DIALECT_OP},
@@ -167,24 +168,20 @@ public:
   }
 
   void printCtx(HWContext &ctx) {
-    sourceLocInfo = &ctx.sourceLocInfo;
-    regNames = &ctx.regNameInfo;
+    auto locTok = sourceLocInfo.bind(&ctx.sourceLocInfo);
+    auto regTok = regNames.bind(&ctx.regNameInfo);
     for (auto mod : ctx.getModules()) {
       if (mod.iref().isOpc(HW_STDCELL_DEF))
         continue;
       printInstr(mod.iref());
     }
-    regNames = nullptr;
-    sourceLocInfo = nullptr;
   }
 
   using Printer::printInstr;
   void printInstr(InstrRef instr, HWContext &ctx) {
-    sourceLocInfo = &ctx.sourceLocInfo;
-    regNames = &ctx.regNameInfo;
+    auto locTok = sourceLocInfo.bind(&ctx.sourceLocInfo);
+    auto regTok = regNames.bind(&ctx.regNameInfo);
     printInstr(instr);
-    regNames = nullptr;
-    sourceLocInfo = nullptr;
   }
 };
 
