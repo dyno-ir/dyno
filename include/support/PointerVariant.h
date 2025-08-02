@@ -123,8 +123,8 @@ public:
   }
 };
 
-template <typename T, unsigned IntBits>
-struct PointerIntTraits<PointerIntPair<T, IntBits>> {
-  static constexpr unsigned numLowBitsAvail =
-      PointerIntTraits<T>::numLowBitsAvail - IntBits;
-};
+// template <typename T, unsigned IntBits>
+// struct PointerIntTraits<PointerIntPair<T, IntBits>> {
+//   static constexpr unsigned numLowBitsAvail =
+//       PointerIntTraits<T>::numLowBitsAvail - IntBits;
+// };
