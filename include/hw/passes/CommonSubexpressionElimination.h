@@ -132,30 +132,34 @@ class CommonSubexpressionEliminationPass {
     InstrRef instrPred = instrStack[instrIdx].instr();
     auto block = HWInstrRef{otherPred}.parentBlock(ctx);
     assert(block == HWInstrRef{instrPred}.parentBlock(ctx));
+    auto it = std::next(block.begin());
+    if (*it == other)
+      return;
+    ctx.getCFG()[other].erase();
+    it.insertPrev(other);
 
-    DEBUG("CSE", {
-      dbgs() << "merging in different blocks:\n";
-      dumpInstr(instr, ctx);
-      dumpInstr(other, ctx);
-      dbgs() << "this pred:\n";
-      dumpInstr(instrPred, ctx);
-      dbgs() << "other pred:\n";
-      dumpInstr(otherPred, ctx);
-      dbgs() << "first parent block:\n";
-      dumpInstr(block.defI(), ctx);
-    })
+    // DEBUG("CSE", {
+    //   dbgs() << "merging in different blocks:\n";
+    //   dumpInstr(instr, ctx);
+    //   dumpInstr(other, ctx);
+    //   dbgs() << "this pred:\n";
+    //   dumpInstr(instrPred, ctx);
+    //   dbgs() << "other pred:\n";
+    //   dumpInstr(otherPred, ctx);
+    //   dbgs() << "first parent block:\n";
+    //   dumpInstr(block.defI(), ctx);
+    // })
 
-    for (auto it = block.begin(); it != block.end(); ++it) {
-      if (*it == otherPred || *it == instrPred) {
-        if (*it == other)
-          return;
-        ctx.getCFG()[other].erase();
-        it.insertPrev(other);
-        return;
-      }
-    }
-
-    dyno_unreachable("")
+    // for (auto it = block.begin(); it != block.end(); ++it) {
+    //   if (*it == otherPred || *it == instrPred) {
+    //     if (*it == other)
+    //       return;
+    //     ctx.getCFG()[other].erase();
+    //     it.insertPrev(other);
+    //     return;
+    //   }
+    // }
+    // dyno_unreachable("")
   }
 
   void runOnProcess(ProcessIRef proc) {

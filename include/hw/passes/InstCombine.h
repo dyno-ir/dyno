@@ -14,8 +14,8 @@
 #include "hw/Wire.h"
 #include "hw/analysis/DemandedBits.h"
 #include "hw/analysis/KnownBits.h"
+#include "hw/analysis/BitAliasAnalysis.h"
 #include "op/IDs.h"
-#include "op/StructuredControlFlow.h"
 #include "support/Debug.h"
 #include "support/Utility.h"
 #include <algorithm>
@@ -35,6 +35,7 @@ class InstCombinePass {
   // todo: outside of pass
   KnownBitsAnalysis knownBits;
   DemandedBitsAnalysis demandedBits;
+  BitAliasAnalysis bitAlias;
 
 public:
   using TaggedIRef = CustomInstrRef<InstrRef, uint64_t>;
@@ -201,6 +202,43 @@ private:
     }
 
     instr.def(0).replace(FatDynObjRef<>{nullref});
+    deleteMatchedInstr(instr);
+    return true;
+  }
+
+  bool simplifyBitAliases(InstrRef instr) {
+    auto defW = instr.def(0)->as<WireRef>();
+    auto [aliases, change] = bitAlias.getReprAliases(defW);
+    assert(aliases.frags.size() != 0);
+    if (!change)
+      return false;
+    HWInstrBuilder build{ctx, instr};
+
+    bool plainConcat = true;
+    for (auto frag : aliases.frags)
+      if (*ctx.resolveObj(frag.ref).as<HWValue>().getNumBits() != frag.len) {
+        plainConcat = false;
+        break;
+      }
+
+    if (plainConcat && aliases.frags.size() == 1) {
+      HWValue val = ctx.resolveObj(aliases.frags.front().ref);
+      replaceUses(defW, val);
+      return true;
+    }
+
+    auto ib =
+        build.buildInstrRaw(plainConcat ? HW_CONCAT : HW_SPLICE,
+                            1 + (plainConcat ? 1 : 3) * aliases.frags.size());
+    ib.addRef(instr.def(0)->as<WireRef>()).other();
+    instr.def(0).replace(FatDynObjRef{nullref});
+    for (auto frag : Range{aliases.frags}.reverse()) {
+      ib.addRef(ctx.resolveObj(frag.ref));
+      if (!plainConcat) {
+        ib.addRef(ConstantRef::fromU32(frag.srcAddr));
+        ib.addRef(ConstantRef::fromU32(frag.len));
+      }
+    }
     deleteMatchedInstr(instr);
     return true;
   }
@@ -448,6 +486,23 @@ private:
     return true;
   }
 
+  bool nonTemporalLoadElim(LoadIRef load) {
+    auto proc = load.parentProc(ctx);
+    if (!proc.isOpc(HW_NETLIST_PROCESS_DEF))
+      return false;
+    auto storeI = load.reg().iref().getSingleStore();
+    if (!storeI)
+      return false;
+    auto store = StoreIRef{storeI};
+    if (store.parentProc(ctx) != proc)
+      return false;
+
+    replaceUses(load.value(), store.value());
+    deleteMatchedInstr(load);
+
+    return true;
+  }
+
   bool storeValConstProp(StoreIRef instr) {
     if (instr.hasRange())
       return false;
@@ -582,7 +637,23 @@ private:
     case *HW_STORE_DEFER: {
       if (storeValConstProp(instr.as<StoreIRef>()))
         return true;
+      break;
     }
+
+    case *HW_LOAD: {
+      if (nonTemporalLoadElim(instr.as<LoadIRef>()))
+        return true;
+      break;
+    }
+
+    case *HW_CONCAT:
+    case *OP_TRUNC:
+    case *HW_SPLICE: {
+      if (simplifyBitAliases(instr))
+        return true;
+      break;
+    }
+
     default:
       break;
     }
@@ -610,8 +681,11 @@ private:
     if (instr.getNumDefs() == 1) {
       if (!instr.def(0)->is<WireRef>())
         return false;
-      if (instr.def(0)->as<WireRef>().getNumUses() == 0)
+      if (instr.def(0)->as<WireRef>().getNumUses() == 0) {
+        // DCE unused instruction
+        TaggedIRef{instr}.get() = 1;
         return false;
+      }
     }
 
     currentMatched.clear();
@@ -720,7 +794,7 @@ public:
 
 public:
   explicit InstCombinePass(HWContext &ctx)
-      : ctx(ctx), cbuild(ctx.constBuild()) {}
+      : ctx(ctx), cbuild(ctx.constBuild()), bitAlias(ctx) {}
 };
 
 }; // namespace dyno

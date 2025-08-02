@@ -1,17 +1,18 @@
 #pragma once
 
+#include "dyno/Obj.h"
 #include <cassert>
-#include <dyno/Obj.h>
 #include <support/Ranges.h>
 #include <vector>
 
 namespace dyno {
 
-template <typename K, typename V> class ObjMapVec {
+template <typename K, typename Container> class ObjMap {
   using Traits = ObjTraits<K>;
 
 public:
-  std::vector<V> elements;
+  Container elements;
+  using V = Container::value_type;
 
   void ensure(ObjRef<K> ref) {
     if (inRange(ref)) [[likely]] {
@@ -47,7 +48,7 @@ public:
   }
 
   class iterator {
-    std::vector<V>::iterator ptr;
+    Container::iterator ptr;
     ObjID::num_t idx;
 
   public:
@@ -59,7 +60,7 @@ public:
     using pointer = std::pair<ObjRef<K>, typename decltype(elements)::pointer>;
     using iterator_category = std::random_access_iterator_tag;
 
-    explicit iterator(std::vector<V>::iterator ptr, ObjID::num_t idx)
+    explicit iterator(Container::iterator ptr, ObjID::num_t idx)
         : ptr(ptr), idx(idx) {}
 
     iterator &operator++() {
@@ -119,9 +120,9 @@ public:
   };
 
   auto begin() { return iterator{elements.begin(), 0}; }
-  auto end() {
-    return iterator{elements.end(), (uint32_t)elements.size()};
-  }
+  auto end() { return iterator{elements.end(), (uint32_t)elements.size()}; }
 };
+
+template <typename K, typename V> using ObjMapVec = ObjMap<K, std::vector<V>>;
 
 } // namespace dyno

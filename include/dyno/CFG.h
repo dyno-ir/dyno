@@ -207,9 +207,10 @@ public:
   iterator begin() const { return {*this, ptr->instrs[0].next}; }
   iterator end() const { return {*this, 0}; }
 
-  iterator_unordered begin_unordered() { return {*this, ptr->instrs[0].next}; }
-
-  iterator_unordered end_unordered() { return iterator{*this, 0}; }
+  iterator_unordered begin_unordered() { return {*this, 1}; }
+  iterator_unordered end_unordered() {
+    return iterator{*this, uint32_t(ptr->instrs.size())};
+  }
 
   Range<iterator_unordered> unordered() {
     return {begin_unordered(), end_unordered()};
@@ -219,6 +220,12 @@ public:
   auto defI() { return ptr->defUse.getSingleDef()->instr(); }
 
   bool empty() { return size() == 0; }
+
+  void clear_unsafe() {
+    ptr->instrs.clear();
+    ptr->instrs.emplace_back(InstrRef{nullref}, IDImpl<uint32_t>{0},
+                             IDImpl<uint32_t>{0});
+  }
 
   void reserve(size_t count) { (*this)->instrs.reserve(count + 1); }
 

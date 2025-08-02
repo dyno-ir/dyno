@@ -5,30 +5,163 @@
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
+#include <iterator>
 #include <vector>
 
-template <typename Container, Container::value_type DefaultWord = 0>
-class UnsizedBitSet {
+template <typename Container, size_t SymbolBits,
+          Container::value_type DefaultWord = 0>
+class UnsizedSymbSet {
+protected:
   Container storage;
+  using container_t = Container;
   using word_t = Container::value_type;
   static constexpr size_t WordBits = bit_mask_sz<word_t>;
-  static constexpr size_t wordIdx(size_t i) { return i / WordBits; }
-  static constexpr size_t bitIdx(size_t i) { return i % WordBits; }
-  static constexpr word_t bitMsk(size_t i) { return word_t(1) << bitIdx(i); }
+  static constexpr size_t WordSymbs = WordBits / SymbolBits;
+
+  static constexpr size_t wordIdx(size_t i) { return i / WordSymbs; }
+  static constexpr size_t symbIdx(size_t i) { return i % WordSymbs; }
+  static constexpr word_t symbMask(size_t i) {
+    return bit_mask_ones<word_t>(SymbolBits) << symbIdx(i);
+  }
 
 public:
+  UnsizedSymbSet(const UnsizedSymbSet &) = default;
+  UnsizedSymbSet(UnsizedSymbSet &&) = default;
+  UnsizedSymbSet &operator=(const UnsizedSymbSet &) = default;
+  UnsizedSymbSet &operator=(UnsizedSymbSet &&) = default;
+
+  UnsizedSymbSet() = default;
+  UnsizedSymbSet(size_t preallocSymbs)
+      : storage(round_up_div(preallocSymbs, WordSymbs)) {}
+
+  void ensureSymbs(size_t i) { ensureWords(round_up_div(i, WordSymbs)); }
+  void ensureWords(size_t words) {
+    if (storage.size() <= words) [[unlikely]]
+      storage.resize(words, DefaultWord);
+  }
+  void resizeSymbs(size_t i) { resizeWords(round_up_div(i, WordSymbs)); }
+  void resizeWords(size_t words) { storage.resize(words, DefaultWord); }
+
+  auto at_unchecked(size_t i) {
+    return DynBitField{storage[wordIdx(i)], symbIdx(i) * SymbolBits,
+                       SymbolBits};
+  }
+  auto at(size_t i) {
+    ensureSymbs(i + 1);
+    return DynBitField{storage[wordIdx(i)], symbIdx(i) * SymbolBits,
+                       SymbolBits};
+  }
+  auto operator[](size_t i) { return at_unchecked(i); }
+};
+
+template <typename Container, size_t SymbolBits,
+          Container::value_type DefaultWord = 0>
+class DynSymbSet : public UnsizedSymbSet<Container, SymbolBits, DefaultWord> {
+  using Base = UnsizedSymbSet<Container, SymbolBits, DefaultWord>;
+
+protected:
+  size_t numSymbs;
+  using Base::storage;
+
+public:
+  using reference = DynBitField<typename Base::container_t::value_type>;
+  using value_type = reference;
+  using Base::at_unchecked;
+
+  auto size() { return numSymbs; }
+  auto at(size_t i) {
+    assert(i < numSymbs && "oob");
+    return at_unchecked(i);
+  }
+  void clear() {
+    numSymbs = 0;
+    storage.clear();
+  }
+
+  void resize(size_t i) {
+    numSymbs = i;
+    this->resizeSymbs(numSymbs);
+  }
+
+  void reserve(size_t i) {
+    this->storage.reserve(round_up_div(i, Base::WordSymbs));
+  }
+
+  class iterator {
+    Container::value_type *word;
+    size_t symb;
+
+  public:
+    iterator(Container::value_type *word, size_t symb)
+        : word(word), symb(symb) {}
+    using iterator_category = std::random_access_iterator_tag;
+    using reference = DynBitField<typename Base::Container::value_type>;
+    using value_type = reference;
+    using difference_type = ptrdiff_t;
+
+    iterator &operator+=(size_t val) {
+      symb += val;
+      auto incr = symb / Base::WordSymbs;
+      symb %= Base::WordSymbs;
+      word += incr;
+      return *this;
+    }
+    iterator &operator-=(size_t val) { *this += -val; }
+    iterator &operator++() { return *this + 1; }
+    iterator &operator--() { return *this - 1; }
+    iterator operator++(int) {
+      auto old{*this};
+      ++(*this);
+      return old;
+    }
+    iterator operator--(int) {
+      auto old{*this};
+      --(*this);
+      return old;
+    }
+
+    reference operator*() { return reference{word, symb, SymbolBits}; }
+    reference operator[](size_t i) { return *((*this) + i); }
+
+    friend difference_type operator-=(iterator lhs, iterator rhs) {
+      return (lhs.word - rhs.word) * Base::WordSymbs + (lhs.symb - rhs.symb);
+    }
+  };
+
+  iterator begin() { return iterator{storage.begin(), 0}; }
+  iterator end() {
+    return iterator{storage.begin() + (numSymbs / Base::WordSymbs),
+                    (numSymbs % Base::WordSymbs)};
+  }
+};
+
+template <typename Container, Container::value_type DefaultWord = 0>
+class UnsizedBitSet : public UnsizedSymbSet<Container, 1, DefaultWord> {
+  using Base = UnsizedSymbSet<Container, 1, DefaultWord>;
+  using word_t = Container::value_type;
+
+protected:
+  using Base::storage;
+  using Base::symbIdx;
+  using Base::symbMask;
+  using Base::WordBits;
+  using Base::wordIdx;
+  using Base::WordSymbs;
+
+public:
+  using Base::ensureWords;
+  using Base::resizeWords;
   UnsizedBitSet(const UnsizedBitSet &) = default;
   UnsizedBitSet(UnsizedBitSet &&) = default;
   UnsizedBitSet &operator=(const UnsizedBitSet &) = default;
   UnsizedBitSet &operator=(UnsizedBitSet &&) = default;
 
   UnsizedBitSet() = default;
-  UnsizedBitSet(size_t preallocBits)
-      : storage(round_up_div(preallocBits, WordBits)) {}
+  UnsizedBitSet(size_t preallocBits) : Base(preallocBits) {}
 
-  void set(size_t i) { storage[wordIdx(i)] |= bitMsk(i); }
-  void clear(size_t i) { storage[wordIdx(i)] &= ~bitMsk(i); }
-  bool get(size_t i) const { storage[wordIdx(i)] & bitMsk(i); }
+  void set(size_t i) { storage[wordIdx(i)] |= symbMask(i); }
+  void clear(size_t i) { storage[wordIdx(i)] &= ~symbMask(i); }
+  bool get(size_t i) const { storage[wordIdx(i)] & symbMask(i); }
 
   void modifyRange(size_t i, size_t len, word_t value) {
     if (len == 0) [[unlikely]]
@@ -60,13 +193,9 @@ public:
   void setRange(size_t i, size_t len) { modifyRange(i, len, ~word_t(0)); }
   void clearRange(size_t i, size_t len) { modifyRange(i, len, word_t(0)); }
 
-  void ensureBits(size_t i) { ensureWords(round_up_div(i, WordBits)); }
-  void ensureWords(size_t words) {
-    if (storage.size() <= words) [[unlikely]]
-      storage.resize(words, DefaultWord);
-  }
-  void resizeBits(size_t i) { resizeWords(round_up_div(i, WordBits)); }
-  void resizeWords(size_t words) { storage.resize(words, DefaultWord); }
+  void resizeBits(size_t i) { this->resizeSymbs(i); }
+  void ensureBits(size_t i) { this->ensureSymbs(i); }
+
   void setDyn(size_t i) {
     ensureBits(i + 1);
     set(i);
@@ -78,8 +207,8 @@ public:
   bool getDyn(size_t i) const {
     auto word = wordIdx(i);
     if (word >= storage.size())
-      return DefaultWord & bitMsk(i);
-    return storage[word] & bitMsk(i);
+      return DefaultWord & symbMask(i);
+    return storage[word] & symbMask(i);
   }
   void modifyRangeDyn(size_t i, size_t len, word_t value) {
     ensureBits(i + len);

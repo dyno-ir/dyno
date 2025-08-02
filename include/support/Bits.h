@@ -3,8 +3,8 @@
 #include <cassert>
 #include <climits>
 #include <concepts>
+#include <cstddef>
 #include <cstdint>
-#include <limits>
 #include <type_traits>
 
 template <std::unsigned_integral T>
@@ -185,4 +185,55 @@ public:
   constexpr void flip() { num ^= mask_ones; }
 
   constexpr unsigned count() { return std::popcount(num & mask_ones); }
+};
+
+template <std::integral NumT> class DynBitField {
+public:
+  using num_t = NumT;
+  using size_type = uint8_t;
+
+private:
+  num_t &num;
+  const size_type pos;
+  const size_type n;
+
+  constexpr num_t mask_ones() const { return bit_mask_ones<num_t>(n, pos); }
+  constexpr num_t mask_zeros() const { return bit_mask_zeros<num_t>(n, pos); }
+  constexpr num_t mask_ones_noshift() const { return bit_mask_ones<num_t>(n); }
+  constexpr num_t mask_zeros_noshift() const {
+    return bit_mask_zeros<num_t>(n);
+  }
+
+public:
+  explicit constexpr DynBitField(num_t &v, size_t pos, size_t n)
+      : num(v), pos(uint8_t(pos)), n(uint8_t(n)) {
+    assert(pos < 256 && n < 256);
+  }
+
+  constexpr DynBitField &operator=(num_t v) {
+    set(v);
+    return *this;
+  }
+
+  constexpr DynBitField &operator+=(num_t v) { return (*this) = (*this) + v; }
+  constexpr DynBitField &operator-=(num_t v) { return (*this) = (*this) - v; }
+  constexpr operator num_t() const { return get(); }
+
+  constexpr num_t get() const { return (num & mask_ones()) >> pos; }
+  constexpr void clr() { num &= mask_zeros(); }
+  constexpr void set() { num |= mask_ones(); }
+
+  constexpr void set(num_t v) {
+    assert((v & mask_ones_noshift()) == v);
+    clr();
+    num |= v << pos;
+  }
+
+  constexpr void flip() { num ^= mask_ones(); }
+  constexpr unsigned count() { return std::popcount(num & mask_ones()); }
+
+  constexpr DynBitField at(size_type offs, size_type len = 1) {
+    assert(offs + len <= pos + n);
+    return DynBitField{num, size_type(pos + offs), len};
+  }
 };

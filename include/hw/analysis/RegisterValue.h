@@ -186,6 +186,57 @@ struct RegisterValue : public RegisterFrags<RegisterValueFragment> {
     assert(startLen == endLen);
   }
 
+  void appendTop(DynObjRef val, uint32_t srcAddr, uint32_t len,
+                 bool untouched = false,
+                 Optional<uint16_t> triggerID = nullopt) {
+    frags.emplace_back(val, srcAddr, frags.back().dstAddr + frags.back().len,
+                       len, untouched, triggerID);
+  }
+
+  void appendTop(const RegisterValue &other) {
+    auto len = frags.back().dstAddr + frags.back().len;
+    for (auto frag : other.frags) {
+      frag.dstAddr += len;
+      frags.emplace_back(frag);
+    }
+  }
+
+  RegisterValue getRange(uint32_t addr, uint32_t len) {
+    auto it = getInsertIt(addr);
+
+    uint32_t end = addr + len;
+
+    RegisterValue range;
+
+    bool allUntouched = true;
+
+    while (it != frags.end() && len != 0) {
+      uint32_t itEnd = it->dstAddr + it->len;
+
+      if (addr < itEnd && it->dstAddr < end) {
+
+        uint32_t start = addr - it->dstAddr;
+        if (it->dstAddr > addr)
+          start = 0;
+
+        uint32_t pieceLen = std::min(end, itEnd) - std::max(addr, it->dstAddr);
+        auto frag = *it;
+        frag.dstAddr = start;
+        frag.len = pieceLen;
+        range.frags.emplace_back(frag);
+        allUntouched &= it->untouched;
+
+        addr += pieceLen;
+        len -= pieceLen;
+        it++;
+      } else
+        break;
+    }
+
+    range.untouched = allUntouched;
+    return range;
+  }
+
   HWValue get(HWInstrBuilder &build, uint32_t addr, uint32_t len,
               bool update = true) {
     auto it = getInsertIt(addr);

@@ -22,6 +22,7 @@
 #include "hw/passes/SSAConstruct.h"
 #include "hw/passes/SeqToComb.h"
 #include "hw/passes/TriggerDedupe.h"
+#include "hw/passes/OrderInstrs.h"
 
 namespace dyno {
 
@@ -47,6 +48,7 @@ class PassPipeline {
   CommonSubexpressionEliminationPass cse{ctx};
   FlipFlopMappingPass ffMap{ctx};
   RemoveBuffersPass removeBufs{ctx};
+  OrderInstrsPass orderInstrs{ctx};
 
 public:
   bool printAfterAll = false;
@@ -148,6 +150,7 @@ public:
 
     runLibertyPipeline();
     runPass(ffMap);
+    runPass(orderInstrs);
     runPass(ssaConstr);
     runPass(instCombine);
     runPass(agressiveDCE);
