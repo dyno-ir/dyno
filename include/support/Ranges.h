@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <initializer_list>
 #include <iterator>
 #include <type_traits>
@@ -47,6 +48,7 @@ inline auto make_earlyincr_range(std::ranges::forward_range auto &&rg) {
 
 template <typename T> class deref_iterator {
   T it;
+
 public:
   using iterator_category = std::forward_iterator_tag;
   using value_type = std::remove_reference_t<decltype(**it)>;
@@ -407,6 +409,13 @@ public:
   template <typename FilterT> auto filter(FilterT filterF) {
     return ::Range{filter_iterator<It, FilterT>(beginIt, endIt, filterF),
                    filter_iterator<It, FilterT>(endIt)};
+  }
+
+  template <typename T> It find(const T &val) {
+    return std::find(begin(), end(), val);
+  }
+  template <typename T> It find_if(T func) {
+    return std::find_if(begin(), end(), func);
   }
 
 private:

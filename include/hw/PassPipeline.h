@@ -6,6 +6,7 @@
 #include "hw/passes/AIGConstruct.h"
 #include "hw/passes/AggressiveDeadCodeElimination.h"
 #include "hw/passes/CommonSubexpressionElimination.h"
+#include "hw/passes/ConstantMapping.h"
 #include "hw/passes/DumpVerilog.h"
 #include "hw/passes/FlipFlopInference.h"
 #include "hw/passes/FlipFlopMapping.h"
@@ -16,13 +17,14 @@
 #include "hw/passes/LowerOps.h"
 #include "hw/passes/ModuleInline.h"
 #include "hw/passes/MuxTreeOptimization.h"
+#include "hw/passes/OrderInstrs.h"
 #include "hw/passes/ParseLiberty.h"
 #include "hw/passes/ProcessLinearize.h"
 #include "hw/passes/RemoveBuffers.h"
 #include "hw/passes/SSAConstruct.h"
 #include "hw/passes/SeqToComb.h"
 #include "hw/passes/TriggerDedupe.h"
-#include "hw/passes/OrderInstrs.h"
+#include "support/Debug.h"
 
 namespace dyno {
 
@@ -49,6 +51,7 @@ class PassPipeline {
   FlipFlopMappingPass ffMap{ctx};
   RemoveBuffersPass removeBufs{ctx};
   OrderInstrsPass orderInstrs{ctx};
+  ConstantMapping constMap{ctx};
 
 public:
   bool printAfterAll = false;
@@ -88,14 +91,15 @@ public:
       mod->ignore = true;
     }
 
-    auto old = printAfterAll;
-    printAfterAll = true;
+    auto old = std::pair(printAfterAll, debugType);
+    printAfterAll = false;
+    debugType = 0;
     runPass(parseLiberty);
     runPass(agressiveDCE);
     runPass(cse);
     runPass(instCombine);
     runPass(agressiveDCE);
-    printAfterAll = old;
+    std::tie(printAfterAll, debugType) = old;
 
     // todo properly
     for (auto mod : ctx.activeModules())
@@ -126,6 +130,7 @@ public:
         .lowerAddCompress = false,
         .lowerSimpleAdd = false,
         .lowerSub = true,
+        .lowerConstantMul = true,
         .lowerMultiInputBitwise = false,
         .lowerEqualityICMP = false,
         .lowerOrderingICMP = true,
@@ -140,6 +145,7 @@ public:
         .lowerAddCompress = false,
         .lowerSimpleAdd = false,
         .lowerSub = true,
+        .lowerConstantMul = true,
         .lowerMultiInputBitwise = false,
         .lowerEqualityICMP = true,
         .lowerOrderingICMP = true,
@@ -151,6 +157,9 @@ public:
     runLibertyPipeline();
     runPass(ffMap);
     runPass(orderInstrs);
+    runPass(instCombine);
+    runPass(cse);
+
     runPass(ssaConstr);
     runPass(instCombine);
     runPass(agressiveDCE);
@@ -161,6 +170,7 @@ public:
         .lowerAddCompress = true,
         .lowerSimpleAdd = true,
         .lowerSub = true,
+        .lowerConstantMul = true,
         .lowerMultiInputBitwise = true,
         .lowerEqualityICMP = true,
         .lowerOrderingICMP = true,
@@ -172,9 +182,12 @@ public:
     runPass(aigConstr);
     runPass(agressiveDCE);
     runPass(abc);
-    runPass(instCombine);
     runPass(agressiveDCE);
     runPass(removeBufs);
+    runPass(constMap);
+    runPass(cse);
+    runPass(instCombine);
+    runPass(agressiveDCE);
   }
 
   void dumpVerilog(std::ostream &os) {

@@ -130,6 +130,27 @@ class BitAliasAnalysis {
       return std::nullopt;
     }
 
+    case *HW_INSERT: {
+      if (first)
+        break;
+      if (frame.ref == instr.other(0)) {
+        frame.acc = std::move(retVal);
+        ++frame.ref;
+      } else {
+        auto addr = frame.ref[1].as<HWValue>();
+        auto len = frame.ref[2].as<ConstantRef>();
+        if (!addr.is<ConstantRef>()) {
+          retVal = BitAliasAcc::mostPessimistic(
+              *instr.def(0)->as<WireRef>().getNumBits());
+          return std::nullopt;
+        }
+        frame.acc.overwriteNoMaterialize(
+            retVal, 0, addr.as<ConstantRef>().getExactVal(), len.getExactVal());
+        return std::nullopt;
+      }
+      break;
+    }
+
     default: {
       frame.acc = ref->as<WireRef>();
       return std::nullopt;
@@ -152,23 +173,23 @@ public:
     while (!stack.empty()) {
       maxLevel = std::max(maxLevel, stack.size());
       auto &frame = stack.back();
-      // maybe put this in nextFunction
-      if (auto asConst = frame.ref->dyn_as<ConstantRef>()) {
-        retVal = asConst;
-        stack.pop_back();
-        continue;
-      }
 
       auto next = nextFunction(std::move(retVal), frame);
 
       if (next) {
-        stack.emplace_back((*next)->as<FatDynObjRef<InstrDefUse>>()->getDef());
+        if ((*next)->is<ConstantRef>()) {
+          retVal = (*next)->as<ConstantRef>();
+        } else
+          stack.emplace_back(
+              (*next)->as<FatDynObjRef<InstrDefUse>>()->getDef());
       } else {
         retVal = std::move(stack.back().acc);
         stack.pop_back();
       }
     }
-    return std::make_pair(RegisterValue{retVal}, maxLevel > 2);
+    auto change = retVal.defragmentValues(ctx);
+    change |= maxLevel > 2;
+    return std::make_pair(RegisterValue{retVal}, change);
   }
 };
 

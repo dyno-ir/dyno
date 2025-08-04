@@ -7,6 +7,7 @@
 #include "support/SmallVec.h"
 #include "support/Utility.h"
 #include <algorithm>
+#include <bit>
 #include <concepts>
 #include <cstdint>
 #include <dyno/IDs.h>
@@ -743,6 +744,31 @@ public:
   template <typename T0>
   constexpr static uint32_t leadingZeros4SExact(const T0 &val) {
     return leadingBits4SExact(val, FourState::S0);
+  }
+
+  template <typename T0>
+  constexpr static uint32_t countBitsExact(const T0 &val, bool bit) {
+    uint32_t cnt = 0;
+    for (uint i = 0; i < val.getExtNumWords(); i++) {
+      cnt += std::popcount(bit ? val.getWord(i) : ~val.getWord(i));
+    }
+    return cnt;
+  }
+
+  template <typename T0>
+  constexpr static uint32_t countBits4SExact(const T0 &val, FourState bit) {
+    if (!val.getIs4S()) {
+      if (bit.isUnk())
+        return 0;
+      return countBitsExact(val, bit.val == FourState::S1);
+    }
+
+    uint32_t cnt = 0;
+    for (uint i = 0; i < val.getExtNumWords(); i++) {
+      cnt += std::popcount(
+          n_equal_mask<2>(val.getWord4S(i), repeatBits(bit.val, 2)));
+    }
+    return cnt;
   }
 
   template <typename T0>

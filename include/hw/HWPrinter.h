@@ -131,10 +131,10 @@ public:
     case AIG_AIG.type: {
       auto &asAIG = ref.as<AIGObjRef>()->aig;
       str << "aig(\n";
-      {
-        std::ofstream dot{"graph.dot"};
-        AIGPrinter{ref.as<AIGObjRef>()}.dumpGraphviz(dot);
-      }
+      // {
+      //   std::ofstream dot{"graph.dot"};
+      //   AIGPrinter{ref.as<AIGObjRef>()}.dumpGraphviz(dot);
+      // }
 
       indentPrint.addIndent();
 

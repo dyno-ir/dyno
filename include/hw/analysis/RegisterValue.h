@@ -1,6 +1,7 @@
 #pragma once
 
 #include "hw/HWAbstraction.h"
+#include "hw/HWContext.h"
 #include "support/Bits.h"
 #include "support/ErrorRecovery.h"
 #include <cstdint>
@@ -195,10 +196,82 @@ struct RegisterValue : public RegisterFrags<RegisterValueFragment> {
 
   void appendTop(const RegisterValue &other) {
     auto len = frags.back().dstAddr + frags.back().len;
+
     for (auto frag : other.frags) {
       frag.dstAddr += len;
       frags.emplace_back(frag);
     }
+  }
+
+  bool defragmentValues(HWContext &ctx) {
+    // clean up constants
+    bool rv = false;
+    for (uint i = 0; i < frags.size(); i++) {
+      auto &low = frags[i];
+      if (low.ref.is<ObjRef<Constant>>() && low.srcAddr != 0) {
+        auto newConst =
+            ctx.constBuild().val(ctx.getConstants().resolve(low.ref)).get();
+        low.srcAddr = 0;
+        low.ref = newConst;
+        rv = true;
+      }
+    }
+
+    bool any = false;
+    uint highIdx = 1;
+
+    for (uint i = 0; true; i++) {
+      auto &low = frags[i];
+      if (low.dstAddr == ~0u)
+        continue;
+      if (i + highIdx >= frags.size())
+        break;
+      auto &high = frags[i + highIdx];
+      assert(high.dstAddr != ~0u);
+
+      if (low.ref.is<ObjRef<Constant>>() && high.ref.is<ObjRef<Constant>>()) {
+        auto newConst = ctx.constBuild()
+                            .val(ctx.getConstants().resolve(low.ref))
+                            .concat(ctx.getConstants().resolve(high.ref))
+                            .get();
+        low.ref = newConst;
+        low.len += high.len;
+        assert(low.untouched == high.untouched);
+        high.dstAddr = ~0u;
+        any = true;
+
+        i--;
+        highIdx++;
+        continue;
+      }
+
+      if (low.ref == high.ref && high.srcAddr == low.srcAddr + low.len) {
+        low.len += high.len;
+        assert(low.untouched == high.untouched);
+        high.dstAddr = ~0u;
+        any = true;
+
+        i--;
+        highIdx++;
+        continue;
+      }
+      highIdx = 1;
+    }
+
+    rv |= any;
+
+    if (!any)
+      return rv;
+
+    size_t outputIdx = 0;
+    for (uint i = 0; i < frags.size(); i++) {
+      if (frags[i].dstAddr == ~0u)
+        continue;
+      frags[outputIdx++] = frags[i];
+    }
+    frags.downsize(outputIdx);
+
+    return rv;
   }
 
   RegisterValue getRange(uint32_t addr, uint32_t len) {
@@ -221,7 +294,8 @@ struct RegisterValue : public RegisterFrags<RegisterValueFragment> {
 
         uint32_t pieceLen = std::min(end, itEnd) - std::max(addr, it->dstAddr);
         auto frag = *it;
-        frag.dstAddr = start;
+        frag.srcAddr = start;
+        frag.dstAddr = addr;
         frag.len = pieceLen;
         range.frags.emplace_back(frag);
         allUntouched &= it->untouched;

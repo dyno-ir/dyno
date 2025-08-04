@@ -1,5 +1,6 @@
 #pragma once
 #include "aig/AIG.h"
+#include "dyno/Constant.h"
 #include "dyno/DestroyMap.h"
 #include "hw/HWAbstraction.h"
 #include "hw/HWContext.h"
@@ -131,7 +132,7 @@ public:
   */
   void parse(AIGObjRef aigObj) {
     std::string line;
-    std::unordered_map<std::string, WireRef> names;
+    std::unordered_map<std::string, HWValue> names;
     std::unordered_map<std::string, ModuleRef> modules;
 
     for (auto mod : ctx.getModules()) {
@@ -202,10 +203,16 @@ public:
         SmallVec<WireRef, 4> defs;
         SmallVec<WireRef, 8> uses;
 
-        ModuleRef mod;
+        ModuleRef mod = nullref;
+        Optional<uint> constVal = nullopt;
         for (auto [i, tok] : split(line).drop_front().enumerate()) {
           if (i == 0) {
-            mod = modules.find(std::string(tok))->second;
+            if (tok == "_const0_")
+              constVal = 0;
+            else if (tok == "_const1_")
+              constVal = 1;
+            else
+              mod = modules.find(std::string(tok))->second;
             continue;
           }
           auto eqIdx = tok.find('=');
@@ -213,22 +220,44 @@ public:
             report_fatal_error("BLIF format");
           auto tokStr = std::string(tok.begin() + eqIdx + 1, tok.end());
           auto wire = names.find(tokStr);
-          if (wire == names.end()) {
+
+          if (constVal) {
+            assert(i == 1);
+            if (wire == names.end()) {
+              names.insert(
+                  std::make_pair(tokStr, ConstantRef::fromBool(*constVal)));
+            } else {
+              if (auto asConst = wire->second.dyn_as<ConstantRef>()) {
+                if (asConst != ConstantRef::fromBool(*constVal))
+                  report_fatal_error("contradictory BLIF constant value");
+
+              } else {
+                wire->second.as<WireRef>().replaceAllUsesWith(
+                    ConstantRef::fromBool(*constVal));
+                ctx.getWires().destroy(wire->second.as<WireRef>());
+                wire->second = ConstantRef::fromBool(*constVal);
+              }
+            }
+          } else if (wire == names.end()) {
             wire =
                 names.insert(std::make_pair(tokStr, ctx.getWires().create(1)))
                     .first;
           }
 
-          if (mod->ports[i - 1].portType.is(HW_INPUT_REGISTER_DEF))
-            uses.emplace_back(wire->second);
-          else if (mod->ports[i - 1].portType.is(HW_OUTPUT_REGISTER_DEF))
-            defs.emplace_back(wire->second);
-          else
-            dyno_unreachable("unexpected port type");
+          if (mod) {
+            if (mod->ports[i - 1].portType.is(HW_INPUT_REGISTER_DEF))
+              uses.emplace_back(wire->second);
+            else if (mod->ports[i - 1].portType.is(HW_OUTPUT_REGISTER_DEF))
+              defs.emplace_back(wire->second);
+            else
+              dyno_unreachable("unexpected port type");
+          }
         }
-        auto ib = build.buildInstrRaw(HW_STDCELL_INSTANCE,
-                                      1 + defs.size() + uses.size());
-        ib.addRefs(defs).other().addRef(mod).addRefs(uses);
+        if (mod) {
+          auto ib = build.buildInstrRaw(HW_STDCELL_INSTANCE,
+                                        1 + defs.size() + uses.size());
+          ib.addRefs(defs).other().addRef(mod).addRefs(uses);
+        }
       }
     }
   }

@@ -12,9 +12,9 @@
 #include "hw/IDs.h"
 #include "hw/LoadStore.h"
 #include "hw/Wire.h"
+#include "hw/analysis/BitAliasAnalysis.h"
 #include "hw/analysis/DemandedBits.h"
 #include "hw/analysis/KnownBits.h"
-#include "hw/analysis/BitAliasAnalysis.h"
 #include "op/IDs.h"
 #include "support/Debug.h"
 #include "support/Utility.h"
@@ -215,11 +215,15 @@ private:
     HWInstrBuilder build{ctx, instr};
 
     bool plainConcat = true;
-    for (auto frag : aliases.frags)
-      if (*ctx.resolveObj(frag.ref).as<HWValue>().getNumBits() != frag.len) {
+    for (auto frag : aliases.frags) {
+      if (frag.ref.is<ObjRef<Constant>>())
+        continue;
+
+      if (*ctx.resolveObj(frag.ref).as<WireRef>().getNumBits() != frag.len) {
         plainConcat = false;
         break;
       }
+    }
 
     if (plainConcat && aliases.frags.size() == 1) {
       HWValue val = ctx.resolveObj(aliases.frags.front().ref);
@@ -233,7 +237,11 @@ private:
     ib.addRef(instr.def(0)->as<WireRef>()).other();
     instr.def(0).replace(FatDynObjRef{nullref});
     for (auto frag : Range{aliases.frags}.reverse()) {
-      ib.addRef(ctx.resolveObj(frag.ref));
+      auto ref = ctx.resolveObj(frag.ref);
+      // downsize constants
+      if (auto asConst = ref.dyn_as<ConstantRef>())
+        ref = cbuild.val(asConst).resize(frag.len).get();
+      ib.addRef(ref);
       if (!plainConcat) {
         ib.addRef(ConstantRef::fromU32(frag.srcAddr));
         ib.addRef(ConstantRef::fromU32(frag.len));

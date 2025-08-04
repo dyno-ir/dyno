@@ -73,9 +73,12 @@ class FlipFlopMappingPass {
   };
 
   enum class FixupType {
-    TIE_RST,
-    TIE_SET,
-    TIE_EN,
+    TIE0_RST,
+    TIE0_SET,
+    TIE0_EN,
+    TIE1_RST,
+    TIE1_SET,
+    TIE1_EN,
     INVERT_RST,
     INVERT_SET,
     INVERT_EN,
@@ -132,8 +135,6 @@ class FlipFlopMappingPass {
       abstr.rstPol = 0;
       abstr.hasSet = 0;
       abstr.setPol = 0;
-      wires.rst = nullref;
-      wires.set = nullref;
 
       uint nRst = instr.numRsts();
       for (uint rstIdx = 0; rstIdx < nRst; rstIdx++) {
@@ -167,10 +168,10 @@ class FlipFlopMappingPass {
   struct FFWires {
     WireRef clk;
     WireRef d;
-    WireRef q;
-    WireRef en;
-    WireRef rst;
-    WireRef set;
+    HWValue q;
+    HWValue en;
+    HWValue rst;
+    HWValue set;
   };
 
   void buildMatchingStdCellFF(const StdCellFF &ff, FFWires wires) {
@@ -232,25 +233,57 @@ class FlipFlopMappingPass {
   }
 
   void buildSingleFF(AbstractFF abstr, FFWires wires) {
-    auto cmd = ffMap[abstr.raw()];
-    if (auto optPtr = cmd.dyn_as<StdCellFF *>()) {
-      buildMatchingStdCellFF(**optPtr, wires);
-    } else {
-      switch (cmd.as<FixupType>()) {
-      case FixupType::TIE_RST:
-      case FixupType::TIE_SET:
-      case FixupType::TIE_EN:
-      case FixupType::INVERT_RST:
-      case FixupType::INVERT_SET:
-      case FixupType::INVERT_EN:
-      case FixupType::INVERT_OUTPUT:
-      case FixupType::INVERT_CLK:
-        break;
+    while (1) {
+      auto cmd = ffMap[abstr.raw()];
+      if (auto optPtr = cmd.dyn_as<StdCellFF *>()) {
+        buildMatchingStdCellFF(**optPtr, wires);
+        return;
+      } else {
+        auto type = cmd.as<FixupType>();
+        switch (type) {
+        case FixupType::TIE0_RST:
+        case FixupType::TIE1_RST:
+          wires.rst = ConstantRef::fromBool(type == FixupType::TIE1_RST);
+          abstr.rstPol = (type == FixupType::TIE0_RST);
+          abstr.hasRst = 1;
+          break;
 
-      case FixupType::FAIL:
-        report_fatal_error("unsupported flip flop type");
+        case FixupType::TIE0_SET:
+        case FixupType::TIE1_SET:
+          wires.rst = ConstantRef::fromBool(type == FixupType::TIE1_SET);
+          abstr.setPol = (type == FixupType::TIE0_SET);
+          abstr.hasSet = 1;
+          break;
+
+        case FixupType::TIE0_EN:
+        case FixupType::TIE1_EN:
+          wires.en = ConstantRef::fromBool(type == FixupType::TIE1_EN);
+          abstr.clkEnPol = (type == FixupType::TIE0_EN);
+          abstr.hasClkEn = 1;
+          break;
+
+        case FixupType::INVERT_RST:
+          wires.rst = build.buildNot(wires.rst);
+          abstr.rstPol = !abstr.rstPol;
+          break;
+        case FixupType::INVERT_SET:
+          wires.set = build.buildNot(wires.set);
+          abstr.setPol = !abstr.setPol;
+          break;
+        case FixupType::INVERT_EN:
+          wires.en = build.buildNot(wires.en);
+          abstr.clkEnPol = !abstr.clkEnPol;
+          break;
+        case FixupType::INVERT_CLK:
+          wires.clk = build.buildNot(wires.clk).as<WireRef>();
+          abstr.clkPol = !abstr.clkPol;
+          break;
+
+        case FixupType::INVERT_OUTPUT:
+        case FixupType::FAIL:
+          report_fatal_error("unsupported flip flop type");
+        }
       }
-      abort();
     }
   }
 
@@ -389,24 +422,27 @@ public:
     };
 
     switch (type) {
-    case FixupType::TIE_RST: {
-      if (!abstr.hasRst)
+    case FixupType::TIE0_RST:
+    case FixupType::TIE1_RST: {
+      if (!abstr.hasRst || abstr.rstPol != (type == FixupType::TIE0_RST))
         break;
       abstr.hasRst = 0;
       abstr.rstPol = 0;
       fixupIfNone();
       break;
     }
-    case FixupType::TIE_SET: {
-      if (!abstr.hasSet)
+    case FixupType::TIE0_SET:
+    case FixupType::TIE1_SET: {
+      if (!abstr.hasSet || abstr.setPol != (type == FixupType::TIE0_SET))
         break;
       abstr.hasSet = 0;
       abstr.setPol = 0;
       fixupIfNone();
       break;
     }
-    case FixupType::TIE_EN: {
-      if (!abstr.hasClkEn)
+    case FixupType::TIE0_EN:
+    case FixupType::TIE1_EN: {
+      if (!abstr.hasClkEn || abstr.clkEnPol != (type == FixupType::TIE0_EN))
         break;
       abstr.hasClkEn = 0;
       abstr.clkEnPol = 0;

@@ -97,8 +97,11 @@ class CommonSubexpressionEliminationPass {
     // assuming other comes first. this is gonna be tricky for worklist-based
     // approach, order might be flipped and we don't have a quick way to find
     // which is first.
-    for (auto [i, def] : instr.defs().enumerate())
-      def->as<WireRef>().replaceAllUsesWith(other.def(i)->as<WireRef>());
+    for (auto [i, def] : instr.defs().enumerate()) {
+      assert(Operand::isDefUseOperand(def->thin()));
+      def->as<FatDynObjRef<InstrDefUse>>()->replaceAllUsesWith(
+          other.def(i)->as<FatDynObjRef<InstrDefUse>>());
+    }
     instrDestroy.mark(instr);
 
     BlockRef otherBl = HWInstrRef{other}.parentBlock(ctx);

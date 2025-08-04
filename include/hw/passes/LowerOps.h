@@ -34,6 +34,7 @@ public:
     bool lowerAddCompress = true;
     bool lowerSimpleAdd = true;
     bool lowerSub = true;
+    bool lowerConstantMul = true;
     bool lowerMultiInputBitwise = true;
     bool lowerEqualityICMP = true;
     bool lowerOrderingICMP = true;
@@ -394,6 +395,8 @@ private:
   }
 
   void lowerShift(InstrRef instr) {
+    build.setInsertPoint(instr);
+
     auto value = instr.other(0)->as<HWValue>();
     auto shamt = instr.other(1)->as<HWValue>();
     if (auto asConstant = shamt.dyn_as<ConstantRef>()) {
@@ -408,8 +411,6 @@ private:
 
     auto valueBits = *value.getNumBits();
     auto inBoundsShamtBits = clog2(valueBits);
-
-    build.setInsertPoint(instr);
 
     HWValue shiftVal = value;
     for (uint i = 0; i < inBoundsShamtBits; i++) {
@@ -476,6 +477,30 @@ private:
     destroyMap[instr] = 1;
   }
 
+  void lowerConstantMul(InstrRef instr) {
+    // until we implement real multiply.
+    if (instr.getNumOthers() != 2 || !instr.other(1)->is<ConstantRef>())
+      report_fatal_error("unsupported mul");
+
+    auto val = instr.other(0)->as<WireRef>();
+    auto c = instr.other(1)->as<ConstantRef>();
+
+    build.setInsertPoint(instr);
+    auto add = build.buildInstrRaw(
+        OP_ADD, 1 + BigInt::countBits4SExact(c, FourState::S1));
+    build.setInsertPoint(add.instr());
+
+    add.addRef(instr.def(0)->as<WireRef>()).other();
+    instr.def(0).replace(FatDynObjRef{nullref});
+
+    for (uint i = 0; i < c.getNumBits(); i++) {
+      if (c.getBit(i) != FourState::S1)
+        continue;
+      add.addRef(build.buildSLL(val, cbuild.val(*val.getNumBits(), i).get()));
+    }
+    destroyMap[instr] = 1;
+  }
+
   void runOnInstr(InstrRef instr) {
     auto token = autoDebugInfo.addWithToken(instr);
 
@@ -496,6 +521,10 @@ private:
 
     case *OP_SUB:
       lowerSub(instr);
+      break;
+
+    case *OP_MUL:
+      lowerConstantMul(instr);
       break;
 
     case *OP_ICMP_ULT:
@@ -539,6 +568,9 @@ public:
 
       if (instr.isOpc(OP_SUB))
         return config.lowerSub;
+
+      if (instr.isOpc(OP_MUL))
+        return config.lowerConstantMul;
 
       if (instr.isOpc(OP_ICMP_ULT, OP_ICMP_SLT, OP_ICMP_ULE, OP_ICMP_SLE,
                       OP_ICMP_UGT, OP_ICMP_SGT, OP_ICMP_UGE, OP_ICMP_SGE))
