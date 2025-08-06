@@ -942,7 +942,8 @@ public:
         continue;
       }
       auto asWire = val.as<WireRef>();
-      if (!asWire.getSingleDef()->instr().isOpc(HW_MUX)) {
+      auto defI = asWire.getSingleDef()->instr();
+      if (!defI.isOpc(HW_MUX) || !defI.def(0)->as<WireRef>().hasSingleUse()) {
         SmallBoolExprCNF expr;
         expr.makeTrue();
         for (auto &prefix : prefixes)

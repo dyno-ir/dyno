@@ -120,11 +120,9 @@ public:
 
     case *HW_REPEAT: {
       auto &val = wireVals[instr.def(0)->as<WireRef>()];
-      auto cnt = instr.other(1)->as<ConstantRef>();
-      if (cnt.getIs4S())
-        report_fatal_error("illegal");
-      BigInt::repeatOp4S(val, getValue(instr.other(0)->as<HWValue>()),
-                         cnt.getExactVal());
+      auto cnt = *instr.def(0)->as<WireRef>().getNumBits() /
+                 *instr.other(0)->as<WireRef>().getNumBits();
+      BigInt::repeatOp4S(val, getValue(instr.other(0)->as<HWValue>()), cnt);
       assert(val.getNumBits() == instr.def(0)->as<WireRef>().getNumBits());
       break;
     }
@@ -234,7 +232,7 @@ public:
       auto val = getValue(instr.other(0)->as<HWValue>());
       if (val.valueEquals(0)) {
         std::print(errs, "Assertion Failed at: ");
-        for (auto loc : ctx.dbgInfo.getSourceLocs(instr))
+        for (auto loc : ctx.sourceLocInfo.getSourceLocs(instr))
           std::print(errs, "{}:{}.{}-{}.{}\n", loc.fileName, loc.beginLine,
                      loc.beginCol, loc.endLine, loc.endCol);
         errs << "\n";

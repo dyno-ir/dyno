@@ -46,8 +46,8 @@ private:
     auto known = knownBits.getKnownBits(wire);
     if (known.getIs4S())
       return false;
-    currentReplaced.emplace_back(instr.def(0));
-    wire.replaceAllUsesWith(cbuild.val(known).get());
+    known.toStream(dbgs());
+    replaceUses(wire, cbuild.val(known).get());
     return true;
   }
 
@@ -197,8 +197,9 @@ private:
         opc = sign ? OP_SEXT : OP_ZEXT;
       else
         opc = OP_ANYEXT;
-      build.buildInstrRaw(opc, 2).addRef(outWire).other().addRef(
-          ibAdd.instr().def(0)->as<WireRef>());
+      auto tempW = ibAdd.instr().def(0)->as<WireRef>();
+      assert(*outWire->numBits >= *tempW.getNumBits());
+      build.buildInstrRaw(opc, 2).addRef(outWire).other().addRef(tempW);
     }
 
     instr.def(0).replace(FatDynObjRef<>{nullref});
@@ -377,11 +378,15 @@ private:
           operands.emplace_back(operand->as<WireRef>());
           continue;
         }
+        if (operand != *instr.end() - 1)
+          change = true;
         constants.emplace_back(operand->as<ConstantRef>());
         continue;
       }
     }
+
     change |= constants.size() > 1;
+
     if (constants.size() > 1) {
       cbuild.val(constants.front());
       switch (*root.getDialectOpcode()) {
@@ -466,6 +471,14 @@ private:
       dyno_unreachable("no 1-ary output value");
     }
 
+    auto operandSorting = [](WireRef lhs, WireRef rhs) {
+      return lhs.getSingleDef()->instr().getObjID() <
+             rhs.getSingleDef()->instr().getObjID();
+    };
+
+    if (!std::is_sorted(operands.begin(), operands.end(), operandSorting))
+      change = true;
+
     if (!change) {
       return false;
     }
@@ -473,11 +486,7 @@ private:
     HWInstrBuilder build{ctx};
     build.setInsertPoint(ctx.getCFG()[root]);
 
-    std::stable_sort(operands.begin(), operands.end(),
-                     [](WireRef lhs, WireRef rhs) {
-                       return lhs.getSingleDef()->instr().getDialectOpcode() <
-                              rhs.getSingleDef()->instr().getDialectOpcode();
-                     });
+    std::stable_sort(operands.begin(), operands.end(), operandSorting);
 
     ++build.insert;
     auto ibuild = build.buildInstrRaw(opc, 1 + operands.size() +
@@ -753,8 +762,13 @@ private:
         dbgs() << "replaced with:\n";
         for (size_t i = lastWorklistSize, sz = worklist.size(); i < sz; i++)
           dumpInstr(worklist[i]);
-        if (lastWorklistSize == worklist.size())
-          dbgs() << "<none>\n";
+        if (lastWorklistSize == worklist.size()) {
+          if (!currentReplaced.empty()) {
+            dumpObj(currentReplaced[0]->fat());
+            dbgs() << "\n";
+          } else
+            dbgs() << "<none>\n";
+        }
       })
 
       auto newInstrs = ArrayRef<InstrRef>{worklist.begin() + lastWorklistSize,

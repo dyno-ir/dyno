@@ -204,6 +204,8 @@ struct RegisterValue : public RegisterFrags<RegisterValueFragment> {
   }
 
   bool defragmentValues(HWContext &ctx) {
+    if (frags.size() == 0)
+      return false;
     // clean up constants
     bool rv = false;
     for (uint i = 0; i < frags.size(); i++) {

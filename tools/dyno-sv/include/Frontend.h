@@ -1,4 +1,5 @@
 
+#include "dyno/Constant.h"
 #include "hw/AutoDebugInfo.h"
 #include "hw/HWAbstraction.h"
 #include "hw/HWContext.h"
@@ -379,7 +380,8 @@ public:
         for (auto ifVar : ifVars) {
           auto reg = build.buildPort(module, HW_REF_REGISTER_DEF);
           reg->numBits = ifVar->getType().getBitstreamWidth();
-          ctx.regNameInfo.addName(reg, (ifName + std::string{ifVar->name}).c_str());
+          ctx.regNameInfo.addName(reg,
+                                  (ifName + std::string{ifVar->name}).c_str());
         }
       }
     }
@@ -390,7 +392,8 @@ public:
       for (auto ifPort : extractIFModuleVars(body)) {
         auto reg = build.buildPort(module, HW_REF_REGISTER_DEF);
         reg->numBits = ifPort->getType().getBitstreamWidth();
-        ctx.regNameInfo.addName(reg, (ifName + std::string{ifPort->name}).c_str());
+        ctx.regNameInfo.addName(reg,
+                                (ifName + std::string{ifPort->name}).c_str());
       }
     }
     visitDefault(node);
@@ -818,8 +821,7 @@ public:
         auto &asPArr = type->as<slang::ast::PackedArrayType>();
         if (!asPArr.isSimpleBitVector()) {
           auto val = (*this)(&asPArr.elementType);
-          return build.buildRepeat(val,
-                                   ConstantRef::fromU32(asPArr.range.width()));
+          return build.buildRepeat(val, asPArr.range.width());
         }
         if (auto val = tryFind(&asPArr.elementType))
           return build.buildResize(val, type->getBitstreamWidth(), sign);
@@ -832,8 +834,7 @@ public:
       case slang::ast::SymbolKind::FixedSizeUnpackedArrayType: {
         auto &asUArr = type->as<slang::ast::FixedSizeUnpackedArrayType>();
         auto val = (*this)(&asUArr.elementType);
-        return build.buildRepeat(val,
-                                 ConstantRef::fromU32(asUArr.range.width()));
+        return build.buildRepeat(val, asUArr.range.width());
       }
       case slang::ast::SymbolKind::TypeAlias: {
         auto &asAlias = type->as<slang::ast::TypeAliasType>();
@@ -1592,7 +1593,12 @@ public:
       auto val = handle_expr(asRepl.concat())->proGetValue(build);
       auto cnt = handle_expr(asRepl.count())->proGetValue(build);
 
-      return std::make_unique<RValue>(build.buildRepeat(val, cnt), expr.type);
+      if (!cnt.is<ConstantRef>() || !cnt.as<ConstantRef>().getLimitedVal())
+        print.error(asRepl.count().sourceRange);
+
+      return std::make_unique<RValue>(
+          build.buildRepeat(val, cnt.as<ConstantRef>().getExactVal()),
+          expr.type);
     }
     case slang::ast::ExpressionKind::StructuredAssignmentPattern: {
       auto &asStructAs =

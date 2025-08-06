@@ -6,8 +6,10 @@
 #include "hw/HWAbstraction.h"
 #include "hw/HWContext.h"
 #include "hw/HWInstr.h"
+#include "hw/HWPrinter.h"
 #include "hw/HWValue.h"
 #include "hw/IDs.h"
+#include "hw/analysis/BitAlignmentAnalysis.h"
 #include "hw/analysis/DelayAnalysis.h"
 #include "op/IDs.h"
 #include "support/Bits.h"
@@ -387,7 +389,7 @@ private:
     } else if (opcode.is(OP_SRA)) {
       auto upper = build.buildSplice(value, BitRange{shamt, valueBits - shamt});
       auto signBit = build.buildSplice(value, BitRange{valueBits - 1, 1});
-      auto signPat = build.buildRepeat(signBit, ConstantRef::fromU32(shamt));
+      auto signPat = build.buildRepeat(signBit, shamt);
       val = build.buildConcat(std::to_array({signPat, upper}));
     } else
       dyno_unreachable("invalid opcode");
@@ -427,8 +429,7 @@ private:
     auto oobVal =
         instr.isOpc(OP_SRA)
             ? build.buildRepeat(
-                  build.buildSplice(value, BitRange{valueBits - 1, 1}),
-                  ConstantRef::fromU32(oobBits))
+                  build.buildSplice(value, BitRange{valueBits - 1, 1}), oobBits)
             : cbuild.zeroLike(value).get();
     instr.def(0)->as<WireRef>().replaceAllUsesWith(
         build.buildMux(oob, oobVal, shiftVal));
@@ -501,6 +502,28 @@ private:
     destroyMap[instr] = 1;
   }
 
+  void lowerNonConstSplice(InstrRef splice) {
+    // what can efficiently lower?
+    // answer: linear access (base + offs * elemsize)
+
+    if (!splice.other(1)->is<WireRef>())
+      return;
+
+    BitAlignAnalysis analysis{ctx};
+    auto res = analysis.getBitAlignment(splice.other(1)->as<WireRef>());
+
+    DEBUG("LowerOps", {
+      res.base.toStream(dbgs());
+      for (auto [obj, fact] : res.terms) {
+        dbgs() << " + ";
+        fact.toStream(dbgs());
+        dbgs() << "*";
+        dumpObj(ctx.getWires().resolve(obj));
+      }
+      dbgs() << "\n";
+    })
+  }
+
   void runOnInstr(InstrRef instr) {
     auto token = autoDebugInfo.addWithToken(instr);
 
@@ -554,6 +577,10 @@ private:
     case *OP_SRA:
       lowerShift(instr);
       return;
+
+    case *HW_SPLICE:
+      lowerNonConstSplice(instr);
+      return;
     }
   }
 
@@ -584,6 +611,9 @@ public:
 
       if (instr.isOpc(OP_AND, OP_OR, OP_XOR))
         return config.lowerMultiInputBitwise;
+
+      if (instr.isOpc(HW_SPLICE))
+        return true;
 
       return false;
     };

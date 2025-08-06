@@ -24,9 +24,9 @@ class BitAliasAnalysis {
     BitAliasAcc(const RegisterValue &val) : RegisterValue(val) {}
     BitAliasAcc(RegisterValue &&val) : RegisterValue(std::move(val)) {}
 
-    static BitAliasAcc mostPessimistic(uint32_t bits) {
+    static BitAliasAcc mostPessimistic(WireRef wire) {
       return BitAliasAcc{
-          RegisterValue{DynObjRef{nullref}, bits, 0, true, nullopt}};
+          RegisterValue{wire, *wire.getNumBits(), 0, true, nullopt}};
     }
   };
 
@@ -60,8 +60,7 @@ class BitAliasAnalysis {
       auto addr = frame.ref[1].as<HWValue>();
       auto len = frame.ref[2].as<ConstantRef>();
       if (!addr.is<ConstantRef>()) {
-        retVal = BitAliasAcc::mostPessimistic(
-            *instr.def(0)->as<WireRef>().getNumBits());
+        frame.acc = BitAliasAcc::mostPessimistic(instr.def(0)->as<WireRef>());
         return std::nullopt;
       }
       retVal = retVal.getRange(addr.as<ConstantRef>().getExactVal(),
@@ -140,8 +139,7 @@ class BitAliasAnalysis {
         auto addr = frame.ref[1].as<HWValue>();
         auto len = frame.ref[2].as<ConstantRef>();
         if (!addr.is<ConstantRef>()) {
-          retVal = BitAliasAcc::mostPessimistic(
-              *instr.def(0)->as<WireRef>().getNumBits());
+          frame.acc = BitAliasAcc::mostPessimistic(instr.def(0)->as<WireRef>());
           return std::nullopt;
         }
         frame.acc.overwriteNoMaterialize(
@@ -189,6 +187,10 @@ public:
     }
     auto change = retVal.defragmentValues(ctx);
     change |= maxLevel > 2;
+    if (retVal.frags.size() == 1) {
+      assert(retVal.frags.front().len == *wire.getNumBits());
+      change &= retVal.frags.front().ref != wire;
+    }
     return std::make_pair(RegisterValue{retVal}, change);
   }
 };

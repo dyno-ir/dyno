@@ -82,6 +82,8 @@ public:
     runPass(loopSimplify);
     runPass(agressiveDCE);
     runPass(cse);
+    runPass(instCombine);
+    runPass(agressiveDCE);
   }
 
   void runLibertyPipeline() {

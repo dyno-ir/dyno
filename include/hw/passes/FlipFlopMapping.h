@@ -39,7 +39,11 @@ class FlipFlopMappingPass {
 
     // uint8_t hasMux : 1 = 0;
 
-    auto raw() const { return std::bit_cast<uint16_t>(*this); }
+    auto raw() const {
+      return (hasRegularOut << 8) | (hasInvOut << 7) | (setPol << 6) |
+             (hasSet << 5) | (rstPol << 4) | (hasRst << 3) | (clkEnPol << 2) |
+             (hasClkEn << 1) | clkPol;
+    }
     AbstractFF() = default;
     explicit AbstractFF(uint16_t raw) {
       *this = std::bit_cast<AbstractFF>(raw);

@@ -130,7 +130,8 @@ class DumpVerilogPass {
       case *HW_REPEAT: {
         std::print(os,
                    "assign _w{}_ = ", wireToID(instr.def(0)->as<WireRef>()));
-        auto cnt = instr.other(1)->as<ConstantRef>().getExactVal();
+        auto cnt = *instr.def(0)->as<WireRef>().getNumBits() /
+                   *instr.other(0)->as<WireRef>().getNumBits();
         auto wire = instr.other(0)->as<WireRef>();
         std::print(os, "{{{}{{_w{}_}}}};\n", cnt, wireToID(wire));
         break;

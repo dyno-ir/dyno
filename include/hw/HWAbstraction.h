@@ -511,20 +511,16 @@ public:
     return rv;
   }
 
-  HWValue buildRepeat(HWValue value, HWValue count) {
-    if (value.is<ConstantRef>() && count.is<ConstantRef>()) {
-      return ctx.constBuild()
-          .val(value.as<ConstantRef>())
-          .repeat(count.as<ConstantRef>().getExactVal())
-          .get();
+  HWValue buildRepeat(HWValue value, uint count) {
+    if (value.is<ConstantRef>()) {
+      return ctx.constBuild().val(value.as<ConstantRef>()).repeat(count).get();
     }
 
-    auto rv = buildInstr(HW_REPEAT, true, value, count).defW();
+    auto rv = buildInstr(HW_REPEAT, true, value).defW();
 
-    if (value.getNumBits() && count.is<ConstantRef>()) {
+    if (value.getNumBits()) {
       uint32_t out;
-      if (__builtin_umul_overflow(*value.getNumBits(),
-                                  count.as<ConstantRef>().getExactVal(), &out))
+      if (__builtin_umul_overflow(*value.getNumBits(), count, &out))
         report_fatal_error("repeat wire length does not fit in uint");
       rv->numBits = out;
     }

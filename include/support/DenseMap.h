@@ -577,13 +577,41 @@ public:
   }
 
 public:
-  // todo: copy/move construct
   LargeSetMap() : Base(1, 0) {
     // asan does not support mixing of placement and regular new/delete
     buckets = (Bucket *)::operator new[](sizeof(Bucket) * 1,
                                          std::align_val_t(alignof(Bucket)));
     std::uninitialized_default_construct_n(buckets, 1);
   }
+
+  LargeSetMap(const LargeSetMap &other) {
+    buckets = (Bucket *)::operator new[](sizeof(Bucket) * other.cap,
+                                         std::align_val_t(alignof(Bucket)));
+    std::uninitialized_copy_n(other.buckets, other.cap, buckets);
+    this->cap = other.cap;
+    this->sz = other.sz;
+  }
+  LargeSetMap(LargeSetMap &&other) {
+    this->buckets = other.buckets;
+    this->cap = other.cap;
+    this->sz = other.sz;
+
+    other.buckets = nullptr;
+    other.sz = 0;
+    other.cap = 0;
+  }
+  LargeSetMap &operator=(const LargeSetMap &other) {
+    std::destroy_at(this);
+    std::construct_at(this, other);
+    return *this;
+  }
+  LargeSetMap &operator=(LargeSetMap &&other) {
+    if (this->buckets)
+      std::destroy_at(this);
+    std::construct_at(this, std::move(other));
+    return *this;
+  }
+
   ~LargeSetMap() {
     this->Base::clearDelete();
     ::operator delete[](buckets, std::align_val_t(alignof(Bucket)));
@@ -610,6 +638,59 @@ public:
     std::uninitialized_default_construct_n(*arr, InlineBuckets);
     buckets = *arr;
   }
+  SmallSetMap(const SmallSetMap &other) : Base(InlineBuckets, 0), arr() {
+    if (other.cap > InlineBuckets) {
+      buckets = (Bucket *)::operator new[](sizeof(Bucket) * other.cap,
+                                           std::align_val_t(alignof(Bucket)));
+    } else {
+      buckets = *arr;
+    }
+    std::uninitialized_copy_n(other.buckets, other.cap, buckets);
+    this->cap = other.cap;
+    this->sz = other.sz;
+  }
+  SmallSetMap(SmallSetMap &&other) : Base(InlineBuckets, 0), arr() {
+    if (other.isSmall()) {
+      buckets = *arr;
+      std::uninitialized_copy_n(other.buckets, other.cap, buckets);
+    } else {
+      this->buckets = other.buckets;
+    }
+
+    this->cap = other.cap;
+    this->sz = other.sz;
+
+    other.buckets = nullptr;
+    other.sz = 0;
+    other.cap = 0;
+  }
+  SmallSetMap &operator=(const SmallSetMap &other) {
+    std::destroy_at(this);
+    std::construct_at(this, other);
+    return *this;
+  }
+  SmallSetMap &operator=(SmallSetMap &&other) {
+    if (!this->buckets) {
+      // moved-from state
+      std::construct_at(this);
+    }
+
+    if (other.isSmall()) {
+      std::uninitialized_copy_n(other.buckets, other.cap, buckets);
+    } else {
+      deleteArr(buckets);
+      this->buckets = other.buckets;
+    }
+
+    this->cap = other.cap;
+    this->sz = other.sz;
+
+    other.buckets = nullptr;
+    other.sz = 0;
+    other.cap = 0;
+    return *this;
+  }
+
   ~SmallSetMap() {
     if (isSmall())
       return;
