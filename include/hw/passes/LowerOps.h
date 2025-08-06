@@ -509,7 +509,7 @@ private:
     if (!splice.other(1)->is<WireRef>())
       return;
 
-    BitAlignAnalysis analysis{ctx};
+    LinearExpressionAnalysis analysis{ctx};
     auto res = analysis.getBitAlignment(splice.other(1)->as<WireRef>());
 
     DEBUG("LowerOps", {
