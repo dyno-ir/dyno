@@ -43,7 +43,7 @@ class RemoveBuffersPass {
       return false;
     if (load.reg() == store.reg())
       return false;
-    if (load.hasRange() || store.hasRange())
+    if (!load.isFullReg() || !store.isFullReg())
       return false;
     if (store.hasTrigger())
       return false;

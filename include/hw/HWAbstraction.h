@@ -11,6 +11,7 @@
 #include "hw/HWInstr.h"
 #include "hw/HWValue.h"
 #include "hw/IDs.h"
+#include "hw/LoadStore.h"
 #include "hw/Module.h"
 #include "hw/Process.h"
 #include "hw/Register.h"
@@ -53,7 +54,16 @@ protected:
     if constexpr (std::is_same_v<BitRange, T>) {
       build.addRef(ref.getAddr());
       build.addRef(ref.getLen());
-    } else if constexpr (IsArrayRef<std::remove_reference_t<T>>) {
+    } else if constexpr (std::is_same_v<AddressGenTerm, T>) {
+      build.addRef(ref.getIdx());
+      build.addRef(ConstantRef::fromU32(ref.getFact()));
+      build.addRef(ConstantRef::fromU32(ref.getMax().value_or(~0u)));
+    } else if constexpr (std::is_same_v<AddressGenTermOperand, T>) {
+      build.addRef(ref.getIdx());
+      build.addRef(ConstantRef::fromU32(ref.getFact()));
+      build.addRef(ConstantRef::fromU32(ref.getMax().value_or(~0u)));
+    } else if constexpr (IsArrayRef<std::decay_t<T>> ||
+                         IsRange<std::decay_t<T>>) {
       for (auto elem : ref)
         addSpecialRef(build, elem);
     } else {
@@ -80,10 +90,18 @@ public:
         [&] {
           if constexpr (std::is_same_v<BitRange, std::decay_t<Ts>>)
             size += 2;
+          else if constexpr (std::is_same_v<AddressGenTerm, std::decay_t<Ts>>)
+            size += 3;
+          else if constexpr (std::is_same_v<AddressGenTermOperand,
+                                            std::decay_t<Ts>>)
+            size += 3;
           else if constexpr (IsArrayRef<std::decay_t<Ts>>) {
             auto len = ts.end() - ts.begin();
             if (!ts.empty())
               size += len * getNumOperands(ts[0]);
+          } else if constexpr (IsRange<std::decay_t<Ts>>) {
+            for (auto elem : ts)
+              size += getNumOperands(elem);
           } else
             size += 1;
         }(),
@@ -373,53 +391,83 @@ private:
   }
 
 public:
-  template <typename... Ts> HWValue buildSplice(Ts... operands) {
-    static_assert(sizeof...(operands) == 2);
+  template <typename... Ts>
+  HWValue buildSplice(HWValue src, uint32_t numBits, uint32_t baseAddr,
+                      Ts... terms) {
+    if constexpr (sizeof...(terms) == 0) {
+      if (auto asConst = src.dyn_as<ConstantRef>()) {
+        auto cbuild = ctx.constBuild();
+        return cbuild.valRange(asConst, baseAddr, numBits).get();
+      }
 
-    auto [len, num, isConst] = spliceNumBitsOps(operands...);
-    if (isConst) {
-      auto cbuild = ctx.constBuild();
-      cbuild.val(0, 0);
-      HWValue last;
-      (
-          [&] {
-            // skip operands with constant zero length range
-            if constexpr (std::is_same_v<decltype(operands), BitRange>) {
-              cbuild.concatRangeLHS(
-                  last.as<ConstantRef>(),
-                  operands.getAddr().template as<ConstantRef>().getExactVal(),
-                  operands.getLen().template as<ConstantRef>().getExactVal());
+      if (numBits == src.getNumBits() && baseAddr == 0)
+        return src;
 
-            } else
-              last = operands;
-          }(),
-          ...);
-      return cbuild.get();
+      HWInstrRef instr;
+      if (baseAddr == 0)
+        instr = buildInstr(HW_SPLICE, true, src);
+      else
+        instr =
+            buildInstr(HW_SPLICE, true, src, ConstantRef::fromU32(baseAddr));
+
+      instr.defW()->numBits = numBits;
+      return instr.defW();
     }
 
-    auto instr = HWInstrRef{ctx.getInstrs().create(1 + 3 * num, HW_SPLICE)};
-    insertInstr(instr);
-
-    InstrBuilder build{instr};
-    build.addRef(ctx.getWires().create(len)).other();
-
-    HWValue last;
-    (
-        [&] {
-          // skip operands with constant zero length range
-          if constexpr (std::is_same_v<decltype(operands), BitRange>) {
-            if (spliceSingleNumBits(last, operands).value_or(1) == 0)
-              return;
-
-            addSpecialRef(build, last);
-            addSpecialRef(build, operands);
-          } else
-            last = operands;
-        }(),
-        ...);
-
+    auto instr = buildInstr(HW_SPLICE, true, src,
+                            ConstantRef::fromU32(baseAddr), terms...);
+    instr.defW()->numBits = numBits;
     return instr.defW();
   }
+
+  // template <typename... Ts> HWValue buildSplice(Ts... operands) {
+  //   static_assert(sizeof...(operands) == 2);
+
+  //   auto [len, num, isConst] = spliceNumBitsOps(operands...);
+  //   if (isConst) {
+  //     auto cbuild = ctx.constBuild();
+  //     cbuild.val(0, 0);
+  //     HWValue last;
+  //     (
+  //         [&] {
+  //           // skip operands with constant zero length range
+  //           if constexpr (std::is_same_v<decltype(operands), BitRange>) {
+  //             cbuild.concatRangeLHS(
+  //                 last.as<ConstantRef>(),
+  //                 operands.getAddr().template
+  //                 as<ConstantRef>().getExactVal(), operands.getLen().template
+  //                 as<ConstantRef>().getExactVal());
+
+  //           } else
+  //             last = operands;
+  //         }(),
+  //         ...);
+  //     return cbuild.get();
+  //   }
+
+  //   auto instr = HWInstrRef{ctx.getInstrs().create(1 + 3 * num, HW_SPLICE)};
+  //   insertInstr(instr);
+
+  //   InstrBuilder build{instr};
+  //   build.addRef(ctx.getWires().create(len)).other();
+
+  //   HWValue last;
+  //   (
+  //       [&] {
+  //         // skip operands with constant zero length range
+  //         if constexpr (std::is_same_v<decltype(operands), BitRange>) {
+  //           if (spliceSingleNumBits(last, operands).value_or(1) == 0)
+  //             return;
+
+  //           addSpecialRef(build, last);
+  //           addSpecialRef(build, operands);
+  //         } else
+  //           last = operands;
+  //       }(),
+  //       ...);
+
+  //   return instr.defW();
+  // }
 
   HWValue buildMultiSplice(ArrayRef<std::pair<HWValue, BitRange>> values) {
     if (std::all_of(values.begin(), values.end(), [](const auto &pair) {
@@ -472,7 +520,8 @@ public:
 
       auto val = value;
       if (!range.isFull())
-        val = buildSplice(val, range);
+        val = buildSplice(val, range.len.as<ConstantRef>().getExactVal(), 0,
+                          AddressGenTerm{range.addr, 1});
       build.addRef(val);
 
       if (numBits) {
@@ -489,9 +538,18 @@ public:
     return rv;
   }
 
-  HWValue buildInsert(HWValue base, HWValue insert, BitRange range) {
-    auto rv = buildInstr(HW_INSERT, true, base, insert, range).defW();
-    rv->numBits = base.getNumBits();
+  template <typename... Ts>
+  HWValue buildInsert(HWValue src, HWValue val, uint32_t baseAddr,
+                      Ts... terms) {
+    if (baseAddr == 0 && sizeof...(terms) == 0) {
+      auto rv = buildInstr(HW_INSERT, true, src, val).defW();
+      rv->numBits = src.getNumBits();
+      return rv;
+    }
+    auto rv = buildInstr(HW_INSERT, true, src, val,
+                         ConstantRef::fromU32(baseAddr), terms...)
+                  .defW();
+    rv->numBits = src.getNumBits();
     return rv;
   }
 
@@ -591,33 +649,45 @@ public:
     return rv;
   }
 
-  WireRef buildLoad(RegisterRef reg, BitRange range = BitRange::full()) {
+  WireRef buildLoad(RegisterRef reg) {
     HWInstrRef ref;
-    if (BitRange::equalsWithDefaultSize(range, BitRange::full(), reg->numBits))
-      ref = buildInstr(HW_LOAD, true, reg);
-    else
-      ref = buildInstr(HW_LOAD, true, reg, range);
-    if (BitRange::equalsWithDefaultSize(range, BitRange::full(), reg->numBits))
-      ref.defW()->numBits = reg->numBits;
-    else if (auto asCRef = range.len.dyn_as<ConstantRef>())
-      ref.defW()->numBits = asCRef.getExactVal();
+    ref = buildInstr(HW_LOAD, true, reg);
+    ref.defW()->numBits = reg.getNumBits();
     return ref.defW();
   }
 
-  HWInstrRef buildStore(RegisterRef reg, HWValue value,
-                        BitRange range = BitRange::full(), bool defer = false,
-                        TriggerIRef trigger = nullref) {
+  template <typename... Ts>
+  WireRef buildLoad(RegisterRef reg, uint32_t numBits, uint32_t baseAddr = 0,
+                    Ts... addressGenTerms) {
+    HWInstrRef ref;
+    if (baseAddr == 0 && sizeof...(addressGenTerms) == 0)
+      ref = buildInstr(HW_LOAD, true, reg);
+    else
+      ref = buildInstr(HW_LOAD, true, reg, ConstantRef::fromU32(baseAddr),
+                       addressGenTerms...);
+    ref.defW()->numBits = numBits;
+    return ref.defW();
+  }
+
+  template <typename... Ts>
+  HWInstrRef buildStore(RegisterRef reg, HWValue value, bool defer = false,
+                        TriggerIRef trigger = nullref, uint32_t baseAddr = 0,
+                        Ts... addressGenTerms) {
     assert(!(!defer && trigger) && "trigger on non-deferred store");
     auto opc = defer ? HW_STORE_DEFER : HW_STORE;
-    if (trigger) {
-      if (BitRange::equalsWithDefaultSize(range, BitRange::full(),
-                                          reg->numBits))
+    if (sizeof...(addressGenTerms) > 0 || baseAddr != 0) {
+      if (trigger) {
+        return buildInstr(opc, false, value, reg, trigger.oref(),
+                          ConstantRef::fromU32(baseAddr), addressGenTerms...);
+      }
+      return buildInstr(opc, false, value, reg, ConstantRef::fromU32(baseAddr),
+                        addressGenTerms...);
+    } else {
+      if (trigger) {
         return buildInstr(opc, false, value, reg, trigger.oref());
-      return buildInstr(opc, false, value, reg, range, trigger.oref());
-    }
-    if (BitRange::equalsWithDefaultSize(range, BitRange::full(), reg->numBits))
+      }
       return buildInstr(opc, false, value, reg);
-    return buildInstr(opc, false, value, reg, range);
+    }
   }
 
   RegisterRef buildRegister(Optional<uint32_t> bitSize = nullopt) {

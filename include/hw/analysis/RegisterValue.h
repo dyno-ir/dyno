@@ -57,8 +57,7 @@ struct RegisterValueFragment {
     addr += srcAddr;
     if (auto regThin = ref.dyn_as<ObjRef<Register>>()) {
       auto reg = RegisterRef{build.ctx.getRegs().resolve(regThin)};
-      return std::make_pair(build.buildLoad(reg, BitRange{addr, len}),
-                            BitRange{0, len});
+      return std::make_pair(build.buildLoad(reg, len, addr), BitRange{0, len});
     }
     if (auto wireThin = ref.dyn_as<ObjRef<Wire>>()) {
       auto wire = WireRef{build.ctx.getWires().resolve(wireThin)};

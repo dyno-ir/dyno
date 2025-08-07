@@ -473,3 +473,8 @@ private:
   It &beginIt;
   It &endIt;
 };
+
+template <typename T>
+concept IsRange = (requires {
+  typename T::iterator;
+} && std::is_same_v<std::remove_cv_t<T>, Range<typename T::iterator>>);

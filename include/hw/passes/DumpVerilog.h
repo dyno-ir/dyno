@@ -72,10 +72,10 @@ class DumpVerilogPass {
             os, "assign _w{}_ = {}", wireToID(asLoad.value()),
             VerilogIntroducedName{print.introduceNameFor(asLoad.reg()).second}
                 .str());
-        if (asLoad.hasRange()) {
-          assert(asLoad.range()->isConstant());
-          auto addr = asLoad.range()->getAddr().as<ConstantRef>().getExactVal();
-          auto len = asLoad.range()->getLen().as<ConstantRef>().getExactVal();
+        if (!asLoad.isFullReg()) {
+          assert(asLoad.isConstantOffs());
+          auto addr = asLoad.base()->as<ConstantRef>().getExactVal();
+          auto len = asLoad.getLen();
           std::print(os, " [{}:{}]", addr + len - 1, addr);
         }
         std::print(os, ";\n");
@@ -88,11 +88,10 @@ class DumpVerilogPass {
             os, "assign {}",
             VerilogIntroducedName{print.introduceNameFor(asStore.reg()).second}
                 .str());
-        if (asStore.hasRange()) {
-          assert(asStore.range()->isConstant());
-          auto addr =
-              asStore.range()->getAddr().as<ConstantRef>().getExactVal();
-          auto len = asStore.range()->getLen().as<ConstantRef>().getExactVal();
+        if (!asStore.isFullReg()) {
+          assert(asStore.isConstantOffs());
+          auto addr = asStore.base()->as<ConstantRef>().getExactVal();
+          auto len = asStore.getLen();
           std::print(os, " [{}:{}]", addr + len - 1, addr);
         }
         std::print(os, " = _w{}_;\n", wireToID(asStore.value().as<WireRef>()));
@@ -100,17 +99,17 @@ class DumpVerilogPass {
       }
 
       case *HW_SPLICE: {
-        std::print(os, "assign _w{}_ = {{",
-                   wireToID(instr.def(0)->as<WireRef>()));
-        for (uint i = 0; i < instr.getNumOthers(); i += 3) {
-          if (i != 0)
-            std::print(os, ", ");
-          auto wire = instr.other(i + 0)->as<WireRef>();
-          auto addr = instr.other(i + 1)->as<ConstantRef>().getExactVal();
-          auto len = instr.other(i + 2)->as<ConstantRef>().getExactVal();
-          std::print(os, "_w{}_ [{}:{}]", wireToID(wire), addr + len - 1, addr);
-        }
-        std::print(os, "}};\n");
+        auto asSplice = instr.as<SpliceIRef>();
+        assert(asSplice.isConstantOffs());
+        std::print(os,
+                   "assign _w{}_ = ", wireToID(instr.def(0)->as<WireRef>()));
+
+        auto wire = asSplice.in()->as<WireRef>();
+        auto addr = asSplice.getBase();
+        auto len = asSplice.getLen();
+        std::print(os, "_w{}_ [{}:{}]", wireToID(wire), addr + len - 1, addr);
+
+        std::print(os, ";\n");
         break;
       }
 

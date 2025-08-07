@@ -472,12 +472,16 @@ public:
 
         uint32_t addr = 0;
         uint32_t len = *asStore.reg()->numBits;
-        if (auto range = asStore.range()) {
-          if (!range->isConstant()) {
+        if (!asStore.isFullReg()) {
+          if (asStore.getNumTerms() != 0) {
             build.setInsertPoint(asStore.iter(ctx));
             auto val = regState.getOrSetDefault(depth, asStore.reg())
                            .get(build, 0, *asStore.reg()->numBits, false);
-            val = build.buildInsert(val, asStore.value(), *asStore.range());
+
+            val = build.buildInsert(
+                val, asStore.value(),
+                asStore.base()->as<ConstantRef>().getExactVal(),
+                asStore.terms());
 
             // plain value doesn't check for conflicting triggers.
             // regState.plainValue(depth, asStore.reg(), val, trigger);
@@ -486,8 +490,8 @@ public:
             destroyList.emplace_back(asStore);
             break;
           }
-          addr = range->getAddr().as<ConstantRef>().getExactVal();
-          len = range->getLen().as<ConstantRef>().getExactVal();
+          addr = asStore.getBase();
+          len = *asStore.other(0)->as<HWValue>().getNumBits();
         }
 
         destroyList.emplace_back(asStore);
@@ -509,18 +513,18 @@ public:
 
         uint32_t addr = 0;
         uint32_t len = *asLoad.reg()->numBits;
-        if (asLoad.hasRange()) {
-          auto range = asLoad.range();
-          if (!range->isConstant()) {
+        if (!asLoad.isFullReg()) {
+          if (asLoad.getNumTerms() != 0) {
             build.setInsertPoint(ctx.getCFG()[asLoad]);
-            auto matVal =
-                build.buildSplice(val.get(build), BitRange{*asLoad.range()});
+            auto matVal = build.buildSplice(
+                val.get(build), asLoad.getLen(),
+                asLoad.base()->as<ConstantRef>().getExactVal(), asLoad.terms());
             asLoad.defW().replaceAllUsesWith(matVal);
             destroyList.emplace_back(asLoad);
             break;
           }
-          addr = range->getAddr().as<ConstantRef>().getExactVal();
-          len = range->getLen().as<ConstantRef>().getExactVal();
+          addr = asLoad.getBase();
+          len = *asLoad.def(0)->as<WireRef>().getNumBits();
         }
 
         build.setInsertPoint(asLoad.iter(ctx));
@@ -741,8 +745,7 @@ public:
                           .iref();
           }
           build.buildStore(reg, regState.get().get(build, addr, len),
-                           BitRange{addr, len}, config.mode == Config::DEFERRED,
-                           trigger);
+                           config.mode == Config::DEFERRED, trigger, addr);
         };
         for (auto frag : regState.get().frags) {
           if (frag.untouched) {

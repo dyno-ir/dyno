@@ -104,17 +104,17 @@ public:
       return aig.createMUX(selNode, lhs, rhs);
     });
   }
-  void buildSplice(InstrRef instr) {
+  void buildSplice(SpliceIRef instr) {
     uint32_t pos = wireToAIGNodeStorage.size();
-    assert(instr.getNumOthers() % 3 == 0);
-    for (int i = instr.getNumOthers() - 3; i >= 0; i -= 3) {
-      auto val = instr.other(i)->as<HWValue>();
-      auto low = instr.other(i + 1)->as<ConstantRef>().getExactVal();
-      auto len = instr.other(i + 2)->as<ConstantRef>().getExactVal();
-      for (uint j = 0; j < len; j++) {
-        wireToAIGNodeStorage.emplace_back(resolveBit(val, low + j));
-      }
+    assert(instr.isConstantOffs());
+
+    auto val = instr.in()->as<HWValue>();
+    auto low = instr.getBase();
+    auto len = instr.getLen();
+    for (uint j = 0; j < len; j++) {
+      wireToAIGNodeStorage.emplace_back(resolveBit(val, low + j));
     }
+
     uint32_t numBits = wireToAIGNodeStorage.size() - pos;
     wireToAIGNode[instr.def(0)->as<WireRef>()] =
         ThinArrayRef<AIGNodeTRef>{pos, numBits};

@@ -3,6 +3,7 @@
 #include "dyno/Constant.h"
 #include "dyno/CustomInstr.h"
 #include "dyno/HierBlockIterator.h"
+#include "dyno/Instr.h"
 #include "dyno/Opcode.h"
 #include "hw/FlipFlop.h"
 #include "hw/HWAbstraction.h"
@@ -17,6 +18,7 @@
 #include "hw/analysis/KnownBits.h"
 #include "op/IDs.h"
 #include "support/Debug.h"
+#include "support/ErrorRecovery.h"
 #include "support/Utility.h"
 #include <algorithm>
 
@@ -215,38 +217,25 @@ private:
       return false;
     HWInstrBuilder build{ctx, instr};
 
-    bool plainConcat = true;
-    for (auto frag : aliases.frags) {
-      if (frag.ref.is<ObjRef<Constant>>())
-        continue;
-
-      if (*ctx.resolveObj(frag.ref).as<WireRef>().getNumBits() != frag.len) {
-        plainConcat = false;
-        break;
-      }
-    }
-
-    if (plainConcat && aliases.frags.size() == 1) {
-      HWValue val = ctx.resolveObj(aliases.frags.front().ref);
-      replaceUses(defW, val);
+    if (aliases.frags.size() == 1) {
+      auto &frag = aliases.frags.front();
+      HWValue val = ctx.resolveObj(frag.ref);
+      HWValue out;
+      if (frag.srcAddr == 0)
+        out = build.buildTrunc(frag.len, val);
+      else
+        out = build.buildSplice(val, frag.len, frag.srcAddr);
+      replaceUses(defW, out);
       return true;
     }
 
-    auto ib =
-        build.buildInstrRaw(plainConcat ? HW_CONCAT : HW_SPLICE,
-                            1 + (plainConcat ? 1 : 3) * aliases.frags.size());
+    auto ib = build.buildInstrRaw(HW_CONCAT, 1 + aliases.frags.size());
+    build.setInsertPoint(ib.instr());
     ib.addRef(instr.def(0)->as<WireRef>()).other();
     instr.def(0).replace(FatDynObjRef{nullref});
     for (auto frag : Range{aliases.frags}.reverse()) {
       auto ref = ctx.resolveObj(frag.ref);
-      // downsize constants
-      if (auto asConst = ref.dyn_as<ConstantRef>())
-        ref = cbuild.val(asConst).resize(frag.len).get();
-      ib.addRef(ref);
-      if (!plainConcat) {
-        ib.addRef(ConstantRef::fromU32(frag.srcAddr));
-        ib.addRef(ConstantRef::fromU32(frag.len));
-      }
+      ib.addRef(build.buildSplice(ref, frag.len, frag.srcAddr));
     }
     deleteMatchedInstr(instr);
     return true;
@@ -521,7 +510,7 @@ private:
   }
 
   bool storeValConstProp(StoreIRef instr) {
-    if (instr.hasRange())
+    if (!instr.isFullReg())
       return false;
     HWValueOrReg ref = nullref;
     bool inverse = false;
@@ -543,9 +532,10 @@ private:
         return false;
 
       auto load = asWire.getDefI().as<LoadIRef>();
-      if (load.hasRange())
+      if (!load.isFullReg())
         return false;
-      ref = load.reg();
+      if (load.reg().getNumBits())
+        ref = load.reg();
     }
 
     RegisterRef reg = instr.reg();
@@ -637,6 +627,73 @@ private:
     return true;
   }
 
+  template <typename RefT> bool simplifyAddressing(RefT instr) {
+    HWInstrBuilder build{ctx, instr};
+    if (instr.getNumTerms() == 0) {
+      if (instr.hasBase() && instr.getBase() == 0) {
+        auto ib = build.buildInstrRaw(instr.getDialectOpcode(),
+                                      instr.getNumOperands() - 1);
+        for (auto def : instr.defs()) {
+          ib.addRef(def->fat());
+          def.replace(FatDynObjRef{nullref});
+        }
+        ib.other();
+        for (auto use : instr.others()) {
+          if (use == instr.base()) {
+            continue;
+            ib.addRef(use->fat());
+          }
+        }
+        deleteMatchedInstr(instr);
+        return true;
+      }
+      return false;
+    }
+
+    uint32_t baseOffs = instr.getBase();
+    SmallVec<AddressGenTermOperand, 4> terms;
+    for (auto term : instr.terms()) {
+      if (auto asConst = term.getIdx().template dyn_as<ConstantRef>()) {
+        uint32_t out;
+        if (__builtin_umul_overflow(asConst.getExactVal(), term.getFact(),
+                                    &out))
+          report_fatal_error("address does not fit into 32 bits");
+        baseOffs += out;
+        continue;
+      }
+      terms.emplace_back(term);
+    }
+
+    if (terms.size() == instr.getNumTerms())
+      return false;
+
+    uint termDiff = instr.getNumTerms() - terms.size();
+    uint numOperands = instr.getNumOperands() - termDiff * 3;
+    bool removeBaseOffs = terms.size() == 0 && baseOffs == 0;
+    if (removeBaseOffs)
+      numOperands--;
+    auto ib = build.buildInstrRaw(instr.getDialectOpcode(), numOperands);
+
+    for (auto def : instr.defs()) {
+      ib.addRef(def->fat());
+      def.replace(FatDynObjRef{nullref});
+    }
+    ib.other();
+    for (auto use : Range{instr.other_begin(),
+                          instr.other_begin() + instr.addressGenBaseIndex()}) {
+      ib.addRef(use->fat());
+    }
+    if (!removeBaseOffs)
+      ib.addRef(ConstantRef::fromU32(baseOffs));
+    for (auto term : terms)
+      ib.addRef(term.getIdx())
+          .addRef(ConstantRef::fromU32(term.getFact()))
+          .addRef(ConstantRef::fromU32(term.getMax().value_or(~0)));
+
+    deleteMatchedInstr(instr);
+    return true;
+  }
+
   bool manual(InstrRef instr) {
     if (instr.getNumDefs() == 1 && instr.def(0)->is<WireRef>())
       if (knownBitsConstProp(instr))
@@ -674,6 +731,19 @@ private:
     default:
       break;
     }
+
+    if (instr.isOpc(HW_SPLICE))
+      if (simplifyAddressing(instr.as<SpliceIRef>()))
+        return true;
+    if (instr.isOpc(HW_INSERT))
+      if (simplifyAddressing(instr.as<InsertIRef>()))
+        return true;
+    if (instr.isOpc(HW_LOAD))
+      if (simplifyAddressing(instr.as<LoadIRef>()))
+        return true;
+    if (instr.isOpc(HW_STORE, HW_STORE_DEFER))
+      if (simplifyAddressing(instr.as<StoreIRef>()))
+        return true;
 
     if (instr.isOpc(OP_ADD, OP_MUL, OP_AND, OP_OR, OP_XOR)) {
       if (reduceBitWidth(instr))

@@ -7,6 +7,7 @@
 #include "hw/HWContext.h"
 #include "hw/HWValue.h"
 #include "hw/IDs.h"
+#include "hw/LoadStore.h"
 #include "hw/Wire.h"
 #include "hw/analysis/RegisterValue.h"
 #include "op/IDs.h"
@@ -57,17 +58,19 @@ class BitAliasAnalysis {
     case *HW_SPLICE: {
       if (first)
         break;
-      auto addr = frame.ref[1].as<HWValue>();
-      auto len = frame.ref[2].as<ConstantRef>();
-      if (!addr.is<ConstantRef>()) {
+      auto asSplice = instr.as<SpliceIRef>();
+      auto addr = asSplice.getBase();
+      auto len = *asSplice.out()->as<WireRef>().getNumBits();
+
+      if (asSplice.getNumTerms() != 0) {
         frame.acc = BitAliasAcc::mostPessimistic(instr.def(0)->as<WireRef>());
         return std::nullopt;
       }
-      retVal = retVal.getRange(addr.as<ConstantRef>().getExactVal(),
-                               len.getExactVal());
+
+      retVal = retVal.getRange(addr, len);
       retVal.appendTop(frame.acc);
       frame.acc = std::move(retVal);
-      frame.ref += 3;
+      return std::nullopt;
       break;
     }
 
@@ -130,20 +133,20 @@ class BitAliasAnalysis {
     }
 
     case *HW_INSERT: {
+      InsertIRef asInsert = instr.as<InsertIRef>();
       if (first)
         break;
       if (frame.ref == instr.other(0)) {
         frame.acc = std::move(retVal);
         ++frame.ref;
       } else {
-        auto addr = frame.ref[1].as<HWValue>();
-        auto len = frame.ref[2].as<ConstantRef>();
-        if (!addr.is<ConstantRef>()) {
+        auto addr = asInsert.getBase();
+        auto len = *asInsert.val()->as<WireRef>().getNumBits();
+        if (asInsert.getNumTerms() != 0) {
           frame.acc = BitAliasAcc::mostPessimistic(instr.def(0)->as<WireRef>());
           return std::nullopt;
         }
-        frame.acc.overwriteNoMaterialize(
-            retVal, 0, addr.as<ConstantRef>().getExactVal(), len.getExactVal());
+        frame.acc.overwriteNoMaterialize(retVal, 0, addr, len);
         return std::nullopt;
       }
       break;

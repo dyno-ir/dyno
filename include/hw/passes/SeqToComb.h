@@ -36,6 +36,7 @@ public:
         // for all regs that are written to by regular STORE in seq process:
         // add a last value loopback FF (i.e. LOAD at front, STORE_DEFER at
         // end of proc)
+        auto store = instr.as<StoreIRef>();
         auto reg = instr.operand(1)->as<RegisterRef>();
         // check if already handled
         if (TaggedRegRef{reg.iref()}.get())
@@ -55,10 +56,13 @@ public:
         // at end of proc, store defer reg value into qreg
         build.setInsertPoint(proc.block().end());
         auto finalV = build.buildLoad(reg);
-        build.buildStore(qReg, finalV, BitRange::full(), true, trigger);
+        build.buildStore(qReg, finalV, false, trigger,
+                         store.base()->as<ConstantRef>().getExactVal(),
+                         store.terms());
         break;
       }
       case *HW_STORE_DEFER: {
+        auto store = instr.as<StoreIRef>();
         build.setInsertPoint(HWInstrRef{instr}.iter(ctx));
 
         auto range = BitRange::full();
@@ -66,8 +70,9 @@ public:
           range = BitRangeOperand{instr.operand(instr.getNumOperands() - 2)};
         }
 
-        build.buildStore(instr.operand(1)->as<RegisterRef>(),
-                         instr.operand(0)->as<HWValue>(), range, true, trigger);
+        build.buildStore(store.reg(), store.value(), true, trigger,
+                         store.base()->as<ConstantRef>().getExactVal(),
+                         store.terms());
         destroyList.emplace_back(instr);
         break;
       }

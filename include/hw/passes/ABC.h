@@ -159,8 +159,8 @@ public:
           uint index = def - defI.def_begin();
 
           // create reg with copy of the val
-          names.insert(std::make_pair(
-              tok, build.buildSplice(inputVal, BitRange{index, 1})));
+          names.insert(
+              std::make_pair(tok, build.buildSplice(inputVal, 1, index)));
         }
       }
       if (line.starts_with(".outputs")) {

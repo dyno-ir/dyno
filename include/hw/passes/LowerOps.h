@@ -13,6 +13,7 @@
 #include "hw/analysis/DelayAnalysis.h"
 #include "op/IDs.h"
 #include "support/Bits.h"
+#include "support/Debug.h"
 #include "support/ErrorRecovery.h"
 #include "support/Utility.h"
 #include <cstdint>
@@ -243,8 +244,8 @@ private:
     SmallVec<AddPair, 32> arr;
     arr.reserve(bits);
     for (uint32_t i = 0; i < bits; i++) {
-      HWValue propBit = build.buildSplice(prop, BitRange{i, 1});
-      HWValue genBit = build.buildSplice(gen, BitRange{i, 1});
+      HWValue propBit = build.buildSplice(prop, 1, i);
+      HWValue genBit = build.buildSplice(gen, 1, i);
       arr.emplace_back(genBit, propBit);
     }
 
@@ -364,10 +365,10 @@ private:
 
     build.setInsertPoint(instr);
 
-    auto carryWire = build.buildSplice(sumWire, BitRange{numBits - 1, 1});
+    auto carryWire = build.buildSplice(sumWire, 1, numBits - 1);
     HWValue out;
     if (isSigned) {
-      HWValue signBit = build.buildSplice(sumWire, BitRange{numBits - 2, 1});
+      HWValue signBit = build.buildSplice(sumWire, 1, numBits - 2);
       out = build.buildXor(signBit, carryWire);
     }
     out = invertResult ? build.buildNot(carryWire) : carryWire;
@@ -381,16 +382,15 @@ private:
     if (shamt == 0)
       val = value;
     else if (opcode.is(OP_SLL)) {
-      val = build.buildConcat(
-          build.buildSplice(value, BitRange{0, valueBits - shamt}),
-          cbuild.zero(shamt).get());
+      val = build.buildConcat(build.buildSplice(value, valueBits - shamt, 0),
+                              cbuild.zero(shamt).get());
     } else if (opcode.is(OP_SRL)) {
-      val = build.buildConcat(
-          cbuild.zero(shamt).get(),
-          build.buildSplice(value, BitRange{shamt, valueBits - shamt}));
+      val =
+          build.buildConcat(cbuild.zero(shamt).get(),
+                            build.buildSplice(value, valueBits - shamt, shamt));
     } else if (opcode.is(OP_SRA)) {
-      auto upper = build.buildSplice(value, BitRange{shamt, valueBits - shamt});
-      auto signBit = build.buildSplice(value, BitRange{valueBits - 1, 1});
+      auto upper = build.buildSplice(value, valueBits - shamt, shamt);
+      auto signBit = build.buildSplice(value, 1, valueBits - 1);
       auto signPat = build.buildRepeat(signBit, shamt);
       val = build.buildConcat(std::to_array({signPat, upper}));
     } else
@@ -420,19 +420,18 @@ private:
     for (uint i = 0; i < inBoundsShamtBits; i++) {
       auto shifted =
           shiftByConstant(instr.getDialectOpcode(), shiftVal, 1u << i);
-      auto cond = build.buildSplice(shamt, BitRange{i, 1});
+      auto cond = build.buildSplice(shamt, 1, i);
       shiftVal = build.buildMux(cond, shifted, shiftVal);
     }
 
     auto oobBits = *shamt.getNumBits() - inBoundsShamtBits;
-    auto oob = build.buildICmp(
-        build.buildSplice(shamt, BitRange{inBoundsShamtBits, oobBits}),
-        cbuild.zero(oobBits).get(), BigInt::ICmpPred::ICMP_NE);
-    auto oobVal =
-        instr.isOpc(OP_SRA)
-            ? build.buildRepeat(
-                  build.buildSplice(value, BitRange{valueBits - 1, 1}), oobBits)
-            : cbuild.zeroLike(value).get();
+    auto oob =
+        build.buildICmp(build.buildSplice(shamt, oobBits, inBoundsShamtBits),
+                        cbuild.zero(oobBits).get(), BigInt::ICmpPred::ICMP_NE);
+    auto oobVal = instr.isOpc(OP_SRA)
+                      ? build.buildRepeat(
+                            build.buildSplice(value, 1, valueBits - 1), oobBits)
+                      : cbuild.zeroLike(value).get();
     instr.def(0)->as<WireRef>().replaceAllUsesWith(
         build.buildMux(oob, oobVal, shiftVal));
     destroyMap[instr] = 1;
@@ -462,7 +461,7 @@ private:
     build.setInsertPoint(ibOR.instr());
 
     for (uint i = 0; i < bits; i++) {
-      auto bit = build.buildSplice(bitsMask, BitRange{i, 1});
+      auto bit = build.buildSplice(bitsMask, 1, i);
       ibOR.addRef(bit);
     }
 
@@ -512,8 +511,7 @@ private:
     for (uint i = 0; i < elemCount; i++) {
       auto size = std::min(elemSize, *value.getNumBits() - i * fact);
       array.emplace_back(build.buildExt(
-          elemSize, build.buildSplice(value, BitRange{i * fact, size}),
-          OP_ANYEXT));
+          elemSize, build.buildSplice(value, size, i * fact), OP_ANYEXT));
     }
     // build binary tree
 
@@ -521,7 +519,7 @@ private:
 
     while ((1ULL << addressBit) < elemCount) {
       size_t outIdx = 0;
-      auto sel = build.buildSplice(address, BitRange{addressBit, 1});
+      auto sel = build.buildSplice(address, 1, addressBit);
       for (uint i = 0; i < array.size(); i += 2) {
         if (i == array.size() - 1)
           array[outIdx++] = array.back();
@@ -537,12 +535,13 @@ private:
     return array[0];
   }
 
-  void lowerNonConstSplice(InstrRef splice) {
+  void lowerNonConstSplice(SpliceIRef splice) {
     // what can efficiently lower?
     // answer: linear access (base + offs * elemsize)
-
-    if (!splice.other(1)->is<WireRef>())
+    if (splice.isConstantOffs())
       return;
+
+    // todo
 
     LinearExpressionAnalysis analysis{ctx};
     auto res = analysis.getLinearExpression(splice.other(1)->as<WireRef>());
@@ -563,8 +562,7 @@ private:
     HWValue cur = splice.other(0)->as<WireRef>();
     auto constShift = res.base.getExactVal();
     build.setInsertPoint(splice);
-    cur = build.buildSplice(
-        cur, BitRange{constShift, *cur.getNumBits() - constShift});
+    cur = build.buildSplice(cur, *cur.getNumBits() - constShift, constShift);
 
     SmallVec<std::pair<WireRef, BigInt>, 4> terms;
 

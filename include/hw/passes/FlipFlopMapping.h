@@ -132,7 +132,7 @@ class FlipFlopMappingPass {
       rstWires.emplace_back(build.buildLoad(instr.rst(i)));
 
     for (uint i = 0; i < bits; i++) {
-      wires.d = build.buildSplice(dWire, BitRange{i, 1}).as<WireRef>();
+      wires.d = build.buildSplice(dWire, 1, i).as<WireRef>();
       qWires.emplace_back(wires.q = ctx.getWires().create(1));
 
       abstr.hasRst = 0;

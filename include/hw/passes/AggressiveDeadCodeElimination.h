@@ -201,9 +201,8 @@ class AggressiveDeadCodeEliminationPass {
       auto reg = asLoad.reg().iref();
       if (!instrMap[reg])
         worklist.emplace_back(reg);
-      if (auto range = asLoad.range()) {
-        visitHWValue(range->getAddr());
-        visitHWValue(range->getLen());
+      for (auto term : asLoad.terms()) {
+        visitHWValue(term.getIdx());
       }
       break;
     }
@@ -217,9 +216,8 @@ class AggressiveDeadCodeEliminationPass {
       auto reg = asStore.reg().iref();
       if (!instrMap[reg])
         worklist.emplace_back(reg);
-      if (auto range = asStore.range()) {
-        visitHWValue(range->getAddr());
-        visitHWValue(range->getLen());
+      for (auto term : asStore.terms()) {
+        visitHWValue(term.getIdx());
       }
       break;
     }

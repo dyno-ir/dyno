@@ -85,7 +85,7 @@ class FlipFlopInferencePass {
     build.setInsertPoint(module.regs_end());
 
     // assume ranges lowered
-    assert(!storeI.hasRange() && "range not lowered?");
+    assert(storeI.isFullReg() && "range not lowered?");
     assert(storeI.hasTrigger() && "no trigger?");
     auto trigger = storeI.trigger();
     if (trigger->size() > 3)

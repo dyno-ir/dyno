@@ -122,7 +122,7 @@ replace {
 // # LOAD/STORE opt
 // load with superfluous indexing
 match {
-  HW_LOAD $out, $reg, #'0, $len:const_like_reg_len($reg)
+  HW_LOAD $out, $reg, #'0
 }
 replace {
   HW_LOAD $out, $reg
@@ -130,14 +130,14 @@ replace {
 
 // store with superfluous indexing
 match {
-  $opc{HW_STORE, HW_STORE_DEFER} $val, $reg, #'0, $len:const_like_reg_len($reg)
+  $opc{HW_STORE, HW_STORE_DEFER} $val, $reg, #'0
 }
 replace {
   $opc defs=0 $val, $reg
 }
 
 match {
-  HW_STORE_DEFER $val, $reg, #'0, $len:const_like_reg_len($reg), $trig
+  HW_STORE_DEFER $val, $reg, $trig, #'0
 }
 replace {
   HW_STORE_DEFER defs=0 $val, $reg, $trig
@@ -163,36 +163,24 @@ replace $out -> $x
 
 // Splice Opt
 match {
-  HW_SPLICE $out, $in, #32'b0, $len:const_like_value_len($in)
-}
-replace $out -> $in
-
-match {
-  HW_SPLICE $out, $in, #32'b0, $other_len
+  HW_SPLICE $out, $in, #32'b0
 }
 replace {
   OP_TRUNC $out, $in
 }
-// todo: C++ patterns for defragmenting splices
 
 match {
-  OP_TRUNC $trunc, $in
-  HW_SPLICE $out, $in,            $old_addr:CORE_CONSTANT,   $old_len:CORE_CONSTANT,
-                  $trunc:HW_WIRE, $trunc_addr:CORE_CONSTANT, $trunc_len:CORE_CONSTANT
+  HW_SPLICE $out, $in
 }
-with [{
-  if (!(*$old_addr.begin())->as<ConstantRef>().valueEquals(*(*$trunc.begin())->as<WireRef>().getNumBits()))
-    goto $fail;
-  if (!(*$trunc_addr.begin())->as<ConstantRef>().valueEquals(0))
-    goto $fail;
-  if ((*$out.begin())->as<WireRef>().getNumBits() != (*$in.begin())->as<WireRef>().getNumBits())
-    goto $fail;
-}]
-replace $out -> $in
+replace {
+  OP_TRUNC $out, $in
+}
 
+
+// todo: merge arbitrary splices
 match {
-  HW_SPLICE $temp, $in, $addrA, $lenA
-  HW_SPLICE $out, $temp:HW_WIRE, $addrB, $lenB
+  HW_SPLICE $temp, $in, $addrA
+  HW_SPLICE $out, $temp:HW_WIRE, $addrB
 }
 with [{
   if (!(*$temp.begin())->as<WireRef>().hasSingleUse())
@@ -200,7 +188,7 @@ with [{
 }]
 replace {
   OP_ADD $sum:wire_like($addrA), $addrA, $addrB
-  HW_SPLICE $out, $in, $sum, $lenB
+  HW_SPLICE $out, $in, $sum
 }
 
 // we need check duplicates of these. dyno dsl pattern matching should fix.
@@ -272,11 +260,11 @@ with [{
     goto $fail;
 }]
 replace {
-  HW_LOAD $x, $reg, #32'h0, const_len_of($x)
+  HW_LOAD $x, $reg
 }
 
 match {
-  HW_LOAD $val, $reg, $offs, $len
+  HW_LOAD $val, $reg, $offs
   OP_TRUNC $x, $val:HW_WIRE
 }
 with [{
@@ -284,7 +272,7 @@ with [{
     goto $fail;
 }]
 replace {
-  HW_LOAD $x, $reg, $offs, const_len_of($x)
+  HW_LOAD $x, $reg, $offs
 }
 
 
@@ -297,9 +285,16 @@ replace {
   OP_ZEXT $out, $x
 }
 
+macro chk_wire $self, $len [{
+  if (!(*$self.begin())->is<WireRef>())
+    goto $fail;
+  if (!$len.valueEquals(*(*$self.begin())->as<WireRef>().getNumBits()))
+    goto $fail;
+}]
+
 match {
-  HW_SPLICE $sign, $x, $splice_offs:chk_const_len_of_minus1($x), #32'd1
-  HW_REPEAT $temp, $sign:HW_WIRE
+  HW_SPLICE $sign, $x, $splice_offs:chk_const_len_of_minus1($x)
+  HW_REPEAT $temp, $sign:chk_wire(#32'd1)
   HW_CONCAT $out, $temp:HW_WIRE, $x
 }
 replace {
@@ -439,9 +434,9 @@ match {
 replace {
   OP_TRUNC $truncShamt:wire32(), $shamt
   OP_OR $temp:wire_like($out), $others...
-  HW_SPLICE $origVal:wire_like($x), $temp, $truncShamt, $len:const_len_of($x)
+  HW_SPLICE $origVal:wire_like($x), $temp, $truncShamt
   OP_OR $modVal:wire_like($x), $origVal, $x
-  HW_INSERT $out, $temp, $modVal, $truncShamt, $len
+  HW_INSERT $out, $temp, $modVal, $truncShamt
 
 }
 */

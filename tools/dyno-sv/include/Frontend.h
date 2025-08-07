@@ -3,6 +3,7 @@
 #include "hw/AutoDebugInfo.h"
 #include "hw/HWAbstraction.h"
 #include "hw/HWContext.h"
+#include "hw/LoadStore.h"
 #include "slang/ast/ASTVisitor.h"
 #include "slang/ast/SystemSubroutine.h"
 #include "slang/ast/expressions/AssignmentExpressions.h"
@@ -27,6 +28,7 @@
 #include "slang/ast/types/Type.h"
 #include "slang/diagnostics/TextDiagnosticClient.h"
 #include "slang/text/SourceManager.h"
+#include <memory>
 namespace dyno {
 
 class SlangErrorPrinter {
@@ -109,19 +111,17 @@ public:
         return getValue();
       case VK_L: {
         auto &asLVal = this->as<RegLValue>();
-        auto ldVal = build.buildLoad(asLVal.lvReg, asLVal.lvBitRange);
+        auto ldVal = build.buildLoad(asLVal.lvReg, asLVal.numBits,
+                                     asLVal.baseAddr, ArrayRef{asLVal.terms});
         assert(ldVal->numBits == type->getBitstreamWidth());
-        // if (ldVal->numBits < type->getBitstreamWidth())
-        //   return build.buildExt(type->getBitstreamWidth(), ldVal,
-        //                         type->isSigned());
         return ldVal;
       }
 
       case VK_CCL: {
         auto &asCCLV = this->as<ConcatLValue>();
         SmallVec<HWValue, 4> buf{asCCLV.lvValues.size()};
-        for (auto [idx, val] : Range{asCCLV.lvValues}.reverse().enumerate()) {
-          buf[idx] = build.buildLoad(val.first, val.second);
+        for (auto [idx, regLV] : Range{asCCLV.lvValues}.reverse().enumerate()) {
+          buf[idx] = regLV->proGetValue(build);
         }
         return build.buildConcat(ArrayRef{buf.begin(), buf.end()});
       }
@@ -129,46 +129,41 @@ public:
     }
 
     static std::unique_ptr<Value> slice(HWInstrBuilder build, Value &value,
-                                        BitRange range,
+                                        uint32_t numBits, uint32_t baseAddr,
+                                        ArrayRef<AddressGenTerm> terms,
                                         const slang::ast::Type *type) {
       switch (value.kind) {
       case Value::VK_CCL:
-        if (range.isConstant()) {
-          auto &asCCL = value.as<ConcatLValue>();
-          auto cbuild = build.ctx.constBuild();
-          cbuild.val(32, 0);
-          for (auto [reg, lvRange] : asCCL.lvValues) {
-            if (!lvRange.isConstant())
-              break;
-            if (BitRange::equalsWithDefaultSize(
-                    BitRange{cbuild.get(), lvRange.getLen()}, range,
-                    reg->numBits)) {
-              return std::make_unique<RegLValue>(reg, type, range);
-            }
-            cbuild.add(lvRange.hasLen() ? lvRange.getLen().as<ConstantRef>()
-                                        : ConstantRef::fromU32(*reg->numBits));
-          }
-        }
-        [[fallthrough]];
+        // if (auto cIdx = idx.dyn_as<ConstantRef>()) {
+        //   auto &asCCL = value.as<ConcatLValue>();
+        //   for (auto &regLV : asCCL.lvValues) {
+        //     if (!lvRange.isConstant())
+        //       break;
+        //     if (BitRange::equalsWithDefaultSize(
+        //             BitRange{cbuild.get(), lvRange.getLen()}, range,
+        //             reg->numBits)) {
+        //       return std::make_unique<RegLValue>(reg, type, range);
+        //     }
+        //     cbuild.add(lvRange.hasLen() ? lvRange.getLen().as<ConstantRef>()
+        //                                 :
+        //                                 ConstantRef::fromU32(*reg->numBits));
+        //   }
+        // }
+        // [[fallthrough]];
       case Value::VK_R: {
-        auto splice = build.buildSplice(value.proGetValue(build), range);
+        auto splice = build.buildSplice(value.proGetValue(build), numBits,
+                                        baseAddr, terms);
         if (auto asWire = splice.dyn_as<WireRef>())
           asWire->numBits = type->getBitstreamWidth();
         return std::make_unique<RValue>(splice, type);
       }
       case Value::VK_L: {
-        auto &lv = value.as<RegLValue>();
-        if (lv.lvBitRange == BitRange::full())
-          return std::make_unique<RegLValue>(lv.lvReg, type, range);
-
-        // fixme: can you ever sign extend here?
-        auto newAddr =
-            build.buildAdd(build.buildUpsize(lv.lvBitRange.getAddr(), 32),
-                           build.buildUpsize(range.getAddr(), 32));
-        auto newLen = range.getLen();
-
-        return std::make_unique<RegLValue>(lv.lvReg, type,
-                                           BitRange{newAddr, newLen});
+        auto lv = value.as<RegLValue>();
+        assert(numBits < lv.numBits);
+        lv.numBits = numBits;
+        lv.baseAddr += baseAddr;
+        lv.terms.push_back_range(Range{terms});
+        return std::make_unique<RegLValue>(lv);
       }
       }
     }
@@ -199,24 +194,21 @@ public:
     void storeVal(HWInstrBuilder build, HWValue val, bool defer = false) {
       switch (kind) {
       case Value::VK_L: {
-        build.buildStore(this->as<RegLValue>().lvReg, val,
-                         this->as<RegLValue>().lvBitRange, defer);
+        auto asRegLV = this->as<RegLValue>();
+        assert(val.getNumBits() == asRegLV.numBits);
+        build.buildStore(asRegLV.lvReg, val, defer, nullref, asRegLV.baseAddr,
+                         ArrayRef{asRegLV.terms});
         break;
       }
       case Value::VK_CCL: {
         auto &asCCLV = this->as<ConcatLValue>();
 
-        HWValue offs = ConstantRef::fromU32(0);
-
-        for (auto &[reg, range] : Range{asCCLV.lvValues}) {
-          HWValue len = range.hasLen() ? range.getLen()
-                                       : ConstantRef::fromU32(*reg->numBits);
-          assert(range.hasLen() ||
-                 range.addr.as<ConstantRef>().getExactVal() == 0);
-
-          build.buildStore(reg, build.buildSplice(val, BitRange{offs, len}),
-                           range, defer);
-          offs = build.buildAdd(offs, len);
+        uint32_t offs = 0;
+        for (auto &regLV : asCCLV.lvValues) {
+          build.buildStore(regLV->lvReg,
+                           build.buildSplice(val, regLV->numBits, offs), defer,
+                           nullref, regLV->baseAddr, ArrayRef{regLV->terms});
+          offs += regLV->numBits;
         }
         break;
       }
@@ -228,26 +220,34 @@ public:
 
   struct RegLValue : public LValue {
     RegisterRef lvReg;
-    BitRange lvBitRange;
+    uint32_t numBits;
+    uint32_t baseAddr;
+    SmallVec<AddressGenTerm, 2> terms;
 
-    RegLValue(RegisterRef reg, const slang::ast::Type *type,
-              BitRange range = BitRange::full())
-        : LValue(VK_L, type), lvReg(reg), lvBitRange(range) {}
+    RegLValue(RegisterRef reg, const slang::ast::Type *type)
+        : LValue(VK_L, type), lvReg(reg), numBits(type->getBitstreamWidth()),
+          baseAddr(0), terms() {}
 
     static bool is_impl(const Value &v) { return v.kind == VK_L; }
+    bool fullReg() const {
+      return baseAddr == 0 && terms.size() == 0 && numBits == lvReg->numBits;
+    }
   };
   struct ConcatLValue : public LValue {
-    SmallVec<std::pair<RegisterRef, BitRange>, 4> lvValues;
+    SmallVec<std::unique_ptr<RegLValue>, 4> lvValues;
 
     ConcatLValue(std::span<std::unique_ptr<Value>> lvals,
                  const slang::ast::Type *type)
         : LValue(VK_CCL, type), lvValues() {
       lvValues.reserve(lvals.size());
       for (auto &val : Range{lvals}.reverse()) {
-        if (auto asLV = val->dyn_as<RegLValue>())
-          lvValues.emplace_back(std::make_pair(asLV->lvReg, asLV->lvBitRange));
-        else if (auto asCCLV = val->dyn_as<ConcatLValue>()) {
-          lvValues.push_back_range(Range{asCCLV->lvValues});
+        if (val->is<RegLValue>()) {
+          lvValues.emplace_back(
+              std::unique_ptr<RegLValue>{&val.release()->as<RegLValue>()});
+        } else if (auto asCCLV = val->dyn_as<ConcatLValue>()) {
+          for (auto &val : asCCLV->lvValues)
+            lvValues.emplace_back(
+                std::unique_ptr<RegLValue>{&val.release()->as<RegLValue>()});
         } else
           dyno_unreachable("expected lvalue");
       }
@@ -577,8 +577,7 @@ public:
 
           build.popInsertPoint();
 
-          if (auto *asLV = val->dyn_as<RegLValue>();
-              asLV && asLV->lvBitRange.isFull()) {
+          if (auto *asLV = val->dyn_as<RegLValue>(); asLV && asLV->fullReg()) {
             portRegs.emplace_back(asLV->lvReg);
           } else {
             build.pushInsertPoint(regsBackIt.succ());
@@ -1078,24 +1077,27 @@ public:
     }
   }
 
-  uint32_t getArrayElemWidth(const slang::ast::Type &type) {
+  std::pair<uint32_t, uint32_t>
+  getArrayElemWidthAndLength(const slang::ast::Type &type) {
     switch (type.kind) {
     case slang::ast::SymbolKind::PackedArrayType: {
       auto &asPArrT = type.as<slang::ast::PackedArrayType>();
-      return asPArrT.elementType.getBitstreamWidth();
+      return std::make_pair(asPArrT.elementType.getBitstreamWidth(),
+                            asPArrT.range.width());
       break;
     }
     case slang::ast::SymbolKind::FixedSizeUnpackedArrayType: {
       auto &asUArrT = type.as<slang::ast::FixedSizeUnpackedArrayType>();
-      return asUArrT.elementType.getBitstreamWidth();
-      break;
+      return std::make_pair(asUArrT.elementType.getBitstreamWidth(),
+                            asUArrT.range.width());
     }
     case slang::ast::SymbolKind::TypeAlias: {
       auto &asTypeAlias = type.as<slang::ast::TypeAliasType>();
-      return getArrayElemWidth(asTypeAlias.targetType.getType());
+      return getArrayElemWidthAndLength(asTypeAlias.targetType.getType());
     }
     case slang::ast::SymbolKind::PredefinedIntegerType: {
-      return 1;
+      auto &asPredefInt = type.as<slang::ast::PredefinedIntegerType>();
+      return std::make_pair(1, asPredefInt.bitWidth);
     }
     default:
       abort();
@@ -1478,12 +1480,11 @@ public:
         offs = add;
         break;
       }
-      uint32_t width = getArrayElemWidth(*asRangeS.value().type);
-      if (width != 1) {
-        offs = build.buildMul(offs, ConstantRef::fromU32(width));
-        len = build.buildMul(len, ConstantRef::fromU32(width));
-      }
-      return Value::slice(build, *value, BitRange{offs, len}, expr.type);
+      auto [ewidth, ecount] =
+          getArrayElemWidthAndLength(*asRangeS.value().type);
+      return Value::slice(build, *value, len.as<ConstantRef>().getExactVal(), 0,
+                          std::to_array({AddressGenTerm{offs, ewidth, ecount}}),
+                          expr.type);
     }
 
     case slang::ast::ExpressionKind::ElementSelect: {
@@ -1493,13 +1494,12 @@ public:
       auto index = build.buildUpsize(
           handle_expr(asElemS.selector())->proGetValue(build), 32);
 
-      uint32_t width = getArrayElemWidth(*asElemS.value().type);
-      if (width != 1)
-        index = build.buildMul(index, ConstantRef::fromU32(width));
+      auto [ewidth, ecount] = getArrayElemWidthAndLength(*asElemS.value().type);
 
-      return Value::slice(build, *value,
-                          BitRange{index, ConstantRef::fromU32(width)},
-                          expr.type);
+      return Value::slice(
+          build, *value, ewidth, 0,
+          std::to_array({AddressGenTerm{index, ewidth, ecount}}),
+          asElemS.value().type);
     }
     case slang::ast::ExpressionKind::MemberAccess: {
       auto &asMemberAcc = expr.as<slang::ast::MemberAccessExpression>();
@@ -1516,13 +1516,10 @@ public:
         abort();
 
       auto value = handle_expr(asMemberAcc.value());
-      assert(expr.type->getBitstreamWidth() ==
-             asField.getType().getBitstreamWidth());
-      return Value::slice(
-          build, *value,
-          BitRange{ConstantRef::fromU32(asField.bitOffset),
-                   ConstantRef::fromU32(asField.getType().getBitstreamWidth())},
-          expr.type);
+      auto bits = asField.getType().getBitstreamWidth();
+      assert(expr.type->getBitstreamWidth() == bits);
+      return Value::slice(build, *value, bits, asField.bitOffset,
+                          ArrayRef<AddressGenTerm>::emptyRef(), expr.type);
     }
 
     case slang::ast::ExpressionKind::ConditionalOp: {
@@ -1639,27 +1636,18 @@ public:
         cur = defaultVal;
 
       auto spliceIn = [&](HWValue newVal, HWValue offs, HWValue len) {
-        BitRange low{ConstantRef::fromU32(0), offs};
-        BitRange mid{ConstantRef::fromU32(0),
-                     len}; // this indexes into the member, not cur, so offs = 0
-
-        auto highOffs = build.buildAdd(offs, len);
-        BitRange high{highOffs,
-                      build.buildSub(ConstantRef::fromU32(totalLen), highOffs)};
-
-        // builder handles len==0 edge cases.
-        cur = build.buildConcat(std::to_array({build.buildSplice(cur, high),
-                                               build.buildSplice(newVal, mid),
-                                               build.buildSplice(cur, low)}));
+        assert(len.as<ConstantRef>().valueEquals(*newVal.getNumBits()));
+        cur = build.buildInsert(cur, newVal,
+                                offs.as<ConstantRef>().getExactVal());
       };
 
       for (auto &indexSetter : asStructAs.indexSetters) {
         auto idx = handle_expr(*indexSetter.index)->proGetValue(build);
-        size_t len = getArrayElemWidth(*asStructAs.type);
-        idx = build.buildMul(idx, ConstantRef::fromU32(len));
+        auto [esize, ecount] = getArrayElemWidthAndLength(*asStructAs.type);
+        idx = build.buildMul(idx, ConstantRef::fromU32(esize));
 
         spliceIn(handle_expr(*indexSetter.expr)->proGetValue(build), idx,
-                 ConstantRef::fromU32(len));
+                 ConstantRef::fromU32(esize));
       }
 
       for (auto &memberSetter : asStructAs.memberSetters) {
@@ -1710,8 +1698,7 @@ public:
 
         if (!bind->isLValue())
           var = bind->getValue();
-        else if (auto rlv = bind->dyn_as<RegLValue>();
-                 rlv && rlv->lvBitRange.isFull())
+        else if (auto rlv = bind->dyn_as<RegLValue>(); rlv && rlv->fullReg())
           var = rlv->lvReg;
         else {
           if (subr->getArguments()[idx]->direction !=

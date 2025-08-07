@@ -153,7 +153,7 @@ class MuxTreeOptimizationPass {
   std::pair<WireRef, bool> getLiteralVal(MuxTree *tree, BoolExprLiteral cond) {
     WireRef out = ctx.getWires().resolve(tree->conditions[cond.id].wire);
     if (out.getNumBits() != 1)
-      out = build.buildSplice(out, BitRange{tree->conditions[cond.id].idx, 1u})
+      out = build.buildSplice(out, 1u, tree->conditions[cond.id].idx)
                 .as<WireRef>();
 
     return std::make_pair(out, !!cond.inverse);
