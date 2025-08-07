@@ -195,7 +195,7 @@ struct RegisterValue : public RegisterFrags<RegisterValueFragment> {
   }
 
   void appendTop(const RegisterValue &other) {
-    auto len = frags.back().dstAddr + frags.back().len;
+    auto len = frags.empty() ? 0 : (frags.back().dstAddr + frags.back().len);
 
     for (auto frag : other.frags) {
       frag.dstAddr += len;
@@ -280,6 +280,7 @@ struct RegisterValue : public RegisterFrags<RegisterValueFragment> {
     auto it = getInsertIt(addr);
 
     uint32_t end = addr + len;
+    uint32_t lenB = len;
 
     RegisterValue range;
 
@@ -310,6 +311,7 @@ struct RegisterValue : public RegisterFrags<RegisterValueFragment> {
     }
 
     range.untouched = allUntouched;
+    assert(range.getLen() == lenB);
     return range;
   }
 
@@ -346,7 +348,7 @@ struct RegisterValue : public RegisterFrags<RegisterValueFragment> {
         break;
     }
 
-    auto rv = build.buildSplice(ArrayRef{operands});
+    auto rv = build.buildMultiSplice(ArrayRef{operands});
     if (update)
       overwrite(rv, 0, addrB, lenB, allUntouched);
     return rv;
@@ -363,7 +365,7 @@ struct RegisterValue : public RegisterFrags<RegisterValueFragment> {
     }
     assert(allUntouched == untouched);
 
-    auto rv = build.buildSplice(ArrayRef{operands});
+    auto rv = build.buildMultiSplice(ArrayRef{operands});
     if (update)
       overwrite(rv, 0, 0, len, allUntouched);
     return rv;

@@ -1648,7 +1648,9 @@ public:
                       build.buildSub(ConstantRef::fromU32(totalLen), highOffs)};
 
         // builder handles len==0 edge cases.
-        cur = build.buildSplice(cur, high, newVal, mid, cur, low);
+        cur = build.buildConcat(std::to_array({build.buildSplice(cur, high),
+                                               build.buildSplice(newVal, mid),
+                                               build.buildSplice(cur, low)}));
       };
 
       for (auto &indexSetter : asStructAs.indexSetters) {

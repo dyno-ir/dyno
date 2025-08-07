@@ -139,7 +139,7 @@ class LinearExpressionAnalysis {
 
 public:
   LinearExpressionAnalysis(HWContext &ctx) : ctx(ctx) {}
-  auto getBitAlignment(WireRef wire) {
+  auto getLinearExpression(WireRef wire) {
     stack.emplace_back(wire.getDef());
 
     uint maxLevel = 0;

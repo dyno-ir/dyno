@@ -247,6 +247,8 @@ public:
   }
 
   HWValue buildExt(uint32_t newSize, HWValue value, bool sign) {
+    if (newSize == value.getNumBits())
+      return value;
     if (auto asConst = value.dyn_as<ConstantRef>()) {
       assert(asConst.getNumBits() <= newSize);
       return ctx.constBuild()
@@ -262,6 +264,8 @@ public:
     return ref.defW();
   }
   HWValue buildExt(uint32_t newSize, HWValue value, DialectOpcode type) {
+    if (newSize == value.getNumBits())
+      return value;
     if (auto asConst = value.dyn_as<ConstantRef>()) {
       assert(asConst.getNumBits() <= newSize);
       return ctx.constBuild()
@@ -351,8 +355,26 @@ private:
     return std::make_tuple(0, 0, true);
   }
 
+  Optional<uint32_t> concatSingleNumBits(HWValue value) {
+    return value.getNumBits();
+  }
+  template <typename... Rest>
+  std::tuple<Optional<uint32_t>, uint32_t, bool>
+  concatNumBitsOps(HWValue value, Rest... rest) {
+    auto lhs = concatSingleNumBits(value);
+    auto [rhsB, rhsN, rhsConst] = concatNumBitsOps(rest...);
+
+    return std::make_tuple((!lhs || !rhsB) ? nullopt : Optional(*lhs + *rhsB),
+                           rhsN + (lhs.value_or(1) != 0),
+                           rhsConst && lhs && value.is<ConstantRef>());
+  }
+  std::tuple<Optional<uint32_t>, uint32_t, bool> concatNumBitsOps() {
+    return std::make_tuple(0, 0, true);
+  }
+
 public:
   template <typename... Ts> HWValue buildSplice(Ts... operands) {
+    static_assert(sizeof...(operands) == 2);
 
     auto [len, num, isConst] = spliceNumBitsOps(operands...);
     if (isConst) {
@@ -399,8 +421,7 @@ public:
     return instr.defW();
   }
 
-  HWValue buildSplice(ArrayRef<std::pair<HWValue, BitRange>> values) {
-
+  HWValue buildMultiSplice(ArrayRef<std::pair<HWValue, BitRange>> values) {
     if (std::all_of(values.begin(), values.end(), [](const auto &pair) {
           return pair.first.template is<ConstantRef>() &&
                  pair.second.isConstant();
@@ -434,8 +455,7 @@ public:
       }
     }
 
-    auto instr =
-        InstrRef{ctx.getInstrs().create(1 + values.size() * 3, HW_SPLICE)};
+    auto instr = InstrRef{ctx.getInstrs().create(1 + values.size(), HW_CONCAT)};
 
     insertInstr(instr);
     InstrBuilder build{instr};
@@ -450,8 +470,10 @@ public:
           asConst && asConst.valueEquals(0))
         continue;
 
-      build.addRef(value);
-      addSpecialRef(build, range);
+      auto val = value;
+      if (!range.isFull())
+        val = buildSplice(val, range);
+      build.addRef(val);
 
       if (numBits) {
         auto val = spliceSingleNumBits(value, range);
@@ -473,8 +495,27 @@ public:
     return rv;
   }
 
-  HWValue buildConcat(ArrayRef<HWValue> values) {
+  template <IsAnyHWValue... Ts> HWValue buildConcat(Ts... operands) {
+    static_assert(sizeof...(operands) > 1);
+    auto [len, num, isConst] = concatNumBitsOps(operands...);
+    if (isConst) {
+      auto cbuild = ctx.constBuild();
+      cbuild.val(0, 0);
+      ([&] { cbuild.concat(operands.template as<ConstantRef>()); }(), ...);
+      return cbuild.get();
+    }
 
+    auto instr = HWInstrRef{ctx.getInstrs().create(1 + num, HW_CONCAT)};
+    insertInstr(instr);
+
+    InstrBuilder build{instr};
+    build.addRef(ctx.getWires().create(len)).other();
+    ([&] { build.addRef(operands); }(), ...);
+
+    return instr.defW();
+  }
+
+  HWValue buildConcat(ArrayRef<HWValue> values) {
     if (values.size() == 1)
       return values[0];
 

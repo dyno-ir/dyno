@@ -8,6 +8,7 @@
 #include "hw/passes/CommonSubexpressionElimination.h"
 #include "hw/passes/ConstantMapping.h"
 #include "hw/passes/DumpVerilog.h"
+#include "hw/passes/FindLongestPath.h"
 #include "hw/passes/FlipFlopInference.h"
 #include "hw/passes/FlipFlopMapping.h"
 #include "hw/passes/FunctionInline.h"
@@ -52,6 +53,7 @@ class PassPipeline {
   RemoveBuffersPass removeBufs{ctx};
   OrderInstrsPass orderInstrs{ctx};
   ConstantMapping constMap{ctx};
+  FindLongestPathPass longestPath{ctx};
 
 public:
   bool printAfterAll = false;
@@ -190,6 +192,9 @@ public:
     runPass(cse);
     runPass(instCombine);
     runPass(agressiveDCE);
+
+    runPass(orderInstrs);
+    runPass(longestPath);
   }
 
   void dumpVerilog(std::ostream &os) {

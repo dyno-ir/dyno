@@ -11,6 +11,7 @@
 #include "hw/HWInstr.h"
 #include "hw/HWPrinter.h"
 #include "hw/IDs.h"
+#include "hw/Register.h"
 #include "op/IDs.h"
 #include "support/Bits.h"
 #include "support/Debug.h"
@@ -33,6 +34,18 @@ class CSEDedupeMap {
     return acc;
   }
 
+  static bool defIsCompatible(OperandRef lhs, OperandRef rhs) {
+    if (lhs->is<WireRef>() && rhs->is<WireRef>()) {
+      if (*lhs->as<WireRef>()->numBits != *rhs->as<WireRef>()->numBits)
+        return false;
+    }
+    if (lhs->is<RegisterRef>() && rhs->is<RegisterRef>()) {
+      if (*lhs->as<RegisterRef>()->numBits != *rhs->as<RegisterRef>()->numBits)
+        return false;
+    }
+    return true;
+  }
+
   static bool instrDeepEqual(InstrRef lhs, InstrRef rhs) {
     if (lhs.getNumOperands() != rhs.getNumOperands())
       return false;
@@ -43,6 +56,11 @@ class CSEDedupeMap {
 
     for (size_t i = 0; i < lhs.getNumOthers(); i++)
       if (lhs.other(i)->thin() != rhs.other(i)->thin())
+        return false;
+
+    // todo: incorporate this into the hash
+    for (size_t i = 0; i < lhs.getNumDefs(); i++)
+      if (!defIsCompatible(lhs.def(i), rhs.def(i)))
         return false;
 
     return true;

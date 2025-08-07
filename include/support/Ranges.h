@@ -411,6 +411,7 @@ public:
                    filter_iterator<It, FilterT>(endIt)};
   }
 
+  template <typename T> void sort(T func) { std::sort(begin(), end(), func); }
   template <typename T> It find(const T &val) {
     return std::find(begin(), end(), val);
   }
