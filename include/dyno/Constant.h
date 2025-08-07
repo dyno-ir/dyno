@@ -1307,16 +1307,16 @@ public:
     size_t rhsExtWords = rhs.getExtNumWords();
     size_t rhsBits = rhs.getRawNumBits();
 
-    std::reference_wrapper lhsWrap{lhsMayAlias};
-    BigInt copy;
+    const T0 *lhsPtr = &lhsMayAlias;
+    BigIntBase copy;
     if constexpr (std::is_same_v<BigIntBase, T0>) {
       if (&out == &lhsMayAlias) {
         copy = lhsMayAlias;
-        lhsWrap = lhsMayAlias;
+        lhsPtr = &copy;
       }
     }
 
-    auto &lhs = lhsWrap.get();
+    auto &lhs = *lhsPtr;
 
     if (lhs.getNumBits() == 0) {
       out = rhs;
@@ -1541,7 +1541,6 @@ public:
     }
     const T0 *lhsPtr = &lhsMayAlias;
     BigIntBase lhsCopy;
-
     if constexpr (std::is_same_v<BigIntBase, T0>) {
       if (&out == &lhsMayAlias && !lhsMayAlias.getIs4S()) {
         lhsCopy = lhsMayAlias;
@@ -1935,8 +1934,7 @@ public:
   static void stream_bin(std::ostream &os, const T &self) {
     for (ssize_t i = self.getRawNumBits() - 1; i >= 0; i--) {
       os << (self.getBit(i) ? '1' : '0');
-      size_t digit = self.getRawNumBits() - 1 - i;
-      if (digit != 0 && (digit % 8) == 0)
+      if (i != 0 && (i % 8) == 0)
         os << "_";
     }
   }
@@ -1946,8 +1944,7 @@ public:
     std::array<char, 4> bitToStr = {'0', '1', 'z', 'x'};
     for (ssize_t i = (self.getRawNumBits() / 2) - 1; i >= 0; i--) {
       os << bitToStr[self.getBit(i)];
-      size_t digit = (self.getRawNumBits() / 2) - 1 - i;
-      if (digit != 0 && (digit % 8) == 0)
+      if (i != 0 && (i % 8) == 0)
         os << "_";
     }
   }
