@@ -172,6 +172,7 @@ public:
     stack.emplace_back(wire.getDef());
 
     uint maxLevel = 0;
+    retVal = BitAliasAcc{};
 
     while (!stack.empty()) {
       maxLevel = std::max(maxLevel, stack.size());
@@ -191,7 +192,7 @@ public:
       }
     }
     auto change = retVal.defragmentValues(ctx);
-    change |= maxLevel > 2;
+    change |= maxLevel > 3;
     if (retVal.frags.size() == 1) {
       assert(retVal.frags.front().len == *wire.getNumBits());
       change &= retVal.frags.front().ref != wire;

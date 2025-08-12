@@ -546,33 +546,30 @@ private:
         *(elemCountOpt ?: round_up_div(*pad.getNumBits(), fact));
     SmallVec<HWValue, 64> array;
     array.reserve(elemCount + 2);
+
+    HWValue cur = pad;
+
     auto oneHot = build.buildSLL(cbuild.val(elemCount, 1).get(),
                                  build.buildResize(address, elemCount, false));
     for (uint i = 0; i < elemCount; i++) {
       auto size = std::min(elemSize, *pad.getNumBits() - i * fact);
+      auto curAddr = baseOffs + i * fact;
       assert(size);
       auto word = build.buildExt(
-          elemSize, build.buildSplice(pad, size, baseOffs + i * fact),
-          OP_ANYEXT);
+          elemSize, build.buildSplice(pad, size, curAddr), OP_ANYEXT);
       auto sel = build.buildSplice(oneHot, 1, i);
       if (enable)
         sel = build.buildAnd(sel, enable);
       auto newWord = build.buildMux(sel, value, word);
-      array.emplace_back(newWord);
+
+      uint32_t numHigh = *cur.getNumBits() - curAddr - elemSize;
+      cur =
+          build.buildConcat(build.buildSplice(cur, numHigh, curAddr + elemSize),
+                            newWord, build.buildTrunc(curAddr, cur));
     }
 
-    uint32_t endAddr = baseOffs + elemCount * fact;
-
-    uint32_t padLow = baseOffs;
-    int64_t padHigh = (int64_t)*value.getNumBits() - endAddr;
-
-    if (padHigh > 0)
-      array.insert(array.begin(), build.buildSplice(pad, padHigh, endAddr));
-
-    if (padLow > 0)
-      array.emplace_back(build.buildTrunc(padLow, pad));
-
-    return build.buildConcat(array);
+    assert(cur.getNumBits() == pad.getNumBits());
+    return cur;
   }
 
   static bool compareTerms(AddressGenTermOperand lhs,
@@ -691,8 +688,8 @@ private:
                               terms.back().getIdx(), terms.back().getFact(),
                               insert.getLen(), terms.back().getMax());
 
-      idxs[0]++;
       for (size_t i = 0; i < idxs.size(); i++) {
+        idxs[i]++;
         uint32_t max = round_up_div(*insert.in()->as<HWValue>().getNumBits(),
                                     terms[i].getFact());
         if (terms[i].getMax())

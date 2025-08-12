@@ -142,6 +142,7 @@ public:
     };
     runPass(lowerOps);
     runPass(instCombine);
+    runPass(agressiveDCE);
 
     // lower everything that can still go through instcombine
     lowerOps.config = LowerOpsPass::Config{
@@ -157,6 +158,7 @@ public:
     };
     runPass(lowerOps);
     runPass(instCombine);
+    runPass(agressiveDCE);
 
     runLibertyPipeline();
     runPass(ffMap);

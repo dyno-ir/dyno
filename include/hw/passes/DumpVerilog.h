@@ -74,7 +74,7 @@ class DumpVerilogPass {
                 .str());
         if (!asLoad.isFullReg()) {
           assert(asLoad.isConstantOffs());
-          auto addr = asLoad.base()->as<ConstantRef>().getExactVal();
+          auto addr = asLoad.getBase();
           auto len = asLoad.getLen();
           std::print(os, " [{}:{}]", addr + len - 1, addr);
         }
@@ -90,7 +90,7 @@ class DumpVerilogPass {
                 .str());
         if (!asStore.isFullReg()) {
           assert(asStore.isConstantOffs());
-          auto addr = asStore.base()->as<ConstantRef>().getExactVal();
+          auto addr = asStore.getBase();
           auto len = asStore.getLen();
           std::print(os, " [{}:{}]", addr + len - 1, addr);
         }

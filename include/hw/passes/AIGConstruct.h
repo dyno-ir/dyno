@@ -48,9 +48,11 @@ public:
   }
 
   AIGNodeTRef resolveBit(HWValue val, uint bit) {
-    if (auto asWire = val.dyn_as<WireRef>())
-      return resolveWire(asWire)[bit];
-    else if (auto asConst = val.dyn_as<ConstantRef>())
+    if (auto asWire = val.dyn_as<WireRef>()) {
+      auto resolved = resolveWire(asWire);
+      assert(asWire.getNumBits() == resolved.size());
+      return resolved[bit];
+    } else if (auto asConst = val.dyn_as<ConstantRef>())
       // todo: what do we want to do with unknown values?
       return asConst.getBit(bit).val ? aig.getOne() : aig.getZero();
     dyno_unreachable("unknown type");

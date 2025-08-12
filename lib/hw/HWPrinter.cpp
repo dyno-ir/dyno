@@ -7,11 +7,21 @@ namespace dyno {
 
 static HWPrinter print{dbgs()};
 
-void dumpCtx(HWContext &ctx) { print.printCtx(ctx); }
-void dumpInstr(InstrRef instr) { print.printInstr(instr); }
-void dumpInstr(InstrRef instr, HWContext &ctx) { print.printInstr(instr, ctx); }
+void dumpCtx(HWContext &ctx) {
+  print.reset();
+  print.printCtx(ctx);
+}
+void dumpInstr(InstrRef instr) {
+  print.reset();
+  print.printInstr(instr);
+}
+void dumpInstr(InstrRef instr, HWContext &ctx) {
+  print.reset();
+  print.printInstr(instr, ctx);
+}
 
 void dumpObj(FatDynObjRef<> obj) {
+  print.reset();
   if (auto asInstr = obj.dyn_as<InstrRef>())
     return dumpInstr(asInstr);
   HWPrinter{dbgs()}.printDef(obj);

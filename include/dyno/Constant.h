@@ -2474,6 +2474,7 @@ public:
   static ConstantRef undef32() {
     return ConstantRef{32, BigInt::EXTX_MASK, FourState::SX, 1};
   }
+  static ConstantRef zeroBitZero() { return ConstantRef{0, 0, 0, 0}; }
   // static ConstantRef zero(uint32_t bits) { return ConstantRef{bits, 0, 0,
   // 0}; } template <typename T> static ConstantRef zeroLike(const T &t) {
   //   return zero(t.getNumBits());

@@ -304,6 +304,8 @@ public:
     return buildExt(newSize, value, true);
   }
   HWValue buildTrunc(uint32_t newSize, HWValue value) {
+    if (newSize == 0)
+      return ConstantRef::zeroBitZero();
     if (auto asConst = value.dyn_as<ConstantRef>()) {
       assert(asConst.getNumBits() >= newSize);
       return ctx.constBuild()
@@ -394,6 +396,11 @@ public:
   template <typename... Ts>
   HWValue buildSplice(HWValue src, uint32_t numBits, uint32_t baseAddr,
                       Ts... terms) {
+
+    if (baseAddr >= *src.as<HWValue>().getNumBits()) {
+      return ctx.constBuild().undef(numBits).get();
+    }
+
     if constexpr (sizeof...(terms) == 0) {
       if (auto asConst = src.dyn_as<ConstantRef>()) {
         auto cbuild = ctx.constBuild();
@@ -559,7 +566,7 @@ public:
     if (isConst) {
       auto cbuild = ctx.constBuild();
       cbuild.val(0, 0);
-      ([&] { cbuild.concat(operands.template as<ConstantRef>()); }(), ...);
+      ([&] { cbuild.concatLHS(operands.template as<ConstantRef>()); }(), ...);
       return cbuild.get();
     }
 
@@ -568,7 +575,14 @@ public:
 
     InstrBuilder build{instr};
     build.addRef(ctx.getWires().create(len)).other();
-    ([&] { build.addRef(operands); }(), ...);
+    (
+        [&] {
+          if constexpr (std::is_convertible_v<decltype(operands), HWValue>)
+            if (operands.getNumBits() == 0)
+              return;
+          build.addRef(operands);
+        }(),
+        ...);
 
     return instr.defW();
   }
@@ -1129,6 +1143,7 @@ public:
   }
 
   HWValue buildMux(HWValue sel, HWValue trueV, HWValue falseV) {
+    assert(trueV.getNumBits() == falseV.getNumBits());
     auto rv = buildInstr(HW_MUX, true, sel, trueV, falseV).defW();
     rv->numBits = trueV.getNumBits();
     return rv;

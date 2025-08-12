@@ -159,7 +159,7 @@ public:
       }
       case Value::VK_L: {
         auto lv = value.as<RegLValue>();
-        assert(numBits < lv.numBits);
+        assert(numBits <= lv.numBits);
         lv.numBits = numBits;
         lv.baseAddr += baseAddr;
         lv.terms.push_back_range(Range{terms});

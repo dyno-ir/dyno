@@ -372,6 +372,11 @@ replace {
   HW_MUX $out, $cond_inv, $rhs, $lhs
 }
 
+match {
+  HW_MUX $out, $cond, $val, $val
+}
+replace $out -> $val
+
 /*
 // todo: multi-bit, reverse matching on the or
 match {
