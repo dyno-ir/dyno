@@ -1,5 +1,6 @@
 #pragma once
 #include "DenseMapInfo.h"
+#include <cassert>
 
 namespace dyno {
 

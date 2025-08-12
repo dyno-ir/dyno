@@ -1,15 +1,15 @@
 #include "hw/HWPrinter.h"
 #include "hw/HWContext.h"
 #include "support/Debug.h"
+#include <memory>
 
 namespace dyno {
 
-void dumpCtx(HWContext &ctx) { HWPrinter{dbgs()}.printCtx(ctx); }
+static HWPrinter print{dbgs()};
 
-void dumpInstr(InstrRef instr) { HWPrinter{dbgs()}.printInstr(instr); }
-void dumpInstr(InstrRef instr, HWContext &ctx) {
-  HWPrinter{dbgs()}.printInstr(instr, ctx);
-}
+void dumpCtx(HWContext &ctx) { print.printCtx(ctx); }
+void dumpInstr(InstrRef instr) { print.printInstr(instr); }
+void dumpInstr(InstrRef instr, HWContext &ctx) { print.printInstr(instr, ctx); }
 
 void dumpObj(FatDynObjRef<> obj) {
   if (auto asInstr = obj.dyn_as<InstrRef>())

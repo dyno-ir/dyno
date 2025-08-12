@@ -100,7 +100,7 @@ r15 = r5.begin();
 r16 = r5.end();
 if (r6 != r2) goto fail_2;
 
-  FatDynObjRef<> w = ctx.getWires().create((*Range{r8, r10}.begin())->as<WireRef>().getNumBits()); RefRange{r18, r19} = w;
+  FatDynObjRef<> w = ctx.getWires().create((*Range{r8, r10}.begin())->as<HWValue>().getNumBits()); RefRange{r18, r19} = w;
 
   FatDynObjRef<> constant = cbuild.val("1'h1"_bv).resize(*(*Range{r1, r3}.begin())->as<WireRef>().getNumBits(), false).get();
   RefRange{r21, r22} = constant;
@@ -158,7 +158,7 @@ r9 = std::next(r3);
 if ((*r3)->fat() != (*r5)->fat()) goto fail_3;
 r10 = std::next(r9);
 
-  FatDynObjRef<> w = ctx.getWires().create((*Range{r5, r7}.begin())->as<WireRef>().getNumBits()); RefRange{r12, r13} = w;
+  FatDynObjRef<> w = ctx.getWires().create((*Range{r5, r7}.begin())->as<HWValue>().getNumBits()); RefRange{r12, r13} = w;
 
   FatDynObjRef<> constant = cbuild.val("1'h1"_bv).resize(*(*Range{r1, r3}.begin())->as<WireRef>().getNumBits(), false).get();
   RefRange{r15, r16} = constant;
@@ -279,9 +279,9 @@ r20 = r5.begin();
 r21 = r5.end();
 if (r6 != r2) goto fail_5;
 
-  FatDynObjRef<> w = ctx.getWires().create((*Range{r14, r15}.begin())->as<WireRef>().getNumBits()); RefRange{r23, r24} = w;
+  FatDynObjRef<> w = ctx.getWires().create((*Range{r14, r15}.begin())->as<HWValue>().getNumBits()); RefRange{r23, r24} = w;
 
-  FatDynObjRef<> w2 = ctx.getWires().create((*Range{r15, r16}.begin())->as<WireRef>().getNumBits()); RefRange{r26, r27} = w2;
+  FatDynObjRef<> w2 = ctx.getWires().create((*Range{r15, r16}.begin())->as<HWValue>().getNumBits()); RefRange{r26, r27} = w2;
 
   FatDynObjRef<> constant = cbuild.val("1'h1"_bv).resize(*(*Range{r14, r15}.begin())->as<WireRef>().getNumBits(), false).get();
   RefRange{r29, r30} = constant;
@@ -405,7 +405,7 @@ r27 = r5.begin();
 r28 = r5.end();
 if (r6 != r2) goto fail_6;
 
-  FatDynObjRef<> w = ctx.getWires().create((*Range{r11, r12}.begin())->as<WireRef>().getNumBits()); RefRange{r30, r31} = w;
+  FatDynObjRef<> w = ctx.getWires().create((*Range{r11, r12}.begin())->as<HWValue>().getNumBits()); RefRange{r30, r31} = w;
 
   FatDynObjRef<> constant = cbuild.val("1'h0"_bv).resize(*(*Range{r14, r16}.begin())->as<WireRef>().getNumBits(), false).get();
   RefRange{r32, r33} = constant;
@@ -616,12 +616,13 @@ InstrRef::iterator r8;
 InstrRef::iterator r9;
 InstrRef::iterator r10;
 InstrRef::iterator r11;
-FatDynObjRef<>* r12;
-FatDynObjRef<>* r13;
+InstrRef::iterator r12;
+InstrRef::iterator r13;
+FatDynObjRef<>* r14;
 FatDynObjRef<>* r15;
-FatDynObjRef<>* r16;
+FatDynObjRef<>* r17;
+FatDynObjRef<>* r18;
 if (!r0.isOpc(HW_SPLICE)) goto fail_14;
-if (r0.getNumOperands() > 3) goto fail_14;
 if (r0.getNumOperands() < 3) goto fail_14;
 r1 = r0.begin();
 r2 = r0.end();
@@ -629,31 +630,40 @@ r3 = std::next(r1);
 if ((*r3)->as<FatDynObjRef<>>().getType() != HW_WIRE) goto fail_14;
 r4 = getDefInstr(r3);
 if (!r4.isOpc(HW_SPLICE)) goto fail_14;
-if (r4.getNumOperands() > 3) goto fail_14;
 if (r4.getNumOperands() < 3) goto fail_14;
 r5 = r4.begin();
 r6 = r4.end();
 r7 = std::next(r5);
 r8 = std::next(r7);
 r9 = std::next(r8);
-r10 = std::next(r3);
+for (r10 = r9;; r10++) {
+if (r10 == r6) break;
+loop_14_0_continue:;
+}
+loop_14_0_break:;
+if (r10 != r6) goto fail_14;
+r11 = std::next(r3);
 if ((*r3)->fat() != (*r5)->fat()) goto fail_14;
-r11 = std::next(r10);
+r12 = std::next(r11);
+for (r13 = r12;; r13++) {
+if (r13 == r2) break;
+loop_14_1_continue:;
+}
+loop_14_1_break:;
+if (r13 != r2) goto fail_14;
 
   if (!(*RefRange{r5, r7}.begin())->as<WireRef>().hasSingleUse())
     goto fail_14;
 
-  FatDynObjRef<> w = ctx.getWires().create((*Range{r8, r9}.begin())->as<WireRef>().getNumBits()); RefRange{r15, r16} = w;
-auto r14 = build.buildInstrRaw(OP_ADD, (r16-r15)+(r9-r8)+(r11-r10));
-copyOperands(r14, r15, r16);
-r14.other();
-copyOperands(r14, r8, r9);
-copyOperands(r14, r10, r11);
-auto r17 = build.buildInstrRaw(HW_SPLICE, (r3-r1)+(r8-r7)+(r16-r15));
-copyOperands(r17, r1, r3);
-r17.other();
-copyOperands(r17, r7, r8);
-copyOperands(r17, r15, r16);
+  FatDynObjRef<> sum = cbuild.val((*Range{r8, r9}.begin())->as<ConstantRef>()).add((*Range{r11, r12}.begin())->as<ConstantRef>()).get();
+  RefRange{r17, r18} = sum;
+auto r16 = build.buildInstrRaw(HW_SPLICE, (r3-r1)+(r8-r7)+(r18-r17)+(r10-r9)+(r13-r12));
+copyOperands(r16, r1, r3);
+r16.other();
+copyOperands(r16, r7, r8);
+copyOperands(r16, r17, r18);
+copyOperands(r16, r9, r10);
+copyOperands(r16, r12, r13);
 deleteIfSingleUse(matched, ctx, r4);
 deleteF(matched, ctx, r0);
 return true;

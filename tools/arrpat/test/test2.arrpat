@@ -4,6 +4,10 @@ macro const_negate $n -> $rv [{
   FatDynObjRef<> negated = cbuild.val((*$n.begin())->as<ConstantRef>()).neg().get();
   $rv = negated;
 }]
+macro const_add $lhs, $rhs -> $rv [{
+  FatDynObjRef<> sum = cbuild.val((*$lhs.begin())->as<ConstantRef>()).add((*$rhs.begin())->as<ConstantRef>()).get();
+  $rv = sum;
+}]
 macro constant_like $val, $other -> $rv [{
   FatDynObjRef<> constant = cbuild.val($val).resize(*(*$other.begin())->as<WireRef>().getNumBits(), false).get();
   $rv = constant;
@@ -13,10 +17,10 @@ macro constant_like_anyorder_obj $val, $other -> $rv [{
   $rv = constant;
 }]
 macro wire_like $other -> $rv [{
-  FatDynObjRef<> w = ctx.getWires().create((*$other.begin())->as<WireRef>().getNumBits()); $rv = w;
+  FatDynObjRef<> w = ctx.getWires().create((*$other.begin())->as<HWValue>().getNumBits()); $rv = w;
 }]
 macro wire_like2 $other -> $rv [{
-  FatDynObjRef<> w2 = ctx.getWires().create((*$other.begin())->as<WireRef>().getNumBits()); $rv = w2;
+  FatDynObjRef<> w2 = ctx.getWires().create((*$other.begin())->as<HWValue>().getNumBits()); $rv = w2;
 }]
 macro const_like_reg_len $op, $reg [{
   auto asConstant = (*$op.begin())->dyn_as<ConstantRef>();
@@ -176,19 +180,16 @@ replace {
   OP_TRUNC $out, $in
 }
 
-
-// todo: merge arbitrary splices
 match {
-  HW_SPLICE $temp, $in, $addrA
-  HW_SPLICE $out, $temp:HW_WIRE, $addrB
+  HW_SPLICE $temp, $in, $addrA, $termsA...
+  HW_SPLICE $out, $temp:HW_WIRE, $addrB, $termsB...
 }
 with [{
   if (!(*$temp.begin())->as<WireRef>().hasSingleUse())
     goto $fail;
 }]
 replace {
-  OP_ADD $sum:wire_like($addrA), $addrA, $addrB
-  HW_SPLICE $out, $in, $sum
+  HW_SPLICE $out, $in, const_add($addrA, $addrB), $termsA..., $termsB...
 }
 
 // we need check duplicates of these. dyno dsl pattern matching should fix.

@@ -67,6 +67,8 @@ class BitAliasAnalysis {
         return std::nullopt;
       }
 
+      assert(retVal.frags.empty() || retVal.frags.front().dstAddr == 0);
+
       retVal = retVal.getRange(addr, len);
       retVal.appendTop(frame.acc);
       frame.acc = std::move(retVal);

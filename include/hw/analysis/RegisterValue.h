@@ -280,6 +280,7 @@ struct RegisterValue : public RegisterFrags<RegisterValueFragment> {
 
     uint32_t end = addr + len;
     uint32_t lenB = len;
+    uint32_t addrB = addr;
 
     RegisterValue range;
 
@@ -297,7 +298,7 @@ struct RegisterValue : public RegisterFrags<RegisterValueFragment> {
         uint32_t pieceLen = std::min(end, itEnd) - std::max(addr, it->dstAddr);
         auto frag = *it;
         frag.srcAddr = start;
-        frag.dstAddr = addr;
+        frag.dstAddr = addr - addrB;
         frag.len = pieceLen;
         range.frags.emplace_back(frag);
         allUntouched &= it->untouched;

@@ -163,6 +163,7 @@ public:
         lv.numBits = numBits;
         lv.baseAddr += baseAddr;
         lv.terms.push_back_range(Range{terms});
+        lv.type = type;
         return std::make_unique<RegLValue>(lv);
       }
       }
@@ -1498,8 +1499,7 @@ public:
 
       return Value::slice(
           build, *value, ewidth, 0,
-          std::to_array({AddressGenTerm{index, ewidth, ecount}}),
-          asElemS.value().type);
+          std::to_array({AddressGenTerm{index, ewidth, ecount}}), asElemS.type);
     }
     case slang::ast::ExpressionKind::MemberAccess: {
       auto &asMemberAcc = expr.as<slang::ast::MemberAccessExpression>();

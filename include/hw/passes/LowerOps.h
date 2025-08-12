@@ -9,6 +9,7 @@
 #include "hw/HWPrinter.h"
 #include "hw/HWValue.h"
 #include "hw/IDs.h"
+#include "hw/LoadStore.h"
 #include "hw/analysis/BitAlignmentAnalysis.h"
 #include "hw/analysis/DelayAnalysis.h"
 #include "op/IDs.h"
@@ -18,6 +19,7 @@
 #include "support/Utility.h"
 #include <cstdint>
 #include <iterator>
+#include <numeric>
 namespace dyno {
 
 class LowerOpsPass {
@@ -504,8 +506,9 @@ private:
   }
 
   HWValue lowerSimpleIndex(HWValue value, HWValue address, uint32_t fact,
-                           uint32_t elemSize) {
-    uint32_t elemCount = round_up_div(*value.getNumBits(), fact);
+                           uint32_t elemSize, Optional<uint32_t> elemCountOpt) {
+    uint32_t elemCount =
+        *(elemCountOpt ?: round_up_div(*value.getNumBits(), fact));
     SmallVec<HWValue, 64> array;
     array.reserve(elemCount);
     for (uint i = 0; i < elemCount; i++) {
@@ -535,68 +538,99 @@ private:
     return array[0];
   }
 
+  HWValue lowerSimpleInsert(HWValue pad, HWValue value, uint32_t baseOffs,
+                            HWValue address, uint32_t fact, uint32_t elemSize,
+                            Optional<uint32_t> elemCountOpt,
+                            HWValue enable = nullref) {
+    uint32_t elemCount =
+        *(elemCountOpt ?: round_up_div(*pad.getNumBits(), fact));
+    SmallVec<HWValue, 64> array;
+    array.reserve(elemCount + 2);
+    auto oneHot = build.buildSLL(cbuild.val(elemCount, 1).get(),
+                                 build.buildResize(address, elemCount, false));
+    for (uint i = 0; i < elemCount; i++) {
+      auto size = std::min(elemSize, *pad.getNumBits() - i * fact);
+      assert(size);
+      auto word = build.buildExt(
+          elemSize, build.buildSplice(pad, size, baseOffs + i * fact),
+          OP_ANYEXT);
+      auto sel = build.buildSplice(oneHot, 1, i);
+      if (enable)
+        sel = build.buildAnd(sel, enable);
+      auto newWord = build.buildMux(sel, value, word);
+      array.emplace_back(newWord);
+    }
+
+    uint32_t endAddr = baseOffs + elemCount * fact;
+
+    uint32_t padLow = baseOffs;
+    int64_t padHigh = (int64_t)*value.getNumBits() - endAddr;
+
+    if (padHigh > 0)
+      array.insert(array.begin(), build.buildSplice(pad, padHigh, endAddr));
+
+    if (padLow > 0)
+      array.emplace_back(build.buildTrunc(padLow, pad));
+
+    return build.buildConcat(array);
+  }
+
+  static bool compareTerms(AddressGenTermOperand lhs,
+                           AddressGenTermOperand rhs) {
+    if (!lhs.getMax() && rhs.getMax())
+      return true;
+    if (lhs.getMax() && !rhs.getMax())
+      return false;
+    if (lhs.getMax() == rhs.getMax())
+      return *lhs.getMax() > *rhs.getMax();
+    return lhs.getFact() > rhs.getFact();
+  }
   void lowerNonConstSplice(SpliceIRef splice) {
-    // what can efficiently lower?
-    // answer: linear access (base + offs * elemsize)
     if (splice.isConstantOffs())
       return;
-
-    // todo
-
-    LinearExpressionAnalysis analysis{ctx};
-    auto res = analysis.getLinearExpression(splice.other(1)->as<WireRef>());
-
-    DEBUG("LowerOps", {
-      res.base.toStream(dbgs());
-      for (auto [obj, fact] : res.terms) {
-        dbgs() << " + ";
-        fact.toStream(dbgs());
-        dbgs() << "*";
-        dumpObj(ctx.getWires().resolve(obj));
-      }
-      dbgs() << "\n";
-    })
 
     auto resBits = *splice.def(0)->as<WireRef>().getNumBits();
 
     HWValue cur = splice.other(0)->as<WireRef>();
-    auto constShift = res.base.getExactVal();
+    auto constShift = splice.getBase();
     build.setInsertPoint(splice);
     cur = build.buildSplice(cur, *cur.getNumBits() - constShift, constShift);
 
-    SmallVec<std::pair<WireRef, BigInt>, 4> terms;
-
-    for (auto [obj, fact] : res.terms) {
-      auto wire = ctx.getWires().resolve(obj);
-      terms.emplace_back(wire, fact);
+    SmallVec<AddressGenTermOperand, 4> terms;
+    for (auto term : splice.terms()) {
+      terms.emplace_back(term);
     }
 
-    Range{terms}.sort([](const auto &lhs, const auto &rhs) {
-      return BigInt::icmpOp(lhs.second, rhs.second, BigInt::ICMP_UGT);
-    });
+    Range{terms}.sort(compareTerms);
 
     constexpr bool LowerFlat = false;
 
     if (LowerFlat) {
-      auto smallest = terms.back();
-      uint32_t smallestI = smallest.second.getExactVal();
-      HWValue acc = build.buildZExt(32, smallest.first);
+      abort();
+      // auto smallest = terms.back();
+      // uint32_t smallestI = smallest.second.getExactVal();
+      // HWValue acc = build.buildZExt(32, smallest.first);
 
-      for (auto term : Range{terms}.drop_back()) {
-        uint32_t fact = term.second.getExactVal();
-        assert(fact % smallestI == 0);
+      // for (auto term : Range{terms}.drop_back()) {
+      //   uint32_t fact = term.second.getExactVal();
+      //   assert(fact % smallestI == 0);
 
-        auto prod = build.buildMul(build.buildZExt(32, term.first),
-                                   ConstantRef::fromU32(fact / smallestI));
-        acc = build.buildAdd(acc, prod);
-      }
+      //   auto prod = build.buildMul(build.buildZExt(32, term.first),
+      //                              ConstantRef::fromU32(fact / smallestI));
+      //   acc = build.buildAdd(acc, prod);
+      // }
 
-      cur = lowerSimpleIndex(cur, acc, smallestI, resBits);
+      // cur = lowerSimpleIndex(cur, acc, smallestI, resBits);
     } else {
       for (auto it = terms.begin(); it != terms.end(); ++it) {
-        auto &[wire, fact] = *it;
-        cur = lowerSimpleIndex(cur, wire, fact.getExactVal(),
-                               std::max(resBits, fact.getExactVal()));
+        auto nextIt = std::next(it);
+        uint32_t bitsToExtract = resBits;
+        if (nextIt != terms.end())
+          bitsToExtract =
+              (nextIt->getMax() ? (*nextIt->getMax() * nextIt->getFact())
+                                : *cur.getNumBits());
+        cur = lowerSimpleIndex(cur, it->getIdx(), it->getFact(), bitsToExtract,
+                               it->getMax());
       }
     }
 
@@ -628,6 +662,54 @@ private:
     //     pow2Addr = build.buildAdd(pow2Addr, wire);
     //   pow2Max += 1ULL << pow2;
     // }
+  }
+
+  void lowerNonConstInsert(InsertIRef insert) {
+    if (insert.isConstantOffs())
+      return;
+
+    build.setInsertPoint(insert);
+
+    SmallVec<AddressGenTermOperand, 4> terms;
+    for (auto term : insert.terms()) {
+      terms.emplace_back(term);
+    }
+    Range{terms}.sort(compareTerms);
+
+    SmallVec<uint32_t, 4> idxs(terms.size() - 1);
+
+    HWValue cur = insert.in()->as<HWValue>();
+    while (true) {
+      HWValue enable = ConstantRef::fromBool(1);
+      uint32_t offset = insert.getBase();
+      for (auto [i, idx] : Range{idxs}.enumerate()) {
+        enable = build.buildAnd(enable,
+                                build.buildSplice(terms[i].getIdx(), 1, idx));
+        offset += idx * terms[i].getFact();
+      }
+      cur = lowerSimpleInsert(cur, insert.val()->as<HWValue>(), offset,
+                              terms.back().getIdx(), terms.back().getFact(),
+                              insert.getLen(), terms.back().getMax());
+
+      idxs[0]++;
+      for (size_t i = 0; i < idxs.size(); i++) {
+        uint32_t max = round_up_div(*insert.in()->as<HWValue>().getNumBits(),
+                                    terms[i].getFact());
+        if (terms[i].getMax())
+          max = *terms[i].getMax();
+
+        if (idxs[i] == max) {
+          idxs[i] = 0;
+          continue;
+        }
+        goto outer_continue;
+      }
+      break;
+    outer_continue:;
+    }
+
+    insert.defW().replaceAllUsesWith(cur);
+    destroyMap[insert] = 1;
   }
 
   void runOnInstr(InstrRef instr) {
@@ -687,6 +769,9 @@ private:
     case *HW_SPLICE:
       lowerNonConstSplice(instr);
       return;
+
+    case *HW_INSERT:
+      lowerNonConstInsert(instr);
     }
   }
 
@@ -719,6 +804,9 @@ public:
         return config.lowerMultiInputBitwise;
 
       if (instr.isOpc(HW_SPLICE))
+        return true;
+
+      if (instr.isOpc(HW_INSERT))
         return true;
 
       return false;

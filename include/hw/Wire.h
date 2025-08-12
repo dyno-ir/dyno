@@ -25,7 +25,7 @@ public:
 };
 
 template <> struct ObjTraits<Wire> {
-  //static constexpr DialectID dialect{DIALECT_HW};
+  // static constexpr DialectID dialect{DIALECT_HW};
   static constexpr DialectType ty{HW_WIRE};
   using FatRefT = WireRef;
 };
