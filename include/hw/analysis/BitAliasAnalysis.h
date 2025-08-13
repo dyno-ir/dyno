@@ -14,6 +14,7 @@
 namespace dyno {
 class BitAliasAnalysis {
   HWContext &ctx;
+  bool change;
 
   class BitAliasAcc : public RegisterValue {
   public:
@@ -44,6 +45,7 @@ class BitAliasAnalysis {
       frame.acc = BitAliasAcc{};
       frame.ref = *instr.other_begin();
     }
+    bool nested = stack.size() >= 3;
 
     switch (*instr.getDialectOpcode()) {
     case *HW_CONCAT: {
@@ -52,26 +54,27 @@ class BitAliasAnalysis {
       retVal.appendTop(frame.acc);
       frame.acc = std::move(retVal);
       frame.ref += 1;
+      change |= nested;
       break;
     }
 
     case *HW_SPLICE: {
-      if (first)
-        break;
       auto asSplice = instr.as<SpliceIRef>();
-      auto addr = asSplice.getBase();
-      auto len = *asSplice.out()->as<WireRef>().getNumBits();
-
       if (asSplice.getNumTerms() != 0) {
         frame.acc = BitAliasAcc::mostPessimistic(instr.def(0)->as<WireRef>());
         return std::nullopt;
       }
 
+      if (first)
+        break;
+      auto addr = asSplice.getBase();
+      auto len = *asSplice.out()->as<WireRef>().getNumBits();
       assert(retVal.frags.empty() || retVal.frags.front().dstAddr == 0);
 
       retVal = retVal.getRange(addr, len);
       retVal.appendTop(frame.acc);
       frame.acc = std::move(retVal);
+      change |= nested;
       return std::nullopt;
       break;
     }
@@ -81,6 +84,7 @@ class BitAliasAnalysis {
         break;
       auto len = *instr.def(0)->as<WireRef>().getNumBits();
       frame.acc = retVal.getRange(0, len);
+      change |= nested;
       return std::nullopt;
     }
 
@@ -93,6 +97,7 @@ class BitAliasAnalysis {
       retVal.appendTop(ctx.constBuild().zero(outLen - inLen).get(), 0,
                        outLen - inLen);
       frame.acc = std::move(retVal);
+      change |= nested;
       return std::nullopt;
     }
 
@@ -105,6 +110,7 @@ class BitAliasAnalysis {
       retVal.appendTop(ctx.constBuild().undef(outLen - inLen).get(), 0,
                        outLen - inLen);
       frame.acc = std::move(retVal);
+      change |= nested;
       return std::nullopt;
     }
 
@@ -118,6 +124,7 @@ class BitAliasAnalysis {
       frame.acc = retVal;
       for (uint i = 0; i < cnt - 1; i++)
         frame.acc.appendTop(retVal);
+      change |= nested;
       return std::nullopt;
     }
 
@@ -131,11 +138,16 @@ class BitAliasAnalysis {
       auto signBit = frame.acc.getRange(inLen - 1, 1);
       for (uint i = 0; i < (outLen - inLen); i++)
         frame.acc.appendTop(signBit);
+      change |= nested;
       return std::nullopt;
     }
 
     case *HW_INSERT: {
       InsertIRef asInsert = instr.as<InsertIRef>();
+      if (asInsert.getNumTerms() != 0) {
+        frame.acc = BitAliasAcc::mostPessimistic(instr.def(0)->as<WireRef>());
+        return std::nullopt;
+      }
       if (first)
         break;
       if (frame.ref == instr.other(0)) {
@@ -143,12 +155,9 @@ class BitAliasAnalysis {
         ++frame.ref;
       } else {
         auto addr = asInsert.getBase();
-        auto len = *asInsert.val()->as<WireRef>().getNumBits();
-        if (asInsert.getNumTerms() != 0) {
-          frame.acc = BitAliasAcc::mostPessimistic(instr.def(0)->as<WireRef>());
-          return std::nullopt;
-        }
+        auto len = asInsert.getLen();
         frame.acc.overwriteNoMaterialize(retVal, 0, addr, len);
+        change |= nested;
         return std::nullopt;
       }
       break;
@@ -173,6 +182,7 @@ public:
 
     uint maxLevel = 0;
     retVal = BitAliasAcc{};
+    change = false;
 
     while (!stack.empty()) {
       maxLevel = std::max(maxLevel, stack.size());
@@ -191,8 +201,7 @@ public:
         stack.pop_back();
       }
     }
-    auto change = retVal.defragmentValues(ctx);
-    change |= maxLevel > 3;
+    change |= retVal.defragmentValues(ctx);
     if (retVal.frags.size() == 1) {
       assert(retVal.frags.front().len == *wire.getNumBits());
       change &= retVal.frags.front().ref != wire;

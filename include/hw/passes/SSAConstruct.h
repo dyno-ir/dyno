@@ -792,6 +792,7 @@ public:
   }
 
   void run() {
+    isNewInstr.clear();
     isNewInstr.resize(ctx.getInstrs().numIDs());
     auto &createHooks = ctx.getInstrs().createHooks;
     auto hookSize = createHooks.size();

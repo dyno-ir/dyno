@@ -1,4 +1,5 @@
 #include "hw/HWPrinter.h"
+#include "dyno/Obj.h"
 #include "hw/HWContext.h"
 #include "support/Debug.h"
 #include <memory>
@@ -7,20 +8,37 @@ namespace dyno {
 
 static HWPrinter print{dbgs()};
 
-void dumpCtx(HWContext &ctx) {
+__attribute__((used)) void dumpCtx(HWContext &ctx) {
   print.reset();
   print.printCtx(ctx);
 }
-void dumpInstr(InstrRef instr) {
+__attribute__((used)) void dumpInstr(InstrRef instr) {
   print.reset();
   print.printInstr(instr);
 }
-void dumpInstr(InstrRef instr, HWContext &ctx) {
+__attribute__((used)) void dumpInstr(InstrRef instr, HWContext &ctx) {
   print.reset();
   print.printInstr(instr, ctx);
 }
 
-void dumpObj(FatDynObjRef<> obj) {
+__attribute__((used)) void dumpDeps(InstrRef instr) {
+  for (auto use : instr.others()) {
+    if (!Operand::isDefUseOperand(*use))
+      continue;
+    dumpDeps(use->as<FatDynObjRef<InstrDefUse>>()->getSingleDef()->instr());
+  }
+  print.printInstr(instr);
+}
+__attribute__((used)) void dumpDeps(InstrRef instr, HWContext &ctx) {
+  for (auto use : instr.others()) {
+    if (!Operand::isDefUseOperand(*use))
+      continue;
+    dumpDeps(use->as<FatDynObjRef<InstrDefUse>>()->getSingleDef()->instr(),
+             ctx);
+  }
+  print.printInstr(instr, ctx);
+}
+__attribute__((used)) void dumpObj(FatDynObjRef<> obj) {
   print.reset();
   if (auto asInstr = obj.dyn_as<InstrRef>())
     return dumpInstr(asInstr);

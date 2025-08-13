@@ -377,10 +377,38 @@ struct RegisterValue : public RegisterFrags<RegisterValueFragment> {
                               Optional<uint16_t> triggerID = nullopt) {
     auto it = frag;
     auto itO = src.getInsertIt(srcAddr);
+
+    // if not aligned with destination
+    if (dstAddr != it->dstAddr) {
+      auto diff = dstAddr - it->dstAddr;
+      it = frags.insert(it, *it);
+      it->len = diff;
+
+      (it + 1)->srcAddr += diff;
+      (it + 1)->dstAddr += diff;
+      (it + 1)->len -= diff;
+
+      ++it;
+    }
+
+    // if not aligned with source
+    if (srcAddr != itO->dstAddr) {
+      auto diff = srcAddr - itO->dstAddr;
+      itO = frags.insert(itO, *itO);
+      itO->len = diff;
+
+      (itO + 1)->srcAddr += diff;
+      (itO + 1)->dstAddr += diff;
+      (itO + 1)->len -= diff;
+
+      ++itO;
+    }
+
     // todo: normalize
     while (len != 0) {
+
       auto thisRemLen = it->len - (dstAddr - it->dstAddr);
-      auto otherRemLen = itO->len - (dstAddr - itO->dstAddr);
+      auto otherRemLen = itO->len - (srcAddr - itO->dstAddr);
       auto pieceLen = std::min(std::min(thisRemLen, otherRemLen), len);
 
       // other frag limiting -> split ours in half
@@ -395,7 +423,7 @@ struct RegisterValue : public RegisterFrags<RegisterValueFragment> {
 
       // this frag is limiting (or perfect match) -> just completely overwrite
       it->ref = itO->ref;
-      it->srcAddr = itO->srcAddr + (dstAddr - itO->dstAddr);
+      it->srcAddr = itO->srcAddr + (srcAddr - itO->dstAddr);
       it->untouched = remainUntouched;
       it->triggerID = triggerID;
       // it->len = it->len; unchanged
@@ -414,7 +442,7 @@ struct RegisterValue : public RegisterFrags<RegisterValueFragment> {
 
   void overwriteNoMaterialize(RegisterValue &src, uint32_t srcAddr,
                               uint32_t dstAddr, uint32_t len) {
-    auto it = src.getInsertIt(dstAddr);
+    auto it = getInsertIt(dstAddr);
     overwriteNoMaterialize(src, it, srcAddr, dstAddr, len);
   }
 

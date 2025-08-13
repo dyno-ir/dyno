@@ -188,6 +188,8 @@ public:
 void dumpCtx(HWContext &ctx);
 void dumpInstr(InstrRef instr);
 void dumpInstr(InstrRef instr, HWContext &ctx);
+void dumpDeps(InstrRef instr);
+void dumpDeps(InstrRef instr, HWContext &ctx);
 void dumpObj(FatDynObjRef<> obj);
 
 }; // namespace dyno

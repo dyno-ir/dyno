@@ -16,16 +16,18 @@ class OrderInstrsPass {
   void handleUse(OperandRef use, SmallVecImpl<OperandRef> &uses) {
     if (auto asWire = use->dyn_as<WireRef>())
       uses.emplace_back(asWire.getDefI());
-    // else if (auto asReg = use->dyn_as<RegisterRef>()) {
-    //   if (!use.instr().isOpc(HW_LOAD))
-    //     return;
-    //   auto block = ctx.getCFG()[use.instr()].blockRef();
-    //   for (auto regUse : asReg.uses()) {
-    //     if (regUse.instr().isOpc(HW_STORE) &&
-    //         ctx.getCFG()[regUse.instr()].blockRef() == block)
-    //       uses.emplace_back(regUse.instr());
-    //   }
-    // }
+    else if (auto asReg = use->dyn_as<RegisterRef>()) {
+      if (!use.instr().isOpc(HW_LOAD))
+        return;
+      if (asReg.getNumUses() > 2)
+        return;
+      auto block = ctx.getCFG()[use.instr()].blockRef();
+      for (auto regUse : asReg.uses()) {
+        if (regUse.instr().isOpc(HW_STORE) &&
+            ctx.getCFG()[regUse.instr()].blockRef() == block)
+          uses.emplace_back(regUse.instr());
+      }
+    }
   }
 
   void prioritzeUses(MutArrayRef<OperandRef> uses) {

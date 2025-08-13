@@ -24,7 +24,8 @@ public:
       return;
 
     auto trigger = proc.other(0)->as<TriggerRef>().iref();
-
+    ObjMapVec<Instr, bool> handled;
+    handled.resize(ctx.getInstrs().numIDs());
     HWInstrBuilder build{ctx};
     std::optional<BlockRef_iterator<true>> regs_end;
 
@@ -39,9 +40,9 @@ public:
         auto store = instr.as<StoreIRef>();
         auto reg = instr.operand(1)->as<RegisterRef>();
         // check if already handled
-        if (TaggedRegRef{reg.iref()}.get())
+        if (handled[instr])
           continue;
-        TaggedRegRef{reg.iref()}.get() = 1;
+        handled[instr] = 1;
 
         if (!regs_end)
           regs_end = mod.regs_end();
@@ -56,7 +57,7 @@ public:
         // at end of proc, store defer reg value into qreg
         build.setInsertPoint(proc.block().end());
         auto finalV = build.buildLoad(reg);
-        build.buildStore(qReg, finalV, false, trigger,
+        build.buildStore(qReg, finalV, true, trigger,
                          store.base()->as<ConstantRef>().getExactVal(),
                          store.terms());
         break;
@@ -64,11 +65,6 @@ public:
       case *HW_STORE_DEFER: {
         auto store = instr.as<StoreIRef>();
         build.setInsertPoint(HWInstrRef{instr}.iter(ctx));
-
-        auto range = BitRange::full();
-        if (instr.getNumOperands() > 3) {
-          range = BitRangeOperand{instr.operand(instr.getNumOperands() - 2)};
-        }
 
         build.buildStore(store.reg(), store.value(), true, trigger,
                          store.base()->as<ConstantRef>().getExactVal(),
