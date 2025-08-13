@@ -6,6 +6,7 @@
 #include "hw/FlipFlop.h"
 #include "hw/HWAbstraction.h"
 #include "hw/HWContext.h"
+#include "hw/HWInstr.h"
 #include "hw/HWPrinter.h"
 #include "hw/HWValue.h"
 #include "hw/IDs.h"
@@ -299,6 +300,57 @@ class FlipFlopMappingPass {
   }
 
 public:
+  RegisterIRef checkIsPort(HWValue val, DialectOpcode opc) {
+    if (!val.is<WireRef>())
+      return nullref;
+    auto wire = val.as<WireRef>();
+    auto instr = wire.getDefI();
+    if (opc == HW_INPUT_REGISTER_DEF && instr.isOpc(HW_LOAD)) {
+      auto load = instr.as<LoadIRef>();
+      if (!load.isFullReg())
+        return nullref;
+      auto reg = load.reg().iref();
+      if (!reg.isOpc(HW_INPUT_REGISTER_DEF))
+        return nullref;
+      return reg;
+    }
+    if (opc == HW_OUTPUT_REGISTER_DEF && instr.isOpc(HW_STORE)) {
+      auto store = instr.as<StoreIRef>();
+      if (!store.isFullReg())
+        return nullref;
+      auto reg = store.reg().iref();
+      if (!reg.isOpc(HW_OUTPUT_REGISTER_DEF))
+        return nullref;
+      return reg;
+    }
+    return nullref;
+  }
+
+  RegisterIRef checkIsReg(HWValue val) {
+    if (!val.is<WireRef>())
+      return nullref;
+    auto wire = val.as<WireRef>();
+    auto defI = wire.getDefI();
+    if (defI.isOpc(HW_LOAD)) {
+      auto load = defI.as<LoadIRef>();
+      if (!load.isFullReg())
+        return nullref;
+      auto reg = load.reg().iref();
+      return reg;
+    }
+    if (!wire.hasSingleUse())
+      return nullref;
+    auto useI = wire.getSingleUse()->instr();
+    if (useI.isOpc(HW_STORE)) {
+      auto store = useI.as<StoreIRef>();
+      if (!store.isFullReg())
+        return nullref;
+      auto reg = store.reg().iref();
+      return reg;
+    }
+    return nullref;
+  }
+
   bool classifyInput(RegisterIRef port, FatFF &ff) {
     auto use = port.oref().getSingleUse();
     if (!use)
@@ -312,20 +364,20 @@ public:
         ff.stdcell.ports.emplace_back(FFPortType::CLK);
         ff.abstr.clkPol = asFF.getPolarity(*use);
         ff.covered.set((size_t)useType);
-        break;
+        return true;
       case FlipFlopIRef::D:
         ff.stdcell.ports.emplace_back(FFPortType::D);
         ff.covered.set((size_t)useType);
-        break;
-      case FlipFlopIRef::Q:
-        ff.stdcell.ports.emplace_back(FFPortType::Q);
-        ff.covered.set((size_t)useType);
-        break;
+        return true;
+      // case FlipFlopIRef::Q:
+      //   ff.stdcell.ports.emplace_back(FFPortType::Q);
+      //   ff.covered.set((size_t)useType);
+      //   return true;
       case FlipFlopIRef::ENABLE:
         ff.stdcell.ports.emplace_back(FFPortType::EN);
         ff.abstr.hasClkEn = 1;
         ff.abstr.clkEnPol = asFF.getPolarity(*use);
-        break;
+        return true;
       case FlipFlopIRef::RESET_0:
       case FlipFlopIRef::RESET_1: {
         auto val = asFF.rstVal(useType == FlipFlopIRef::RESET_1 ? 1 : 0);
@@ -342,35 +394,83 @@ public:
           ff.abstr.setPol = asFF.getPolarity(*use);
           ff.stdcell.ports.emplace_back(FFPortType::SET);
         }
-        break;
+        return true;
       }
-      default:
-        return false;
+      default:;
       }
     }
 
-    // todo: MUX before flip flop
-    return true;
+    // detecting clk en MUX in front of FF
+    // todo: should probably just go in instcombine
+    if (use->instr().isOpc(HW_LOAD)) {
+      auto singleUse = use->instr().def(0)->as<WireRef>().getSingleUse();
+      if (!singleUse)
+        return false;
+      auto instr = singleUse->instr();
+      if (!instr.isOpc(HW_MUX))
+        return false;
+      auto mux = instr;
+      auto sel = mux.other(0);
+      auto trueV = mux.other(1);
+      auto falseV = mux.other(2);
+
+      auto selPort = checkIsPort(sel->as<HWValue>(), HW_INPUT_REGISTER_DEF);
+      if (!selPort)
+        return false;
+
+      auto mod = HWInstrRef{mux}.parentMod(ctx);
+      auto it = mod.regs_end();
+      if (it == mod.block().end())
+        return false;
+      if (!it->isOpc(HW_FLIP_FLOP))
+        return false;
+      auto ffInstr = it->as<FlipFlopIRef>();
+      if (ffInstr.d().iref() != checkIsReg(mux.def(0)->as<HWValue>()))
+        return false;
+
+      auto falseVPort =
+          checkIsPort(falseV->as<HWValue>(), HW_INPUT_REGISTER_DEF);
+      auto trueVPort = checkIsPort(trueV->as<HWValue>(), HW_INPUT_REGISTER_DEF);
+
+      if (!!trueVPort == !!falseVPort)
+        return false;
+
+      if (checkIsReg(falseVPort ? trueV->as<HWValue>()
+                                : falseV->as<HWValue>()) != ffInstr.q().iref())
+        return false;
+
+      if (port == selPort) {
+        ff.abstr.hasClkEn = 1;
+        ff.abstr.clkEnPol = !!trueVPort;
+        ff.stdcell.ports.emplace_back(FFPortType::EN);
+        return true;
+      }
+      if (port == trueVPort || port == falseVPort) {
+        ff.abstr.hasClkEn = 1;
+        ff.abstr.clkEnPol = !!trueVPort;
+        ff.stdcell.ports.emplace_back(FFPortType::D);
+        ff.covered.set(FlipFlopIRef::D);
+        return true;
+      }
+      return false;
+    }
+    return false;
   }
 
   bool classifyOutput(RegisterIRef port, FatFF &ff) {
-    auto use = port.oref().getSingleUse();
-    if (!use)
-      return false;
+    for (auto use : port.oref().uses()) {
+      if (use.instr().isOpc(HW_FLIP_FLOP)) {
+        auto asFF = use.instr().as<FlipFlopIRef>();
 
-    // todo: detect NOT for q inv
-
-    if (use->instr().isOpc(HW_FLIP_FLOP)) {
-      auto asFF = use->instr().as<FlipFlopIRef>();
-      auto type = asFF.classifyUse(*use);
-      if (type == FlipFlopIRef::Q) {
-        ff.abstr.hasRegularOut = 1;
-        ff.stdcell.ports.emplace_back(FFPortType::Q);
-      } else
-        return false;
+        auto type = asFF.classifyUse(use);
+        if (type == FlipFlopIRef::Q) {
+          ff.abstr.hasRegularOut = 1;
+          ff.stdcell.ports.emplace_back(FFPortType::Q);
+          return true;
+        }
+      }
     }
-
-    return true;
+    return false;
   }
 
   bool classifyPorts(ModuleIRef mod, FatFF &ff) {

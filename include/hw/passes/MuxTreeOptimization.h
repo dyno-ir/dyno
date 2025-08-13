@@ -150,7 +150,9 @@ class MuxTreeOptimizationPass {
     return selExpr;
   }
 
-  std::pair<WireRef, bool> getLiteralVal(MuxTree *tree, BoolExprLiteral cond) {
+  static std::pair<WireRef, bool>
+  getLiteralVal(HWInstrBuilder &build, MuxTree *tree, BoolExprLiteral cond) {
+    auto &ctx = build.ctx;
     WireRef out = ctx.getWires().resolve(tree->conditions[cond.id].wire);
     if (out.getNumBits() != 1)
       out = build.buildSplice(out, 1u, tree->conditions[cond.id].idx)
@@ -159,12 +161,18 @@ class MuxTreeOptimizationPass {
     return std::make_pair(out, !!cond.inverse);
   }
 
-  HWValue getExprVal(MuxTree *tree, SmallBoolExprCNF &expr) {
+public:
+  static HWValue getExprVal(HWInstrBuilder &build, MuxTree *tree,
+                            SmallBoolExprCNF &expr) {
+    if (expr.isTrue())
+      return ConstantRef::fromBool(1);
+    if (expr.isUnsat())
+      return ConstantRef::fromBool(0);
     SmallVec<HWValue, 4> andOperands;
     for (auto clause : expr.clauses()) {
       SmallVec<HWValue, 4> orOperands;
       for (auto lit : clause) {
-        auto [val, inv] = getLiteralVal(tree, lit);
+        auto [val, inv] = getLiteralVal(build, tree, lit);
         if (inv)
           val = build.buildNot(val).as<WireRef>();
         orOperands.emplace_back(val);
@@ -189,6 +197,7 @@ class MuxTreeOptimizationPass {
     return sel;
   }
 
+private:
   template <std::invocable<MutArrayRef<BoolExprLiteral>> Func>
   void forAllClauses(MuxTree::Entry &entry, Func &&func) {
     for (auto clause : entry.expr.clauses()) {
@@ -215,8 +224,8 @@ class MuxTreeOptimizationPass {
       if (auto asConst = falseV.dyn_as<ConstantRef>();
           asConst && asConst.allBitsUndef())
         return trueV;
-      return build.buildMux(getExprVal(tree, tree->entries[0].expr), trueV,
-                            falseV);
+      return build.buildMux(getExprVal(build, tree, tree->entries[0].expr),
+                            trueV, falseV);
     }
 
     auto selExpr = getBestMUXExpr(tree);
@@ -298,7 +307,7 @@ class MuxTreeOptimizationPass {
         asConst && asConst.allBitsUndef())
       return leftVal;
 
-    auto sel = getExprVal(tree, selExpr);
+    auto sel = getExprVal(build, tree, selExpr);
     return build.buildMux(sel, rightVal, leftVal);
   }
 

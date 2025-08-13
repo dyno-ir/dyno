@@ -377,6 +377,26 @@ match {
 }
 replace $out -> $val
 
+match {
+  OP_NOT $sel_inv, $sel
+  OP_AND $b, anyorder($val_b, $sel_inv:HW_WIRE)
+  OP_AND $a, anyorder($val_a, $sel)
+  OP_OR $out, $a:chk_wire(#32'b1), $b:HW_WIRE
+}
+replace {
+  HW_MUX $out, $sel, $val_a, $val_b
+}
+// fixme: we need this twice (reverse order on the or) bc of matching limitations
+match {
+  OP_NOT $sel_inv, $sel
+  OP_AND $b, anyorder($val_b, $sel_inv:HW_WIRE)
+  OP_AND $a, anyorder($val_a, $sel)
+  OP_OR $out, $b:chk_wire(#32'b1), $a:HW_WIRE
+}
+replace {
+  HW_MUX $out, $sel, $val_a, $val_b
+}
+
 /*
 // todo: multi-bit, reverse matching on the or
 match {

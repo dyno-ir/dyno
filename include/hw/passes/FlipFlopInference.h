@@ -2,11 +2,13 @@
 #include "dyno/Constant.h"
 #include "hw/HWAbstraction.h"
 #include "hw/HWContext.h"
+#include "hw/HWValue.h"
 #include "hw/IDs.h"
 #include "hw/LoadStore.h"
 #include "hw/SensList.h"
 #include "hw/Wire.h"
 #include "hw/analysis/MuxTree.h"
+#include "hw/passes/MuxTreeOptimization.h"
 #include "support/ErrorRecovery.h"
 
 namespace dyno {
@@ -19,20 +21,13 @@ class FlipFlopInferencePass {
 
   std::pair<ConstantRef, uint>
   findReset(StoreIRef store,
-            ArrayRef<std::pair<RegisterRef, bool>> resetCandidates) {
+            ArrayRef<std::pair<RegisterRef, bool>> resetCandidates,
+            MuxTree *muxTree) {
+    SmallVec<std::pair<SmallBoolExprCNF, uint>, 2> resetExprs;
     if (auto asConst = store.value().dyn_as<ConstantRef>())
       return std::pair(asConst, 0);
-    auto wire = store.value().as<WireRef>();
-    auto instr = wire.getDefI();
-    if (!instr.isOpc(HW_MUX))
-      return std::pair(nullref, 0);
-    auto mtree = muxTreeAnalysis.analyzeMuxTree(instr);
-    muxTreeAnalysis.printMuxTree(ctx, &mtree);
-    muxTreeAnalysis.dedupeMuxTreeOutputs(&mtree);
-    muxTreeAnalysis.printMuxTree(ctx, &mtree);
 
-    SmallVec<std::pair<SmallBoolExprCNF, uint>, 2> resetExprs;
-
+    auto &mtree = *muxTree;
     for (auto [i, cond] : Range{mtree.conditions}.enumerate()) {
       auto instr = ctx.getWires().resolve(cond.wire).getDefI();
       // not sure if this is 100% to spec in weird cases. we might want to
@@ -66,6 +61,49 @@ class FlipFlopInferencePass {
     }
 
     return std::make_pair(nullref, 0);
+  }
+
+  bool isQLoad(RegisterIRef q, HWValue value) {
+    if (!value.is<WireRef>())
+      return false;
+    auto wire = value.as<WireRef>();
+    auto instr = wire.getDefI();
+    if (!instr.isOpc(HW_LOAD))
+      return false;
+    auto load = instr.as<LoadIRef>();
+    if (load.reg() != q.oref() || !load.isFullReg())
+      return false;
+    return true;
+  }
+
+  Optional<uint> findClockEnable(RegisterIRef q, StoreIRef store,
+                                 MuxTree *muxTree) {
+    if (isQLoad(q, store.value().as<HWValue>()))
+      return 0;
+    if (!muxTree)
+      return nullopt;
+    for (auto [i, entry] : Range{muxTree->entries}.enumerate()) {
+      auto ref = ctx.resolveObj(entry.output);
+      if (isQLoad(q, ref.as<HWValue>()))
+        return i;
+    }
+    return nullopt;
+  }
+
+  std::optional<MuxTree> getMuxTree(StoreIRef store) {
+    std::optional<MuxTree> muxTree = std::nullopt;
+    if (auto asConst = store.value().dyn_as<ConstantRef>())
+      return std::nullopt;
+    auto wire = store.value().as<WireRef>();
+    auto instr = wire.getDefI();
+    if (!instr.isOpc(HW_MUX))
+      return std::nullopt;
+    auto mtree =
+        muxTreeAnalysis.analyzeMuxTree(store.value().as<WireRef>().getDefI());
+    muxTreeAnalysis.printMuxTree(ctx, &mtree);
+    muxTreeAnalysis.dedupeMuxTreeOutputs(&mtree);
+    muxTreeAnalysis.printMuxTree(ctx, &mtree);
+    return mtree;
   }
 
   bool runOnReg(ModuleIRef module, RegisterIRef reg) {
@@ -107,6 +145,24 @@ class FlipFlopInferencePass {
       return {trigger.iref().other(i)->as<RegisterRef>(),
               trigger->getMode(i) == SensMode::POSEDGE};
     };
+
+    auto muxTree = getMuxTree(storeI);
+    auto *muxTreePtr = muxTree ? &*muxTree : nullptr;
+
+    HWValue undef = cbuild.undef(*dValue.getNumBits()).get();
+
+    RegisterRef clkEn = nullref;
+    if (auto clkEnIdx =
+            findClockEnable(storeI.reg().iref(), storeI, muxTreePtr)) {
+      clkEn = build.buildRegister(1);
+      build.pushInsertPoint(storeI);
+      auto val = MuxTreeOptimizationPass::getExprVal(
+          build, muxTreePtr, muxTreePtr->entries[*clkEnIdx].expr);
+      build.buildStore(clkEn, val);
+      dValue = build.buildMux(val, undef, dValue).as<WireRef>();
+      build.popInsertPoint();
+    }
+
     if (hasReset) {
       SmallVec<std::pair<RegisterRef, bool>, 2> resetCandidates;
 
@@ -116,14 +172,14 @@ class FlipFlopInferencePass {
         resetCandidates = {get(0), get(1)};
       }
       uint resetIndex = 0;
-      std::tie(resetValue, resetIndex) = findReset(storeI, resetCandidates);
+      std::tie(resetValue, resetIndex) =
+          findReset(storeI, resetCandidates, muxTreePtr);
       if (!resetValue)
         report_fatal_error("reset sensitivity but no reset value found");
       rstReg = resetCandidates[resetIndex];
       clkReg = hasIFF ? resetCandidates[0] : (resetCandidates[1 - resetIndex]);
 
       build.pushInsertPoint(storeI);
-      HWValue undef = cbuild.undef(*dValue.getNumBits()).get();
       dValue = build
                    .buildMux(build.buildLoad(rstReg.first),
                              rstReg.second ? undef : dValue,
@@ -136,12 +192,14 @@ class FlipFlopInferencePass {
     auto dReg = build.buildRegister(reg.getNumBits());
 
     // ignore clk en for now.
-    auto ib = build.buildInstrRaw(HW_FLIP_FLOP, 4 + hasReset * 3);
+    auto ib = build.buildInstrRaw(HW_FLIP_FLOP, 4 + !!clkEn * 2 + hasReset * 3);
     ib.other()
         .addRef(clkReg.first)
         .addRef(ConstantRef::fromBool(clkReg.second))
         .addRef(dReg)
         .addRef(reg.oref());
+    if (clkEn)
+      ib.addRef(clkEn).addRef(ConstantRef::fromBool(0));
     if (hasReset)
       ib.addRef(rstReg.first)
           .addRef(ConstantRef::fromBool(rstReg.second))
