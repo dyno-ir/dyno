@@ -580,9 +580,9 @@ private:
       switch (*instr.getDialectOpcode()) {
       case *HW_LOAD: {
         auto defW = instr.def(0)->as<WireRef>();
-        defW.replaceAllUsesWith(build.buildNot(defW), [&](OperandRef r) {
-          currentReplaced.emplace_back(r);
-        });
+        auto invW = ctx.getWires().create(*defW.getNumBits());
+        replaceUses(defW, invW);
+        build.buildInstrRaw(OP_NOT, 2).addRef(invW).other().addRef(defW);
         break;
       }
 
@@ -641,8 +641,8 @@ private:
         for (auto use : instr.others()) {
           if (use == instr.base()) {
             continue;
-            ib.addRef(use->fat());
           }
+          ib.addRef(use->fat());
         }
         deleteMatchedInstr(instr);
         return true;
@@ -806,10 +806,11 @@ private:
   void oldInstrHook(InstrRef old, ArrayRef<InstrRef> newInstrs) {
     for (auto newInstr : newInstrs)
       ctx.sourceLocInfo.copyDebugInfo(old, newInstr);
-    if (TaggedIRef{old}.get())
+    if (TaggedIRef{old}.get()) {
       for (auto op : old) {
         op.replace(FatDynObjRef<>{nullref});
       }
+    }
   }
 
   void replacedUseHook(OperandRef replaced) {
@@ -830,8 +831,9 @@ private:
         continue;
       DEBUG("instcombine", {
         dbgs() << "replaced with:\n";
+        HWPrinter print{dbgs()};
         for (size_t i = lastWorklistSize, sz = worklist.size(); i < sz; i++)
-          dumpInstr(worklist[i]);
+          print.printInstr(worklist[i], ctx);
         if (lastWorklistSize == worklist.size()) {
           if (!currentReplaced.empty()) {
             dumpObj(currentReplaced[0]->fat());

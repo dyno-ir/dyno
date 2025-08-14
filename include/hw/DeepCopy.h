@@ -89,6 +89,7 @@ public:
       if (auto it = oldToNewMap.find(ref)) {
         ref = it.val();
       }
+      assert(ref != nullref);
       build.addRef(ref);
     }
 

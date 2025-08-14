@@ -24,6 +24,7 @@ public:
   FatRefUnion<ProcessIRef, FunctionIRef> parent(HWContext &ctx) {
     while (true) {
       auto block = parentBlock(ctx);
+      assert(block);
       if (auto parent =
               block.defI().dyn_as<FatRefUnion<ProcessIRef, FunctionIRef>>())
         return parent;

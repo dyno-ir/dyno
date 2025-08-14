@@ -12,7 +12,9 @@ inline void traverseSCFPreorder(IFunc ifunc, BFunc bfunc,
     case *OP_IF: {
       ifunc(instr);
       traverseSCFPreorder(ifunc, bfunc, instr.as<IfInstrRef>().getTrueBlock());
-      traverseSCFPreorder(ifunc, bfunc, instr.as<IfInstrRef>().getFalseBlock());
+      if (instr.as<IfInstrRef>().hasFalseBlock())
+        traverseSCFPreorder(ifunc, bfunc,
+                            instr.as<IfInstrRef>().getFalseBlock());
       break;
     }
     case *OP_SWITCH: {

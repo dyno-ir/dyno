@@ -189,6 +189,8 @@ public:
                          const BlockRef_iterator &b) {
     return a.block == b.block && a.pos == b.pos;
   }
+
+  bool isEnd() const;
 };
 static_assert(std::bidirectional_iterator<BlockRef_iterator<true>>);
 
@@ -228,6 +230,8 @@ public:
   }
 
   void reserve(size_t count) { (*this)->instrs.reserve(count + 1); }
+
+  CFG &getCFG() { return *ptr->cfg; }
 
   void sort() {
     // think copy is faster than in place, just guess though.
@@ -300,5 +304,12 @@ inline BlockRef_iterator_base CFG::operator[](ObjRef<Instr> ref) {
 inline auto BlockRef_iterator_base::blockRef() const {
   return BlockRef{block->ref.getObjID(), block};
 }
+
+template <bool Ordered> bool BlockRef_iterator<Ordered>::isEnd() const {
+  if constexpr (Ordered)
+    return *this == this->blockRef().end();
+  else
+    return *this == this->blockRef().end_unordered();
+};
 
 } // namespace dyno

@@ -91,9 +91,12 @@ class CommonSubexpressionEliminationPass {
   DestroyMap<Instr> instrDestroy;
 
   static bool ignoreForCSE(InstrRef instr) {
-    return instr.isOpc(HW_STORE, HW_STORE_DEFER, HW_ASSERT_DEFER, OP_ASSERT,
-                       HW_PRINT_DEFER, HW_PRINT, OP_IF, OP_WHILE, OP_DO_WHILE,
-                       OP_FOR, OP_CALL, OP_SWITCH, OP_YIELD, OP_UNYIELD);
+    return instr.isOpc(
+        HW_STORE, HW_STORE_DEFER, HW_ASSERT_DEFER, OP_ASSERT, HW_PRINT_DEFER,
+        HW_PRINT, OP_IF, OP_WHILE, OP_DO_WHILE, OP_FOR, OP_CALL, OP_SWITCH,
+        OP_YIELD, OP_UNYIELD, OP_CASE, OP_CASE_DEFAULT, HW_COMB_PROCESS_DEF,
+        HW_INIT_PROCESS_DEF, HW_FINAL_PROCESS_DEF, HW_SEQ_PROCESS_DEF,
+        HW_LATCH_PROCESS_DEF, HW_NETLIST_PROCESS_DEF);
   }
 
   template <typename T> auto findFirstShared(ArrayRef<T> a, ArrayRef<T> b) {
@@ -109,6 +112,7 @@ class CommonSubexpressionEliminationPass {
     if (!other)
       return;
 
+    assert(other != instr);
     assert(HWInstrRef{other}.parentProc(ctx) ==
            HWInstrRef{instr}.parentProc(ctx));
 
@@ -135,8 +139,11 @@ class CommonSubexpressionEliminationPass {
 
     auto buildStack = [&](BlockRef block, SmallVecImpl<OperandRef> &stack) {
       while (true) {
+        auto instr = block.defI();
+        // switch block is a special context, doesn't count here.
+        // if (!instr.isOpc(OP_SWITCH))
         stack.emplace_back(*block.def());
-        auto parent = HWInstrRef{block.defI()}.parentBlock(ctx);
+        auto parent = HWInstrRef{instr}.parentBlock(ctx);
         if (!parent)
           break;
         block = parent;
@@ -153,23 +160,21 @@ class CommonSubexpressionEliminationPass {
     InstrRef instrPred = instrStack[instrIdx].instr();
     auto block = HWInstrRef{otherPred}.parentBlock(ctx);
     assert(block == HWInstrRef{instrPred}.parentBlock(ctx));
-    auto it = std::next(block.begin());
-    if (*it == other)
-      return;
-    ctx.getCFG()[other].erase();
-    it.insertPrev(other);
 
-    // DEBUG("CSE", {
-    //   dbgs() << "merging in different blocks:\n";
-    //   dumpInstr(instr, ctx);
-    //   dumpInstr(other, ctx);
-    //   dbgs() << "this pred:\n";
-    //   dumpInstr(instrPred, ctx);
-    //   dbgs() << "other pred:\n";
-    //   dumpInstr(otherPred, ctx);
-    //   dbgs() << "first parent block:\n";
-    //   dumpInstr(block.defI(), ctx);
-    // })
+    if (block.defI().isOpc(OP_SWITCH))
+      block = HWInstrRef{block.defI()}.parentBlock(ctx);
+
+    DEBUG("CSE", {
+      dbgs() << "merging in different blocks:\n";
+      dumpInstr(instr, ctx);
+      dumpInstr(other, ctx);
+      dumpInstr(HWInstrRef{otherPred}.parentBlock(ctx).defI(), ctx);
+      dumpInstr(HWInstrRef{instrPred}.parentBlock(ctx).defI(), ctx);
+    })
+
+    ctx.getCFG()[other].erase();
+    auto it = block.begin();
+    it.insertPrev(other);
 
     // for (auto it = block.begin(); it != block.end(); ++it) {
     //   if (*it == otherPred || *it == instrPred) {
@@ -185,10 +190,18 @@ class CommonSubexpressionEliminationPass {
 
   void runOnProcess(ProcessIRef proc) {
     map.clear();
-    for (auto instr : HierBlockRange{proc.block()})
+    Range range{StableHierBlockRangeIter{proc.block().begin()},
+                StableHierBlockRangeIter{proc.block().end()}};
+    ObjMapVec<Instr, bool> visited;
+    dumpInstr(proc, ctx);
+    for (auto instr : range) {
+      dumpInstr(instr, ctx);
+      assert(!visited.get_ensure(instr));
+      visited.get_ensure(instr) = 1;
       if (!ignoreForCSE(instr)) {
         runOnInstr(instr);
       }
+    }
   }
 
   void runOnModule(ModuleIRef mod) {

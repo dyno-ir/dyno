@@ -45,7 +45,7 @@ class MuxTreeOptimizationPass {
     DEBUG("MuxTreeOptimization", {
       dbgs() << "mux tree at: ";
       if (tree->root)
-        dumpInstr(tree->root);
+        dumpInstr(tree->root, ctx);
       else
         dbgs() << "\n";
       for (auto entry : tree->entries) {

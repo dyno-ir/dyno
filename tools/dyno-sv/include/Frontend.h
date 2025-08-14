@@ -5,6 +5,7 @@
 #include "hw/HWContext.h"
 #include "hw/LoadStore.h"
 #include "slang/ast/ASTVisitor.h"
+#include "slang/ast/Symbol.h"
 #include "slang/ast/SystemSubroutine.h"
 #include "slang/ast/expressions/AssignmentExpressions.h"
 #include "slang/ast/expressions/CallExpression.h"
@@ -589,7 +590,7 @@ public:
             if (auto *psym = conn->port.as_if<slang::ast::PortSymbol>())
               portRegs.back()->numBits = psym->getType().getBitstreamWidth();
 
-            build.pushInsertPoint(proc.block().begin());
+            build.pushInsertPoint(proc.block().end());
             build.buildStore(portRegs.back(), val->proGetValue(build));
             build.popInsertPoint();
           }
@@ -648,10 +649,6 @@ public:
         break;
       }
 
-      case slang::ast::SymbolKind::TypeAlias: {
-        break;
-      }
-
       case slang::ast::SymbolKind::Subroutine: {
         auto &asSubr = member.as<slang::ast::SubroutineSymbol>();
         auto [found, it] = functionMap.findOrInsert(
@@ -669,6 +666,14 @@ public:
       }
 
       case slang::ast::SymbolKind::UninstantiatedDef: {
+        break;
+      }
+
+      case slang::ast::SymbolKind::TypeAlias: {
+        break;
+      }
+
+      case slang::ast::SymbolKind::TransparentMember: {
         break;
       }
 

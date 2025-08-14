@@ -2,6 +2,7 @@
 
 #include "dyno/CFG.h"
 #include "dyno/Constant.h"
+#include "dyno/Instr.h"
 #include "hw/AutoDebugInfo.h"
 #include "hw/DeepCopy.h"
 #include "hw/HWAbstraction.h"
@@ -299,9 +300,14 @@ class LoopSimplifyPass {
           build.buildInstrRaw(OP_UNYIELD, newNumYieldVals + isForLoop);
 
       build.setInsertPoint(yield);
-      auto yieldBuild =
-          build.buildInstrRaw(OP_YIELD, newNumYieldVals + newHasCond);
-      yieldBuild.other();
+
+      auto yieldBuildVals = newNumYieldVals + newHasCond;
+
+      std::optional<InstrBuilder> yieldBuild = std::nullopt;
+      if (yieldBuildVals != 0) {
+        yieldBuild = build.buildInstrRaw(OP_YIELD, yieldBuildVals);
+        yieldBuild->other();
+      }
 
       WireRef forIterWire;
       if (isForLoop) {
@@ -312,7 +318,7 @@ class LoopSimplifyPass {
         unyieldBuild.addRef(forIterWire);
       }
       if (newHasCond)
-        yieldBuild.addRef(yield.operand(0)->fat());
+        yieldBuild->addRef(yield.operand(0)->fat());
 
       if (forLoopIter) {
         unyield.operand(*forLoopIter)
@@ -340,7 +346,7 @@ class LoopSimplifyPass {
         if (i == forLoopIter)
           continue;
 
-        yieldBuild.addRef(yieldOp->fat());
+        yieldBuild->addRef(yieldOp->fat());
         unyieldBuild.addRef(unyieldOp->fat());
         unyieldOp.replace(FatDynObjRef<>{nullref});
       }

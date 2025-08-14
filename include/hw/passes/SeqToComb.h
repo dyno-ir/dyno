@@ -57,8 +57,7 @@ public:
         // at end of proc, store defer reg value into qreg
         build.setInsertPoint(proc.block().end());
         auto finalV = build.buildLoad(reg);
-        build.buildStore(qReg, finalV, true, trigger,
-                         store.base()->as<ConstantRef>().getExactVal(),
+        build.buildStore(qReg, finalV, true, trigger, store.getBase(),
                          store.terms());
         break;
       }
@@ -67,8 +66,7 @@ public:
         build.setInsertPoint(HWInstrRef{instr}.iter(ctx));
 
         build.buildStore(store.reg(), store.value(), true, trigger,
-                         store.base()->as<ConstantRef>().getExactVal(),
-                         store.terms());
+                         store.getBase(), store.terms());
         destroyList.emplace_back(instr);
         break;
       }

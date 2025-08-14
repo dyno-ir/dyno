@@ -33,6 +33,7 @@ public:
       DEFERRED,
     };
     Mode mode = IMMEDIATE;
+    bool lowerAllDynamic = true;
   };
   Config config;
 
@@ -474,10 +475,14 @@ public:
         uint32_t len = *asStore.reg()->numBits;
         if (!asStore.isFullReg()) {
           if (asStore.getNumTerms() != 0) {
-            build.setInsertPoint(asStore.iter(ctx));
-            auto val = regState.getOrSetDefault(depth, asStore.reg())
-                           .get(build, 0, *asStore.reg()->numBits, false);
 
+            build.setInsertPoint(asStore.iter(ctx));
+            auto &state = regState.getOrSetDefault(depth, asStore.reg());
+
+            if (state.untouched && !config.lowerAllDynamic)
+              break;
+
+            auto val = state.get(build, 0, *asStore.reg()->numBits, false);
             val = build.buildInsert(
                 val, asStore.value(),
                 asStore.base()->as<ConstantRef>().getExactVal(),
@@ -515,6 +520,9 @@ public:
         uint32_t len = *asLoad.reg()->numBits;
         if (!asLoad.isFullReg()) {
           if (asLoad.getNumTerms() != 0) {
+            if (val.untouched && !config.lowerAllDynamic)
+              break;
+
             build.setInsertPoint(ctx.getCFG()[asLoad]);
             auto matVal = build.buildSplice(
                 val.get(build), asLoad.getLen(),

@@ -5,6 +5,7 @@
 #include "hw/passes/ABC.h"
 #include "hw/passes/AIGConstruct.h"
 #include "hw/passes/AggressiveDeadCodeElimination.h"
+#include "hw/passes/CheckPass.h"
 #include "hw/passes/CommonSubexpressionElimination.h"
 #include "hw/passes/ConstantMapping.h"
 #include "hw/passes/DumpVerilog.h"
@@ -54,16 +55,20 @@ class PassPipeline {
   OrderInstrsPass orderInstrs{ctx};
   ConstantMapping constMap{ctx};
   FindLongestPathPass longestPath{ctx};
+  CheckPass checkPass{ctx};
 
 public:
   bool printAfterAll = false;
+  bool checkAfterAll = true;
 
-  template <typename T> void runPass(T &pass) {
+  template <typename T> void runPass(T &pass, bool skipCheck = false) {
     pass.run();
     if (printAfterAll) {
       std::print(std::cerr, "\n\nIR after {}:\n", __PRETTY_FUNCTION__);
       HWPrinter{std::cerr}.printCtx(ctx);
     }
+    if (checkAfterAll && !skipCheck)
+      checkPass.run();
   }
 
   void runOptPipeline() {
@@ -71,6 +76,7 @@ public:
     HWPrinter{std::cerr}.printCtx(ctx);
 
     runPass(funcInline);
+    runPass(instCombine);
     runPass(moduleInline);
     runPass(triggerDedupe);
     runPass(seqToComb);
@@ -83,7 +89,8 @@ public:
     runPass(instCombine);
     runPass(loopSimplify);
     runPass(agressiveDCE);
-    runPass(cse);
+    runPass(cse, true);
+    runPass(orderInstrs);
     runPass(instCombine);
     runPass(agressiveDCE);
   }
@@ -100,7 +107,8 @@ public:
     debugType = 0;
     runPass(parseLiberty);
     runPass(agressiveDCE);
-    runPass(cse);
+    runPass(cse, true);
+    runPass(orderInstrs);
     runPass(instCombine);
     runPass(agressiveDCE);
     std::tie(printAfterAll, debugType) = old;
@@ -124,7 +132,8 @@ public:
     runPass(agressiveDCE);
 
     runPass(flipFlopInference);
-    runPass(cse);
+    runPass(cse, true);
+    runPass(orderInstrs);
     runPass(muxTreeOpt);
     runPass(agressiveDCE);
 
@@ -164,7 +173,8 @@ public:
     runPass(ffMap);
     runPass(orderInstrs);
     runPass(instCombine);
-    runPass(cse);
+    runPass(cse, true);
+    runPass(orderInstrs);
 
     runPass(ssaConstr);
     runPass(instCombine);

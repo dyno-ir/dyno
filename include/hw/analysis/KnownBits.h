@@ -64,6 +64,18 @@ class KnownBitsAnalysis {
     pushNextOrReturn(frame, instr);
   }
 
+  void getICMPKnownBits(Frame &frame, InstrRef instr, BigInt::ICmpPred pred) {
+    if (frame.idx == 0)
+      ;
+    else if (frame.idx == 1)
+      frame.acc = retVal;
+    else {
+      frame.acc.val = ConstantRef::fromFourState(
+          BigInt::icmpOp4S(frame.acc.val, retVal.val, pred));
+    }
+    pushNextOrReturn(frame, instr);
+  }
+
 public:
   BigInt getKnownBits(HWValue rootVal) {
     stack.emplace_back(rootVal, 0);
@@ -86,6 +98,13 @@ public:
         FOR_HW_SIMPLE_OPS(LAMBDA)
         LAMBDA(HW_CONCAT, _, _, BigInt::concatOp4S)
 #undef LAMBDA
+#define LAMBDA(opc, pred)                                  \
+  case *opc:                                                                   \
+    getICMPKnownBits(frame, instr, pred);                  \
+    break;
+        FOR_OP_ALL_COMPARE_OPS(LAMBDA)
+#undef LAMBDA
+
 
       case *OP_NOT: {
         if (frame.idx == 0) {

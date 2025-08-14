@@ -511,8 +511,11 @@ public:
     }
 
     auto instr = InstrRef{ctx.getInstrs().create(1 + values.size(), HW_CONCAT)};
-
     insertInstr(instr);
+
+    auto insertSave = insert;
+    setInsertPoint(instr);
+
     InstrBuilder build{instr};
 
     build.addRef(ctx.getWires().create());
@@ -539,7 +542,7 @@ public:
           *numBits += *val;
       }
     }
-
+    insert = insertSave;
     auto rv = HWInstrRef{instr}.defW();
     rv->numBits = numBits;
     return rv;

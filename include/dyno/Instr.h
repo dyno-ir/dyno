@@ -454,6 +454,7 @@ public:
   void replaceAllUsesWith(FatDynObjRef<> newRef, Callback &&func) {
     if (Operand::isDefUseOperand(newRef)) {
       auto &other = *reinterpret_cast<InstrDefUse *>(newRef.getPtr());
+      assert(&other != this);
       for (OperandRef use : uses()) {
         func(use);
         use->emplace(newRef);
@@ -593,9 +594,16 @@ class InstrBuilder {
 
 public:
   InstrBuilder(const InstrBuilder &) = delete;
-  InstrBuilder(InstrBuilder &&) = delete;
   InstrBuilder &operator=(const InstrBuilder &) = delete;
-  InstrBuilder &operator=(InstrBuilder &&) = delete;
+
+  InstrBuilder(InstrBuilder &&other) : op(other.op) {
+    other.op = *other.instr().end();
+  };
+  InstrBuilder &operator=(InstrBuilder &&other) {
+    this->op = other.op;
+    other.op = *other.instr().end();
+    return *this;
+  };
 
   InstrBuilder(InstrRef instr) : op(instr, 0) {
     instr->numDefs = instr->numOperands;

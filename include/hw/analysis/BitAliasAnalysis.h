@@ -11,6 +11,7 @@
 #include "hw/Wire.h"
 #include "hw/analysis/RegisterValue.h"
 #include "op/IDs.h"
+#include <optional>
 namespace dyno {
 class BitAliasAnalysis {
   HWContext &ctx;
@@ -122,6 +123,11 @@ class BitAliasAnalysis {
       assert(outLen % inLen == 0);
       auto cnt = outLen / inLen;
       frame.acc = retVal;
+      if (cnt == 0) {
+        frame.acc = ConstantRef::zeroBitZero();
+        change = true;
+        return std::nullopt;
+      }
       for (uint i = 0; i < cnt - 1; i++)
         frame.acc.appendTop(retVal);
       change |= nested;
