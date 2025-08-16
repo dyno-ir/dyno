@@ -537,7 +537,6 @@ public:
       if (entry == FixupType::FAIL) {
         count++;
         entry = ptr;
-        dumpInstr(mod);
       }
     }
     DEBUG("FlipFlopMapping", {

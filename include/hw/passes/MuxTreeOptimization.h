@@ -233,8 +233,8 @@ private:
     DEBUG("MuxTreeOptimization", {
       dbgs() << "splitting tree on: ";
       selExpr.dump();
+      dbgs() << "\n\n";
     });
-    dbgs() << "\n\n";
     auto selExprNeg = selExpr.negated2(tree->conditions.size());
 
     MuxTree *left = muxTreeAlloc.allocate();

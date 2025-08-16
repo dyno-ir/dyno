@@ -49,7 +49,6 @@ private:
     auto known = knownBits.getKnownBits(wire);
     if (known.getIs4S())
       return false;
-    known.toStream(dbgs());
     replaceUses(wire, cbuild.val(known).get());
     return true;
   }

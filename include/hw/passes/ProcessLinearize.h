@@ -266,28 +266,28 @@ public:
     }
   }
 
-  void visit(SmallVecImpl<ProcessIRef> &ordered, ProcessIRef proc) {
-    auto &custom = map[proc.proc()];
+  // void visit(SmallVecImpl<ProcessIRef> &ordered, ProcessIRef proc) {
+  //   auto &custom = map[proc.proc()];
 
-    if ((custom.bitField & Custom::VISITED))
-      return;
-    if ((custom.bitField & Custom::PRE_VISITED)) {
-      std::cerr << "cyclic:\n";
-      dumpInstr(proc);
-      abort();
-    }
+  //   if ((custom.bitField & Custom::VISITED))
+  //     return;
+  //   if ((custom.bitField & Custom::PRE_VISITED)) {
+  //     std::cerr << "cyclic:\n";
+  //     dumpInstr(proc);
+  //     abort();
+  //   }
 
-    custom.bitField |= Custom::PRE_VISITED;
+  //   custom.bitField |= Custom::PRE_VISITED;
 
-    for (auto depend : Range{custom.predsSet}) {
-      if (depend == proc)
-        continue;
-      visit(ordered, depend);
-    }
+  //   for (auto depend : Range{custom.predsSet}) {
+  //     if (depend == proc)
+  //       continue;
+  //     visit(ordered, depend);
+  //   }
 
-    custom.bitField |= Custom::VISITED;
-    ordered.emplace_back(proc);
-  }
+  //   custom.bitField |= Custom::VISITED;
+  //   ordered.emplace_back(proc);
+  // }
 
   void linearize(ModuleIRef module) {
     SmallVec<ProcessIRef, 16> ordered;
