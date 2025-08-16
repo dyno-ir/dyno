@@ -21,6 +21,7 @@
 #include "support/ErrorRecovery.h"
 #include "support/Utility.h"
 #include <algorithm>
+#include <csignal>
 
 namespace dyno {
 
@@ -226,6 +227,7 @@ private:
       else
         out = build.buildSplice(val, frag.len, frag.srcAddr);
       replaceUses(defW, out);
+      deleteMatchedInstr(instr);
       return true;
     }
 
@@ -699,6 +701,19 @@ private:
       if (knownBitsConstProp(instr))
         return true;
 
+    if (instr.isOpc(HW_SPLICE))
+      if (simplifyAddressing(instr.as<SpliceIRef>()))
+        return true;
+    if (instr.isOpc(HW_INSERT))
+      if (simplifyAddressing(instr.as<InsertIRef>()))
+        return true;
+    if (instr.isOpc(HW_LOAD))
+      if (simplifyAddressing(instr.as<LoadIRef>()))
+        return true;
+    if (instr.isOpc(HW_STORE, HW_STORE_DEFER))
+      if (simplifyAddressing(instr.as<StoreIRef>()))
+        return true;
+
     switch (*instr.getDialectOpcode()) {
 #define LAMBDA(opc, ib, cb, bib) case *opc:
       FOR_HW_COMM_OPS(LAMBDA)
@@ -722,7 +737,8 @@ private:
 
     case *HW_CONCAT:
     case *OP_TRUNC:
-    case *HW_SPLICE: {
+    case *HW_SPLICE:
+    case *HW_INSERT: {
       if (simplifyBitAliases(instr))
         return true;
       break;
@@ -731,19 +747,6 @@ private:
     default:
       break;
     }
-
-    if (instr.isOpc(HW_SPLICE))
-      if (simplifyAddressing(instr.as<SpliceIRef>()))
-        return true;
-    if (instr.isOpc(HW_INSERT))
-      if (simplifyAddressing(instr.as<InsertIRef>()))
-        return true;
-    if (instr.isOpc(HW_LOAD))
-      if (simplifyAddressing(instr.as<LoadIRef>()))
-        return true;
-    if (instr.isOpc(HW_STORE, HW_STORE_DEFER))
-      if (simplifyAddressing(instr.as<StoreIRef>()))
-        return true;
 
     if (instr.isOpc(OP_ADD, OP_MUL, OP_AND, OP_OR, OP_XOR)) {
       if (reduceBitWidth(instr))
@@ -826,21 +829,31 @@ private:
       if (TaggedIRef{instr}.get())
         continue;
       auto lastWorklistSize = worklist.size();
-      DEBUG("instcombine", { dumpInstr(instr); })
+#ifdef _DEBUG_
+      std::stringstream str;
+      HWPrinter print{str};
+      print.printDeps(instr, ctx, 2);
+#endif
+
       if (!runOnInstr(instr))
         continue;
+
       DEBUG("instcombine", {
+        dbgs() << "initial instructions:\n";
+        dbgs() << str.str();
+        str.str("");
         dbgs() << "replaced with:\n";
-        HWPrinter print{dbgs()};
+
         for (size_t i = lastWorklistSize, sz = worklist.size(); i < sz; i++)
           print.printInstr(worklist[i], ctx);
         if (lastWorklistSize == worklist.size()) {
           if (!currentReplaced.empty()) {
             dumpObj(currentReplaced[0]->fat());
-            dbgs() << "\n";
+            str << "\n";
           } else
-            dbgs() << "<none>\n";
+            str << "<none>\n";
         }
+        dbgs() << str.str();
       })
 
       auto newInstrs = ArrayRef<InstrRef>{worklist.begin() + lastWorklistSize,

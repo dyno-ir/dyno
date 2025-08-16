@@ -231,11 +231,15 @@ public:
   }
 
   constexpr bool valueEquals(uint32_t val) const {
+    if (self().getIs4S())
+      return false;
     if (auto val2 = getLimitedVal())
       return val == *val2;
     return false;
   }
   constexpr bool valueEqualsS(int32_t val) const {
+    if (self().getIs4S())
+      return false;
     if (auto val2 = getLimitedValS())
       return val == *val2;
     return false;

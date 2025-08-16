@@ -61,7 +61,10 @@ class BitAliasAnalysis {
 
     case *HW_SPLICE: {
       auto asSplice = instr.as<SpliceIRef>();
-      if (asSplice.getNumTerms() != 0) {
+      if (asSplice.getNumTerms() != 0 && !asSplice.terms().all([](auto term) {
+            return term.getIdx().template is<ConstantRef>();
+          })) {
+
         frame.acc = BitAliasAcc::mostPessimistic(instr.def(0)->as<WireRef>());
         return std::nullopt;
       }
@@ -71,6 +74,12 @@ class BitAliasAnalysis {
       auto addr = asSplice.getBase();
       auto len = *asSplice.out()->as<WireRef>().getNumBits();
       assert(retVal.frags.empty() || retVal.frags.front().dstAddr == 0);
+
+      // support unsimplified constant addresses here to avoid explosion
+      // in instcombine for long insert/splice sequences. (todo: better fix?)
+      asSplice.terms().for_each([&](auto term) {
+        addr += term.getIdx().template as<ConstantRef>().getExactVal();
+      });
 
       retVal = retVal.getRange(addr, len);
       retVal.appendTop(frame.acc);
@@ -150,19 +159,32 @@ class BitAliasAnalysis {
 
     case *HW_INSERT: {
       InsertIRef asInsert = instr.as<InsertIRef>();
-      if (asInsert.getNumTerms() != 0) {
-        frame.acc = BitAliasAcc::mostPessimistic(instr.def(0)->as<WireRef>());
-        return std::nullopt;
-      }
-      if (first)
+      if (first) {
+        if (asInsert.getNumTerms() != 0 && !asInsert.terms().all([](auto term) {
+              return term.getIdx().template is<ConstantRef>();
+            })) {
+          frame.acc = BitAliasAcc::mostPessimistic(instr.def(0)->as<WireRef>());
+          return std::nullopt;
+        }
         break;
+      }
       if (frame.ref == instr.other(0)) {
         frame.acc = std::move(retVal);
         ++frame.ref;
       } else {
         auto addr = asInsert.getBase();
         auto len = asInsert.getLen();
+
+        // support unsimplified constant addresses here to avoid explosion
+        // in instcombine for long insert/splice sequences. (todo: better fix?)
+        asInsert.terms().for_each([&](auto term) {
+          addr += term.getIdx().template as<ConstantRef>().getExactVal();
+        });
+
         frame.acc.overwriteNoMaterialize(retVal, 0, addr, len);
+        // constant inserts can be lowered to splice, so also mark change if
+        // first entry.
+        change |= stack.size() == 1;
         change |= nested;
         return std::nullopt;
       }

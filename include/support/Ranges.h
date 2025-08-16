@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <initializer_list>
 #include <iterator>
+#include <numeric>
 #include <type_traits>
 
 template <typename It> class Range;
@@ -417,6 +418,14 @@ public:
   }
   template <typename T> It find_if(T func) {
     return std::find_if(begin(), end(), func);
+  }
+
+  template <typename T> bool all(T func) {
+    return std::all_of(begin(), end(), func);
+  }
+
+  template <typename T> void for_each(T func) {
+    std::for_each(begin(), end(), func);
   }
 
 private:

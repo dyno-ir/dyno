@@ -183,6 +183,25 @@ public:
     auto regTok = regNames.bind(&ctx.regNameInfo);
     printInstr(instr);
   }
+
+  void printDeps(InstrRef instr) {
+    for (auto use : instr.others()) {
+      if (!Operand::isDefUseOperand(*use))
+        continue;
+      printDeps(use->as<FatDynObjRef<InstrDefUse>>()->getSingleDef()->instr());
+    }
+    printInstr(instr);
+  }
+  void printDeps(InstrRef instr, HWContext &ctx, uint maxDepth = -1) {
+    if (maxDepth)
+      for (auto use : instr.others()) {
+        if (!Operand::isDefUseOperand(*use))
+          continue;
+        printDeps(use->as<FatDynObjRef<InstrDefUse>>()->getSingleDef()->instr(),
+                  ctx, maxDepth - 1);
+      }
+    printInstr(instr, ctx);
+  }
 };
 
 void dumpCtx(HWContext &ctx);

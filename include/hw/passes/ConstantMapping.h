@@ -117,7 +117,7 @@ class ConstantMapping {
       return oneW;
 
     auto ib = build.buildInstrRaw(HW_CONCAT, 1 + val.getNumBits());
-    WireRef w = ctx.getWires().create(val.getNumWords());
+    WireRef w = ctx.getWires().create(val.getNumBits());
     ib.addRef(w).other();
 
     // note: could use repeat to reduce operand count

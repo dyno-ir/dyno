@@ -5,6 +5,7 @@
 #include "dyno/Opcode.h"
 #include "hw/HWValue.h"
 #include "hw/IDs.h"
+#include "hw/LoadStore.h"
 #include "hw/Wire.h"
 #include "op/IDs.h"
 #include <concepts>
@@ -98,13 +99,12 @@ public:
         FOR_HW_SIMPLE_OPS(LAMBDA)
         LAMBDA(HW_CONCAT, _, _, BigInt::concatOp4S)
 #undef LAMBDA
-#define LAMBDA(opc, pred)                                  \
+#define LAMBDA(opc, pred)                                                      \
   case *opc:                                                                   \
-    getICMPKnownBits(frame, instr, pred);                  \
+    getICMPKnownBits(frame, instr, pred);                                      \
     break;
         FOR_OP_ALL_COMPARE_OPS(LAMBDA)
 #undef LAMBDA
-
 
       case *OP_NOT: {
         if (frame.idx == 0) {
@@ -138,6 +138,51 @@ public:
                               ? PatBigInt::fromFourState(FourState::S0, delta)
                               : PatBigInt::fromSign(retVal.val, delta);
           BigInt::concatOp4S(retVal.val, lhs, retVal.val);
+          stack.pop_back();
+        }
+        break;
+      }
+
+      case *HW_SPLICE: {
+        auto asSplice = instr.as<SpliceIRef>();
+        if (frame.idx == 0) {
+          if (!asSplice.isConstantOffs()) {
+            retVal = KnownBitsVal{PatBigInt::undef(*wire.getNumBits())};
+            stack.pop_back();
+            break;
+          }
+          frame.idx++;
+          stack.emplace_back(instr.other(0)->as<HWValue>(), 0);
+        } else {
+          BigInt::rangeSelectOp4S(retVal.val, retVal.val, asSplice.getBase(),
+                                  asSplice.getLen());
+          stack.pop_back();
+        }
+        break;
+      }
+
+      case *HW_INSERT: {
+        auto asInsert = instr.as<InsertIRef>();
+        if (frame.idx == 0) {
+          if (!asInsert.isConstantOffs()) {
+            retVal = KnownBitsVal{PatBigInt::undef(*wire.getNumBits())};
+            stack.pop_back();
+            break;
+          }
+          frame.idx++;
+          stack.emplace_back(asInsert.in()->as<HWValue>(), 0);
+        } else if (frame.idx == 1) {
+          frame.acc = std::move(retVal);
+          frame.idx++;
+          stack.emplace_back(asInsert.val()->as<HWValue>(), 0);
+        } else {
+          auto highOffs = asInsert.getBase() + asInsert.getLen();
+          BigInt low, high;
+          BigInt::rangeSelectOp4S(low, frame.acc.val, 0, asInsert.getBase());
+          BigInt::rangeSelectOp4S(high, frame.acc.val, highOffs,
+                                  frame.acc.val.getNumBits() - highOffs);
+          BigInt::concatOp4S(low, retVal.val, low);
+          BigInt::concatOp4S(retVal.val, high, low);
           stack.pop_back();
         }
         break;

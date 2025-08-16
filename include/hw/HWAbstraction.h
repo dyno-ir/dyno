@@ -397,6 +397,9 @@ public:
   HWValue buildSplice(HWValue src, uint32_t numBits, uint32_t baseAddr,
                       Ts... terms) {
 
+    if (sizeof...(terms) == 0 && baseAddr == 0)
+      return buildTrunc(numBits, src);
+
     if (baseAddr >= *src.as<HWValue>().getNumBits()) {
       return ctx.constBuild().undef(numBits).get();
     }
@@ -482,16 +485,9 @@ public:
                  pair.second.isConstant();
         })) {
       auto cbuild = ctx.constBuild();
-      if (values.size() == 0)
-        return cbuild.val(0, 0).get();
-
-      cbuild.valRange(
-          values.back().first.as<ConstantRef>(),
-          values.back().second.getAddr().as<ConstantRef>().getExactVal(),
-          values.back().second.getLen().as<ConstantRef>().getExactVal());
-
-      for (size_t i = values.size() - 1; i-- > 0;)
-        cbuild.concatRange(
+      cbuild.val(0, 0);
+      for (size_t i = 0; i < values.size(); i++)
+        cbuild.concatRangeLHS(
             values[i].first.as<ConstantRef>(),
             values[i].second.getAddr().as<ConstantRef>().getExactVal(),
             values[i].second.getLen().as<ConstantRef>().getExactVal());
@@ -523,7 +519,7 @@ public:
 
     Optional<uint32_t> numBits = 0;
 
-    for (auto [value, range] : Range{values}.reverse()) {
+    for (auto [value, range] : values) {
       if (auto asConst = range.getLen().dyn_as<ConstantRef>();
           asConst && asConst.valueEquals(0))
         continue;

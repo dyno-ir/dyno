@@ -199,7 +199,13 @@ public:
     runPass(abc);
     runPass(agressiveDCE);
     runPass(removeBufs);
+
+    runPass(cse);
+    runPass(instCombine);
+    runPass(agressiveDCE);
+
     runPass(constMap);
+
     runPass(cse);
     runPass(instCombine);
     runPass(agressiveDCE);
@@ -211,6 +217,11 @@ public:
   void dumpVerilog(std::ostream &os) {
     DumpVerilogPass dumpVerilog{ctx, os};
     dumpVerilog.run();
+  }
+
+  void dumpDyno(std::ostream &os) {
+    HWPrinter print{os};
+    print.printCtx(ctx);
   }
 
 public:
