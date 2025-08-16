@@ -58,7 +58,7 @@ class PassPipeline {
   CheckPass checkPass{ctx};
 
 public:
-  bool printAfterAll = false;
+  bool printAfterAll = true;
   bool checkAfterAll = true;
 
   template <typename T> void runPass(T &pass, bool skipCheck = false) {
@@ -170,12 +170,11 @@ public:
     runPass(agressiveDCE);
 
     runLibertyPipeline();
-    runPass(ffMap);
+    runPass(ffMap, true);
     runPass(orderInstrs);
     runPass(instCombine);
     runPass(cse, true);
     runPass(orderInstrs);
-
     runPass(ssaConstr);
     runPass(instCombine);
     runPass(agressiveDCE);
@@ -200,7 +199,13 @@ public:
     runPass(abc);
     runPass(agressiveDCE);
     runPass(removeBufs);
+
+    runPass(cse);
+    runPass(instCombine);
+    runPass(agressiveDCE);
+
     runPass(constMap);
+
     runPass(cse);
     runPass(instCombine);
     runPass(agressiveDCE);
@@ -212,6 +217,11 @@ public:
   void dumpVerilog(std::ostream &os) {
     DumpVerilogPass dumpVerilog{ctx, os};
     dumpVerilog.run();
+  }
+
+  void dumpDyno(std::ostream &os) {
+    HWPrinter print{os};
+    print.printCtx(ctx);
   }
 
 public:

@@ -4,6 +4,7 @@
 #include "hw/HWContext.h"
 #include "support/Bits.h"
 #include "support/ErrorRecovery.h"
+#include <algorithm>
 #include <cstdint>
 #include <utility>
 
@@ -237,7 +238,7 @@ struct RegisterValue : public RegisterFrags<RegisterValueFragment> {
                             .get();
         low.ref = newConst;
         low.len += high.len;
-        assert(low.untouched == high.untouched);
+        low.untouched &= high.untouched;
         high.dstAddr = ~0u;
         any = true;
 
@@ -248,7 +249,7 @@ struct RegisterValue : public RegisterFrags<RegisterValueFragment> {
 
       if (low.ref == high.ref && high.srcAddr == low.srcAddr + low.len) {
         low.len += high.len;
-        assert(low.untouched == high.untouched);
+        low.untouched &= high.untouched;
         high.dstAddr = ~0u;
         any = true;
 
@@ -348,6 +349,7 @@ struct RegisterValue : public RegisterFrags<RegisterValueFragment> {
         break;
     }
 
+    std::reverse(operands.begin(), operands.end());
     auto rv = build.buildMultiSplice(ArrayRef{operands});
     if (update)
       overwrite(rv, 0, addrB, lenB, allUntouched);
@@ -365,6 +367,7 @@ struct RegisterValue : public RegisterFrags<RegisterValueFragment> {
     }
     assert(allUntouched == untouched);
 
+    std::reverse(operands.begin(), operands.end());
     auto rv = build.buildMultiSplice(ArrayRef{operands});
     if (update)
       overwrite(rv, 0, 0, len, allUntouched);

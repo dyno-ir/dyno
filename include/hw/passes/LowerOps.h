@@ -243,11 +243,21 @@ private:
     HWValue prop = build.buildXor(lhs, rhs);
     uint32_t bits = *lhs.getNumBits();
 
+    HWValue cin = nullref;
+    if (instr.isOpc(HW_ADD_CARRY))
+      cin = instr.other(2)->as<HWValue>();
+
     SmallVec<AddPair, 32> arr;
     arr.reserve(bits);
     for (uint32_t i = 0; i < bits; i++) {
       HWValue propBit = build.buildSplice(prop, 1, i);
       HWValue genBit = build.buildSplice(gen, 1, i);
+
+      if (i == 0 && cin) {
+        genBit =
+            build.buildOr(genBit, build.buildAnd(cin, build.buildTrunc(1, lhs)),
+                          build.buildAnd(cin, build.buildTrunc(1, rhs)));
+      }
       arr.emplace_back(genBit, propBit);
     }
 
@@ -259,9 +269,12 @@ private:
     ibCC.addRef(instr.def(0)->as<WireRef>()).other();
     for (uint32_t i = bits; i-- > 0;) {
       HWValue sum;
-      if (i == 0)
-        sum = arr[0].prop;
-      else {
+      if (i == 0) {
+        if (cin)
+          sum = build.buildXor(arr[0].prop, cin);
+        else
+          sum = arr[0].prop;
+      } else {
         sum = build.buildXor(arr[i].prop, processed[i - 1].gen);
       }
       ibCC.addRef(sum);
@@ -426,14 +439,14 @@ private:
       shiftVal = build.buildMux(cond, shifted, shiftVal);
     }
 
-    auto oobBits = *shamt.getNumBits() - inBoundsShamtBits;
     auto oob =
-        build.buildICmp(build.buildSplice(shamt, oobBits, inBoundsShamtBits),
-                        cbuild.zero(oobBits).get(), BigInt::ICmpPred::ICMP_NE);
-    auto oobVal = instr.isOpc(OP_SRA)
-                      ? build.buildRepeat(
-                            build.buildSplice(value, 1, valueBits - 1), oobBits)
-                      : cbuild.zeroLike(value).get();
+        build.buildICmp(shamt, cbuild.val(*shamt.getNumBits(), valueBits).get(),
+                        BigInt::ICmpPred::ICMP_UGE);
+    auto oobVal =
+        instr.isOpc(OP_SRA)
+            ? build.buildRepeat(build.buildSplice(value, 1, valueBits - 1),
+                                valueBits)
+            : cbuild.zeroLike(value).get();
     instr.def(0)->as<WireRef>().replaceAllUsesWith(
         build.buildMux(oob, oobVal, shiftVal));
     destroyMap[instr] = 1;
@@ -723,6 +736,11 @@ private:
       }
       break;
 
+    case *HW_ADD_CARRY:
+      if (config.lowerSimpleAdd)
+        lowerAdd(instr);
+      break;
+
     case *HW_ADD_COMPRESS:
       lowerAddCompress(instr);
       break;
@@ -777,6 +795,9 @@ public:
     auto isLoweringInstr = [&](InstrRef instr) {
       if (instr.isOpc(OP_ADD))
         return config.lowerMultiInputAdd || config.lowerSimpleAdd;
+
+      if (instr.isOpc(HW_ADD_CARRY))
+        return config.lowerSimpleAdd;
 
       if (instr.isOpc(HW_ADD_COMPRESS))
         return config.lowerAddCompress;

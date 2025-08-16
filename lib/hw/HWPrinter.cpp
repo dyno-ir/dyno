@@ -22,21 +22,12 @@ __attribute__((used)) void dumpInstr(InstrRef instr, HWContext &ctx) {
 }
 
 __attribute__((used)) void dumpDeps(InstrRef instr) {
-  for (auto use : instr.others()) {
-    if (!Operand::isDefUseOperand(*use))
-      continue;
-    dumpDeps(use->as<FatDynObjRef<InstrDefUse>>()->getSingleDef()->instr());
-  }
-  print.printInstr(instr);
+  print.reset();
+  print.printDeps(instr);
 }
 __attribute__((used)) void dumpDeps(InstrRef instr, HWContext &ctx) {
-  for (auto use : instr.others()) {
-    if (!Operand::isDefUseOperand(*use))
-      continue;
-    dumpDeps(use->as<FatDynObjRef<InstrDefUse>>()->getSingleDef()->instr(),
-             ctx);
-  }
-  print.printInstr(instr, ctx);
+  print.reset();
+  print.printDeps(instr, ctx);
 }
 __attribute__((used)) void dumpObj(FatDynObjRef<> obj) {
   print.reset();

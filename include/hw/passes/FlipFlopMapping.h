@@ -12,6 +12,7 @@
 #include "hw/IDs.h"
 #include "hw/LoadStore.h"
 #include "hw/Register.h"
+#include "support/Bits.h"
 #include "support/Debug.h"
 #include "support/ErrorRecovery.h"
 #include "support/PointerVariant.h"
@@ -23,32 +24,38 @@
 namespace dyno {
 
 class FlipFlopMappingPass {
+
   struct AbstractFF {
-    uint8_t clkPol : 1 = 0;
-
-    uint8_t hasClkEn : 1 = 0;
-    uint8_t clkEnPol : 1 = 0;
-
-    uint8_t hasRst : 1 = 0;
-    uint8_t rstPol : 1 = 0;
-
-    uint8_t hasSet : 1 = 0;
-    uint8_t setPol : 1 = 0;
-
-    uint8_t hasInvOut : 1 = 0;
-    uint8_t hasRegularOut : 1 = 0;
-
-    // uint8_t hasMux : 1 = 0;
-
-    auto raw() const {
-      return (hasRegularOut << 8) | (hasInvOut << 7) | (setPol << 6) |
-             (hasSet << 5) | (rstPol << 4) | (hasRst << 3) | (clkEnPol << 2) |
-             (hasClkEn << 1) | clkPol;
-    }
-    AbstractFF() = default;
-    explicit AbstractFF(uint16_t raw) {
-      *this = std::bit_cast<AbstractFF>(raw);
+    enum Indices {
+      CLK_POL,
+      HAS_EN,
+      EN_POL,
+      HAS_RST,
+      RST_POL,
+      HAS_SET,
+      SET_POL,
+      HAS_INV_OUT,
+      HAS_REGULAR_OUT
     };
+
+  private:
+    uint16_t raw = 0;
+
+  public:
+    auto clkPol() { return BitField<uint16_t, 1, CLK_POL>{raw}; }
+    auto hasEn() { return BitField<uint16_t, 1, HAS_EN>{raw}; }
+    auto enPol() { return BitField<uint16_t, 1, EN_POL>{raw}; }
+    auto hasRst() { return BitField<uint16_t, 1, HAS_RST>{raw}; }
+    auto rstPol() { return BitField<uint16_t, 1, RST_POL>{raw}; }
+    auto hasSet() { return BitField<uint16_t, 1, HAS_SET>{raw}; }
+    auto setPol() { return BitField<uint16_t, 1, SET_POL>{raw}; }
+    auto hasInvOut() { return BitField<uint16_t, 1, HAS_INV_OUT>{raw}; }
+    auto hasRegularOut() { return BitField<uint16_t, 1, HAS_REGULAR_OUT>{raw}; }
+
+    auto getRaw() const { return raw; }
+
+    AbstractFF() = default;
+    explicit AbstractFF(uint16_t raw) : raw(raw) {};
   };
 
   enum class FFPortType : uint8_t {
@@ -88,6 +95,8 @@ class FlipFlopMappingPass {
     INVERT_SET,
     INVERT_EN,
     INVERT_OUTPUT,
+    ADD_EN0_MUX,
+    ADD_EN1_MUX,
     INVERT_CLK,
     FAIL,
   };
@@ -117,16 +126,17 @@ class FlipFlopMappingPass {
     SmallVec<HWValue, 32> qWires;
     qWires.reserve(bits);
 
+    wires.qReg = instr.q();
     wires.clk = build.buildLoad(instr.clk());
     wires.en = instr.hasClkEn() ? build.buildLoad(instr.clkEn()) : nullref;
 
-    abstr.clkPol = instr.clkPolarity();
-    abstr.hasClkEn = instr.hasClkEn();
-    abstr.clkEnPol = abstr.hasClkEn && instr.clkEnPolarity();
+    abstr.clkPol() = instr.clkPolarity();
+    abstr.hasEn() = instr.hasClkEn();
+    abstr.enPol() = abstr.hasEn() && instr.clkEnPolarity();
 
     // todo: fuse NOTs
-    abstr.hasInvOut = 0;
-    abstr.hasRegularOut = 1;
+    abstr.hasInvOut() = 0;
+    abstr.hasRegularOut() = 1;
 
     SmallVec<WireRef, 2> rstWires;
     for (uint i = 0; i < instr.numRsts(); i++)
@@ -134,12 +144,13 @@ class FlipFlopMappingPass {
 
     for (uint i = 0; i < bits; i++) {
       wires.d = build.buildSplice(dWire, 1, i).as<WireRef>();
+      wires.bitIdx = i;
       qWires.emplace_back(wires.q = ctx.getWires().create(1));
 
-      abstr.hasRst = 0;
-      abstr.rstPol = 0;
-      abstr.hasSet = 0;
-      abstr.setPol = 0;
+      abstr.hasRst() = 0;
+      abstr.rstPol() = 0;
+      abstr.hasSet() = 0;
+      abstr.setPol() = 0;
 
       uint nRst = instr.numRsts();
       for (uint rstIdx = 0; rstIdx < nRst; rstIdx++) {
@@ -149,16 +160,16 @@ class FlipFlopMappingPass {
           break;
 
         if (bitVal == FourState::S0) {
-          if (abstr.hasRst)
+          if (abstr.hasRst())
             report_fatal_error("two async resets");
-          abstr.hasRst = 1;
-          abstr.rstPol = instr.rstPolarity(rstIdx);
+          abstr.hasRst() = 1;
+          abstr.rstPol() = instr.rstPolarity(rstIdx);
           wires.rst = rstWires[rstIdx];
         } else {
-          if (abstr.hasSet)
+          if (abstr.hasSet())
             report_fatal_error("two async sets");
-          abstr.hasSet = 1;
-          abstr.setPol = instr.rstPolarity(rstIdx);
+          abstr.hasSet() = 1;
+          abstr.setPol() = instr.rstPolarity(rstIdx);
           wires.set = rstWires[rstIdx];
         }
       }
@@ -177,6 +188,9 @@ class FlipFlopMappingPass {
     HWValue en;
     HWValue rst;
     HWValue set;
+
+    RegisterRef qReg;
+    uint bitIdx;
   };
 
   void buildMatchingStdCellFF(const StdCellFF &ff, FFWires wires) {
@@ -239,7 +253,7 @@ class FlipFlopMappingPass {
 
   void buildSingleFF(AbstractFF abstr, FFWires wires) {
     while (1) {
-      auto cmd = ffMap[abstr.raw()];
+      auto cmd = ffMap[abstr.getRaw()];
       if (auto optPtr = cmd.dyn_as<StdCellFF *>()) {
         buildMatchingStdCellFF(**optPtr, wires);
         return;
@@ -249,39 +263,55 @@ class FlipFlopMappingPass {
         case FixupType::TIE0_RST:
         case FixupType::TIE1_RST:
           wires.rst = ConstantRef::fromBool(type == FixupType::TIE1_RST);
-          abstr.rstPol = (type == FixupType::TIE0_RST);
-          abstr.hasRst = 1;
+          abstr.rstPol() = (type == FixupType::TIE0_RST);
+          abstr.hasRst() = 1;
           break;
 
         case FixupType::TIE0_SET:
         case FixupType::TIE1_SET:
           wires.rst = ConstantRef::fromBool(type == FixupType::TIE1_SET);
-          abstr.setPol = (type == FixupType::TIE0_SET);
-          abstr.hasSet = 1;
+          abstr.setPol() = (type == FixupType::TIE0_SET);
+          abstr.hasSet() = 1;
           break;
 
         case FixupType::TIE0_EN:
         case FixupType::TIE1_EN:
           wires.en = ConstantRef::fromBool(type == FixupType::TIE1_EN);
-          abstr.clkEnPol = (type == FixupType::TIE0_EN);
-          abstr.hasClkEn = 1;
+          abstr.enPol() = (type == FixupType::TIE0_EN);
+          abstr.hasEn() = 1;
           break;
 
         case FixupType::INVERT_RST:
           wires.rst = build.buildNot(wires.rst);
-          abstr.rstPol = !abstr.rstPol;
+          abstr.rstPol() = !abstr.rstPol();
           break;
         case FixupType::INVERT_SET:
           wires.set = build.buildNot(wires.set);
-          abstr.setPol = !abstr.setPol;
+          abstr.setPol() = !abstr.setPol();
           break;
         case FixupType::INVERT_EN:
           wires.en = build.buildNot(wires.en);
-          abstr.clkEnPol = !abstr.clkEnPol;
+          abstr.enPol() = !abstr.enPol();
           break;
+        case FixupType::ADD_EN0_MUX: {
+          // if we directly use wires.q we build a cyclic dependency, better
+          // avoid that while we can.
+          auto qIndirect = build.buildLoad(wires.qReg, 1, wires.bitIdx);
+          wires.d = build.buildMux(wires.en, qIndirect, wires.d).as<WireRef>();
+          abstr.hasEn() = 0;
+          abstr.enPol() = 0;
+          break;
+        }
+        case FixupType::ADD_EN1_MUX: {
+          auto qIndirect = build.buildLoad(wires.qReg, 1, wires.bitIdx);
+          wires.d = build.buildMux(wires.en, wires.d, qIndirect).as<WireRef>();
+          abstr.hasEn() = 0;
+          abstr.enPol() = 0;
+          break;
+        }
         case FixupType::INVERT_CLK:
           wires.clk = build.buildNot(wires.clk).as<WireRef>();
-          abstr.clkPol = !abstr.clkPol;
+          abstr.clkPol() = !abstr.clkPol();
           break;
 
         case FixupType::INVERT_OUTPUT:
@@ -362,7 +392,7 @@ public:
       switch (useType) {
       case FlipFlopIRef::CLOCK:
         ff.stdcell.ports.emplace_back(FFPortType::CLK);
-        ff.abstr.clkPol = asFF.getPolarity(*use);
+        ff.abstr.clkPol() = asFF.getPolarity(*use);
         ff.covered.set((size_t)useType);
         return true;
       case FlipFlopIRef::D:
@@ -375,23 +405,23 @@ public:
       //   return true;
       case FlipFlopIRef::ENABLE:
         ff.stdcell.ports.emplace_back(FFPortType::EN);
-        ff.abstr.hasClkEn = 1;
-        ff.abstr.clkEnPol = asFF.getPolarity(*use);
+        ff.abstr.hasEn() = 1;
+        ff.abstr.enPol() = asFF.getPolarity(*use);
         return true;
       case FlipFlopIRef::RESET_0:
       case FlipFlopIRef::RESET_1: {
         auto val = asFF.rstVal(useType == FlipFlopIRef::RESET_1 ? 1 : 0);
         if (val.valueEqualsS(0)) {
-          if (ff.abstr.hasRst)
+          if (ff.abstr.hasRst())
             return false; // multiple resets?
-          ff.abstr.hasRst = 1;
-          ff.abstr.rstPol = asFF.getPolarity(*use);
+          ff.abstr.hasRst() = 1;
+          ff.abstr.rstPol() = asFF.getPolarity(*use);
           ff.stdcell.ports.emplace_back(FFPortType::RST);
         } else if (val.valueEqualsS(-1)) {
-          if (ff.abstr.hasSet)
+          if (ff.abstr.hasSet())
             return false; // multiple sets?
-          ff.abstr.hasSet = 1;
-          ff.abstr.setPol = asFF.getPolarity(*use);
+          ff.abstr.hasSet() = 1;
+          ff.abstr.setPol() = asFF.getPolarity(*use);
           ff.stdcell.ports.emplace_back(FFPortType::SET);
         }
         return true;
@@ -440,14 +470,14 @@ public:
         return false;
 
       if (port == selPort) {
-        ff.abstr.hasClkEn = 1;
-        ff.abstr.clkEnPol = !!trueVPort;
+        ff.abstr.hasEn() = 1;
+        ff.abstr.enPol() = !!trueVPort;
         ff.stdcell.ports.emplace_back(FFPortType::EN);
         return true;
       }
       if (port == trueVPort || port == falseVPort) {
-        ff.abstr.hasClkEn = 1;
-        ff.abstr.clkEnPol = !!trueVPort;
+        ff.abstr.hasEn() = 1;
+        ff.abstr.enPol() = !!trueVPort;
         ff.stdcell.ports.emplace_back(FFPortType::D);
         ff.covered.set(FlipFlopIRef::D);
         return true;
@@ -464,7 +494,7 @@ public:
 
         auto type = asFF.classifyUse(use);
         if (type == FlipFlopIRef::Q) {
-          ff.abstr.hasRegularOut = 1;
+          ff.abstr.hasRegularOut() = 1;
           ff.stdcell.ports.emplace_back(FFPortType::Q);
           return true;
         }
@@ -503,7 +533,7 @@ public:
         continue;
       ff.stdcell.module = obj;
       auto ptr = &stdCellFFs.emplace_back(ff.stdcell);
-      auto &entry = ffMap[std::bit_cast<uint16_t>(ff.abstr)];
+      auto &entry = ffMap[ff.abstr.getRaw()];
       if (entry == FixupType::FAIL) {
         count++;
         entry = ptr;
@@ -517,10 +547,10 @@ public:
   }
 
   void precomputeFixup(FixupType type, uint ffIdx) {
-    AbstractFF abstr = std::bit_cast<AbstractFF>((uint16_t)ffIdx);
+    AbstractFF abstr = AbstractFF{(uint16_t)ffIdx};
 
     auto fixupIfNone = [&]() {
-      auto &entry = ffMap[AbstractFF{abstr}.raw()];
+      auto &entry = ffMap[abstr.getRaw()];
       if (entry == FixupType::FAIL)
         entry = type;
     };
@@ -528,65 +558,73 @@ public:
     switch (type) {
     case FixupType::TIE0_RST:
     case FixupType::TIE1_RST: {
-      if (!abstr.hasRst || abstr.rstPol != (type == FixupType::TIE0_RST))
+      if (!abstr.hasRst() || abstr.rstPol() != (type == FixupType::TIE0_RST))
         break;
-      abstr.hasRst = 0;
-      abstr.rstPol = 0;
+      abstr.hasRst() = 0;
+      abstr.rstPol() = 0;
       fixupIfNone();
       break;
     }
     case FixupType::TIE0_SET:
     case FixupType::TIE1_SET: {
-      if (!abstr.hasSet || abstr.setPol != (type == FixupType::TIE0_SET))
+      if (!abstr.hasSet() || abstr.setPol() != (type == FixupType::TIE0_SET))
         break;
-      abstr.hasSet = 0;
-      abstr.setPol = 0;
+      abstr.hasSet() = 0;
+      abstr.setPol() = 0;
       fixupIfNone();
       break;
     }
     case FixupType::TIE0_EN:
     case FixupType::TIE1_EN: {
-      if (!abstr.hasClkEn || abstr.clkEnPol != (type == FixupType::TIE0_EN))
+      if (!abstr.hasEn() || abstr.enPol() != (type == FixupType::TIE0_EN))
         break;
-      abstr.hasClkEn = 0;
-      abstr.clkEnPol = 0;
+      abstr.hasEn() = 0;
+      abstr.enPol() = 0;
       fixupIfNone();
       break;
     }
     case FixupType::INVERT_RST: {
-      if (!abstr.hasRst)
+      if (!abstr.hasRst())
         break;
-      abstr.rstPol = !abstr.rstPol;
+      abstr.rstPol() = !abstr.rstPol();
       fixupIfNone();
       break;
     }
     case FixupType::INVERT_SET: {
-      if (!abstr.hasSet)
+      if (!abstr.hasSet())
         break;
-      abstr.setPol = !abstr.setPol;
+      abstr.setPol() = !abstr.setPol();
       fixupIfNone();
       break;
     }
     case FixupType::INVERT_EN: {
-      if (!abstr.hasClkEn)
+      if (!abstr.hasEn())
         break;
-      abstr.clkEnPol = !abstr.clkEnPol;
+      abstr.enPol() = !abstr.enPol();
       fixupIfNone();
       break;
     }
 
     case FixupType::INVERT_OUTPUT: {
-      auto t = abstr.hasInvOut;
-      abstr.hasInvOut = abstr.hasRegularOut;
-      abstr.hasRegularOut = t;
+      auto t = abstr.hasInvOut();
+      abstr.hasInvOut() = abstr.hasRegularOut();
+      abstr.hasRegularOut() = t;
+      fixupIfNone();
+      break;
+    }
 
-      abstr.clkEnPol = !abstr.clkEnPol;
+    case FixupType::ADD_EN0_MUX:
+    case FixupType::ADD_EN1_MUX: {
+      if (abstr.hasEn())
+        break;
+      abstr.hasEn() = 1;
+      abstr.enPol() = (type == FixupType::ADD_EN0_MUX);
       fixupIfNone();
       break;
     }
 
     case FixupType::INVERT_CLK: {
-      abstr.clkPol = !abstr.clkPol;
+      abstr.clkPol() = !abstr.clkPol();
       fixupIfNone();
       break;
     }
