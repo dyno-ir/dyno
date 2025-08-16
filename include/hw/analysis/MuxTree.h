@@ -458,6 +458,10 @@ struct SmallBoolExprCNF {
   }
 
   std::optional<bool> simplify(uint numLiterals) {
+    if (isTrue())
+      return true;
+    if (isUnsat())
+      return false;
     // todo: dedupe literals and clause subset for non-singleton clause
     // this->dump();
     SmallVec<Optional<uint8_t>, 16> known(numLiterals);
@@ -783,9 +787,9 @@ struct SmallBoolExprCNF {
     lhs.dump();
 
     *this = lhs.negated2(numLiterals);
-    // this->dump();
+    this->dump();
     this->simplify(numLiterals);
-    // this->dump();
+    this->dump();
   }
 
   auto evalWithBoundVars2(SmallBoolExprCNF &orig, SmallBoolExprCNF &expr,
@@ -921,6 +925,7 @@ public:
 
   MuxTree analyzeMuxTree(InstrRef root,
                          std::invocable<InstrRef> auto visitedCallback) {
+    conditionsDedupeMap.clear();
     SmallVec<std::tuple<HWValue, uint32_t>, 32> worklist{
         {root.def(0)->as<WireRef>(), 1}};
 
@@ -1014,6 +1019,7 @@ public:
       entry.expr = tree->entries[rules[0]].expr;
 
       for (auto rule : Range{rules}.drop_front()) {
+        dbgs() << "\n\n";
         entry.expr.addAsGlobalOR(tree->entries[rule].expr,
                                  tree->conditions.size());
       }

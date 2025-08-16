@@ -37,7 +37,9 @@ class OrderInstrsPass {
 
   void prioritzeUses(MutArrayRef<OperandRef> uses) {
     std::sort(uses.begin(), uses.end(), [](OperandRef lhs, OperandRef rhs) {
-      return lhs->as<FatDynObjRef<InstrDefUse>>()->getNumUses() >
+      //if (lhs->is<RegisterRef>() != rhs->is<RegisterRef>())
+      //  return lhs->is<RegisterRef>();
+      return lhs->as<FatDynObjRef<InstrDefUse>>()->getNumUses() <
              rhs->as<FatDynObjRef<InstrDefUse>>()->getNumUses();
     });
   }
@@ -64,7 +66,7 @@ class OrderInstrsPass {
         continue;
       }
       auto pm = map[instr].at(PRE_MARK);
-      assert(pm == 0);
+      // assert(!pm);
       if (pm) {
         // circular dep
         stack.pop_back();

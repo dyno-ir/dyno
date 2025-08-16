@@ -135,8 +135,9 @@ public:
   }
   void buildRepeat(InstrRef instr) {
     uint32_t pos = wireToAIGNodeStorage.size();
-    auto count = instr.other(1)->as<ConstantRef>().getExactVal();
     auto val = instr.other(0)->as<HWValue>();
+    assert(*instr.def(0)->as<WireRef>().getNumBits() % *val.getNumBits() == 0);
+    auto count = *instr.def(0)->as<WireRef>().getNumBits() / *val.getNumBits();
     for (uint i = 0; i < count; i++) {
       for (uint j = 0; j < *val.getNumBits(); j++) {
         wireToAIGNodeStorage.emplace_back(resolveBit(val, j));
@@ -208,6 +209,25 @@ class AIGConstructPass {
     for (auto use : wire.uses())
       if (use.instr().isOpc(AIG_INPUT))
         return;
+
+    //auto nodes = abuild.resolveWire(wire);
+    //if (std::all_of(nodes.begin(), nodes.end(),
+    //                [](AIGNodeTRef ref) { return ref.isSpecial(); })) {
+    //  auto ibuild = build.buildInstrRaw(HW_CONCAT, nodes.size() + 1);
+    //  build.setInsertPoint(ibuild.instr());
+    //  ibuild.addRef(wire).other();
+    //  for (auto node : Range{nodes}.reverse()) {
+    //    auto fat = aigRef->aig.store.resolve(node).as<FatAIGNodeRef>();
+    //    auto def = *fat->defUse.getSingleDef();
+    //    auto instr = def.instr();
+    //    assert(instr.isOpc(AIG_INPUT));
+    //    auto val = build.buildSplice(instr.other(0)->as<HWValue>(), 1,
+    //                                 def - *instr.def_begin());
+    //    ibuild.addRef(val);
+    //  }
+    //  return;
+    //}
+
     auto &aig = abuild.aig;
     auto arr = abuild.buildOutput(wire);
     auto ibuild = build.buildInstrRaw(AIG_OUTPUT, arr.size() + 2);

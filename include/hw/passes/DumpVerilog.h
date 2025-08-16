@@ -195,6 +195,10 @@ class DumpVerilogPass {
         std::print(os, ");\n");
         break;
       }
+
+      default:
+        report_fatal_error("verilog dump not implemented for instruction");
+        break;
       }
     }
 

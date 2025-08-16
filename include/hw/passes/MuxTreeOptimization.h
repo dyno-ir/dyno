@@ -314,7 +314,7 @@ private:
   void runOnProcess(ProcessIRef proc) {
     MuxtreeAnalysis analysis;
     // assume proc is already flat for now, ignore SCF constructs.
-    for (auto instr :
+    for (InstrRef instr :
          Range{proc.block().begin(), proc.block().end()}.reverse()) {
       if (visitedMap[instr])
         continue;
@@ -329,9 +329,10 @@ private:
         analysis.dedupeMuxTreeOutputs(&muxtree);
         printMuxTree(&muxtree);
         auto wire = lowerMuxTreeSimple(&muxtree);
-        instr.def(0)->as<WireRef>().replaceAllUsesWith(wire);
+        auto oldWire = instr.def(0)->as<WireRef>();
+        if (wire != oldWire)
+          oldWire.replaceAllUsesWith(wire);
         return;
-        break;
       }
     }
   }
@@ -343,6 +344,7 @@ private:
 
 public:
   void run() {
+    visitedMap.clear();
     visitedMap.resize(ctx.getInstrs().numIDs());
 
     ctx.getInstrs().createHooks.emplace_back(

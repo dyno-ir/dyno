@@ -1,5 +1,4 @@
 #include "Frontend.h"
-#include "hw/HWPrinter.h"
 #include "hw/PassPipeline.h"
 #include "slang/driver/Driver.h"
 
@@ -39,7 +38,7 @@ int main(int argc, char **argv) {
   std::cout << "\n\n\n";
 
   PassPipeline pipeline{ctx};
-  pipeline.printAfterAll = true;
+  //pipeline.printAfterAll = true;
   pipeline.runOptPipeline();
   pipeline.runLoweringPipeline();
   std::ofstream of{"dump.v"};

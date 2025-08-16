@@ -426,14 +426,14 @@ private:
       shiftVal = build.buildMux(cond, shifted, shiftVal);
     }
 
-    auto oobBits = *shamt.getNumBits() - inBoundsShamtBits;
     auto oob =
-        build.buildICmp(build.buildSplice(shamt, oobBits, inBoundsShamtBits),
-                        cbuild.zero(oobBits).get(), BigInt::ICmpPred::ICMP_NE);
-    auto oobVal = instr.isOpc(OP_SRA)
-                      ? build.buildRepeat(
-                            build.buildSplice(value, 1, valueBits - 1), oobBits)
-                      : cbuild.zeroLike(value).get();
+        build.buildICmp(shamt, cbuild.val(*shamt.getNumBits(), valueBits).get(),
+                        BigInt::ICmpPred::ICMP_UGE);
+    auto oobVal =
+        instr.isOpc(OP_SRA)
+            ? build.buildRepeat(build.buildSplice(value, 1, valueBits - 1),
+                                valueBits)
+            : cbuild.zeroLike(value).get();
     instr.def(0)->as<WireRef>().replaceAllUsesWith(
         build.buildMux(oob, oobVal, shiftVal));
     destroyMap[instr] = 1;

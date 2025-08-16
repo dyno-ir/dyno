@@ -100,6 +100,7 @@ class FlipFlopInferencePass {
       return std::nullopt;
     auto mtree =
         muxTreeAnalysis.analyzeMuxTree(store.value().as<WireRef>().getDefI());
+    muxTreeAnalysis.simplifyConditions(&mtree);
     muxTreeAnalysis.printMuxTree(ctx, &mtree);
     muxTreeAnalysis.dedupeMuxTreeOutputs(&mtree);
     muxTreeAnalysis.printMuxTree(ctx, &mtree);

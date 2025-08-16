@@ -192,12 +192,7 @@ class CommonSubexpressionEliminationPass {
     map.clear();
     Range range{StableHierBlockRangeIter{proc.block().begin()},
                 StableHierBlockRangeIter{proc.block().end()}};
-    ObjMapVec<Instr, bool> visited;
-    dumpInstr(proc, ctx);
     for (auto instr : range) {
-      dumpInstr(instr, ctx);
-      assert(!visited.get_ensure(instr));
-      visited.get_ensure(instr) = 1;
       if (!ignoreForCSE(instr)) {
         runOnInstr(instr);
       }
