@@ -72,8 +72,12 @@ public:
   }
 
   void runOptPipeline() {
-    std::print(std::cerr, "\n\nInitial IR:\n");
-    HWPrinter{std::cerr}.printCtx(ctx);
+    // std::print(std::cerr, "\n\nInitial IR:\n");
+    // HWPrinter{std::cerr}.printCtx(ctx);
+    {
+      std::ofstream ostr("initial.dyno");
+      dumpDyno(ostr);
+    }
 
     runPass(funcInline);
     runPass(instCombine);

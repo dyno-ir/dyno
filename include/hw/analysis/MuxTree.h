@@ -770,26 +770,17 @@ struct SmallBoolExprCNF {
     }
 
     // todo properly
-    this->dump();
     auto lhs = this->negated2(numLiterals);
-    lhs.dump();
     lhs.simplify(numLiterals);
-    lhs.dump();
 
     auto rhs = other.negated2(numLiterals);
-    rhs.dump();
     rhs.simplify(numLiterals);
-    rhs.dump();
 
     lhs.addAsGlobalAND(rhs);
-    lhs.dump();
     lhs.simplify(numLiterals);
-    lhs.dump();
 
     *this = lhs.negated2(numLiterals);
-    this->dump();
     this->simplify(numLiterals);
-    this->dump();
   }
 
   auto evalWithBoundVars2(SmallBoolExprCNF &orig, SmallBoolExprCNF &expr,
@@ -1019,7 +1010,6 @@ public:
       entry.expr = tree->entries[rules[0]].expr;
 
       for (auto rule : Range{rules}.drop_front()) {
-        dbgs() << "\n\n";
         entry.expr.addAsGlobalOR(tree->entries[rule].expr,
                                  tree->conditions.size());
       }

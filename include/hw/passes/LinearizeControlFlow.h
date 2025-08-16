@@ -244,7 +244,6 @@ class LinearizeControlFlowPass {
         continue;
       case *OP_IF:
         linearizeIf(instr);
-        dumpCtx(ctx);
         break;
       case *OP_SWITCH:
         linearizeSwitch(instr.as<SwitchInstrRef>());
