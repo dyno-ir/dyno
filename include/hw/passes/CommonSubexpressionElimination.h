@@ -125,6 +125,7 @@ class CommonSubexpressionEliminationPass {
           other.def(i)->as<FatDynObjRef<InstrDefUse>>());
     }
     instrDestroy.mark(instr);
+    ctx.sourceLocInfo.copyDebugInfo(instr, other);
 
     BlockRef otherBl = HWInstrRef{other}.parentBlock(ctx);
     BlockRef instrBl = HWInstrRef{instr}.parentBlock(ctx);

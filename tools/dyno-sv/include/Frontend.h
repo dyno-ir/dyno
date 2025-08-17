@@ -1413,6 +1413,11 @@ public:
     case slang::ast::ExpressionKind::NamedValue: {
       auto const &nval = expr.as<slang::ast::ValueExpressionBase>();
       auto [found, sig] = vars.findOrInsert(&nval.symbol, [&] {
+        // when the enum is used in a structs, enum values aren't propagated to
+        // nval.getConstant()
+        if (auto enumMember = nval.symbol.as_if<slang::ast::EnumValueSymbol>())
+          return RegisterOrConstantRef{
+              toDynoConstant(enumMember->getValue().integer())};
         return nval.getConstant()
                    ? RegisterOrConstantRef{toDynoConstant(
                          nval.getConstant()->integer())}
