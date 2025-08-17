@@ -139,7 +139,7 @@ class FlipFlopInferencePass {
     std::pair<RegisterRef, bool> clkReg;
     std::pair<RegisterRef, bool> rstReg;
 
-    WireRef dValue = storeI.value().as<WireRef>();
+    HWValue dValue = storeI.value().as<HWValue>();
     ConstantRef resetValue;
 
     auto get = [&](uint i) -> std::pair<RegisterRef, bool> {
@@ -160,7 +160,7 @@ class FlipFlopInferencePass {
       auto val = MuxTreeOptimizationPass::getExprVal(
           build, muxTreePtr, muxTreePtr->entries[*clkEnIdx].expr);
       build.buildStore(clkEn, val);
-      dValue = build.buildMux(val, undef, dValue).as<WireRef>();
+      dValue = build.buildMux(val, undef, dValue);
       build.popInsertPoint();
     }
 
@@ -181,11 +181,9 @@ class FlipFlopInferencePass {
       clkReg = hasIFF ? resetCandidates[0] : (resetCandidates[1 - resetIndex]);
 
       build.pushInsertPoint(storeI);
-      dValue = build
-                   .buildMux(build.buildLoad(rstReg.first),
-                             rstReg.second ? undef : dValue,
-                             !rstReg.second ? undef : dValue)
-                   .as<WireRef>();
+      dValue = build.buildMux(build.buildLoad(rstReg.first),
+                              rstReg.second ? undef : dValue,
+                              !rstReg.second ? undef : dValue);
       build.popInsertPoint();
     } else
       clkReg = get(0);

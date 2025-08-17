@@ -331,16 +331,9 @@ private:
   // like (a - b) > 10 to a simple sum.
   void lowerOrderingICMP(InstrRef instr) {
     auto numBits = *instr.other(0)->as<HWValue>().getNumBits();
-    build.setInsertPoint(instr);
-    auto ibuild = build.buildInstrRaw(OP_SUB, 3);
-    auto sumWire = ctx.getWires().create(numBits);
-    ibuild.addRef(sumWire);
-    ibuild.other();
 
-    build.setInsertPoint(ibuild.instr());
-
-    HWValue lhs = build.buildZExt(numBits + 1, instr.other(0)->as<HWValue>());
-    HWValue rhs = build.buildZExt(numBits + 1, instr.other(1)->as<HWValue>());
+    HWValue lhs = instr.other(0)->as<HWValue>();
+    HWValue rhs = instr.other(1)->as<HWValue>();
     bool invertResult = false;
     bool isSigned = false;
     switch (*instr.getDialectOpcode()) {
@@ -375,18 +368,34 @@ private:
     default:
       dyno_unreachable("unknown opcode");
     }
+
+    build.setInsertPoint(instr);
+    if (!isSigned) {
+      lhs = build.buildZExt(numBits + 1, lhs);
+      rhs = build.buildZExt(numBits + 1, rhs);
+    }
+
+    auto ibuild = build.buildInstrRaw(OP_SUB, 3);
+    auto sumWire = ctx.getWires().create(isSigned ? numBits : numBits + 1);
+    ibuild.addRef(sumWire);
+    ibuild.other();
+    build.setInsertPoint(ibuild.instr());
     ibuild.addRef(lhs);
     ibuild.addRef(rhs);
 
     build.setInsertPoint(instr);
 
-    auto carryWire = build.buildSplice(sumWire, 1, numBits - 1);
     HWValue out;
     if (isSigned) {
-      HWValue signBit = build.buildSplice(sumWire, 1, numBits - 2);
-      out = build.buildXor(signBit, carryWire);
+      auto signLHS = build.buildSplice(lhs, 1, numBits - 1);
+      auto signRHS = build.buildSplice(rhs, 1, numBits - 1);
+      auto signsDifferent = build.buildXor(signLHS, signRHS);
+      HWValue signBit = build.buildSplice(sumWire, 1, numBits - 1);
+      out = build.buildMux(signsDifferent, signLHS, signBit);
+    } else {
+      out = build.buildSplice(sumWire, 1, numBits);
     }
-    out = invertResult ? build.buildNot(carryWire) : carryWire;
+    out = invertResult ? build.buildNot(out) : out;
     instr.def(0)->as<WireRef>().replaceAllUsesWith(out);
     destroyMap[instr] = 1;
   }

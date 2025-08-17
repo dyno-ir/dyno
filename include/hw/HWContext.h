@@ -109,6 +109,8 @@ public:
   HWContext() {
     instrs.destroyHooks.emplace_back(
         [&](InstrRef instr) { sourceLocInfo.resetDebugInfo(instr); });
+    regs.destroyHooks.emplace_back(
+        [&](RegisterRef ref) { regNameInfo.clearNames(ref); });
   }
 };
 
