@@ -819,6 +819,11 @@ private:
     worklist.emplace_back(replaced.instr());
   }
 
+  void anyMatchHook() {
+    bitAlias.clearCache();
+    knownBits.clearCache();
+  }
+
   void runOnProcess(ProcessIRef proc) {
     worklist.clear();
     for (auto instr : HierBlockRange{proc.block()})
@@ -836,6 +841,8 @@ private:
 
       if (!runOnInstr(instr))
         continue;
+
+      anyMatchHook();
 
       DEBUG("instcombine", {
         dbgs() << "initial instructions:\n";

@@ -1,16 +1,19 @@
 #pragma once
 
+#include "dyno/AnalysisCache.h"
 #include "dyno/Constant.h"
 #include "dyno/Instr.h"
 #include "dyno/Obj.h"
 #include "dyno/Opcode.h"
 #include "hw/HWContext.h"
+#include "hw/HWPrinter.h"
 #include "hw/HWValue.h"
 #include "hw/IDs.h"
 #include "hw/LoadStore.h"
 #include "hw/Wire.h"
 #include "hw/analysis/RegisterValue.h"
 #include "op/IDs.h"
+#include "support/Debug.h"
 #include <optional>
 namespace dyno {
 class BitAliasAnalysis {
@@ -202,11 +205,12 @@ class BitAliasAnalysis {
 
   SmallVec<Frame, 16> stack;
   BitAliasAcc retVal;
+  AnalysisCache<ObjRef<Wire>, BitAliasAcc> cache;
 
 public:
   BitAliasAnalysis(HWContext &ctx) : ctx(ctx) {}
-  auto getReprAliases(WireRef wire) {
-    stack.emplace_back(wire.getDef());
+  auto getReprAliases(WireRef rootWire) {
+    stack.emplace_back(rootWire.getDef());
 
     uint maxLevel = 0;
     retVal = BitAliasAcc{};
@@ -215,6 +219,14 @@ public:
     while (!stack.empty()) {
       maxLevel = std::max(maxLevel, stack.size());
       auto &frame = stack.back();
+
+      if (auto asWire = frame.ref.instr().def(0)->dyn_as<WireRef>()) {
+        if (auto val = cache.find(asWire)) {
+          retVal = *val;
+          stack.pop_back();
+          continue;
+        }
+      }
 
       auto next = nextFunction(std::move(retVal), frame);
 
@@ -226,16 +238,22 @@ public:
               (*next)->as<FatDynObjRef<InstrDefUse>>()->getDef());
       } else {
         retVal = std::move(stack.back().acc);
+        assert(frame.ref.instr().getNumDefs() == 1);
+        if (auto asWire = frame.ref.instr().def(0)->dyn_as<WireRef>()) {
+          cache.insert(asWire, retVal);
+        }
         stack.pop_back();
       }
     }
     change |= retVal.defragmentValues(ctx);
     if (retVal.frags.size() == 1) {
-      assert(retVal.frags.front().len == *wire.getNumBits());
-      change &= retVal.frags.front().ref != wire;
+      assert(retVal.frags.front().len == *rootWire.getNumBits());
+      change &= retVal.frags.front().ref != rootWire;
     }
     return std::make_pair(RegisterValue{retVal}, change);
   }
+
+  void clearCache() { cache.clearAll(); }
 };
 
 }; // namespace dyno

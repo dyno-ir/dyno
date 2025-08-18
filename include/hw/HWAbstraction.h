@@ -392,6 +392,51 @@ private:
     return std::make_tuple(0, 0, true);
   }
 
+  HWValue buildConstSpliceOfConcat(WireRef wire, uint32_t numBits,
+                                   uint32_t baseAddr) {
+    if (!wire.hasSingleDef() || !wire.getDefI().isOpc(HW_CONCAT))
+      return nullref;
+    auto instr = wire.getDefI();
+
+    uint32_t bits = 0;
+    uint32_t lowerOffs, upperOffs;
+    auto it = *instr.other_end() - 1;
+
+    lowerOffs = bits;
+    while (bits < baseAddr) {
+      if (!it->as<HWValue>().getNumBits()) [[unlikely]]
+        return nullref;
+      lowerOffs = bits;
+      bits += *it->as<HWValue>().getNumBits();
+      --it;
+    }
+
+    auto lower = it;
+
+    upperOffs = bits;
+    while (bits < baseAddr + numBits) {
+      if (!it->as<HWValue>().getNumBits()) [[unlikely]]
+        return nullref;
+      upperOffs = 0;
+      bits += *it->as<HWValue>().getNumBits();
+      --it;
+    }
+
+    auto upper = it;
+
+    if (lower == upper)
+      return buildSplice(lower->as<HWValue>(), numBits, baseAddr - lowerOffs);
+
+    if (lowerOffs - baseAddr == 0 && upperOffs - baseAddr - numBits == 0) {
+      auto concat =
+          buildInstr(HW_CONCAT, true, Range{upper, lower}.as<HWValue>());
+      concat.defW()->numBits = numBits;
+      return concat.defW();
+    }
+
+    return nullref;
+  }
+
 public:
   template <typename... Ts>
   HWValue buildSplice(HWValue src, uint32_t numBits, uint32_t baseAddr,
@@ -413,13 +458,15 @@ public:
       if (numBits == src.getNumBits() && baseAddr == 0)
         return src;
 
-      HWInstrRef instr;
       if (baseAddr == 0)
-        instr = buildInstr(HW_SPLICE, true, src);
-      else
-        instr =
-            buildInstr(HW_SPLICE, true, src, ConstantRef::fromU32(baseAddr));
+        return buildTrunc(numBits, src);
 
+      auto wire = src.as<WireRef>();
+      if (auto val = buildConstSpliceOfConcat(wire, numBits, baseAddr))
+        return val;
+
+      HWInstrRef instr =
+          buildInstr(HW_SPLICE, true, src, ConstantRef::fromU32(baseAddr));
       instr.defW()->numBits = numBits;
       return instr.defW();
     }
@@ -596,8 +643,8 @@ public:
       if (values.size() == 0)
         return cbuild.val(0, 0).get();
       cbuild.val(values.back().as<ConstantRef>());
-      for (size_t i = values.size() - 1; i-- > 0;)
-        cbuild.concat(values[i].as<ConstantRef>());
+      for (auto val : values)
+        cbuild.concatLHS(val.as<ConstantRef>());
 
       return cbuild.get();
     }

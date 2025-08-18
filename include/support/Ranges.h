@@ -428,6 +428,8 @@ public:
     std::for_each(begin(), end(), func);
   }
 
+  bool empty() const { return begin() == end(); }
+
 private:
   It beginIt, endIt;
 };
