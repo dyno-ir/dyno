@@ -1,5 +1,6 @@
 #pragma once
 
+#include "dyno/AnalysisCache.h"
 #include "dyno/Constant.h"
 #include "dyno/Instr.h"
 #include "dyno/Opcode.h"
@@ -8,6 +9,7 @@
 #include "hw/LoadStore.h"
 #include "hw/Wire.h"
 #include "op/IDs.h"
+#include "support/DenseMap.h"
 #include <concepts>
 namespace dyno {
 
@@ -50,6 +52,7 @@ class KnownBitsAnalysis {
       stack.emplace_back(instr.other(frame.idx++)->as<HWValue>(), 0);
     } else {
       retVal = stack.back().acc;
+      cache.insert(stack.back().value.as<WireRef>(), retVal);
       stack.pop_back();
     }
   }
@@ -78,7 +81,10 @@ class KnownBitsAnalysis {
   }
 
 public:
+  AnalysisCache<ObjRef<Wire>, KnownBitsVal> cache;
+
   BigInt getKnownBits(HWValue rootVal) {
+
     stack.emplace_back(rootVal, 0);
     while (!stack.empty()) {
       auto &frame = stack.back();
@@ -89,6 +95,12 @@ public:
       }
       auto wire = frame.value.as<WireRef>();
       auto instr = wire.getDefI();
+
+      if (auto val = cache.find(wire.as<WireRef>())) {
+        retVal = KnownBitsVal{*val};
+        stack.pop_back();
+        continue;
+      }
 
       switch (*instr.getDialectOpcode()) {
 
@@ -112,6 +124,7 @@ public:
           stack.emplace_back(instr.other(0)->as<HWValue>(), 0);
         } else {
           BigInt::notOp4S(retVal.val, retVal.val);
+          cache.insert(wire, retVal);
           stack.pop_back();
         }
         break;
@@ -123,6 +136,7 @@ public:
           stack.emplace_back(instr.other(0)->as<HWValue>(), 0);
         } else {
           BigInt::resizeOp4S(retVal.val, retVal.val, *wire.getNumBits());
+          cache.insert(wire, retVal);
           stack.pop_back();
         }
         break;
@@ -138,6 +152,7 @@ public:
                               ? PatBigInt::fromFourState(FourState::S0, delta)
                               : PatBigInt::fromSign(retVal.val, delta);
           BigInt::concatOp4S(retVal.val, lhs, retVal.val);
+          cache.insert(wire, retVal);
           stack.pop_back();
         }
         break;
@@ -156,6 +171,7 @@ public:
         } else {
           BigInt::rangeSelectOp4S(retVal.val, retVal.val, asSplice.getBase(),
                                   asSplice.getLen());
+          cache.insert(wire, retVal);
           stack.pop_back();
         }
         break;
@@ -183,6 +199,7 @@ public:
                                   frame.acc.val.getNumBits() - highOffs);
           BigInt::concatOp4S(low, retVal.val, low);
           BigInt::concatOp4S(retVal.val, high, low);
+          cache.insert(wire, retVal);
           stack.pop_back();
         }
         break;
@@ -197,6 +214,8 @@ public:
 
     return retVal.val;
   }
+
+  void clearCache() { cache.clearAll(); }
 };
 
 }; // namespace dyno

@@ -1,5 +1,6 @@
 #pragma once
 #include "support/DenseMap.h"
+#include <memory>
 
 template <typename Bucket, typename K, typename V,
           typename size_type = uint32_t>
@@ -46,8 +47,13 @@ protected:
            !DenseMapInfo<K>::isEqual(k, DenseMapInfo<K>::getTombstoneKey()));
 
     size_type bucketIndex = prev.bucket - getBuckets();
+    size_type startBucketIndex = bucketIndex;
     size_type offset = prev.probeOffset;
     size_type start = prev.idx;
+
+    bool sawTombstone = false;
+    size_type seenTombstoneIdx;
+    size_type seenTombstoneBucket;
 
     assert(offset != 0 && "cannot find next on this iterator");
 
@@ -58,9 +64,21 @@ protected:
                               iterator{&getBuckets()[bucketIndex],
                                        cap - bucketIndex, entryIndex, offset});
       }
+      if (!sawTombstone) {
+        if (auto tombstoneIndex = getBuckets()[bucketIndex].find(
+                DenseMapInfo<K>::getTombstoneKey());
+            tombstoneIndex != Bucket::entriesPerBucket) {
+          sawTombstone = true;
+          seenTombstoneIdx = tombstoneIndex;
+          seenTombstoneBucket = bucketIndex;
+        }
+      }
       if (auto emptyIndex = getBuckets()[bucketIndex].find(
               DenseMapInfo<K>::getEmptyKey(), start);
           emptyIndex != Bucket::entriesPerBucket) {
+        // if we already saw a tombstone, break to return that.
+        if (sawTombstone)
+          break;
         return std::make_pair(false,
                               iterator{&getBuckets()[bucketIndex],
                                        cap - bucketIndex, emptyIndex, offset});
@@ -69,8 +87,13 @@ protected:
       bucketIndex = (bucketIndex + offset) & (cap - 1);
       offset += 1;
       start = ~0;
+      if (bucketIndex == startBucketIndex) [[unlikely]]
+        break;
     }
-    dyno_unreachable("full hash map");
+    assert(sawTombstone && "hash map full?");
+    return std::make_pair(false, iterator{&getBuckets()[bucketIndex],
+                                          cap - seenTombstoneBucket,
+                                          seenTombstoneIdx, offset});
   }
 
 public:
@@ -91,7 +114,7 @@ public:
     auto iter = Base::findEmptyImpl(k, false);
     sz++;
     iter.keyMut() = k;
-    (*iter).second = std::move(v);
+    std::construct_at(&(*iter).second, std::move(v));
     return iter;
   }
   iterator insert(const K &k, const V &v) { return insert(k, V{v}); }

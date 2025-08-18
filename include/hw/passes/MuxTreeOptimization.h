@@ -256,7 +256,9 @@ private:
     // safely discard it.
     for (auto entry : tree->entries) {
       // decide whether to put entry in left, right or both.
-      assert(!entry.expr.isUnsat());
+      if (entry.expr.isUnsat())
+        continue;
+      
       auto [ifTrueRem, trueBrSat, ifFalseRem, falseBrSat] =
           entry.expr.evalWithBoundVars2(entry.expr, selExpr, selExprNeg,
                                         tree->conditions.size());

@@ -34,7 +34,13 @@ public:
     assert(!DenseMapInfo<K>::isEqual(k, DenseMapInfo<K>::getEmptyKey()) &&
            !DenseMapInfo<K>::isEqual(k, DenseMapInfo<K>::getTombstoneKey()));
     size_type bucketIndex = DenseMapInfo<K>::getHashValue(k) & (cap - 1);
+    size_type startBucketIndex = bucketIndex;
     size_type offset = 1;
+
+    bool sawTombstone = false;
+    size_type seenTombstoneIdx;
+    size_type seenTombstoneBucket;
+
     while (true) {
       if (auto entryIndex = getBuckets()[bucketIndex].find(k);
           entryIndex != Bucket::entriesPerBucket) {
@@ -42,9 +48,21 @@ public:
                               iterator{&getBuckets()[bucketIndex],
                                        cap - bucketIndex, entryIndex, offset});
       }
+      if (!sawTombstone) {
+        if (auto tombstoneIndex = getBuckets()[bucketIndex].find(
+                DenseMapInfo<K>::getTombstoneKey());
+            tombstoneIndex != Bucket::entriesPerBucket) {
+          sawTombstone = true;
+          seenTombstoneIdx = tombstoneIndex;
+          seenTombstoneBucket = bucketIndex;
+        }
+      }
       if (auto emptyIndex =
               getBuckets()[bucketIndex].find(DenseMapInfo<K>::getEmptyKey());
           emptyIndex != Bucket::entriesPerBucket) {
+        // if we already saw a tombstone, break to return that.
+        if (sawTombstone)
+          break;
         return std::make_pair(false,
                               iterator{&getBuckets()[bucketIndex],
                                        cap - bucketIndex, emptyIndex, offset});
@@ -52,8 +70,13 @@ public:
 
       bucketIndex = (bucketIndex + offset) & (cap - 1);
       offset += 1;
+      if (bucketIndex == startBucketIndex) [[unlikely]]
+        break;
     }
-    dyno_unreachable("full hash map");
+    assert(sawTombstone && "hash map full?");
+    return std::make_pair(false, iterator{&getBuckets()[bucketIndex],
+                                         cap - seenTombstoneBucket,
+                                         seenTombstoneIdx, offset});
   }
 
   iterator findEmptyImpl(const K &k, bool assertNotExist = true) const {
@@ -80,7 +103,6 @@ public:
       bucketIndex = (bucketIndex + offset) & (cap - 1);
       offset += 1;
     }
-    dyno_unreachable("full hash map");
   }
 
   template <std::invocable<Bucket *, size_type> T> void grow(T &&reinsertFunc) {
@@ -297,7 +319,7 @@ public:
     auto iter = Base::findEmptyImpl(k);
     sz++;
     iter.keyMut() = k;
-    (*iter).second = std::move(v);
+    std::construct_at(&(*iter).second, std::move(v));
     return iter;
   }
   iterator insert(const K &k, const V &v) { return insert(k, V{v}); }
@@ -311,8 +333,9 @@ public:
 
       sz++;
       iter.keyMut() = k;
-    }
-    (*iter).second = std::move(v);
+      std::construct_at(&(*iter).second, std::move(v));
+    } else
+      (*iter).second = std::move(v);
     return iter;
   }
   iterator insertOrAssign(const K &k, const V &v) {
@@ -329,7 +352,7 @@ public:
 
     sz++;
     iter.keyMut() = k;
-    (*iter).second = func();
+    std::construct_at(&(*iter).second, std::move(func()));
     return std::make_pair(false, iter);
   }
 
