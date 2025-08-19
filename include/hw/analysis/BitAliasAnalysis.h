@@ -238,16 +238,24 @@ public:
               (*next)->as<FatDynObjRef<InstrDefUse>>()->getDef());
       } else {
         retVal = std::move(stack.back().acc);
-        assert(frame.ref.instr().getNumDefs() == 1);
-        if (auto asWire = frame.ref.instr().def(0)->dyn_as<WireRef>()) {
-          cache.insert(asWire, retVal);
-        }
+        if (frame.ref.instr().getNumDefs() == 1)
+          if (auto asWire = frame.ref.instr().def(0)->dyn_as<WireRef>()) {
+            cache.insert(asWire, retVal);
+          }
         stack.pop_back();
       }
     }
     change |= retVal.defragmentValues(ctx);
+    assert(retVal.getLen() == *rootWire.getNumBits());
     if (retVal.frags.size() == 1) {
-      assert(retVal.frags.front().len == *rootWire.getNumBits());
+      // if the result is just a single HWValue (that's not the root wire),
+      // we can just do replace all uses on the root wire, so always change
+      if (ctx.resolveObj(retVal.frags.front().ref).as<HWValue>().getNumBits() ==
+          rootWire.getNumBits()) {
+        assert(retVal.frags.front().srcAddr == 0);
+        assert(retVal.frags.front().len == *rootWire.getNumBits());
+        change = true;
+      }
       change &= retVal.frags.front().ref != rootWire;
     }
     return std::make_pair(RegisterValue{retVal}, change);

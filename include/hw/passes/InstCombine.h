@@ -21,7 +21,6 @@
 #include "support/ErrorRecovery.h"
 #include "support/Utility.h"
 #include <algorithm>
-#include <csignal>
 
 namespace dyno {
 
@@ -204,7 +203,7 @@ private:
       build.buildInstrRaw(opc, 2).addRef(outWire).other().addRef(tempW);
     }
 
-    instr.def(0).replace(FatDynObjRef<>{nullref});
+    //instr.def(0).replace(FatDynObjRef<>{nullref});
     deleteMatchedInstr(instr);
     return true;
   }
@@ -233,7 +232,7 @@ private:
     auto ib = build.buildInstrRaw(HW_CONCAT, 1 + aliases.frags.size());
     build.setInsertPoint(ib.instr());
     ib.addRef(instr.def(0)->as<WireRef>()).other();
-    instr.def(0).replace(FatDynObjRef{nullref});
+    //instr.def(0).replace(FatDynObjRef{nullref});
     for (auto frag : Range{aliases.frags}.reverse()) {
       auto ref = ctx.resolveObj(frag.ref);
       ib.addRef(build.buildSplice(ref, frag.len, frag.srcAddr));
@@ -311,7 +310,7 @@ private:
     }
     build.setInsertPoint(instr);
 
-    instr.def(0).replace(FatDynObjRef<>{nullref});
+    //instr.def(0).replace(FatDynObjRef<>{nullref});
     deleteMatchedInstr(instr);
     return true;
   }
@@ -636,7 +635,7 @@ private:
                                       instr.getNumOperands() - 1);
         for (auto def : instr.defs()) {
           ib.addRef(def->fat());
-          def.replace(FatDynObjRef{nullref});
+          //def.replace(FatDynObjRef{nullref});
         }
         ib.other();
         for (auto use : instr.others()) {
@@ -677,7 +676,7 @@ private:
 
     for (auto def : instr.defs()) {
       ib.addRef(def->fat());
-      def.replace(FatDynObjRef{nullref});
+      //def.replace(FatDynObjRef{nullref});
     }
     ib.other();
     for (auto use : Range{instr.other_begin(),
@@ -772,8 +771,8 @@ private:
         return false;
       if (instr.def(0)->as<WireRef>().getNumUses() == 0) {
         // DCE unused instruction
-        TaggedIRef{instr}.get() = 1;
-        return false;
+        deleteMatchedInstr(instr);
+        return true;
       }
     }
 
@@ -810,6 +809,17 @@ private:
       ctx.sourceLocInfo.copyDebugInfo(old, newInstr);
     if (TaggedIRef{old}.get()) {
       for (auto op : old) {
+
+        // propagate unused values up the chain
+        if (!op.isDef()) {
+          if (auto asWire = op->dyn_as<WireRef>();
+              asWire && asWire.hasSingleUse() && asWire.hasSingleDef()) {
+            auto defI = asWire.getDefI();
+            if (!TaggedIRef{defI}.get())
+              deleteMatchedInstr(defI);
+          }
+        }
+
         op.replace(FatDynObjRef<>{nullref});
       }
     }
@@ -826,6 +836,9 @@ private:
 
   void runOnProcess(ProcessIRef proc) {
     worklist.clear();
+    bitAlias.clearCache();
+    knownBits.clearCache();
+
     for (auto instr : HierBlockRange{proc.block()})
       worklist.emplace_back(instr);
     while (!worklist.empty()) {
@@ -833,11 +846,6 @@ private:
       if (TaggedIRef{instr}.get())
         continue;
       auto lastWorklistSize = worklist.size();
-#ifdef _DEBUG_
-      std::stringstream str;
-      HWPrinter print{str};
-      print.printDeps(instr, ctx, 2);
-#endif
 
       if (!runOnInstr(instr))
         continue;
@@ -845,9 +853,12 @@ private:
       anyMatchHook();
 
       DEBUG("instcombine", {
+        HWPrinter print{dbgs()};
         dbgs() << "initial instructions:\n";
-        dbgs() << str.str();
-        str.str("");
+
+        for (auto instr : currentMatched)
+          print.printInstr(instr, ctx);
+
         dbgs() << "replaced with:\n";
 
         for (size_t i = lastWorklistSize, sz = worklist.size(); i < sz; i++)
@@ -855,17 +866,16 @@ private:
         if (lastWorklistSize == worklist.size()) {
           if (!currentReplaced.empty()) {
             dumpObj(currentReplaced[0]->fat());
-            str << "\n";
+            dbgs() << "\n";
           } else
-            str << "<none>\n";
+            dbgs() << "<none>\n";
         }
-        dbgs() << str.str();
       })
 
       auto newInstrs = ArrayRef<InstrRef>{worklist.begin() + lastWorklistSize,
                                           worklist.end()};
-      for (auto instr : currentMatched) {
-        oldInstrHook(instr, newInstrs);
+      for (size_t i = 0; i < currentMatched.size(); i++) {
+        oldInstrHook(currentMatched[i], newInstrs);
       }
       for (auto operand : currentReplaced) {
         replacedUseHook(operand);

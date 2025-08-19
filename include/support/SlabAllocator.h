@@ -46,6 +46,13 @@ public:
     for (auto *ptr : slabs)
       free(ptr);
   }
+
+  void clear() {
+    for (auto *ptr : slabs)
+      free(ptr);
+    slabs.clear();
+    remElems = 0;
+  }
 };
 
 template <typename T> class SlabAllocator {
@@ -71,6 +78,13 @@ public:
     for (size_type i = 0; i < base.size(); i++) {
       std::destroy_at(reinterpret_cast<T *>(base[i]));
     }
+  }
+
+  void clear() {
+    for (size_type i = 0; i < base.size(); i++) {
+      std::destroy_at(reinterpret_cast<T *>(base[i]));
+    }
+    base.clear();
   }
 
   SlabAllocator() : base(sizeof(T)) {}

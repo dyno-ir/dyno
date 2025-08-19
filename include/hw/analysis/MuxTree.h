@@ -12,6 +12,7 @@
 #include "support/SmallVec.h"
 #include <bit>
 #include <cstdint>
+#include <unordered_map>
 namespace dyno {
 
 struct BoolExprLiteral {
@@ -303,7 +304,7 @@ struct SmallBoolExprCNF {
         if (numValidLits == 1)
           continue;
 
-        for (auto lit : clause) {
+        for (auto [litIdx, lit] : Range{clause}.enumerate()) {
           if (lit.isMarked())
             continue;
 
@@ -357,6 +358,23 @@ struct SmallBoolExprCNF {
               keepClause.clearDyn(clauseIdx);
               other[*diffIdx].mark();
               it.erase();
+
+              for (size_t i = 0; i < litIdx; i++) {
+                auto lit = clause[i];
+                if (lit.isMarked())
+                  continue;
+                uint32_t hashWO =
+                    totalHash ^ hash_u32(lit.id << 1 | lit.inverse);
+                uint32_t hash = hashWO ^ hash_u32(lit.id << 16);
+                auto it = combineMap.find(hash);
+                assert(it != combineMap.end());
+                while (it != combineMap.end()) {
+                  auto next = combineMap.find_next(it);
+                  if (it.val() == clause.idx)
+                    it.erase();
+                  it = next;
+                }
+              }
 
               // delete stale
               // reconstruct other's total hash
@@ -434,12 +452,10 @@ struct SmallBoolExprCNF {
 
   bool findAndDedupeKnown(
       uint numLiterals, SmallVecImpl<Optional<uint8_t>> &known,
-      UnsizedBitSet<SmallVec<uint64_t, 2>, ~uint64_t(0)> &keepClause,
-      bool prune = false) {
+      UnsizedBitSet<SmallVec<uint64_t, 2>, ~uint64_t(0)> &keepClause) {
+
     for (auto [clauseIdx, clause] : Range{clauses()}.enumerate()) {
       if (clause.len == 1) {
-        if (prune)
-          keepClause.clearDyn(clauseIdx);
         bool val = !clause.front().inverse;
         auto &slot = known[clause.front().id];
         if (slot) {
@@ -447,8 +463,8 @@ struct SmallBoolExprCNF {
             makeUnsat();
             return false;
           }
-          if (!prune)
-            keepClause.clearDyn(clauseIdx);
+
+          keepClause.clearDyn(clauseIdx);
         }
         slot = val;
       }
@@ -482,11 +498,13 @@ struct SmallBoolExprCNF {
       return res;
 
     if (checkSAT) {
+      auto temp = *this;
       auto sat = satSolve(numLiterals);
       if (!sat) {
         makeUnsat();
         return false;
       }
+      *this = temp;
     }
 
     auto hashClause = [](ClauseRef clause) {
@@ -554,6 +572,7 @@ struct SmallBoolExprCNF {
         known[lit.id] = nullopt;
       }
     }
+
     UnsizedBitSet<SmallVec<uint64_t, 2>, ~uint64_t(0)> keepClause;
     for (auto [clauseIdx, clause] : Range{clauses()}.enumerate()) {
       if (clause.len == 1) {
@@ -576,27 +595,26 @@ struct SmallBoolExprCNF {
         }
       }
     }
-    SmallBoolExprCNF copy = *this;
 
     auto rv = simplifyImpl(numLiterals, known, keepClause);
     if (rv.has_value()) {
-      if (rv.value() == true)
-        *this = copy;
       return *rv;
     }
 
-    // just pick first literal, no heuristic
-    literals.emplace_back(literals[0]);
-    literals.back().clauseBegin = true;
+    SmallBoolExprCNF copy = *this;
 
+    // just pick first literal, no heuristic
+    literals.emplace_back(BoolExprLiteral{literals[0]});
+    literals.back().inverse = 0;
+    literals.back().clauseBegin = true;
     auto ifTrue = satSolve(numLiterals);
     *this = copy;
     if (ifTrue) {
       return true;
     }
 
-    literals.emplace_back(literals[0]);
-    literals.back().inverse = !literals.back().inverse;
+    literals.emplace_back(BoolExprLiteral{literals[0]});
+    literals.back().inverse = 1;
     literals.back().clauseBegin = true;
 
     auto ifFalse = satSolve(numLiterals);
@@ -618,7 +636,7 @@ struct SmallBoolExprCNF {
   }
   void makeUnsat() { literals.clear(); }
 
-  auto negated2(uint numLiterals) {
+  std::optional<SmallBoolExprCNF> negated(uint numLiterals) {
     if (isTrue()) {
       SmallBoolExprCNF rv;
       rv.makeUnsat();
@@ -635,6 +653,10 @@ struct SmallBoolExprCNF {
     for (auto clause : clauses()) {
       count *= clause.len;
       clauseVec.emplace_back(clause);
+    }
+    if (count > 2000000) {
+      dbgs() << count;
+      return std::nullopt;
     }
 
     SmallBoolExprCNF exprOut;
@@ -663,6 +685,7 @@ struct SmallBoolExprCNF {
       }
     }
 
+    exprOut.simplify(numLiterals);
     return exprOut;
   }
 
@@ -769,18 +792,24 @@ struct SmallBoolExprCNF {
       return;
     }
 
-    // todo properly
-    auto lhs = this->negated2(numLiterals);
-    lhs.simplify(numLiterals);
+    this->dump();
+    other.dump();
 
-    auto rhs = other.negated2(numLiterals);
-    rhs.simplify(numLiterals);
+    SmallBoolExprCNF copy = *this;
+    literals.clear();
 
-    lhs.addAsGlobalAND(rhs);
-    lhs.simplify(numLiterals);
+    for (auto lhs : copy.clauses()) {
+      for (auto rhs : other.clauses()) {
+        literals.push_back_range(Range{lhs});
+        auto mid = literals.size();
+        literals.push_back_range(Range{rhs});
+        literals[mid].clauseBegin = 0;
+      }
+    }
 
-    *this = lhs.negated2(numLiterals);
-    this->simplify(numLiterals);
+    this->dump();
+    simplify(numLiterals);
+    this->dump();
   }
 
   auto evalWithBoundVars2(SmallBoolExprCNF &orig, SmallBoolExprCNF &expr,
@@ -881,7 +910,7 @@ public:
       return;
     } else if (instr.isOpc(OP_NOT)) {
       analyzeCond(muxtree, cond, instr.other(0)->as<WireRef>());
-      cond = cond.negated2(muxtree->conditions.size());
+      cond = *cond.negated(muxtree->conditions.size());
       cond.simplify(muxtree->conditions.size());
       return;
     } else if (instr.isOpc(OP_OR)) {
@@ -910,12 +939,13 @@ public:
     cond.literals.emplace_back(getCondIdx(muxtree, wire, 0), 0, 1);
   }
 
-  MuxTree analyzeMuxTree(InstrRef root) {
-    return analyzeMuxTree(root, [](InstrRef) {});
+  MuxTree analyzeMuxTree(InstrRef root, bool matchMultiUse = false) {
+    return analyzeMuxTree(root, [](InstrRef) {}, matchMultiUse);
   }
 
   MuxTree analyzeMuxTree(InstrRef root,
-                         std::invocable<InstrRef> auto visitedCallback) {
+                         std::invocable<InstrRef> auto visitedCallback,
+                         bool matchMultiUse = false) {
     conditionsDedupeMap.clear();
     SmallVec<std::tuple<HWValue, uint32_t>, 32> worklist{
         {root.def(0)->as<WireRef>(), 1}};
@@ -939,7 +969,8 @@ public:
       }
       auto asWire = val.as<WireRef>();
       auto defI = asWire.getSingleDef()->instr();
-      if (!defI.isOpc(HW_MUX) || !defI.def(0)->as<WireRef>().hasSingleUse()) {
+      if (!defI.isOpc(HW_MUX) || (!matchMultiUse && defI != root &&
+                                  !defI.def(0)->as<WireRef>().hasSingleUse())) {
         SmallBoolExprCNF expr;
         expr.makeTrue();
         for (auto &prefix : prefixes)
@@ -971,7 +1002,7 @@ public:
         worklist.emplace_back(operand->as<HWValue>(), 1);
         if (operand != instr.other(1)) {
           prefixes.back() =
-              prefixes.back().negated2(muxtree->conditions.size());
+              *prefixes.back().negated(muxtree->conditions.size());
         }
         break;
       }

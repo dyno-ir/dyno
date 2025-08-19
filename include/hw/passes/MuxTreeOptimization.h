@@ -53,8 +53,19 @@ class MuxTreeOptimizationPass {
         entry.expr.dump(false);
         dbgs() << ": ";
 
-        dumpObj(ctx.resolveObj(entry.output));
-        dbgs() << "\n";
+        auto ref = ctx.resolveObj(entry.output);
+        if (auto wire = ref.dyn_as<WireRef>())
+          dumpInstr(wire.getDefI(), ctx);
+        else {
+          dumpObj(ref);
+          dbgs() << "\n";
+        }
+      }
+
+      dbgs() << "symbols:\n";
+      for (auto [i, cond] : Range{tree->conditions}.enumerate()) {
+        dbgs() << i << ": bit " << cond.idx << " of ";
+        dumpInstr(ctx.getWires().resolve(cond.wire).getDefI(), ctx);
       }
     });
   }
@@ -65,7 +76,8 @@ class MuxTreeOptimizationPass {
   // elements that resolve the assignment for an entire var. If there's none of
   // those left, it just selects the single boolean signal as close to 50/50 as
   // possible.
-  SmallBoolExprCNF getBestMUXExpr(MuxTree *tree) {
+  std::pair<SmallBoolExprCNF, Optional<uint32_t>>
+  getBestMUXExpr(MuxTree *tree) {
 
     uint bestLitIdx = 0;
     uint bestTotal = 0;
@@ -77,7 +89,7 @@ class MuxTreeOptimizationPass {
       SmallBoolExprCNF testExpr;
       testExpr.literals.emplace_back(
           BoolExprLiteral{uint16_t(litIdx), 0, true});
-      SmallBoolExprCNF testExprInv = testExpr.negated2(tree->conditions.size());
+      SmallBoolExprCNF testExprInv = *testExpr.negated(tree->conditions.size());
 
       SmallVec<uint, 8> trueExprs;
       SmallVec<uint, 8> falseExprs;
@@ -142,12 +154,12 @@ class MuxTreeOptimizationPass {
         continue;
       dbgs() << "entry #" << idx
              << " is not bin tree compatible. peeling off.\n";
-      return tree->entries[idx].expr;
+      return std::pair(tree->entries[idx].expr, idx);
     }
 
     SmallBoolExprCNF selExpr;
     selExpr.literals.emplace_back(uint16_t(bestLitIdx), 0, true);
-    return selExpr;
+    return std::pair(selExpr, nullopt);
   }
 
   static std::pair<WireRef, bool>
@@ -228,14 +240,18 @@ private:
                             trueV, falseV);
     }
 
-    auto selExpr = getBestMUXExpr(tree);
+    auto [selExpr, peelOffIdx] = getBestMUXExpr(tree);
 
+    auto selExprNeg = selExpr.negated(tree->conditions.size());
     DEBUG("MuxTreeOptimization", {
       dbgs() << "splitting tree on: ";
       selExpr.dump();
+      if (selExprNeg) {
+        dbgs() << "\nnegated:";
+        selExprNeg->dump();
+      }
       dbgs() << "\n\n";
     });
-    auto selExprNeg = selExpr.negated2(tree->conditions.size());
 
     MuxTree *left = muxTreeAlloc.allocate();
     MuxTree *right = muxTreeAlloc.allocate();
@@ -246,39 +262,52 @@ private:
     right->conditions = tree->conditions;
     right->root = nullref;
 
-    // only valid if the corresponding tree is empty.
-    DynObjRef leftSingleOutput = nullref;
-    DynObjRef rightSingleOutput = nullref;
-
-    // go thru entries. consider the entry expression in the cases that the
-    // expression we MUX on is true (right subtree) or false (left subtree). If
-    // the entry expression becomes unsatisfiable in either subtree we can
-    // safely discard it.
-    for (auto entry : tree->entries) {
-      // decide whether to put entry in left, right or both.
-      if (entry.expr.isUnsat())
-        continue;
-      
-      auto [ifTrueRem, trueBrSat, ifFalseRem, falseBrSat] =
-          entry.expr.evalWithBoundVars2(entry.expr, selExpr, selExprNeg,
-                                        tree->conditions.size());
-
-      if (!trueBrSat && !falseBrSat)
-        continue;
-
-      if (trueBrSat)
-        rightSingleOutput = entry.output;
-      if (falseBrSat)
-        leftSingleOutput = entry.output;
-
-      if (falseBrSat) {
-        left->entries.emplace_back(
-            MuxTree::Entry{std::move(ifFalseRem), entry.output});
+    if (!selExprNeg) {
+      dbgs() << "not simplifying other terms, negation too expensive\n";
+      assert(peelOffIdx);
+      for (auto [i, entry] : Range{tree->entries}.enumerate()) {
+        if (i == *peelOffIdx)
+          continue;
+        left->entries.emplace_back(entry);
       }
-      if (trueBrSat) {
-        right->entries.emplace_back(
-            MuxTree::Entry{std::move(ifTrueRem), entry.output});
+      right->entries.emplace_back(tree->entries[*peelOffIdx]);
+    } else {
+      // go thru entries. consider the entry expression in the cases that the
+      // expression we MUX on is true (right subtree) or false (left subtree).
+      // If the entry expression becomes unsatisfiable in either subtree we can
+      // safely discard it.
+      for (auto [entryIdx, entry] : Range{tree->entries}.enumerate()) {
+        // decide whether to put entry in left, right or both.
+        if (entry.expr.isUnsat())
+          continue;
+
+        auto [ifTrueRem, trueBrSat, ifFalseRem, falseBrSat] =
+            entry.expr.evalWithBoundVars2(entry.expr, selExpr, *selExprNeg,
+                                          tree->conditions.size());
+
+        if (!trueBrSat && !falseBrSat)
+          continue;
+
+        if (falseBrSat) {
+          left->entries.emplace_back(
+              MuxTree::Entry{std::move(ifFalseRem), entry.output});
+        }
+        if (trueBrSat) {
+          right->entries.emplace_back(
+              MuxTree::Entry{std::move(ifTrueRem), entry.output});
+        }
       }
+
+      uint cntTrueLeft = 0;
+      for (auto entry : left->entries)
+        if (entry.expr.isTrue())
+          cntTrueLeft++;
+      assert(cntTrueLeft <= 1);
+      uint cntTrueRight = 0;
+      for (auto entry : right->entries)
+        if (entry.expr.isTrue())
+          cntTrueRight++;
+      assert(cntTrueRight <= 1);
     }
 
     DEBUG("MuxTreeOptimization", {
@@ -289,18 +318,20 @@ private:
       printMuxTree(right);
     })
 
-    HWValue leftVal;
-    HWValue rightVal;
+    HWValue leftVal = nullref;
+    HWValue rightVal = nullref;
 
-    if (left->entries.size() == 0)
-      leftVal = ctx.resolveObj(leftSingleOutput);
-    else
+    if (!left->entries.empty())
       leftVal = lowerMuxTreeSimple(left);
-
-    if (right->entries.size() == 0)
-      rightVal = ctx.resolveObj(rightSingleOutput);
-    else
+    if (!right->entries.empty())
       rightVal = lowerMuxTreeSimple(right);
+
+    assert(leftVal || rightVal);
+
+    if (!leftVal)
+      return rightVal;
+    if (!rightVal)
+      return leftVal;
 
     if (auto asConst = leftVal.dyn_as<ConstantRef>();
         asConst && asConst.allBitsUndef())
@@ -326,6 +357,7 @@ private:
         visitedMap[instr] = 1;
         auto muxtree = analysis.analyzeMuxTree(
             instr, [&](InstrRef ref) { visitedMap[ref] = 1; });
+        printMuxTree(&muxtree);
         analysis.simplifyConditions(&muxtree);
         printMuxTree(&muxtree);
         analysis.dedupeMuxTreeOutputs(&muxtree);
@@ -334,7 +366,7 @@ private:
         auto oldWire = instr.def(0)->as<WireRef>();
         if (wire != oldWire)
           oldWire.replaceAllUsesWith(wire);
-        return;
+        break;
       }
     }
   }
@@ -355,6 +387,8 @@ public:
     for (auto mod : ctx.activeModules()) {
       runOnModule(mod.iref());
     }
+
+    muxTreeAlloc.clear();
   }
 
   explicit MuxTreeOptimizationPass(HWContext &ctx) : ctx(ctx), build(ctx) {}

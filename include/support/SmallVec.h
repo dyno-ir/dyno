@@ -268,6 +268,11 @@ public:
     return *(end() - 1);
   }
 
+  const T &back() const {
+    assert(sz > 0);
+    return *(end() - 1);
+  }
+
   bool erase_unordered(iterator it) {
     // Don't self-move assign. I think C++17 allows this tho
     // TODO: Gate this if trivially move-assignable?
@@ -325,6 +330,11 @@ public:
   }
 
   T &front() {
+    assert(sz > 0);
+    return *arr;
+  }
+
+  const T &front() const {
     assert(sz > 0);
     return *arr;
   }

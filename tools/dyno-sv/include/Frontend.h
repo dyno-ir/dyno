@@ -1155,8 +1155,16 @@ public:
       auto rhs = handle_expr(assign.right());
       assignLVStack.pop_back();
 
-      lhs->as<LValue>().storeVal(build, rhs->proGetValue(build),
-                                 assign.isNonBlocking());
+      if (auto rlv = lhs->dyn_as<RegLValue>()) {
+        if (auto right = rhs->dyn_as<RValue>()) {
+          if (right->value.getNumBits() != rlv->numBits)
+            print.error(expr.sourceRange);
+        }
+      }
+
+      auto val = rhs->proGetValue(build);
+
+      lhs->as<LValue>().storeVal(build, val, assign.isNonBlocking());
       return rhs;
     }
     case slang::ast::ExpressionKind::LValueReference: {
@@ -1669,6 +1677,8 @@ public:
         HWValue newVal = handle_expr(*memberSetter.expr)->proGetValue(build);
         spliceIn(newVal, ConstantRef::fromU32(offs), ConstantRef::fromU32(len));
       }
+
+      assert(cur.getNumBits() == totalLen);
 
       return std::make_unique<RValue>(cur, expr.type);
     }

@@ -62,7 +62,6 @@ private:
 
 public:
   explicit ProcessLinearizePass(HWContext &ctx) : ctx(ctx), copier(ctx) {}
-  std::vector<ProcessIRef> procs;
   DeepCopier copier;
 
   void findDeps(ModuleIRef module) {
