@@ -642,7 +642,6 @@ public:
       auto cbuild = ctx.constBuild();
       if (values.size() == 0)
         return cbuild.val(0, 0).get();
-      cbuild.val(values.back().as<ConstantRef>());
       for (auto val : values)
         cbuild.concatLHS(val.as<ConstantRef>());
 

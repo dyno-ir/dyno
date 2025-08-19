@@ -103,10 +103,15 @@ struct RegisterValue : public RegisterFrags<RegisterValueFragment> {
         depth(depth), untouched(untouched) {}
 
   uint32_t getLen() const {
+    uint32_t lenFast =
+        frags.empty() ? 0 : frags.back().dstAddr + frags.back().len;
+#ifdef _DEBUG_
     uint32_t len = 0;
     for (auto frag : frags)
       len += frag.len;
-    return len;
+    assert(len == lenFast);
+#endif
+    return lenFast;
   }
 
   void overwrite(DynObjRef ref, uint32_t srcAddr, uint32_t dstAddr,
@@ -672,6 +677,72 @@ struct RegisterRegions : public RegisterFrags<RegisterRegionsFragment> {
   }
 
   explicit RegisterRegions(uint32_t len) : RegisterFrags({{{}, 0, len}}) {}
+};
+
+struct RegisterPartitionFragment {
+  uint32_t dstAddr;
+  uint32_t len;
+};
+
+struct RegisterPartitions : public RegisterFrags<RegisterPartitionFragment, 4> {
+  using Fragment = RegisterPartitionFragment;
+
+  void addPartition(uint32_t dstAddr, uint32_t len) {
+    auto it = getInsertIt(dstAddr);
+
+    if (it == frags.end()) {
+      frags.emplace_back(dstAddr, len);
+      return;
+    }
+
+    // it subsumes us
+    if (it->dstAddr <= dstAddr && it->dstAddr + it->len >= dstAddr + len)
+      return;
+
+    auto centerLen = len;
+    auto centerAddr = dstAddr;
+
+    if (it->dstAddr < dstAddr) {
+      if (it->dstAddr + it->len <= dstAddr)
+        ++it;
+      else {
+        // it starts earlier but also ends earlier -> insert an intersection
+        // frag
+        auto pieceLen = dstAddr - it->dstAddr;
+        Fragment frag{it->dstAddr, pieceLen};
+        it = frags.insert(it, frag) + 1;
+
+        centerLen -= pieceLen;
+        centerAddr += pieceLen;
+        it->len -= pieceLen;
+        it->dstAddr += pieceLen;
+      }
+    }
+
+    auto insertPos = it - frags.begin();
+
+    while (len != 0 && it != frags.end()) {
+
+      uint32_t end = dstAddr + len;
+      uint32_t itEnd = it->dstAddr + it->len;
+
+      // it ends later
+      if (itEnd > end) {
+        Fragment frag{it->dstAddr, len};
+        it->len = itEnd - end;
+        it->dstAddr += len;
+        centerLen -= len;
+        it = frags.insert(it, frag);
+        break;
+      }
+
+      len -= it->len;
+      dstAddr += it->len;
+      it = frags.erase(it);
+    }
+
+    frags.insert(frags.begin() + insertPos, Fragment{centerAddr, centerLen});
+  }
 };
 
 }; // namespace dyno

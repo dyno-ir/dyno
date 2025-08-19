@@ -139,10 +139,10 @@ public:
   bool hasTrigger() {
     return getNumOperands() > 2 && operand(2)->is<TriggerRef>();
   }
-  TriggerRef trigger() {
+  TriggerIRef trigger() {
     if (!hasTrigger())
       return nullref;
-    return operand(2)->as<TriggerRef>();
+    return operand(2)->as<TriggerRef>().iref();
   }
 
   uint32_t getLen() { return *value().getNumBits(); }

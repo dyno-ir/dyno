@@ -469,7 +469,7 @@ public:
 
         TriggerID trigger = nullopt;
         if (instr.getDialectOpcode() == HW_STORE_DEFER)
-          trigger = asStore.trigger().getObjID().num;
+          trigger = asStore.trigger().oref().getObjID().num;
 
         uint32_t addr = 0;
         uint32_t len = *asStore.reg()->numBits;

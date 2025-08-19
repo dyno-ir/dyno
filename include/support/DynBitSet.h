@@ -8,9 +8,12 @@
 #include <iterator>
 #include <vector>
 
-template <typename Container, size_t SymbolBits,
-          Container::value_type DefaultWord = 0>
+template <typename containter, size_t SymbolBits,
+          containter::value_type DefaultWord = 0>
 class UnsizedSymbSet {
+public:
+  using Container = containter;
+
 protected:
   Container storage;
   using container_t = Container;
@@ -107,8 +110,8 @@ public:
       return *this;
     }
     iterator &operator-=(size_t val) { *this += -val; }
-    iterator &operator++() { return *this + 1; }
-    iterator &operator--() { return *this - 1; }
+    iterator &operator++() { return *this += 1; }
+    iterator &operator--() { return *this -= 1; }
     iterator operator++(int) {
       auto old{*this};
       ++(*this);
@@ -120,11 +123,14 @@ public:
       return old;
     }
 
-    reference operator*() { return reference{word, symb, SymbolBits}; }
+    reference operator*() { return reference{*word, symb, SymbolBits}; }
     reference operator[](size_t i) { return *((*this) + i); }
 
     friend difference_type operator-=(iterator lhs, iterator rhs) {
       return (lhs.word - rhs.word) * Base::WordSymbs + (lhs.symb - rhs.symb);
+    }
+    friend bool operator==(iterator lhs, iterator rhs) {
+      return lhs.word == rhs.word && lhs.symb == rhs.symb;
     }
   };
 
@@ -161,7 +167,7 @@ public:
 
   void set(size_t i) { storage[wordIdx(i)] |= symbMask(i); }
   void clear(size_t i) { storage[wordIdx(i)] &= ~symbMask(i); }
-  bool get(size_t i) const { storage[wordIdx(i)] & symbMask(i); }
+  bool get(size_t i) const { return storage[wordIdx(i)] & symbMask(i); }
 
   void modifyRange(size_t i, size_t len, word_t value) {
     if (len == 0) [[unlikely]]

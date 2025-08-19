@@ -78,9 +78,11 @@ class FlipFlopInferencePass {
 
   Optional<uint> findClockEnable(RegisterIRef q, StoreIRef store,
                                  MuxTree *muxTree) {
+    if (!muxTree)
+      return nullopt;
     if (isQLoad(q, store.value().as<HWValue>()))
       return 0;
-    if (!muxTree)
+    if (store.value().as<WireRef>().getNumUses() != 1)
       return nullopt;
     for (auto [i, entry] : Range{muxTree->entries}.enumerate()) {
       auto ref = ctx.resolveObj(entry.output);
@@ -126,7 +128,7 @@ class FlipFlopInferencePass {
     // assume ranges lowered
     assert(storeI.isFullReg() && "range not lowered?");
     assert(storeI.hasTrigger() && "no trigger?");
-    auto trigger = storeI.trigger();
+    auto trigger = storeI.trigger().oref();
     if (trigger->size() > 3)
       report_fatal_error("too many sensitivities on flip flop");
     bool hasReset = trigger->size() != 1;
