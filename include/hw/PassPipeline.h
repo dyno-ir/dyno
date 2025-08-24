@@ -13,6 +13,7 @@
 #include "hw/passes/FlipFlopInference.h"
 #include "hw/passes/FlipFlopMapping.h"
 #include "hw/passes/FunctionInline.h"
+#include "hw/passes/FuzzyCSE.h"
 #include "hw/passes/InstCombine.h"
 #include "hw/passes/LinearizeControlFlow.h"
 #include "hw/passes/LoopSimplify.h"
@@ -22,6 +23,7 @@
 #include "hw/passes/OrderInstrs.h"
 #include "hw/passes/ParseLiberty.h"
 #include "hw/passes/ProcessLinearize.h"
+#include "hw/passes/RegisterPartition.h"
 #include "hw/passes/RemoveBuffers.h"
 #include "hw/passes/SSAConstruct.h"
 #include "hw/passes/SeqToComb.h"
@@ -56,6 +58,8 @@ class PassPipeline {
   ConstantMapping constMap{ctx};
   FindLongestPathPass longestPath{ctx};
   CheckPass checkPass{ctx};
+  RegisterPartitionPass regPartition{ctx};
+  FuzzyCSEPass fuzzyCse{ctx};
 
 public:
   bool printAfterAll = true;
@@ -69,6 +73,7 @@ public:
     }
     if (checkAfterAll && !skipCheck)
       checkPass.run();
+    //dumpDyno();
   }
 
   void runOptPipeline() {
@@ -126,21 +131,6 @@ public:
 
   void runLoweringPipeline() {
 
-    processLinearize.config.retainInnerDeps = 0;
-    processLinearize.config.retainIODeps = 0;
-    runPass(processLinearize);
-    runPass(linearizeControlFlow);
-    ssaConstr.config.mode = SSAConstructPass::Config::IMMEDIATE;
-    runPass(ssaConstr);
-    runPass(instCombine);
-    runPass(agressiveDCE);
-
-    runPass(flipFlopInference);
-    runPass(cse, true);
-    runPass(orderInstrs);
-    runPass(muxTreeOpt);
-    runPass(agressiveDCE);
-
     // lower compares and sub and re-run instcombine
     lowerOps.config = LowerOpsPass::Config{
         .lowerMultiInputAdd = false,
@@ -152,10 +142,34 @@ public:
         .lowerEqualityICMP = false,
         .lowerOrderingICMP = true,
         .lowerShift = false,
+        .lowerInsert = false,
+        .lowerExtract = false,
     };
     runPass(lowerOps);
     runPass(instCombine);
+    runPass(cse, true);
+    runPass(fuzzyCse, true);
+    runPass(orderInstrs);
+    runPass(instCombine);
+
+    processLinearize.config.retainInnerDeps = 0;
+    processLinearize.config.retainIODeps = 0;
+    runPass(processLinearize);
+    runPass(linearizeControlFlow);
+    ssaConstr.config.mode = SSAConstructPass::Config::IMMEDIATE;
+    runPass(ssaConstr);
+    dumpDyno();
+    runPass(instCombine);
+    dumpDyno();
     runPass(agressiveDCE);
+
+    runPass(muxTreeOpt);
+    runPass(instCombine);
+
+    runPass(cse, true);
+    runPass(fuzzyCse, true);
+    runPass(orderInstrs);
+    runPass(instCombine);
 
     // lower everything that can still go through instcombine
     lowerOps.config = LowerOpsPass::Config{
@@ -168,12 +182,20 @@ public:
         .lowerEqualityICMP = true,
         .lowerOrderingICMP = true,
         .lowerShift = true,
+        .lowerInsert = true,
+        .lowerExtract = true,
     };
     runPass(lowerOps);
     runPass(instCombine);
-    runPass(agressiveDCE);
+
+    runPass(flipFlopInference);
+    runPass(cse, true);
+    runPass(orderInstrs);
+
+    runPass(instCombine);
 
     runLibertyPipeline();
+
     runPass(ffMap, true);
     runPass(orderInstrs);
     runPass(instCombine);
@@ -194,6 +216,8 @@ public:
         .lowerEqualityICMP = true,
         .lowerOrderingICMP = true,
         .lowerShift = true,
+        .lowerInsert = true,
+        .lowerExtract = true,
     };
     runPass(lowerOps);
     runPass(agressiveDCE);
@@ -209,11 +233,11 @@ public:
     runPass(agressiveDCE);
 
     runPass(constMap);
-
     runPass(cse);
     runPass(instCombine);
     runPass(agressiveDCE);
 
+    orderInstrs.config.assertNoCircularDeps = false;
     runPass(orderInstrs);
     runPass(longestPath);
   }
@@ -227,6 +251,12 @@ public:
     HWPrinter print{os};
     print.printCtx(ctx);
   }
+
+  void dumpDyno(std::string path) {
+    std::ofstream str{path};
+    dumpDyno(str);
+  }
+  __attribute__((used)) void dumpDyno() { dumpDyno("dump_unnamed.dyno"); }
 
 public:
   explicit PassPipeline(HWContext &ctx) : ctx(ctx) {}

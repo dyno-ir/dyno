@@ -91,7 +91,8 @@ protected:
   struct opc {
     using print_fn = bool (PrinterBase::*)(FatDynObjRef<> ref, bool def);
   };
-  using name_fn = const char *(PrinterBase::*)(FatDynObjRef<> ref);
+  using name_fn =
+      std::optional<IntroducedName> (PrinterBase::*)(FatDynObjRef<> ref);
   Interfaces<NUM_DIALECTS, type::print_fn, opc::print_fn, name_fn> interfaces;
 
 public:
@@ -150,8 +151,8 @@ public:
     noCustom.clearCustom();
     auto [found, it] = introduced.findOrInsert(noCustom, [&] -> IntroducedName {
       if (auto func = interfaces.getVal<name_fn>(ref.getDialectID())) {
-        if (const char *name = (this->*func)(ref))
-          return IntroducedName{name};
+        if (auto nm = (this->*func)(ref))
+          return *nm;
       }
       return IntroducedName{numericNameCnt++};
     });

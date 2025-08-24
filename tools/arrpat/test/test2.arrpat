@@ -54,6 +54,25 @@ match {
 }
 replace $out -> $b
 
+match {
+  HW_REPEAT $out, $in
+}
+with [{
+  auto lenOut = *(*$out.begin())->as<WireRef>().getNumBits();
+  auto lenIn = *(*$in.begin())->as<HWValue>().getNumBits();
+  if (lenOut != lenIn)
+    goto $fail;
+}]
+replace $out -> $in
+
+
+match {
+  OP_XOR $out, $in, #'1
+}
+replace {
+  OP_NOT $out, $in
+}
+
 
 // # ADD/SUB rules
 // sub to add negated
@@ -414,24 +433,24 @@ replace {
 }
 */
 
-/*
-// these might hinder MUX tree analysis. skip for now, maybe support in mux tree analysis at some
+
+// these might hinder MUX tree analysis, maybe support output patterns in mux tree analysis?
 match {
   HW_MUX $out, $cond, #'1, $rhs
 }
 replace {
-  OP_SEXT $temp:wire_like($out), $cond
+  HW_REPEAT $temp:wire_like($out), $cond
   OP_OR $out, $temp, $rhs
 }
 
 match {
-  HW_MUX $out, $cond, $rhs, #'0
+  HW_MUX $out, $cond, $lhs, #'0
 }
 replace {
-  OP_SEXT $temp:wire_like($out), $cond
-  OP_AND $out, $temp, $rhs
+  HW_REPEAT $temp:wire_like($out), $cond
+  OP_AND $out, $temp, $lhs
 }
-*/
+
 
 
 match {

@@ -71,3 +71,16 @@ public:
 };
 
 }; // namespace dyno
+
+template <typename T> struct DenseMapInfo<dyno::Optional<T>> {
+  static T getEmptyKey() {
+    return DenseMapInfo<T>::getEmptyKey() +
+           (std::numeric_limits<T>::is_signed ? 1 : (-1));
+  }
+  static T getTombstoneKey() {
+    return DenseMapInfo<T>::getTombstoneKey() +
+           (std::numeric_limits<T>::is_signed ? 1 : (-1));
+  }
+  static unsigned getHashValue(const T &k) { return std::hash<T>()(k); }
+  static bool isEqual(const T &lhs, const T &rhs) { return lhs == rhs; }
+};

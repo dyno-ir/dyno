@@ -654,8 +654,9 @@ struct SmallBoolExprCNF {
       count *= clause.len;
       clauseVec.emplace_back(clause);
     }
+    dbgs() << count << "\n";
+    // fixme: SmallBoolExprCNF needs to be replaced with BDD or something...
     if (count > 2000000) {
-      dbgs() << count;
       return std::nullopt;
     }
 
@@ -905,7 +906,9 @@ public:
     } else if (instr.isOpc(OP_AND)) {
       cond.makeTrue();
       for (auto op : instr.others()) {
-        analyzeCond(muxtree, cond, op->as<WireRef>());
+        SmallBoolExprCNF subExpr;
+        analyzeCond(muxtree, subExpr, op->as<WireRef>());
+        cond.addAsGlobalAND(subExpr);
       }
       return;
     } else if (instr.isOpc(OP_NOT)) {
@@ -939,13 +942,14 @@ public:
     cond.literals.emplace_back(getCondIdx(muxtree, wire, 0), 0, 1);
   }
 
-  MuxTree analyzeMuxTree(InstrRef root, bool matchMultiUse = false) {
+  std::optional<MuxTree> analyzeMuxTree(InstrRef root,
+                                        bool matchMultiUse = false) {
     return analyzeMuxTree(root, [](InstrRef) {}, matchMultiUse);
   }
 
-  MuxTree analyzeMuxTree(InstrRef root,
-                         std::invocable<InstrRef> auto visitedCallback,
-                         bool matchMultiUse = false) {
+  std::optional<MuxTree>
+  analyzeMuxTree(InstrRef root, std::invocable<InstrRef> auto visitedCallback,
+                 bool matchMultiUse = false) {
     conditionsDedupeMap.clear();
     SmallVec<std::tuple<HWValue, uint32_t>, 32> worklist{
         {root.def(0)->as<WireRef>(), 1}};
@@ -1001,8 +1005,16 @@ public:
         std::get<1>(worklist.back()) += 1;
         worklist.emplace_back(operand->as<HWValue>(), 1);
         if (operand != instr.other(1)) {
-          prefixes.back() =
-              *prefixes.back().negated(muxtree->conditions.size());
+          auto negated = prefixes.back().negated(muxtree->conditions.size());
+          if (!negated)
+            return std::nullopt;
+          for (auto lit : negated->literals) {
+            assert(!lit.isMarked());
+          }
+          if (negated->isTrue())
+            prefixes.pop_back();
+          else
+            prefixes.back() = *negated;
         }
         break;
       }

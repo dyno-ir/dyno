@@ -44,6 +44,8 @@ public:
     bool lowerEqualityICMP = true;
     bool lowerOrderingICMP = true;
     bool lowerShift = true;
+    bool lowerInsert = true;
+    bool lowerExtract = true;
   };
   Config config;
 
@@ -129,7 +131,7 @@ private:
         ibuild.addRef(val);
         worstDelay = dl;
       }
-      auto comprDelay = delay.getDefDelay(ibuild.instr().def(0), nullptr);
+      auto comprDelay = delay.getDefDelay(ibuild.instr().def(0));
       if (!comprDelay)
         worstDelay = UINT32_MAX;
       else if (worstDelay != UINT32_MAX)
@@ -308,7 +310,7 @@ private:
         ibuild.addRef(val);
         worstDelay = dl;
       }
-      auto comprDelay = delay.getDefDelay(ibuild.instr().def(0), nullptr);
+      auto comprDelay = delay.getDefDelay(ibuild.instr().def(0));
       if (!comprDelay)
         worstDelay = UINT32_MAX;
       else if (worstDelay != UINT32_MAX)
@@ -370,18 +372,29 @@ private:
     }
 
     build.setInsertPoint(instr);
+    rhs = build.buildNot(rhs);
     if (!isSigned) {
       lhs = build.buildZExt(numBits + 1, lhs);
       rhs = build.buildZExt(numBits + 1, rhs);
     }
 
-    auto ibuild = build.buildInstrRaw(OP_SUB, 3);
+    HWValue *constantOperand = nullptr;
+    if (lhs.is<ConstantRef>())
+      constantOperand = &lhs;
+    else if (rhs.is<ConstantRef>())
+      constantOperand = &rhs;
+    if (constantOperand)
+      *constantOperand = build.buildAdd(*constantOperand,
+                                        cbuild.oneLike(*constantOperand).get());
+    auto ibuild = build.buildInstrRaw(OP_ADD, constantOperand ? 3 : 4);
     auto sumWire = ctx.getWires().create(isSigned ? numBits : numBits + 1);
     ibuild.addRef(sumWire);
     ibuild.other();
     build.setInsertPoint(ibuild.instr());
     ibuild.addRef(lhs);
     ibuild.addRef(rhs);
+    if (!constantOperand)
+      ibuild.addRef(cbuild.oneLike(lhs));
 
     build.setInsertPoint(instr);
 
@@ -394,6 +407,7 @@ private:
       out = build.buildMux(signsDifferent, signLHS, signBit);
     } else {
       out = build.buildSplice(sumWire, 1, numBits);
+      invertResult = !invertResult;
     }
     out = invertResult ? build.buildNot(out) : out;
     instr.def(0)->as<WireRef>().replaceAllUsesWith(out);
@@ -788,14 +802,15 @@ private:
     case *OP_SRL:
     case *OP_SRA:
       lowerShift(instr);
-      return;
+      break;
 
     case *HW_SPLICE:
       lowerNonConstSplice(instr);
-      return;
+      break;
 
     case *HW_INSERT:
       lowerNonConstInsert(instr);
+      break;
     }
   }
 
@@ -831,10 +846,10 @@ public:
         return config.lowerMultiInputBitwise;
 
       if (instr.isOpc(HW_SPLICE))
-        return true;
+        return config.lowerExtract;
 
       if (instr.isOpc(HW_INSERT))
-        return true;
+        return config.lowerInsert;
 
       return false;
     };
@@ -854,6 +869,7 @@ public:
 
     while (!worklist.empty()) {
       runOnInstr(worklist.pop_back_val());
+      delay.clearCache();
     }
 
     ctx.getInstrs().createHooks.pop_back();

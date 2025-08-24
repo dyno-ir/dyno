@@ -200,8 +200,7 @@ struct RegisterValue : public RegisterFrags<RegisterValueFragment> {
   }
 
   void appendTop(const RegisterValue &other) {
-    auto len = frags.empty() ? 0 : (frags.back().dstAddr + frags.back().len);
-
+    auto len = getLen();
     for (auto frag : other.frags) {
       frag.dstAddr += len;
       frags.emplace_back(frag);
@@ -370,7 +369,7 @@ struct RegisterValue : public RegisterFrags<RegisterValueFragment> {
       len += frag.len;
       allUntouched &= frag.untouched;
     }
-    assert(allUntouched == untouched);
+    assert(allUntouched == untouched || frags.empty());
 
     std::reverse(operands.begin(), operands.end());
     auto rv = build.buildMultiSplice(ArrayRef{operands});

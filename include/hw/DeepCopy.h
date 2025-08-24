@@ -97,6 +97,10 @@ public:
     return copyInstr;
   }
 
+  InstrRef copyInstr(InstrRef srcInstr, BlockRef_iterator<true> dstIt) {
+    return copyInstr(srcInstr, dstIt, emptyCallback);
+  }
+
   template <IsCopyHook InstrHook>
   InstrRef moveInstr(InstrRef srcInstr, BlockRef_iterator<true> dstIt,
                      InstrHook &instrCallback) {
@@ -134,8 +138,7 @@ private:
 
   template <IsCopyHook InstrHook>
   void moveInstrsImpl(BlockRef_iterator<true> srcIt,
-                      BlockRef_iterator<true> dstIt,
-                      InstrHook &instrCallback) {
+                      BlockRef_iterator<true> dstIt, InstrHook &instrCallback) {
     return copyMoveInstrsImpl<&DeepCopier::moveInstr<InstrHook>, InstrHook>(
         srcIt, dstIt, instrCallback);
   }

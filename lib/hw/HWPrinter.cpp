@@ -29,6 +29,11 @@ __attribute__((used)) void dumpDeps(InstrRef instr, HWContext &ctx) {
   print.reset();
   print.printDeps(instr, ctx);
 }
+__attribute__((used)) void dumpDeps(InstrRef instr, HWContext &ctx,
+                                    uint maxDepth) {
+  print.reset();
+  print.printDeps(instr, ctx, maxDepth);
+}
 __attribute__((used)) void dumpObj(FatDynObjRef<> obj) {
   print.reset();
   if (auto asInstr = obj.dyn_as<InstrRef>())

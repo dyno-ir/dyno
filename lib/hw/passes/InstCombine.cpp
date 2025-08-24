@@ -41,11 +41,15 @@ static void deleteF(SmallVecImpl<InstrRef> &matched, HWContext &ctx,
 
 static void deleteIfSingleUse(SmallVecImpl<InstrRef> &matched, HWContext &ctx,
                               InstrRef ref) {
-  if (ref.def(0)->as<WireRef>().getNumUses() == 1) {
-    deleteF(matched, ctx, ref);
-    return;
-  }
-  matched.emplace_back(ref);
+
+  // this is only valid for direct users replaced values.
+  // if (ref.def(0)->as<WireRef>().getNumUses() == 1) {
+  //   deleteF(matched, ctx, ref);
+  //   return;
+  // }
+  // matched.emplace_back(ref);
+
+  // for now simply ignore, will be re-inspected.
 }
 
 static void replaceAllUses(SmallVecImpl<OperandRef> &replaced,

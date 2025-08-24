@@ -1155,16 +1155,8 @@ public:
       auto rhs = handle_expr(assign.right());
       assignLVStack.pop_back();
 
-      if (auto rlv = lhs->dyn_as<RegLValue>()) {
-        if (auto right = rhs->dyn_as<RValue>()) {
-          if (right->value.getNumBits() != rlv->numBits)
-            print.error(expr.sourceRange);
-        }
-      }
-
-      auto val = rhs->proGetValue(build);
-
-      lhs->as<LValue>().storeVal(build, val, assign.isNonBlocking());
+      lhs->as<LValue>().storeVal(build, rhs->proGetValue(build),
+                                 assign.isNonBlocking());
       return rhs;
     }
     case slang::ast::ExpressionKind::LValueReference: {
@@ -1426,6 +1418,10 @@ public:
         if (auto enumMember = nval.symbol.as_if<slang::ast::EnumValueSymbol>())
           return RegisterOrConstantRef{
               toDynoConstant(enumMember->getValue().integer())};
+        if (auto param = nval.symbol.as_if<slang::ast::ParameterSymbol>()) {
+          return RegisterOrConstantRef{
+              toDynoConstant(param->getValue().integer())};
+        }
         return nval.getConstant()
                    ? RegisterOrConstantRef{toDynoConstant(
                          nval.getConstant()->integer())}

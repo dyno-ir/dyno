@@ -12,6 +12,7 @@
 #include "hw/HWPrinter.h"
 #include "hw/IDs.h"
 #include "hw/Register.h"
+#include "hw/analysis/ControlFlow.h"
 #include "op/IDs.h"
 #include "support/Bits.h"
 #include "support/Debug.h"
@@ -89,6 +90,7 @@ class CommonSubexpressionEliminationPass {
   HWContext &ctx;
   CSEDedupeMap map;
   DestroyMap<Instr> instrDestroy;
+  ControlFlowAnalysis controlFlowAnalysis;
 
   static bool ignoreForCSE(InstrRef instr) {
     return instr.isOpc(
@@ -97,14 +99,6 @@ class CommonSubexpressionEliminationPass {
         OP_YIELD, OP_UNYIELD, OP_CASE, OP_CASE_DEFAULT, HW_COMB_PROCESS_DEF,
         HW_INIT_PROCESS_DEF, HW_FINAL_PROCESS_DEF, HW_SEQ_PROCESS_DEF,
         HW_LATCH_PROCESS_DEF, HW_NETLIST_PROCESS_DEF);
-  }
-
-  template <typename T> auto findFirstShared(ArrayRef<T> a, ArrayRef<T> b) {
-    for (size_t i = 0; i < a.size(); i++)
-      for (size_t j = 0; j < b.size(); j++)
-        if (a[i] == b[j])
-          return std::pair<size_t, size_t>(i, j);
-    dyno_unreachable("no common element");
   }
 
   void runOnInstr(InstrRef instr) {
@@ -132,45 +126,18 @@ class CommonSubexpressionEliminationPass {
     if (otherBl == instrBl) {
       DEBUG("CSE", {
         dbgs() << "merging in same block:\n";
-        dumpInstr(instr);
-        dumpInstr(other);
+        dumpInstr(instr, ctx);
+        dumpInstr(other, ctx);
       })
       return;
     }
 
-    auto buildStack = [&](BlockRef block, SmallVecImpl<OperandRef> &stack) {
-      while (true) {
-        auto instr = block.defI();
-        // switch block is a special context, doesn't count here.
-        // if (!instr.isOpc(OP_SWITCH))
-        stack.emplace_back(*block.def());
-        auto parent = HWInstrRef{instr}.parentBlock(ctx);
-        if (!parent)
-          break;
-        block = parent;
-      }
-    };
-
-    SmallVec<OperandRef, 4> otherStack{*other.begin()};
-    buildStack(otherBl, otherStack);
-    SmallVec<OperandRef, 4> instrStack{*instr.begin()};
-    buildStack(instrBl, instrStack);
-    auto [otherIdx, instrIdx] = findFirstShared(
-        ArrayRef{otherStack}.drop_front(), ArrayRef{instrStack}.drop_front());
-    InstrRef otherPred = otherStack[otherIdx].instr();
-    InstrRef instrPred = instrStack[instrIdx].instr();
-    auto block = HWInstrRef{otherPred}.parentBlock(ctx);
-    assert(block == HWInstrRef{instrPred}.parentBlock(ctx));
-
-    if (block.defI().isOpc(OP_SWITCH))
-      block = HWInstrRef{block.defI()}.parentBlock(ctx);
+    auto block = controlFlowAnalysis.findSharedParentBlock(instrBl, otherBl);
 
     DEBUG("CSE", {
       dbgs() << "merging in different blocks:\n";
       dumpInstr(instr, ctx);
       dumpInstr(other, ctx);
-      dumpInstr(HWInstrRef{otherPred}.parentBlock(ctx).defI(), ctx);
-      dumpInstr(HWInstrRef{instrPred}.parentBlock(ctx).defI(), ctx);
     })
 
     ctx.getCFG()[other].erase();
@@ -217,7 +184,7 @@ public:
     instrDestroy.clear();
   }
   explicit CommonSubexpressionEliminationPass(HWContext &ctx)
-      : ctx(ctx), map(ctx) {}
+      : ctx(ctx), map(ctx), controlFlowAnalysis(ctx) {}
 };
 
 }; // namespace dyno

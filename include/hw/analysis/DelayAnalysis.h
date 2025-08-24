@@ -1,23 +1,32 @@
 #pragma once
 
-#include "dyno/DialectInfo.h"
-#include "dyno/Interface.h"
+#include "dyno/AnalysisCache.h"
+#include "dyno/Constant.h"
+#include "dyno/Instr.h"
 #include "dyno/Opcode.h"
 #include "hw/HWValue.h"
 #include "hw/IDs.h"
+#include "hw/LoadStore.h"
 #include "hw/Wire.h"
+#include "hw/analysis/DelayAnalysis.h"
 #include "op/IDs.h"
-#include "support/Optional.h"
-#include <cmath>
-
+#include "support/DenseMap.h"
+#include <concepts>
 namespace dyno {
 
-// just skeleton, real modeling tbd
 class DelayAnalysis {
 
   static inline DialectOpcodeInterface<NUM_DIALECTS, Optional<uint8_t>> delay;
 
-public:
+  struct Frame {
+    HWValue value;
+    uint idx;
+    uint32_t acc;
+  };
+  SmallVec<Frame, 16> stack;
+  Optional<uint32_t> retVal;
+  AnalysisCache<ObjRef<Wire>, Optional<uint32_t>> cache;
+
   void setupDelayTable() {
     // todo constexpr
     delay.set(OP_AND, 1);
@@ -34,8 +43,6 @@ public:
     delay.set(HW_MUX, 2);
     delay.set(HW_ADD_COMPRESS, 2);
   }
-
-  DelayAnalysis() { setupDelayTable(); }
 
   uint32_t getAddDelay(uint32_t bits, uint32_t operands) {
     if (operands <= 1)
@@ -59,23 +66,17 @@ public:
 
   uint32_t getDecoderDelay(uint32_t bitsOut) { return log2(bitsOut); }
 
-  Optional<uint32_t> getDefDelay(OperandRef def, SmallVecImpl<WireRef> *stack) {
+public:
+  DelayAnalysis() { setupDelayTable(); }
+
+  Optional<uint32_t> getDefDelay(OperandRef def) {
     WireRef wire = def->as<WireRef>();
     InstrRef instr = def.instr();
     auto bits = *wire.getNumBits();
 
-    auto pushUses = [stack](InstrRef instr) {
-      if (!stack)
-        return;
-      for (auto use : instr.others())
-        if (auto asWire = use->dyn_as<WireRef>())
-          stack->emplace_back(asWire);
-    };
-
     switch (*instr.getDialectOpcode()) {
     case *OP_SUB:
     case *OP_ADD: {
-      pushUses(instr);
       return getAddDelay(bits, instr.getNumOthers());
     }
 
@@ -89,7 +90,6 @@ public:
     case *OP_ICMP_CZNE:
     case *OP_ICMP_CXEQ:
     case *OP_ICMP_CXNE: {
-      pushUses(instr);
       return std::log2(*instr.operand(1)->as<HWValue>().getNumBits());
     }
 
@@ -101,14 +101,12 @@ public:
     case *OP_ICMP_SGT:
     case *OP_ICMP_UGE:
     case *OP_ICMP_SGE: {
-      pushUses(instr);
       return getAddDelay(*instr.operand(1)->as<HWValue>().getNumBits(), 2);
     }
 
     case *OP_SLL:
     case *OP_SRL:
     case *OP_SRA: {
-      pushUses(instr);
       auto bits = *instr.operand(1)->as<HWValue>().getNumBits();
       return getFanoutDelay(bits) + getDecoderDelay(bits) + *delay[HW_MUX];
     }
@@ -121,7 +119,6 @@ public:
       return nullopt;
 
     default: {
-      pushUses(instr);
       auto val = delay[instr.getDialectOpcode()];
       if (val)
         return *val;
@@ -133,32 +130,52 @@ public:
     }
   }
 
-  Optional<uint32_t> getDelayOf(WireRef wire) {
-    SmallVec<WireRef, 32> stack{wire};
-    SmallVec<std::pair<uint32_t, uint32_t>, 16> accs{{~0u, 0}};
+  Optional<uint32_t> getDelayOf(HWValue rootVal) {
 
+    stack.emplace_back(rootVal, 0);
     while (!stack.empty()) {
-      auto curWire = stack.pop_back_val();
-      auto oldStackSize = stack.size();
+      auto &frame = stack.back();
+      if (auto asConst = frame.value.dyn_as<ConstantRef>()) {
+        retVal = 0;
+        stack.pop_back();
+        continue;
+      }
+      auto wire = frame.value.as<WireRef>();
+      auto instr = wire.getDefI();
 
-      if (oldStackSize == accs.back().first) {
-        auto maxDelay = accs.pop_back_val().second;
-        accs.back().second += maxDelay;
+      if (auto val = cache.find(wire.as<WireRef>())) {
+        retVal = *val;
+        stack.pop_back();
+        continue;
       }
 
-      auto val = getDefDelay(curWire.getDef(), &stack);
-      if (!val)
-        return nullopt;
-      accs.back().second =
-          std::max(accs.back().second,
-                   *val + getFanoutDelay(curWire->defUse.getNumUses()));
+      // if delay is unknown no need to find max operand delay
+      if (frame.idx == 0 && !getDefDelay(wire.getDef())) {
+        retVal = nullopt;
+        stack.pop_back();
+        continue;
+      }
 
-      if (oldStackSize != stack.size())
-        accs.emplace_back(oldStackSize, 0);
+      // select maximum delay use
+      auto maxVal =
+          retVal ? std::max(*retVal, frame.acc) : Optional<uint32_t>{nullopt};
+
+      if (maxVal && frame.idx != instr.getNumOthers()) {
+        frame.acc = *maxVal;
+        stack.emplace_back(instr.other(frame.idx++)->as<HWValue>(), 0, 0);
+      } else {
+        retVal = maxVal;
+        if (retVal)
+          *retVal += *getDefDelay(wire.getDef());
+        cache.insert(stack.back().value.as<WireRef>(), retVal);
+        stack.pop_back();
+      }
     }
 
-    return accs.front().second;
+    return retVal;
   }
+
+  void clearCache() { cache.clearAll(); }
 };
 
 }; // namespace dyno

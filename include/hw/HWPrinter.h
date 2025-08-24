@@ -108,21 +108,25 @@ public:
     return true;
   }
 
-  const char *getObjectName(FatDynObjRef<> ref) {
+  std::optional<IntroducedName> getObjectName(FatDynObjRef<> ref) {
     switch (ref.getTyID()) {
     case HW_MODULE.type:
       return ref.as<ModuleRef>()->name.c_str();
     case HW_REGISTER.type: {
       if (!regNames)
-        return nullptr;
+        return std::nullopt;
       auto range = regNames->getNames(ref.as<RegisterRef>());
       if (range.begin() == range.end())
-        return nullptr;
+        return std::nullopt;
       // todo: what about multiple and collisions?
       return *range.begin();
     }
+    case HW_WIRE.type: {
+      // todo properly (or just not)
+      return ref.getObjID() + 10000;
     }
-    return nullptr;
+    }
+    return std::nullopt;
   }
 
   // todo: in AIG dialect

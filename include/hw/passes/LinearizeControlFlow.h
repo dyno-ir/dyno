@@ -194,6 +194,13 @@ class LinearizeControlFlowPass {
   }
 
   void linearizeFor(ForInstrRef forLoop) {
+
+    bool illformed = !forLoop.getUpper()->is<ConstantRef>() ||
+                     !forLoop.getLower()->is<ConstantRef>() ||
+                     !forLoop.getStep()->is<ConstantRef>();
+    if (illformed)
+      report_fatal_error("ill-formed for loop");
+
     BigInt diff = forLoop.getUpper()->as<ConstantRef>() -
                   forLoop.getLower()->as<ConstantRef>();
     BigInt step = forLoop.getStep()->as<ConstantRef>();

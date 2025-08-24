@@ -71,6 +71,7 @@ class AggressiveDeadCodeEliminationPass {
   }
 
   void visitHWValue(HWValue value) {
+    assert(value);
     if (auto asConst = value.dyn_as<ConstantRef>()) {
       if (asConst.isInline())
         return;
@@ -84,6 +85,11 @@ class AggressiveDeadCodeEliminationPass {
     }
   }
 
+  void pushInstr(InstrRef instr) {
+    assert(instr);
+    worklist.emplace_back(instr);
+  }
+
   void markParentBlockDef(InstrRef instr) {
     auto block = HWInstrRef{instr}.parentBlock(ctx);
     if (block.defI().isOpc(HW_INIT_PROCESS_DEF, HW_COMB_PROCESS_DEF,
@@ -94,13 +100,13 @@ class AggressiveDeadCodeEliminationPass {
 
     if (block.defI().isOpc(OP_IF, OP_FOR, OP_WHILE, OP_DO_WHILE, OP_SWITCH) &&
         !instrMap[block.defI()]) {
-      worklist.emplace_back(block.defI());
+      pushInstr(block.defI());
     }
 
     if (block.defI().isOpc(OP_CASE, OP_CASE_DEFAULT)) {
       auto instr = ctx.getCFG()[block.defI()].blockRef().defI();
       if (!instrMap[instr])
-        worklist.emplace_back(instr);
+        pushInstr(instr);
     }
   }
 
@@ -144,7 +150,7 @@ class AggressiveDeadCodeEliminationPass {
     case *OP_SWITCH: {
       auto asSwitch = instr.as<SwitchInstrRef>();
       if (!instrMap[instr])
-        visitHWValue(asSwitch.cond()->as<WireRef>());
+        visitHWValue(asSwitch.cond()->as<HWValue>());
 
       for (uint i = 0; i < asSwitch.getNumYieldValues(); i++) {
         if (!wireMap[asSwitch.getYieldValue(i)->as<WireRef>()])
@@ -177,13 +183,13 @@ class AggressiveDeadCodeEliminationPass {
       for (auto yield : asWhileLoop.yieldValues())
         wireMap[yield->as<WireRef>()] = 1;
       if (auto yield = asWhileLoop.getCondYield())
-        worklist.emplace_back(yield);
+        pushInstr(yield);
       if (auto yield = asWhileLoop.getCondUnyield())
-        worklist.emplace_back(yield);
+        pushInstr(yield);
       if (auto yield = asWhileLoop.getBodyYield())
-        worklist.emplace_back(yield);
+        pushInstr(yield);
       if (auto yield = asWhileLoop.getBodyUnyield())
-        worklist.emplace_back(yield);
+        pushInstr(yield);
       break;
     }
 
@@ -196,9 +202,9 @@ class AggressiveDeadCodeEliminationPass {
       for (auto yield : asDoWhile.yieldValues())
         wireMap[yield->as<WireRef>()] = 1;
       if (auto yield = asDoWhile.getYield())
-        worklist.emplace_back(yield);
+        pushInstr(yield);
       if (auto unyield = asDoWhile.getUnyield())
-        worklist.emplace_back(unyield);
+        pushInstr(unyield);
       break;
     }
 
@@ -214,8 +220,9 @@ class AggressiveDeadCodeEliminationPass {
       visitHWValue(asFor.getUpper()->as<HWValue>());
       visitHWValue(asFor.getStep()->as<HWValue>());
       if (auto yield = asFor.getYield())
-        worklist.emplace_back(yield);
-      worklist.emplace_back(asFor.getUnyield());
+        pushInstr(yield);
+      if (auto unyield = asFor.getUnyield())
+        pushInstr(unyield);
       break;
     }
 
@@ -225,7 +232,7 @@ class AggressiveDeadCodeEliminationPass {
       auto asLoad = instr.as<LoadIRef>();
       auto reg = asLoad.reg().iref();
       if (!instrMap[reg])
-        worklist.emplace_back(reg);
+        pushInstr(reg);
       for (auto term : asLoad.terms()) {
         visitHWValue(term.getIdx());
       }
@@ -240,7 +247,7 @@ class AggressiveDeadCodeEliminationPass {
       visitHWValue(asStore.value());
       auto reg = asStore.reg().iref();
       if (!instrMap[reg])
-        worklist.emplace_back(reg);
+        pushInstr(reg);
       for (auto term : asStore.terms()) {
         visitHWValue(term.getIdx());
       }
@@ -253,7 +260,7 @@ class AggressiveDeadCodeEliminationPass {
       for (auto op : instr.others().drop_front()) {
         auto reg = op->as<RegisterRef>().iref();
         if (!instrMap[reg])
-          worklist.emplace_back(reg);
+          pushInstr(reg);
       }
       break;
     }
@@ -272,7 +279,7 @@ class AggressiveDeadCodeEliminationPass {
         auto iref = reg->as<RegisterRef>().iref();
         if (instrMap[iref])
           continue;
-        worklist.emplace_back(iref);
+        pushInstr(iref);
       }
       break;
     }
@@ -290,7 +297,7 @@ class AggressiveDeadCodeEliminationPass {
     }
 
     case *AIG_OUTPUT: {
-      worklist.emplace_back(
+      pushInstr(
           instr.other(0)->as<AIGObjRef>()->defUse.getSingleDef()->instr());
       break;
     }
@@ -307,7 +314,7 @@ class AggressiveDeadCodeEliminationPass {
       // AIG depends on all its inputs
       for (auto use : asAIGObj->defUse.uses())
         if (use.instr().isOpc(AIG_INPUT))
-          worklist.emplace_back(use.instr());
+          pushInstr(use.instr());
       break;
     }
 
@@ -326,13 +333,13 @@ class AggressiveDeadCodeEliminationPass {
       if (instrMap[instr])
         break;
       auto asFF = instr.as<FlipFlopIRef>();
-      worklist.emplace_back(asFF.clk().iref());
-      worklist.emplace_back(asFF.d().iref());
+      pushInstr(asFF.clk().iref());
+      pushInstr(asFF.d().iref());
       if (asFF.hasClkEn()) {
-        worklist.emplace_back(asFF.clkEn().iref());
+        pushInstr(asFF.clkEn().iref());
       }
       for (uint i = 0; i < asFF.numRsts(); i++) {
-        worklist.emplace_back(asFF.rst(i).iref());
+        pushInstr(asFF.rst(i).iref());
         visitHWValue(asFF.rstVal(i));
       }
       break;
