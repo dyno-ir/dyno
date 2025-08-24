@@ -1,8 +1,10 @@
 #pragma once
 #include "dyno/Obj.h"
 #include "hw/HWContext.h"
+#include "hw/HWPrinter.h"
 #include "hw/Register.h"
 #include "hw/analysis/SCFTraversal.h"
+#include "support/Debug.h"
 #include "support/DynBitSet.h"
 
 namespace dyno {
@@ -14,12 +16,28 @@ class OrderInstrsPass {
   ObjMap<Instr, DynSymbSet<std::vector<uint64_t>, 2>> map;
   enum { PRE_MARK = 0, MARK = 1 };
 
+public:
+  struct Config {
+    bool assertNoCircularDeps = true;
+  };
+  Config config;
+
+private:
   void handleUse(BlockRef block, OperandRef use,
                  SmallVecImpl<OperandRef> &uses) {
     if (auto asWire = use->dyn_as<WireRef>()) {
       auto instr = asWire.getDefI();
-      if (ctx.getCFG()[instr].blockRef() == block)
-        uses.emplace_back(instr);
+      if (map[instr].at(MARK))
+        return;
+      if (ctx.getCFG()[instr].blockRef() != block) {
+        assert(!instr.isOpc(OP_UNYIELD));
+        dbgs() << "out of block:\n";
+        HWPrinter print{dbgs()};
+        print.printInstr(block.defI(), ctx);
+        dbgs() << "in question:\n";
+        print.printInstr(instr, ctx);
+      }
+      uses.emplace_back(instr);
     }
     // else if (auto asReg = use->dyn_as<RegisterRef>()) {
     //   if (!use.instr().isOpc(HW_LOAD))
@@ -37,8 +55,8 @@ class OrderInstrsPass {
 
   void prioritzeUses(MutArrayRef<OperandRef> uses) {
     std::sort(uses.begin(), uses.end(), [](OperandRef lhs, OperandRef rhs) {
-      //if (lhs->is<RegisterRef>() != rhs->is<RegisterRef>())
-      //  return lhs->is<RegisterRef>();
+      // if (lhs->is<RegisterRef>() != rhs->is<RegisterRef>())
+      //   return lhs->is<RegisterRef>();
       return lhs->as<FatDynObjRef<InstrDefUse>>()->getNumUses() <
              rhs->as<FatDynObjRef<InstrDefUse>>()->getNumUses();
     });
@@ -66,12 +84,14 @@ class OrderInstrsPass {
         continue;
       }
       auto pm = map[instr].at(PRE_MARK);
-      // assert(!pm);
+      if (config.assertNoCircularDeps)
+        assert(!pm);
       if (pm) {
         // circular dep
         stack.pop_back();
         continue;
       }
+
       pm = 1;
       instr.setCustom(1);
 
@@ -85,16 +105,14 @@ class OrderInstrsPass {
   }
 
   void runOnBlock(BlockRef block) {
-    map.clear();
-    map.resize(ctx.getInstrs().numIDs());
-
     SmallVec<ObjRef<Instr>, 32> ordered;
+    ordered.reserve(block.size());
     size_t i = 0;
     for (auto instr : block) {
       visit(block, instr, ordered);
       ++i;
     }
-    assert(ordered.size() == block.size() && block.size() == i);
+    // assert(ordered.size() == block.size() && block.size() == i);
     block.clear_unsafe();
     auto it = block.end();
     for (auto instr : ordered) {
@@ -104,6 +122,8 @@ class OrderInstrsPass {
   }
 
   void runOnModule(ModuleIRef mod) {
+    map.clear();
+    map.resize(ctx.getInstrs().numIDs());
     for (auto proc : mod.procs()) {
       auto blocks = getSCFBlocksPreorder(proc.block());
       for (auto block : blocks)

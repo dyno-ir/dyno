@@ -8,27 +8,13 @@
 #include "hw/HWInstr.h"
 #include "hw/IDs.h"
 #include "hw/Register.h"
+#include "support/Debug.h"
 namespace dyno {
 class ModuleInlinePass {
   HWContext &ctx;
   DeepCopier copier;
-
-  ObjMapVec<Module, bool> isSubModule;
-  auto markSubModules() {
-    isSubModule.resize(ctx.getModules().numIDs());
-    for (auto mod : ctx.getModules()) {
-      if (mod->defUse.getNumUses() != 0)
-        isSubModule[mod] = true;
-    }
-
-    SmallVec<ModuleIRef, 4> rv;
-    for (auto [obj, hasInst] : isSubModule) {
-      if (hasInst)
-        continue;
-      rv.emplace_back(ctx.getModules().resolve(obj).iref());
-    }
-    return rv;
-  }
+  ObjMapVec<Module, bool> isTopModule;
+  SmallVec<HWInstrRef, 32> worklist;
 
   void inlineInstance(HWInstrRef instance) {
     // copy module over (converting ports to regs)
@@ -53,6 +39,11 @@ class ModuleInlinePass {
         self->oldToNewMap.insert(src.def(0)->fat(), reg);
         return true;
       }
+      if (src.isOpc(HW_INSTANCE)) {
+        auto instr = copier.copyInstr(src, dstIt);
+        worklist.emplace_back(instr);
+        return true;
+      }
 
       return false;
     };
@@ -69,18 +60,29 @@ class ModuleInlinePass {
     for (auto use : ref.mod()->defUse.uses()) {
       deleteRec(HWInstrRef{use.instr()}.parentMod(ctx));
     }
+    DEBUG("ModuleInline", {
+      dbgs() << "deleting module: \"";
+      dbgs() << ref.mod()->name;
+      dbgs() << "\"\n";
+    })
     HWInstrBuilder{ctx}.destroyInstr(ref);
   }
 
 public:
   void run() {
-    markSubModules();
-    SmallVec<HWInstrRef, 32> worklist;
+    worklist.clear();
+    isTopModule.clear();
+    isTopModule.resize(ctx.getModules().numIDs());
+
     for (auto mod : ctx.activeModules()) {
-      for (auto use : mod->defUse.uses()) {
-        auto modUsed = HWInstrRef{use.instr()}.parentMod(ctx);
-        if (!isSubModule[modUsed.mod()]) {
-          worklist.emplace_back(use.instr());
+      if (mod.getNumUses() == 0) {
+        isTopModule[mod] = 1;
+      } else {
+        for (auto use : mod->defUse.uses()) {
+          auto modUsed = HWInstrRef{use.instr()}.parentMod(ctx);
+          if (isTopModule[modUsed.mod()]) {
+            worklist.emplace_back(use.instr());
+          }
         }
       }
     }
@@ -90,8 +92,9 @@ public:
     }
 
     for (auto mod : ctx.activeModules()) {
-      if (isSubModule[mod])
+      if (!isTopModule[mod]) {
         deleteRec(mod.iref());
+      }
     }
   }
 

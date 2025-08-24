@@ -139,8 +139,8 @@ class ConstantMapping {
     auto [zeroW, oneW] = getConstant01Wires();
 
     for (auto instr : proc.block().unordered()) {
-      // only map constants for stdcells and stores (i.e. output ports)
-      if (!instr.isOpc(HW_STDCELL_INSTANCE, HW_STORE))
+      // only map constants for stdcells, stores and concats
+      if (!instr.isOpc(HW_STDCELL_INSTANCE, HW_STORE, HW_CONCAT))
         continue;
       for (auto use : instr.others()) {
         if (!use->is<ConstantRef>())

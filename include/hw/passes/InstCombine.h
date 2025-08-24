@@ -49,6 +49,7 @@ private:
     if (known.getIs4S())
       return false;
     replaceUses(wire, cbuild.val(known).get());
+    deleteMatchedInstr(instr);
     return true;
   }
 
@@ -203,7 +204,7 @@ private:
       build.buildInstrRaw(opc, 2).addRef(outWire).other().addRef(tempW);
     }
 
-    //instr.def(0).replace(FatDynObjRef<>{nullref});
+    // instr.def(0).replace(FatDynObjRef<>{nullref});
     deleteMatchedInstr(instr);
     return true;
   }
@@ -232,7 +233,7 @@ private:
     auto ib = build.buildInstrRaw(HW_CONCAT, 1 + aliases.frags.size());
     build.setInsertPoint(ib.instr());
     ib.addRef(instr.def(0)->as<WireRef>()).other();
-    //instr.def(0).replace(FatDynObjRef{nullref});
+    // instr.def(0).replace(FatDynObjRef{nullref});
     for (auto frag : Range{aliases.frags}.reverse()) {
       auto ref = ctx.resolveObj(frag.ref);
       ib.addRef(build.buildSplice(ref, frag.len, frag.srcAddr));
@@ -310,7 +311,7 @@ private:
     }
     build.setInsertPoint(instr);
 
-    //instr.def(0).replace(FatDynObjRef<>{nullref});
+    // instr.def(0).replace(FatDynObjRef<>{nullref});
     deleteMatchedInstr(instr);
     return true;
   }
@@ -635,7 +636,7 @@ private:
                                       instr.getNumOperands() - 1);
         for (auto def : instr.defs()) {
           ib.addRef(def->fat());
-          //def.replace(FatDynObjRef{nullref});
+          // def.replace(FatDynObjRef{nullref});
         }
         ib.other();
         for (auto use : instr.others()) {
@@ -676,7 +677,7 @@ private:
 
     for (auto def : instr.defs()) {
       ib.addRef(def->fat());
-      //def.replace(FatDynObjRef{nullref});
+      // def.replace(FatDynObjRef{nullref});
     }
     ib.other();
     for (auto use : Range{instr.other_begin(),
@@ -802,6 +803,10 @@ private:
         break;
       }
     }
+
+    for (auto op : ref.others())
+      if (auto wire = op->dyn_as<WireRef>())
+        assert(wire.getNumDefs() == 1);
   }
 
   void oldInstrHook(InstrRef old, ArrayRef<InstrRef> newInstrs) {
@@ -822,6 +827,9 @@ private:
 
         op.replace(FatDynObjRef<>{nullref});
       }
+    } else {
+      // if not explicitly ok to delete, re-inspect
+      worklist.emplace_back(old);
     }
   }
 

@@ -553,7 +553,15 @@ public:
       }
     }
 
-    auto instr = InstrRef{ctx.getInstrs().create(1 + values.size(), HW_CONCAT)};
+    uint numOperands = 0;
+    for (auto [value, range] : values) {
+      if (auto asConst = range.getLen().dyn_as<ConstantRef>();
+          asConst && asConst.valueEquals(0))
+        continue;
+      numOperands++;
+    }
+
+    auto instr = InstrRef{ctx.getInstrs().create(1 + numOperands, HW_CONCAT)};
     insertInstr(instr);
 
     auto insertSave = insert;

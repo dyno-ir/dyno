@@ -336,6 +336,12 @@ class ABCPass {
            "print_stats; write_blif "
            "mapped.blif\"");
 
+    //system("yosys-abc -q \"read_blif aig.blif; read_library "
+    //       "stdcells.genlib; strash; &get -n; &fraig -x; "
+    //       "&put; scorr; dc2; dretime; strash; &get -n; &dch -f; &nf; &put;"
+    //       "print_stats; write_blif "
+    //       "mapped_gen.blif\"");
+
     std::ifstream mappedFile{"mapped.blif"};
     BLIF_Parser parse{ctx, mappedFile};
     parse.parse(aigRef);

@@ -702,12 +702,9 @@ struct CodeGen {
   }
 
   void checkSimple(uint32_t operandID, Object *obj) {
-    if (auto operand = obj->dyn_as<MatchOperand>()) {
-      if (operand->typeID)
-        ops.emplace_back(
-            BytecodeOp::makeCheckType(operandID, *operand->typeID));
 
-      if (auto defI = findInDefs(*operand->nameID);
+    auto checkSubInstr = [&](uint32_t name) {
+      if (auto defI = findInDefs(name);
           defI && !visitedInstrs.contains(*defI)) {
 
         auto instrReg = makeInstrRef();
@@ -715,7 +712,14 @@ struct CodeGen {
                                  .getDefInstr = {instrReg, operandID}});
         generateMatchInstr(instrReg, *defI);
       }
+    };
 
+    if (auto operand = obj->dyn_as<MatchOperand>()) {
+      if (operand->typeID)
+        ops.emplace_back(
+            BytecodeOp::makeCheckType(operandID, *operand->typeID));
+      if (operand->nameID)
+        checkSubInstr(*operand->nameID);
     } else if (auto constant = obj->dyn_as<MatchConstant>()) {
       ops.push_back(BytecodeOp{
           .opcode = BytecodeOp::CHECK_TYPE,
@@ -748,6 +752,9 @@ struct CodeGen {
       ops.push_back(BytecodeOp{
           .opcode = BytecodeOp::INLINE_CODE,
           .inlineCode{std::string_view(codePtr->begin(), codePtr->end())}});
+
+      if (call->bindName)
+        checkSubInstr(*call->bindName);
     }
   }
 
@@ -863,6 +870,10 @@ struct CodeGen {
   void registerOrCheckName(uint32_t nameID, uint32_t begin, uint32_t end) {
     auto newVar = Variable{begin, end};
     auto [found, it] = vars.findOrInsert(nameID, newVar);
+    if (!found) {
+      std::print(std::cerr, "inserted {}: {}\n", nameID,
+                 lexer.GetIdent(nameID));
+    }
     if (found) {
       ops.emplace_back(BytecodeOp{.opcode = BytecodeOp::CHECK_EQUAL,
                                   .checkEqual = {begin, it.val().operand}});
@@ -955,6 +966,8 @@ struct CodeGen {
     }
 
     if (instr->opcodeNameID) {
+      std::print(std::cerr, "inserted {}: {}\n", *instr->opcodeNameID,
+                 lexer.GetIdent(*instr->opcodeNameID));
       vars.insert(*instr->opcodeNameID, Variable{instrReg, 0});
     }
 
@@ -1082,6 +1095,8 @@ struct CodeGen {
       if (auto name = call->bindName) {
         assert(macro.retvals.size() == 1 &&
                "can't bind multiple retvals to one name");
+        std::print(std::cerr, "inserted {}: {}\n", *name,
+                   lexer.GetIdent(*name));
         vars.insert(*name, Variable{begin, end});
       }
 
@@ -1121,7 +1136,11 @@ struct CodeGen {
       }
       if (auto operand = op->dyn_as<MatchOperand>()) {
         auto var = vars.find(*operand->nameID);
-        assert(var && "name not found");
+        if (!var) {
+          std::cerr << "name not found: " << lexer.GetIdent(*operand->nameID)
+                    << "\n";
+          abort();
+        }
         ops.emplace_back(BytecodeOp::makeCopyOperand(
             dstInstr, var.val().operand, var.val().end));
       } else if (auto constant = op->dyn_as<MatchConstant>()) {
@@ -1160,9 +1179,15 @@ struct CodeGen {
       // todo: packs?
 
       uint32_t replReg;
-      if (auto *repl = rule.replacement->dyn_as<MatchOperand>())
-        replReg = vars.find(*repl->nameID).val().operand;
-      else if (auto *constant = rule.replacement->dyn_as<MatchConstant>()) {
+      if (auto *repl = rule.replacement->dyn_as<MatchOperand>()) {
+        auto it = vars.find(*repl->nameID);
+        if (!it) {
+          std::cerr << "name not found: " << lexer.GetIdent(*repl->nameID)
+                    << "\n";
+          abort();
+        }
+        replReg = it.val().operand;
+      } else if (auto *constant = rule.replacement->dyn_as<MatchConstant>()) {
         replReg = makeConstant();
         if (constant->isUnsized) {
           ops.emplace_back(BytecodeOp{

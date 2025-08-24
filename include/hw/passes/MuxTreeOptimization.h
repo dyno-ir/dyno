@@ -355,8 +355,12 @@ private:
       switch (*instr.getDialectOpcode()) {
       case *HW_MUX:
         visitedMap[instr] = 1;
-        auto muxtree = analysis.analyzeMuxTree(
+        auto muxtreeOpt = analysis.analyzeMuxTree(
             instr, [&](InstrRef ref) { visitedMap[ref] = 1; });
+        if (!muxtreeOpt)
+          continue;
+        auto &muxtree = *muxtreeOpt;
+
         printMuxTree(&muxtree);
         analysis.simplifyConditions(&muxtree);
         printMuxTree(&muxtree);

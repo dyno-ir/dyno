@@ -540,11 +540,20 @@ public:
   }
 
   constexpr void setRepeating(uint32_t val, unsigned bits, uint8_t custom = 0) {
+    if (bits == 0) {
+      words.resize(1);
+      words[0] = val;
+      numBits = bits;
+      Extend{field} = 0;
+      Custom{field} = 0;
+      return;
+    }
     words.resize(1);
     words[0] = val;
     numBits = bits;
     Extend{field} = val & bit_mask_ones<uint32_t>(BigIntExtendBits);
     Custom{field} = custom;
+    normalizeExtend();
   }
   constexpr void set(uint64_t val, unsigned bits) {
     if (bits <= WordBits)
@@ -553,18 +562,24 @@ public:
     words[0] = val;
     words[1] = val >> WordBits;
     numBits = bits;
+    Extend{field} = 0;
+    Custom{field} = 0;
     normalize();
   }
   constexpr void set(uint32_t val, unsigned bits) {
     words.resize(1);
     words[0] = val;
     numBits = bits;
+    Extend{field} = 0;
+    Custom{field} = 0;
   }
   constexpr void setPruned(uint64_t val) {
     unsigned bits = clog2(val);
     numBits = bits;
     words.resize(bits <= WordBits ? 1 : 2);
     words[0] = val;
+    Extend{field} = 0;
+    Custom{field} = 0;
     if (words.size() == 2) {
       words[1] = val >> WordBits;
       normalize();
@@ -748,6 +763,45 @@ public:
   template <typename T0>
   constexpr static uint32_t leadingZeros4SExact(const T0 &val) {
     return leadingBits4SExact(val, FourState::S0);
+  }
+
+  template <typename T0>
+  constexpr static uint32_t trailingZeros(const T0 &val) {
+    uint32_t acc = 0;
+    for (auto word : val.getWords()) {
+      if (word == 0)
+        acc += WordBits;
+      else {
+        acc += __builtin_ctz(word);
+        return acc;
+      }
+    }
+    // getting here means all words are zero.
+
+    switch (val.getExtend()) {
+    case 0b00:
+      return val.getRawNumBits();
+    case 0b01:
+    case 0b11:
+      return val.getNumWords() * WordBits;
+    case 0b10:
+      return val.getNumWords() * WordBits + 1;
+    }
+
+    dyno_unreachable("");
+  }
+
+  template <typename T0>
+  constexpr static Optional<uint32_t> trailingZeros4S(const T0 &val) {
+    if (val.getIs4S())
+      return nullopt;
+    return trailingZeros(val);
+  }
+
+  template <typename T0>
+  constexpr static uint32_t trailingZeros4SExact(const T0 &val) {
+    auto tz = trailingZeros(val);
+    return val.getIs4S() ? tz / 2 : tz;
   }
 
   template <typename T0>
@@ -2206,6 +2260,11 @@ private:
   constexpr void normalize() {
     assert(words.size() <= getExtNumWords() ||
            (numBits == 0 && words.size() == 1));
+    // if (numBits == 0) [[unlikely]] {
+    //   words.back() = 0;
+    //   Extend{field} = 0;
+    //   Custom{field} = 0;
+    // } else
     if (getNumWords() * bit_mask_sz<uint32_t> < numBits)
       prune();
     else if (getNumWords() * bit_mask_sz<uint32_t> >= numBits) {
@@ -2812,6 +2871,8 @@ public:
   BigInt getBigInt() { return cur; }
 
   operator ConstantRef() { return get(); }
+  operator FatDynObjRef<>() { return get(); }
+  operator DynObjRef() { return get(); }
 };
 
 using ConstantBuilder = ConstantBuilderBase<BigInt>;

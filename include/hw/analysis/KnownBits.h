@@ -169,8 +169,20 @@ public:
           frame.idx++;
           stack.emplace_back(instr.other(0)->as<HWValue>(), 0);
         } else {
-          BigInt::rangeSelectOp4S(retVal.val, retVal.val, asSplice.getBase(),
-                                  asSplice.getLen());
+          auto len = asSplice.getLen();
+          int64_t oobLen = int64_t(asSplice.getLen() + asSplice.getBase()) -
+                           retVal.val.getNumBits();
+          if (asSplice.getBase() >= retVal.val.getNumBits()) {
+            retVal.val = PatBigInt::undef(retVal.val.getNumBits());
+          } else if (oobLen > 0) {
+            BigInt::rangeSelectOp4S(retVal.val, retVal.val, asSplice.getBase(),
+                                    len - oobLen);
+            BigInt::concatOp4S(retVal.val, PatBigInt::undef(oobLen),
+                               retVal.val);
+          } else {
+            BigInt::rangeSelectOp4S(retVal.val, retVal.val, asSplice.getBase(),
+                                    len);
+          }
           cache.insert(wire, retVal);
           stack.pop_back();
         }

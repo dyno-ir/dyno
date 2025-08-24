@@ -45,7 +45,11 @@ public:
   void resizeSymbs(size_t i) { resizeWords(round_up_div(i, WordSymbs)); }
   void resizeWords(size_t words) { storage.resize(words, DefaultWord); }
 
-  auto at_unchecked(size_t i) {
+  DynBitField<word_t> at_unchecked(size_t i) {
+    return DynBitField{storage[wordIdx(i)], symbIdx(i) * SymbolBits,
+                       SymbolBits};
+  }
+  const DynBitField<const word_t> at_unchecked(size_t i) const {
     return DynBitField{storage[wordIdx(i)], symbIdx(i) * SymbolBits,
                        SymbolBits};
   }
@@ -54,7 +58,10 @@ public:
     return DynBitField{storage[wordIdx(i)], symbIdx(i) * SymbolBits,
                        SymbolBits};
   }
-  auto operator[](size_t i) { return at_unchecked(i); }
+  DynBitField<word_t> operator[](size_t i) { return at_unchecked(i); }
+  const DynBitField<const word_t> operator[](size_t i) const {
+    return at_unchecked(i);
+  }
 };
 
 template <typename Container, size_t SymbolBits,

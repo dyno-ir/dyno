@@ -50,6 +50,7 @@ class BitAliasAnalysis {
       frame.ref = *instr.other_begin();
     }
     bool nested = stack.size() >= 3;
+    bool notRoot = stack.size() >= 2;
 
     switch (*instr.getDialectOpcode()) {
     case *HW_CONCAT: {
@@ -58,7 +59,7 @@ class BitAliasAnalysis {
       retVal.appendTop(frame.acc);
       frame.acc = std::move(retVal);
       frame.ref += 1;
-      change |= nested;
+      change |= notRoot;
       break;
     }
 
@@ -81,13 +82,22 @@ class BitAliasAnalysis {
       // support unsimplified constant addresses here to avoid explosion
       // in instcombine for long insert/splice sequences. (todo: better fix?)
       asSplice.terms().for_each([&](auto term) {
-        addr += term.getIdx().template as<ConstantRef>().getExactVal();
+        addr += term.getIdx().template as<ConstantRef>().getExactVal() * term.getFact();
       });
 
-      retVal = retVal.getRange(addr, len);
-      retVal.appendTop(frame.acc);
-      frame.acc = std::move(retVal);
-      change |= nested;
+      int64_t oobLen = int64_t(addr + len) - retVal.getLen();
+      if (addr >= retVal.getLen()) {
+        frame.acc = BitAliasAcc{ctx.constBuild().undef(oobLen)};
+        change = 1;
+      } else if (oobLen > 0) {
+        frame.acc = retVal.getRange(addr, len - oobLen);
+        frame.acc.frags.emplace_back(ctx.constBuild().undef(oobLen).get(), 0,
+                                     len - oobLen, oobLen, false, nullopt);
+        change = 1;
+      } else {
+        frame.acc = retVal.getRange(addr, len);
+        change |= nested;
+      }
       return std::nullopt;
       break;
     }
@@ -181,8 +191,17 @@ class BitAliasAnalysis {
         // support unsimplified constant addresses here to avoid explosion
         // in instcombine for long insert/splice sequences. (todo: better fix?)
         asInsert.terms().for_each([&](auto term) {
-          addr += term.getIdx().template as<ConstantRef>().getExactVal();
+          addr += term.getIdx().template as<ConstantRef>().getExactVal() * term.getFact();
         });
+
+        std::print(
+            dbgs(),
+            "analyzed: len={}, addr={}, retVal.getLen()={}, wireLen{}: ", len,
+            addr, retVal.getLen(), *instr.def(0)->as<WireRef>().getNumBits());
+        dumpInstr(instr, ctx);
+        if (instr.def(0)->as<WireRef>().getNumBits() == 516 && addr == 129 && len == 1) {
+          dbgs() << "here\n";
+        }
 
         frame.acc.overwriteNoMaterialize(retVal, 0, addr, len);
         // constant inserts can be lowered to splice, so also mark change if
@@ -209,7 +228,11 @@ class BitAliasAnalysis {
 
 public:
   BitAliasAnalysis(HWContext &ctx) : ctx(ctx) {}
-  auto getReprAliases(WireRef rootWire) {
+  std::pair<RegisterValue, bool> getReprAliases(HWValue root) {
+    if (auto asConst = root.dyn_as<ConstantRef>()) {
+      return {BitAliasAcc{asConst}, false};
+    }
+    auto rootWire = root.as<WireRef>();
     stack.emplace_back(rootWire.getDef());
 
     uint maxLevel = 0;
