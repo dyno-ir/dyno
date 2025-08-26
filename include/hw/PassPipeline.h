@@ -138,18 +138,6 @@ public:
 
   void runLoweringPipeline() {
 
-    // fuse processes aggressively and unroll loops
-    processLinearize.config.retainInnerDeps = 0;
-    processLinearize.config.retainIODeps = 0;
-    runPass(processLinearize);
-    linearizeControlFlow.config.flattenLoops = 1;
-    linearizeControlFlow.config.flattenMultiway = 0;
-    runPass(linearizeControlFlow);
-    ssaConstr.config.mode = SSAConstructPass::Config::IMMEDIATE;
-    runPass(ssaConstr);
-    runPass(instCombine);
-    runPass(agressiveDCE);
-
     // lower subtract and ordering compares for CSE/share
     lowerOps.config = LowerOpsPass::Config{
         .lowerMultiInputAdd = false,
@@ -179,6 +167,9 @@ public:
     runPass(instCombine);
     runPass(agressiveDCE);
 
+    processLinearize.config.retainInnerDeps = 0;
+    processLinearize.config.retainIODeps = 0;
+    runPass(processLinearize);
     linearizeControlFlow.config.flattenLoops = 1;
     linearizeControlFlow.config.flattenMultiway = 1;
     runPass(linearizeControlFlow);
