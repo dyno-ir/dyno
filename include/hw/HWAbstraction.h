@@ -26,6 +26,7 @@
 #include "support/Utility.h"
 #include <algorithm>
 #include <dyno/NewDeleteObjStore.h>
+#include <iterator>
 #include <type_traits>
 
 namespace dyno {
@@ -441,7 +442,6 @@ public:
   template <typename... Ts>
   HWValue buildSplice(HWValue src, uint32_t numBits, uint32_t baseAddr,
                       Ts... terms) {
-
     if (sizeof...(terms) == 0 && baseAddr == 0)
       return buildTrunc(numBits, src);
 
@@ -475,6 +475,20 @@ public:
                             ConstantRef::fromU32(baseAddr), terms...);
     instr.defW()->numBits = numBits;
     return instr.defW();
+  }
+
+  HWValue buildSplice(HWValue src, uint32_t numBits, uint32_t baseAddr,
+                      IsRange auto terms) {
+    if (terms.empty())
+      return buildSplice(src, numBits, baseAddr);
+    auto len = std::distance(terms.begin(), terms.end());
+    auto ib = buildInstrRaw(HW_SPLICE, 1 + 2 + 3 * len);
+    auto defW = ctx.getWires().create(numBits);
+    ib.addRef(defW).other();
+    ib.addRef(src);
+    ib.addRef(ConstantRef::fromU32(baseAddr));
+    addSpecialRef(ib, terms);
+    return defW;
   }
 
   // template <typename... Ts> HWValue buildSplice(Ts... operands) {

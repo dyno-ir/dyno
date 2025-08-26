@@ -3,6 +3,7 @@
 #include "dyno/CustomInstr.h"
 #include "dyno/HierBlockIterator.h"
 #include "dyno/Instr.h"
+#include "hw/AutoDebugInfo.h"
 #include "hw/HWAbstraction.h"
 #include "hw/HWInstr.h"
 #include "hw/HWValue.h"
@@ -13,9 +14,10 @@ namespace dyno {
 
 class SeqToCombPass {
   HWContext &ctx;
+  AutoCopyDebugInfoStack autoDbgInfo;
 
 public:
-  explicit SeqToCombPass(HWContext &ctx) : ctx(ctx) {}
+  explicit SeqToCombPass(HWContext &ctx) : ctx(ctx), autoDbgInfo(ctx) {}
 
   using TaggedRegRef = CustomInstrRef<RegisterIRef, uint64_t>;
 
@@ -34,6 +36,7 @@ public:
     for (auto instr : range) {
       switch (*instr.getDialectOpcode()) {
       case *HW_STORE: {
+        auto tok = autoDbgInfo.addWithToken(instr);
         // for all regs that are written to by regular STORE in seq process:
         // add a last value loopback FF (i.e. LOAD at front, STORE_DEFER at
         // end of proc)
@@ -47,21 +50,23 @@ public:
         if (!regs_end)
           regs_end = mod.regs_end();
 
+        auto [accessAddr, accessLen] = store.getConstAccessRange();
+
         build.setInsertPoint(*regs_end);
-        auto qReg = build.buildRegister(reg->numBits);
+        auto qReg = build.buildRegister(accessLen);
 
         // at start of proc put qReg value into reg as default (stateful) value.
         build.setInsertPoint(proc.block().begin());
-        build.buildStore(reg, build.buildLoad(qReg));
+        build.buildStore(reg, build.buildLoad(qReg), false, nullref, accessAddr);
 
         // at end of proc, store defer reg value into qreg
         build.setInsertPoint(proc.block().end());
-        auto finalV = build.buildLoad(reg);
-        build.buildStore(qReg, finalV, true, trigger, store.getBase(),
-                         store.terms());
+        auto finalV = build.buildLoad(reg, accessLen, accessAddr);
+        build.buildStore(qReg, finalV, true, trigger);
         break;
       }
       case *HW_STORE_DEFER: {
+        auto tok = autoDbgInfo.addWithToken(instr);
         auto store = instr.as<StoreIRef>();
         build.setInsertPoint(HWInstrRef{instr}.iter(ctx));
 
@@ -71,6 +76,7 @@ public:
         break;
       }
       case *OP_ASSERT: {
+        auto tok = autoDbgInfo.addWithToken(instr);
         build.setInsertPoint(HWInstrRef{instr}.iter(ctx));
         build.buildAssert(instr.operand(0)->as<HWValue>(), trigger);
         destroyList.emplace_back(instr);

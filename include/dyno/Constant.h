@@ -19,7 +19,6 @@
 #include <iostream>
 #include <iterator>
 #include <ostream>
-#include <span>
 #include <string>
 #include <type_traits>
 
@@ -358,6 +357,9 @@ class PatBigInt : public BigIntMixin<PatBigInt> {
   friend class BigIntBase<CexprVec<uint32_t, 16>>;
 
   uint32_t bits;
+  // we assume that BigInts always store at least one word in some places,
+  // so do here too for compatibility.
+  uint32_t word;
   uint8_t field;
 
   template <typename T> using Extend = BitField<T, BigIntExtendBits, 0>;
@@ -365,15 +367,19 @@ class PatBigInt : public BigIntMixin<PatBigInt> {
   using Custom = BitField<T, BigIntCustomBits, BigIntExtendBits>;
 
 public:
-  uint32_t getNumWords() const { return 0; }
+  uint32_t getNumWords() const { return 1; }
   uint32_t getRawNumBits() const { return bits; }
   uint8_t getExtend() const { return Extend{field}; }
   uint8_t getIs4S() const { return Custom{field}; }
-  MutArrayRef<uint32_t> getWords() const {
-    return MutArrayRef<uint32_t>::emptyRef();
-  };
+  ArrayRef<uint32_t> getWords() const { return ArrayRef<uint32_t>(&word, 1); };
+  MutArrayRef<uint32_t> getWords() { return MutArrayRef<uint32_t>(&word, 1); };
   PatBigInt(uint32_t bits, uint8_t pattern, uint8_t custom = 0)
       : bits(bits), field(0) {
+
+    word = repeatExtend(pattern);
+    if (bits < 32)
+      word &= bit_mask_ones<uint32_t>(bits);
+
     Extend{field} = pattern;
     Custom{field} = custom;
   }
@@ -898,15 +904,15 @@ public:
   template <typename T0, typename T1>
   static BigIntBase upowOp4S(const T0 &lhs, const T1 &rhs) {
     if (lhs.getIs4S() || rhs.getIs4S())
-      return PatBigInt(lhs.getRawNumBits(), 0b11, 1);
+      return PatBigInt::undef(lhs.getNumBits());
     return BigIntBase::upowOp(lhs, rhs);
   }
 
   template <typename T0, typename T1>
   static BigIntBase spowOp4S(const T0 &lhs, const T1 &rhs) {
     if (lhs.getIs4S() || rhs.getIs4S() ||
-        (lhs.valueEquals(0) && rhs.getRawSignBit()))
-      return PatBigInt(lhs.getRawNumBits(), 0b11, 1);
+        (lhs.valueEquals(0) && rhs.getSignBit() == FourState::S1))
+      return PatBigInt::undef(lhs.getNumBits());
     return BigIntBase::spowOp(lhs, rhs);
   }
 

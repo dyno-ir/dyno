@@ -83,10 +83,10 @@ public:
   void runOptPipeline() {
     // std::print(std::cerr, "\n\nInitial IR:\n");
     // HWPrinter{std::cerr}.printCtx(ctx);
-    {
-      std::ofstream ostr("initial.dyno");
-      dumpDyno(ostr);
-    }
+    //{
+    //  std::ofstream ostr("initial.dyno");
+    //  dumpDyno(ostr);
+    //}
 
     runPass(funcInline);
     runPass(instCombine);
@@ -137,6 +137,22 @@ public:
   }
 
   void runLoweringPipeline() {
+    // fuse processes aggressively and unroll loops
+    linearizeControlFlow.config.flattenLoops = 1;
+    linearizeControlFlow.config.flattenMultiway = 0;
+    runPass(linearizeControlFlow);
+    //processLinearize.config.retainInnerDeps = 0;
+    //processLinearize.config.retainIODeps = 0;
+    //runPass(processLinearize);
+    //ssaConstr.config.mode = SSAConstructPass::Config::IMMEDIATE;
+    //runPass(ssaConstr);
+    runPass(instCombine);
+    runPass(cse, true);
+    orderInstrs.config.assertNoCircularDeps = true;
+    orderInstrs.config.moveStoresBeforeLoads = false;
+    runPass(orderInstrs);
+    runPass(instCombine);
+    runPass(agressiveDCE);
 
     // lower subtract and ordering compares for CSE/share
     lowerOps.config = LowerOpsPass::Config{
@@ -152,10 +168,12 @@ public:
         .lowerInsert = false,
         .lowerExtract = false,
     };
+
+    //dumpAfterAll = true;
+
     runPass(lowerOps);
     runPass(instCombine);
     runPass(cse, true);
-    dumpAfterAll = true;
     runPass(fuzzyCse, true);
     runPass(orderInstrs);
     runPass(instCombine);

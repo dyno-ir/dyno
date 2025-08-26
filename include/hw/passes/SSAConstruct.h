@@ -483,10 +483,8 @@ public:
               break;
 
             auto val = state.get(build, 0, *asStore.reg()->numBits, false);
-            val = build.buildInsert(
-                val, asStore.value(),
-                asStore.base()->as<ConstantRef>().getExactVal(),
-                asStore.terms());
+            val = build.buildInsert(val, asStore.value(), asStore.getBase(),
+                                    asStore.terms());
 
             // plain value doesn't check for conflicting triggers.
             // regState.plainValue(depth, asStore.reg(), val, trigger);
@@ -496,7 +494,7 @@ public:
             break;
           }
           addr = asStore.getBase();
-          len = *asStore.other(0)->as<HWValue>().getNumBits();
+          len = asStore.getLen();
         }
 
         destroyList.emplace_back(asStore);
@@ -524,15 +522,14 @@ public:
               break;
 
             build.setInsertPoint(ctx.getCFG()[asLoad]);
-            auto matVal = build.buildSplice(
-                val.get(build), asLoad.getLen(),
-                asLoad.base()->as<ConstantRef>().getExactVal(), asLoad.terms());
+            auto matVal = build.buildSplice(val.get(build), asLoad.getLen(),
+                                            asLoad.getBase(), asLoad.terms());
             asLoad.defW().replaceAllUsesWith(matVal);
             destroyList.emplace_back(asLoad);
             break;
           }
           addr = asLoad.getBase();
-          len = *asLoad.def(0)->as<WireRef>().getNumBits();
+          len = asLoad.getLen();
         }
 
         build.setInsertPoint(asLoad.iter(ctx));

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "dyno/CFG.h"
+#include "dyno/DestroyMap.h"
 #include "dyno/ObjMap.h"
 #include "hw/DeepCopy.h"
 #include "hw/HWAbstraction.h"
@@ -54,6 +55,7 @@ class ModuleInlinePass {
     HWInstrBuilder{ctx}.destroyInstr(instance);
   }
 
+  DestroyMap<Module> destroyMap;
   void deleteRec(ModuleIRef ref) {
     if (!ctx.getInstrs().exists(ref))
       return;
@@ -65,11 +67,13 @@ class ModuleInlinePass {
       dbgs() << ref.mod()->name;
       dbgs() << "\"\n";
     })
-    HWInstrBuilder{ctx}.destroyInstr(ref);
+    destroyMap.mark(ref.mod());
   }
 
 public:
   void run() {
+    destroyMap.clear();
+    destroyMap.resize(ctx.getModules().numIDs());
     worklist.clear();
     isTopModule.clear();
     isTopModule.resize(ctx.getModules().numIDs());
@@ -96,6 +100,9 @@ public:
         deleteRec(mod.iref());
       }
     }
+    HWInstrBuilder build{ctx};
+    destroyMap.apply(ctx.getModules(),
+                     [&](ModuleRef mod) { build.destroyInstr(mod.iref()); });
   }
 
 public:
