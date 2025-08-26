@@ -2,6 +2,7 @@
 #include "hw/HWInstr.h"
 #include "hw/HWValue.h"
 #include "hw/IDs.h"
+#include <algorithm>
 
 namespace dyno {
 
@@ -115,7 +116,9 @@ public:
 
   bool isConstantOffs() { return getNumTerms() == 0; }
 
-  bool isFullReg() { return getLen() == reg().getNumBits(); }
+  bool isFullReg() {
+    return getLen() == reg().getNumBits() && isConstantOffs() && getBase() == 0;
+  }
 
   std::pair<uint32_t, uint32_t> getConstAccessRange() {
     if (isConstantOffs())
@@ -148,13 +151,24 @@ public:
   uint32_t getLen() { return *value().getNumBits(); }
 
   bool isConstantOffs() { return getNumTerms() == 0; }
-  bool isFullReg() { return getLen() == reg().getNumBits(); }
+  bool isFullReg() {
+    return getLen() == reg().getNumBits() && isConstantOffs() && getBase() == 0;
+  }
 
   std::pair<uint32_t, uint32_t> getConstAccessRange() {
     if (isConstantOffs())
-      return std::make_pair(
-          hasBase() ? base()->as<ConstantRef>().getExactVal() : 0, getLen());
-    return std::make_pair(0, *reg()->numBits);
+      return std::make_pair(getBase(), getLen());
+
+    Optional<uint32_t> endOffs = getLen();
+    for (auto term : terms()) {
+      auto max = term.getMax();
+      if (!max) {
+        endOffs = nullopt;
+        break;
+      }
+      *endOffs += *max * term.getFact();
+    }
+    return std::make_pair(getBase(), *(endOffs ?: reg().getNumBits()));
   }
 };
 

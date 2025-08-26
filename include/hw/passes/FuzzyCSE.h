@@ -10,6 +10,7 @@
 #include "hw/analysis/ControlFlow.h"
 #include "support/Debug.h"
 #include "support/DynBitSet.h"
+#include <cassert>
 
 namespace dyno {
 
@@ -259,9 +260,12 @@ private:
 
     build.setInsertPoint(ib.instr());
 
-    auto &newInstrAbstr = candidates.emplace_back();
+    assert(Range{candidates}.find_if([&](AbstractInstr &abstr) {
+      return abstr.ref == ib.instr();
+    }) == candidates.end());
+    AbstractInstr newInstrAbstr;
     newInstrAbstr.ref = ib.instr();
-    newInstrAbstr.idx = candidates.size() - 1;
+    newInstrAbstr.idx = candidates.size();
     for (auto [idx, prefix] : Range{matchingPrefixes}.enumerate()) {
       auto val = prefix.get(build, false);
       ib.addRef(build.buildZExt(maxPrefixSize + 1, val));
@@ -288,6 +292,7 @@ private:
         [](size_t, auto pair) { return pair.second; });
     rebuildInstr(rhsAbstr, matchingPrefixes, rhsCovered, rhsIdxs, defW);
 
+    candidates.emplace_back(newInstrAbstr);
     return true;
   }
 
@@ -308,6 +313,9 @@ private:
 
     for (auto instr : HierBlockRange{proc.block()}) {
       if (instr.isOpc(OP_ADD)) {
+        assert(Range{candidates}.find_if([&](AbstractInstr &abstr) {
+          return abstr.ref == instr;
+        }) == candidates.end());
         auto &abstr = candidates.emplace_back();
         abstr.ref = instr;
         abstr.idx = candidates.size() - 1;
@@ -355,10 +363,15 @@ private:
           if (otherUse.instr == candidate.idx) {
             continue;
           }
-          auto success =
-              tryCombineInstrs(candidate, candidates[otherUse.instr]);
-          if (success)
+          auto &other = candidates[otherUse.instr];
+          assert(candidate.ref);
+          assert(other.ref);
+          auto success = tryCombineInstrs(candidate, other);
+          if (success) {
+            assert(candidate.ref == nullref);
+            assert(other.ref == nullref);
             goto next;
+          }
         }
       }
     next:;

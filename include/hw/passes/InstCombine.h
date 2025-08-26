@@ -48,6 +48,7 @@ private:
     auto known = knownBits.getKnownBits(wire);
     if (known.getIs4S())
       return false;
+    assert(known.getNumBits() == wire.getNumBits());
     replaceUses(wire, cbuild.val(known).get());
     deleteMatchedInstr(instr);
     return true;
@@ -59,6 +60,7 @@ private:
   }
 
   void replaceUses(WireRef wire, HWValue newVal) {
+    assert(newVal.getNumBits() == wire.getNumBits());
     wire.replaceAllUsesWith(
         newVal, [&](OperandRef ref) { currentReplaced.emplace_back(ref); });
   }
@@ -501,10 +503,13 @@ private:
     if (!storeI)
       return false;
     auto store = StoreIRef{storeI};
+    if (!store.isFullReg())
+      return false;
     if (store.parentProc(ctx) != proc)
       return false;
-
-    replaceUses(load.value(), store.value());
+    HWInstrBuilder build{ctx, load};
+    replaceUses(load.value(), build.buildSplice(store.value(), load.getLen(),
+                                                load.getBase(), load.terms()));
     deleteMatchedInstr(load);
 
     return true;
@@ -617,10 +622,14 @@ private:
     } else {
       assert(ref.is<ConstantRef>());
       assert(!inverse);
+      HWInstrBuilder build{ctx};
       for (auto use : uses) {
+        auto asLoad = use.instr().as<LoadIRef>();
+        build.setInsertPoint(asLoad);
+        auto splice = build.buildSplice(ref.as<ConstantRef>(), asLoad.getLen(),
+                                        asLoad.getBase(), asLoad.terms());
+        replaceUses(asLoad.value(), splice);
         deleteMatchedInstr(use.instr());
-        use.instr().def(0)->as<WireRef>().replaceAllUsesWith(
-            ref, [&](OperandRef r) { currentReplaced.emplace_back(r); });
       }
     }
 

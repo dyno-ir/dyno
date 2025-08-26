@@ -147,6 +147,7 @@ public:
           frame.idx++;
           stack.emplace_back(instr.other(0)->as<HWValue>(), 0);
         } else {
+          assert(*wire.getNumBits() >= retVal.val.getNumBits());
           uint delta = *wire.getNumBits() - retVal.val.getNumBits();
           PatBigInt lhs = instr.isOpc(OP_ZEXT)
                               ? PatBigInt::fromFourState(FourState::S0, delta)

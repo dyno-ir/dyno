@@ -1,4 +1,5 @@
 #pragma once
+#include "dyno/HierBlockIterator.h"
 #include "dyno/Obj.h"
 #include "hw/HWContext.h"
 #include "hw/HWInstr.h"
@@ -31,13 +32,13 @@ private:
                             SmallVecImpl<OperandRef> &uses) {
     if (!sub)
       return;
-    for (auto instr : sub) {
+    for (auto instr : HierBlockRange{sub}) {
       for (auto use : instr.others()) {
         auto wire = use->dyn_as<WireRef>();
         if (!wire)
           continue;
         auto instr = HWInstrRef{wire.getDefI()};
-        if (instr.parentBlock(ctx) != sub)
+        if (!instr.isDescendantOf(sub, ctx))
           handleUse(block, use, uses);
       }
     }
