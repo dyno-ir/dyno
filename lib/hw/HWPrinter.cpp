@@ -2,7 +2,6 @@
 #include "dyno/Obj.h"
 #include "hw/HWContext.h"
 #include "support/Debug.h"
-#include <memory>
 
 namespace dyno {
 

@@ -40,6 +40,14 @@ class LinearizeControlFlowPass {
   //   return true;
   // }
 
+public:
+  struct Config {
+    bool flattenLoops = true;
+    bool flattenMultiway = true;
+  };
+  Config config;
+
+private:
   bool copyAndPushYieldVals(DeepCopier *self, InstrRef old,
                             BlockRef_iterator<true> insert,
                             SmallVecImpl<HWValue> &yields) {
@@ -250,12 +258,18 @@ class LinearizeControlFlowPass {
       default:
         continue;
       case *OP_IF:
+        if (!config.flattenMultiway)
+          continue;
         linearizeIf(instr);
         break;
       case *OP_SWITCH:
+        if (!config.flattenMultiway)
+          continue;
         linearizeSwitch(instr.as<SwitchInstrRef>());
         break;
       case *OP_FOR:
+        if (!config.flattenLoops)
+          continue;
         linearizeFor(instr.as<ForInstrRef>());
         break;
       }
