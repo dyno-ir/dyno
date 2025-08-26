@@ -372,6 +372,7 @@ private:
     }
 
     build.setInsertPoint(instr);
+    auto rhsNonInverted = rhs;
     rhs = build.buildNot(rhs);
     if (!isSigned) {
       lhs = build.buildZExt(numBits + 1, lhs);
@@ -401,8 +402,9 @@ private:
     HWValue out;
     if (isSigned) {
       auto signLHS = build.buildSplice(lhs, 1, numBits - 1);
-      auto signRHS = build.buildSplice(rhs, 1, numBits - 1);
+      auto signRHS = build.buildSplice(rhsNonInverted, 1, numBits - 1);
       auto signsDifferent = build.buildXor(signLHS, signRHS);
+      // sign bit is set if b > a i.e. a < b
       HWValue signBit = build.buildSplice(sumWire, 1, numBits - 1);
       out = build.buildMux(signsDifferent, signLHS, signBit);
     } else {

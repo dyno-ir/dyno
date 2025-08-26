@@ -9,6 +9,7 @@
 #include "hw/passes/CommonSubexpressionElimination.h"
 #include "hw/passes/ConstantMapping.h"
 #include "hw/passes/DumpVerilog.h"
+#include "hw/passes/EarlySharePass.h"
 #include "hw/passes/FindLongestPath.h"
 #include "hw/passes/FlipFlopInference.h"
 #include "hw/passes/FlipFlopMapping.h"
@@ -60,10 +61,12 @@ class PassPipeline {
   CheckPass checkPass{ctx};
   RegisterPartitionPass regPartition{ctx};
   FuzzyCSEPass fuzzyCse{ctx};
+  EarlySharePass earlyShare{ctx};
 
 public:
   bool printAfterAll = true;
   bool checkAfterAll = true;
+  bool dumpAfterAll = false;
 
   template <typename T> void runPass(T &pass, bool skipCheck = false) {
     pass.run();
@@ -71,9 +74,10 @@ public:
       std::print(std::cerr, "\n\nIR after {}:\n", __PRETTY_FUNCTION__);
       HWPrinter{std::cerr}.printCtx(ctx);
     }
+    if (dumpAfterAll)
+      dumpDyno();
     if (checkAfterAll && !skipCheck)
       checkPass.run();
-    //dumpDyno();
   }
 
   void runOptPipeline() {
@@ -89,6 +93,7 @@ public:
     runPass(moduleInline);
     runPass(triggerDedupe);
     runPass(seqToComb);
+    ssaConstr.config.mode = SSAConstructPass::Config::IMMEDIATE;
     runPass(ssaConstr);
     runPass(processLinearize);
     runPass(ssaConstr);
@@ -99,6 +104,8 @@ public:
     runPass(loopSimplify);
     runPass(agressiveDCE);
     runPass(cse, true);
+    orderInstrs.config.assertNoCircularDeps = true;
+    orderInstrs.config.moveStoresBeforeLoads = false;
     runPass(orderInstrs);
     runPass(instCombine);
     runPass(agressiveDCE);
@@ -131,7 +138,19 @@ public:
 
   void runLoweringPipeline() {
 
-    // lower compares and sub and re-run instcombine
+    // fuse processes aggressively and unroll loops
+    processLinearize.config.retainInnerDeps = 0;
+    processLinearize.config.retainIODeps = 0;
+    runPass(processLinearize);
+    linearizeControlFlow.config.flattenLoops = 1;
+    linearizeControlFlow.config.flattenMultiway = 0;
+    runPass(linearizeControlFlow);
+    ssaConstr.config.mode = SSAConstructPass::Config::IMMEDIATE;
+    runPass(ssaConstr);
+    runPass(instCombine);
+    runPass(agressiveDCE);
+
+    // lower subtract and ordering compares for CSE/share
     lowerOps.config = LowerOpsPass::Config{
         .lowerMultiInputAdd = false,
         .lowerAddCompress = false,
@@ -148,19 +167,24 @@ public:
     runPass(lowerOps);
     runPass(instCombine);
     runPass(cse, true);
+    dumpAfterAll = true;
     runPass(fuzzyCse, true);
     runPass(orderInstrs);
     runPass(instCombine);
 
-    processLinearize.config.retainInnerDeps = 0;
-    processLinearize.config.retainIODeps = 0;
-    runPass(processLinearize);
+    runPass(earlyShare);
+    runPass(instCombine);
+    ssaConstr.config.mode = SSAConstructPass::Config::IMMEDIATE;
+    runPass(ssaConstr);
+    runPass(instCombine);
+    runPass(agressiveDCE);
+
+    linearizeControlFlow.config.flattenLoops = 1;
+    linearizeControlFlow.config.flattenMultiway = 1;
     runPass(linearizeControlFlow);
     ssaConstr.config.mode = SSAConstructPass::Config::IMMEDIATE;
     runPass(ssaConstr);
-    dumpDyno();
     runPass(instCombine);
-    dumpDyno();
     runPass(agressiveDCE);
 
     runPass(muxTreeOpt);
@@ -168,8 +192,13 @@ public:
 
     runPass(cse, true);
     runPass(fuzzyCse, true);
+    orderInstrs.config.assertNoCircularDeps = true;
+    orderInstrs.config.moveStoresBeforeLoads = true;
     runPass(orderInstrs);
     runPass(instCombine);
+    runPass(ssaConstr);
+    runPass(instCombine);
+    orderInstrs.config.moveStoresBeforeLoads = false;
 
     // lower everything that can still go through instcombine
     lowerOps.config = LowerOpsPass::Config{
@@ -191,7 +220,9 @@ public:
     runPass(flipFlopInference);
     runPass(cse, true);
     runPass(orderInstrs);
-
+    runPass(instCombine);
+    // re-run mux tree opt to remove loopback MUXs after ff inference
+    runPass(muxTreeOpt);
     runPass(instCombine);
 
     runLibertyPipeline();

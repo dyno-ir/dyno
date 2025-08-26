@@ -1,9 +1,12 @@
 #pragma once
 #include "dyno/Obj.h"
 #include "hw/HWContext.h"
+#include "hw/HWInstr.h"
 #include "hw/HWPrinter.h"
 #include "hw/Register.h"
 #include "hw/analysis/SCFTraversal.h"
+#include "op/IDs.h"
+#include "op/StructuredControlFlow.h"
 #include "support/Debug.h"
 #include "support/DynBitSet.h"
 
@@ -19,10 +22,62 @@ class OrderInstrsPass {
 public:
   struct Config {
     bool assertNoCircularDeps = true;
+    bool moveStoresBeforeLoads = false;
   };
   Config config;
 
 private:
+  void handleUsesInSubBlock(BlockRef block, BlockRef sub,
+                            SmallVecImpl<OperandRef> &uses) {
+    if (!sub)
+      return;
+    for (auto instr : sub) {
+      for (auto use : instr.others()) {
+        auto wire = use->dyn_as<WireRef>();
+        if (!wire)
+          continue;
+        auto instr = HWInstrRef{wire.getDefI()};
+        if (instr.parentBlock(ctx) != sub)
+          handleUse(block, use, uses);
+      }
+    }
+  }
+
+  void handleSCFUses(InstrRef instr, BlockRef block,
+                     SmallVecImpl<OperandRef> &uses) {
+    switch (*instr.getDialectOpcode()) {
+    case *OP_IF: {
+      auto asIf = instr.as<IfInstrRef>();
+      handleUsesInSubBlock(block, asIf.getTrueBlock(), uses);
+      handleUsesInSubBlock(block, asIf.getFalseBlock(), uses);
+      break;
+    }
+    case *OP_SWITCH: {
+      auto asSwitch = instr.as<SwitchInstrRef>();
+      for (auto sub : asSwitch.caseBlocks())
+        handleUsesInSubBlock(block, sub, uses);
+      break;
+    }
+    case *OP_FOR: {
+      auto asFor = instr.as<ForInstrRef>();
+      handleUsesInSubBlock(block, asFor.getBlock(), uses);
+      break;
+    }
+    case *OP_WHILE: {
+      auto asWhile = instr.as<WhileInstrRef>();
+      handleUsesInSubBlock(block, asWhile.getCondBlock(), uses);
+      handleUsesInSubBlock(block, asWhile.getBodyBlock(), uses);
+      break;
+    }
+    case *OP_DO_WHILE: {
+      auto asDoWhile = instr.as<DoWhileInstrRef>();
+      handleUsesInSubBlock(block, asDoWhile.getBlock(), uses);
+      break;
+    }
+    default:;
+    }
+  }
+
   void handleUse(BlockRef block, OperandRef use,
                  SmallVecImpl<OperandRef> &uses) {
     if (auto asWire = use->dyn_as<WireRef>()) {
@@ -37,26 +92,13 @@ private:
         dbgs() << "in question:\n";
         print.printInstr(instr, ctx);
       }
+
       uses.emplace_back(instr);
     }
-    // else if (auto asReg = use->dyn_as<RegisterRef>()) {
-    //   if (!use.instr().isOpc(HW_LOAD))
-    //     return;
-    //   if (asReg.getNumUses() > 2)
-    //     return;
-    //   auto block = ctx.getCFG()[use.instr()].blockRef();
-    //   for (auto regUse : asReg.uses()) {
-    //     if (regUse.instr().isOpc(HW_STORE) &&
-    //         ctx.getCFG()[regUse.instr()].blockRef() == block)
-    //       uses.emplace_back(regUse.instr());
-    //   }
-    // }
   }
 
   void prioritzeUses(MutArrayRef<OperandRef> uses) {
     std::sort(uses.begin(), uses.end(), [](OperandRef lhs, OperandRef rhs) {
-      // if (lhs->is<RegisterRef>() != rhs->is<RegisterRef>())
-      //   return lhs->is<RegisterRef>();
       return lhs->as<FatDynObjRef<InstrDefUse>>()->getNumUses() <
              rhs->as<FatDynObjRef<InstrDefUse>>()->getNumUses();
     });
@@ -98,6 +140,7 @@ private:
       SmallVec<OperandRef, 4> uses;
       for (auto use : instr.others())
         handleUse(block, use, uses);
+      handleSCFUses(instr, block, uses);
       prioritzeUses(uses);
       for (auto use : uses)
         stack.emplace_back(use.instr());
@@ -107,12 +150,17 @@ private:
   void runOnBlock(BlockRef block) {
     SmallVec<ObjRef<Instr>, 32> ordered;
     ordered.reserve(block.size());
-    size_t i = 0;
+
+    if (config.moveStoresBeforeLoads) {
+      for (auto instr : block) {
+        if (instr.isOpc(HW_STORE))
+          visit(block, instr, ordered);
+      }
+    }
     for (auto instr : block) {
       visit(block, instr, ordered);
-      ++i;
     }
-    // assert(ordered.size() == block.size() && block.size() == i);
+
     block.clear_unsafe();
     auto it = block.end();
     for (auto instr : ordered) {

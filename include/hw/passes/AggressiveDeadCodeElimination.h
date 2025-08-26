@@ -153,8 +153,9 @@ class AggressiveDeadCodeEliminationPass {
         visitHWValue(asSwitch.cond()->as<HWValue>());
 
       for (uint i = 0; i < asSwitch.getNumYieldValues(); i++) {
-        if (!wireMap[asSwitch.getYieldValue(i)->as<WireRef>()])
-          continue;
+        wireMap[asSwitch.getYieldValue(i)->as<WireRef>()] = 1;
+        // if (!wireMap[asSwitch.getYieldValue(i)->as<WireRef>()])
+        //   continue;
         for (auto yieldInstr : asSwitch.caseYields()) {
           if (!yieldInstr)
             continue;

@@ -436,7 +436,19 @@ replace {
 
 // these might hinder MUX tree analysis, maybe support output patterns in mux tree analysis?
 match {
-  HW_MUX $out, $cond, #'1, $rhs
+  HW_MUX $out, $cond, #1'b1, #1'b0
+}
+replace $out -> $cond
+
+match {
+  HW_MUX $out, $cond, #1'b0, #1'b1
+}
+replace {
+  OP_NOT $out, $cond
+}
+
+match {
+  HW_MUX $out, $cond, #'1, $rhs:HW_WIRE
 }
 replace {
   HW_REPEAT $temp:wire_like($out), $cond
@@ -444,13 +456,30 @@ replace {
 }
 
 match {
-  HW_MUX $out, $cond, $lhs, #'0
+  HW_MUX $out, $cond, $rhs:HW_WIRE, #'1
+}
+replace {
+  OP_NOT $conv_inv:wire_like($cond), $cond
+  HW_REPEAT $temp:wire_like2($out), $conv_inv
+  OP_OR $out, $temp, $rhs
+}
+
+match {
+  HW_MUX $out, $cond, $lhs:HW_WIRE, #'0
 }
 replace {
   HW_REPEAT $temp:wire_like($out), $cond
   OP_AND $out, $temp, $lhs
 }
 
+match {
+  HW_MUX $out, $cond, #'0, $lhs:HW_WIRE
+}
+replace {
+  OP_NOT $conv_inv:wire_like($cond), $cond
+  HW_REPEAT $temp:wire_like2($out), $conv_inv
+  OP_AND $out, $temp, $lhs
+}
 
 
 match {

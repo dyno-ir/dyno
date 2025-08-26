@@ -38,7 +38,7 @@ int main(int argc, char **argv) {
   std::cout << "\n\n\n";
 
   PassPipeline pipeline{ctx};
-  pipeline.printAfterAll = false;
+  pipeline.printAfterAll = true;
   pipeline.checkAfterAll = true;
   debugType = 1;
   pipeline.runOptPipeline();

@@ -276,6 +276,8 @@ public:
   }
 
   template <BigIntAPI T> constexpr bool valueEqualsS(const T &other) const {
+    if (self().getIs4S() != other.getIs4S())
+      return false;
     if (other.getNumWords() != self().getNumWords())
       return false;
     if (other.getExtend() != self().getExtend())
@@ -333,10 +335,17 @@ public:
       return false;
     if (self().isExtended() && !FourState{self().getExtend()}.isUnk())
       return false;
-    for (auto word : self().getWords()) {
+    for (auto word : Range{self().getWords()}.drop_back()) {
       if ((word & repeatBits(0b10U, 2)) != repeatBits(0b10U, 2))
         return false;
     }
+    auto bits = self().getRawNumBits();
+    uint32_t mask = (bits % 32 == 0) ? ~0U : bit_mask_ones<uint32_t>(bits % 32);
+
+    auto lastWord = self().getWords().back();
+    if ((lastWord & repeatBits(0b10U, 2)) != (repeatBits(0b10U, 2) & mask))
+      return false;
+
     return true;
   }
 };

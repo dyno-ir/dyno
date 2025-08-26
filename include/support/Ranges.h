@@ -168,6 +168,110 @@ public:
   }
 };
 
+template <typename T, typename U> class zip_iterator {
+  T it;
+  U it2;
+
+public:
+  using iterator_category = std::forward_iterator_tag;
+  using value_type = std::pair<decltype(*it), decltype(*it2)>;
+  using pointer = value_type *;
+  using reference = value_type &;
+  using difference_type = std::iterator_traits<T>::difference_type;
+
+  zip_iterator() = default;
+  zip_iterator(T it, U it2) : it(it), it2(it2) {}
+
+  value_type operator*() { return std::make_pair(*it, *it2); }
+
+  zip_iterator &operator++() {
+    ++it;
+    ++it2;
+  }
+
+  zip_iterator operator++(int) {
+    zip_iterator tmp(*this);
+    ++(*this);
+    return tmp;
+  }
+
+  friend bool operator==(const zip_iterator &a, const zip_iterator &b) {
+    auto rv = a.it == b.it;
+    assert(rv == (a.it2 == b.it2));
+    return rv;
+  }
+
+  friend bool operator!=(const zip_iterator &a, const zip_iterator &b) {
+    return !(a == b);
+  }
+};
+
+template <typename T, typename U> class sorted_intersect_iterator {
+  T it;
+  U it2;
+
+  T itEnd;
+  U it2End;
+
+  void prime() {
+    while (it != itEnd && it2 != it2End) {
+      if (*it == *it2) {
+        break;
+      } else if (*it < *it2) {
+        ++it;
+      } else
+        ++it2;
+    }
+    if (it == itEnd)
+      it2 == it2End;
+    else if (it2 == it2End)
+      it == itEnd;
+  }
+
+public:
+  using iterator_category = std::forward_iterator_tag;
+  using value_type = std::iterator_traits<T>::value_type;
+  using pointer = value_type *;
+  using reference = value_type &;
+  using difference_type = std::iterator_traits<T>::difference_type;
+
+  sorted_intersect_iterator() = default;
+  sorted_intersect_iterator(T itEnd, U it2End)
+      : it(itEnd), it2(it2End), itEnd(itEnd), it2End(it2End) {}
+  sorted_intersect_iterator(T it, T itEnd, U it2, U it2End)
+      : it(it), it2(it2), itEnd(itEnd), it2End(it2End) {}
+
+  value_type operator*() {
+    auto rv = *it;
+    assert(rv == *it2);
+    return rv;
+  }
+
+  sorted_intersect_iterator &operator++() {
+    ++it;
+    ++it2;
+    prime();
+  }
+
+  sorted_intersect_iterator operator++(int) {
+    sorted_intersect_iterator tmp(*this);
+    ++(*this);
+    return tmp;
+  }
+
+  friend bool operator==(const sorted_intersect_iterator &a,
+                         const sorted_intersect_iterator &b) {
+    auto rv = a.it == b.it;
+    assert(rv == (a.it2 == b.it2));
+    return rv;
+  }
+
+  friend bool operator!=(const sorted_intersect_iterator &a,
+                         const sorted_intersect_iterator &b) {
+    return !(a == b);
+  }
+};
+
 template <typename T> class mark_back_iterator {
   T it;
   T end;
@@ -413,6 +517,9 @@ public:
   }
 
   template <typename T> void sort(T func) { std::sort(begin(), end(), func); }
+  template <typename T> void stable_sort(T func) {
+    std::stable_sort(begin(), end(), func);
+  }
   template <typename T> It find(const T &val) {
     return std::find(begin(), end(), val);
   }
@@ -423,9 +530,30 @@ public:
   template <typename T> bool all(T func) {
     return std::all_of(begin(), end(), func);
   }
+  template <typename T> bool any(T func) {
+    return std::any_of(begin(), end(), func);
+  }
 
   template <typename T> void for_each(T func) {
     std::for_each(begin(), end(), func);
+  }
+
+  Range zip(Range other) {
+    return ::Range{
+        zip_iterator<decltype(beginIt), decltype(other.beginIt)>{begin(),
+                                                                 end()},
+        zip_iterator<decltype(beginIt), decltype(other.beginIt)>{end(),
+                                                                 other.end()},
+    };
+  }
+
+  Range sorted_intersect(Range other) {
+    return ::Range{
+        sorted_intersect_iterator<decltype(beginIt), decltype(other.beginIt)>{
+            begin(), end(), other.begin(), other.end()},
+        sorted_intersect_iterator<decltype(beginIt), decltype(other.beginIt)>{
+            end(), other.end()},
+    };
   }
 
   bool empty() const { return begin() == end(); }
