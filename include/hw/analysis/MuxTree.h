@@ -350,8 +350,8 @@ struct SmallBoolExprCNF {
 
             // perfectly equal, just delete this
             if (!diffIdx) {
-              for (auto [key, val] : combineMap)
-                assert(val != clause.idx);
+              // for (auto [key, val] : combineMap)
+              //   assert(val != clause.idx);
               keepClause.clearDyn(clauseIdx);
               goto next_clause;
             } else {
@@ -793,8 +793,8 @@ struct SmallBoolExprCNF {
       return;
     }
 
-    this->dump();
-    other.dump();
+    // this->dump();
+    // other.dump();
 
     SmallBoolExprCNF copy = *this;
     literals.clear();
@@ -808,9 +808,9 @@ struct SmallBoolExprCNF {
       }
     }
 
-    this->dump();
+    // this->dump();
     simplify(numLiterals);
-    this->dump();
+    // this->dump();
   }
 
   auto evalWithBoundVars2(SmallBoolExprCNF &orig, SmallBoolExprCNF &expr,
@@ -913,8 +913,13 @@ public:
       return;
     } else if (instr.isOpc(OP_NOT)) {
       analyzeCond(muxtree, cond, instr.other(0)->as<WireRef>());
-      cond = *cond.negated(muxtree->conditions.size());
-      cond.simplify(muxtree->conditions.size());
+      auto negated = cond.negated(muxtree->conditions.size());
+      if (negated) {
+        cond = *negated;
+        cond.simplify(muxtree->conditions.size());
+      } else {
+        cond.literals.emplace_back(getCondIdx(muxtree, wire, 0), 0, 1);
+      }
       return;
     } else if (instr.isOpc(OP_OR)) {
       cond.makeUnsat();
@@ -943,13 +948,14 @@ public:
   }
 
   std::optional<MuxTree> analyzeMuxTree(InstrRef root,
-                                        bool matchMultiUse = false) {
-    return analyzeMuxTree(root, [](InstrRef) {}, matchMultiUse);
+                                        bool matchMultiUse = false,
+                                        bool exploreConds = true) {
+    return analyzeMuxTree(root, [](InstrRef) {}, matchMultiUse, exploreConds);
   }
 
   std::optional<MuxTree>
   analyzeMuxTree(InstrRef root, std::invocable<InstrRef> auto visitedCallback,
-                 bool matchMultiUse = false) {
+                 bool matchMultiUse = false, bool exploreConds = true) {
     conditionsDedupeMap.clear();
     SmallVec<std::tuple<HWValue, uint32_t>, 32> worklist{
         {root.def(0)->as<WireRef>(), 1}};
@@ -997,7 +1003,12 @@ public:
       if (operand == instr.other(1)) {
         visitedCallback(instr);
         auto &prefix = prefixes.emplace_back();
-        analyzeCond(muxtree, prefix, instr.other(0)->as<WireRef>());
+        if (exploreConds)
+          analyzeCond(muxtree, prefix, instr.other(0)->as<WireRef>());
+        else {
+          prefix.literals.emplace_back(
+              getCondIdx(muxtree, instr.other(0)->as<WireRef>(), 0), 0, 1);
+        }
       }
 
       switch (*instr.getDialectOpcode()) {
@@ -1008,13 +1019,11 @@ public:
           auto negated = prefixes.back().negated(muxtree->conditions.size());
           if (!negated)
             return std::nullopt;
-          for (auto lit : negated->literals) {
-            assert(!lit.isMarked());
-          }
-          if (negated->isTrue())
-            prefixes.pop_back();
-          else
-            prefixes.back() = *negated;
+          prefixes.back() = *negated;
+          if (!negated->isTrue())
+            for (auto lit : negated->literals) {
+              assert(!lit.isMarked());
+            }
         }
         break;
       }

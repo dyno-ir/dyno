@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
@@ -106,6 +107,16 @@ public:
   MutArrayRef drop_back() const {
     assert(sz >= 1);
     return MutArrayRef{ptr, sz - 1};
+  }
+
+  template <typename U> bool all(U func) {
+    return std::all_of(begin(), end(), func);
+  }
+  template <typename U> bool any(U func) {
+    return std::any_of(begin(), end(), func);
+  }
+  template <typename U> void for_each(U func) {
+    std::for_each(begin(), end(), func);
   }
 
   pointer data() { return ptr; }

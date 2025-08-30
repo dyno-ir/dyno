@@ -74,8 +74,9 @@ private:
       for (uint i = instr.getNumOthers(); i < regs.size(); i++)
         build.buildStore(regs[i], ctx.constBuild().zero(maxBits).get());
 
+      auto reqBits = *instr.def()->as<WireRef>().getNumBits();
       instr.def(0)->as<WireRef>().replaceAllUsesWith(
-          build.buildLoad(resultReg));
+          build.buildLoad(resultReg, reqBits));
     }
 
     build.setInsertPoint(mod.regs_end());

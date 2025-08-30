@@ -44,7 +44,7 @@ class PassPipeline {
   InstCombinePass instCombine{ctx};
   ModuleInlinePass moduleInline{ctx};
   LoopSimplifyPass loopSimplify{ctx};
-  LinearizeControlFlowPass linearizeControlFlow{ctx};
+  LinearizeControlFlowPass linearizeControlFlow{ctx, instCombine};
   AggressiveDeadCodeEliminationPass agressiveDCE{ctx};
   LowerOpsPass lowerOps{ctx};
   AIGConstructPass aigConstr{ctx};
@@ -83,10 +83,10 @@ public:
   void runOptPipeline() {
     // std::print(std::cerr, "\n\nInitial IR:\n");
     // HWPrinter{std::cerr}.printCtx(ctx);
-    //{
-    //  std::ofstream ostr("initial.dyno");
-    //  dumpDyno(ostr);
-    //}
+    {
+      std::ofstream ostr("initial.dyno");
+      dumpDyno(ostr);
+    }
 
     runPass(funcInline);
     runPass(instCombine);
@@ -109,6 +109,8 @@ public:
     runPass(orderInstrs);
     runPass(instCombine);
     runPass(agressiveDCE);
+
+    runPass(instCombine);
   }
 
   void runLibertyPipeline() {
@@ -140,14 +142,16 @@ public:
     // fuse processes aggressively and unroll loops
     linearizeControlFlow.config.flattenLoops = 1;
     linearizeControlFlow.config.flattenMultiway = 0;
+    checkPass.config.noLoops = true;
     runPass(linearizeControlFlow);
-    //processLinearize.config.retainInnerDeps = 0;
-    //processLinearize.config.retainIODeps = 0;
-    //runPass(processLinearize);
-    //ssaConstr.config.mode = SSAConstructPass::Config::IMMEDIATE;
-    //runPass(ssaConstr);
+    // processLinearize.config.retainInnerDeps = 0;
+    // processLinearize.config.retainIODeps = 0;
+    // runPass(processLinearize);
+    // ssaConstr.config.mode = SSAConstructPass::Config::IMMEDIATE;
+    // runPass(ssaConstr);
     runPass(instCombine);
     runPass(cse, true);
+
     orderInstrs.config.assertNoCircularDeps = true;
     orderInstrs.config.moveStoresBeforeLoads = false;
     runPass(orderInstrs);
@@ -169,7 +173,7 @@ public:
         .lowerExtract = false,
     };
 
-    //dumpAfterAll = true;
+    // dumpAfterAll = true;
 
     runPass(lowerOps);
     runPass(instCombine);
@@ -193,9 +197,14 @@ public:
     runPass(linearizeControlFlow);
     ssaConstr.config.mode = SSAConstructPass::Config::IMMEDIATE;
     runPass(ssaConstr);
+
     runPass(instCombine);
     runPass(agressiveDCE);
 
+    runPass(instCombine);
+    runPass(cse, true);
+    runPass(orderInstrs);
+    runPass(instCombine);
     runPass(muxTreeOpt);
     runPass(instCombine);
 
@@ -224,7 +233,14 @@ public:
         .lowerExtract = true,
     };
     runPass(lowerOps);
+    dumpDyno();
     runPass(instCombine);
+
+    runPass(regPartition);
+    runPass(instCombine);
+    runPass(processLinearize);
+    runPass(instCombine);
+    runPass(agressiveDCE);
 
     runPass(flipFlopInference);
     runPass(cse, true);
@@ -237,6 +253,8 @@ public:
     runLibertyPipeline();
 
     runPass(ffMap, true);
+    runPass(instCombine);
+    runPass(processLinearize);
     runPass(orderInstrs);
     runPass(instCombine);
     runPass(cse, true);

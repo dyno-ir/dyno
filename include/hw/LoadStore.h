@@ -99,6 +99,33 @@ public:
   bool hasBase() {
     return self().getNumOthers() > self().addressGenBaseIndex();
   }
+
+  bool isConstantOffs() { return getNumTerms() == 0; }
+
+  std::pair<uint32_t, uint32_t> getConstAccessRange() {
+    if (isConstantOffs())
+      return std::make_pair(getBase(), self().getLen());
+
+    Optional<uint32_t> endOffs = self().getLen();
+    for (auto term : terms()) {
+      auto max = term.getMax();
+      if (!max) {
+        endOffs = nullopt;
+        break;
+      }
+      *endOffs += (*max - 1) * term.getFact();
+    }
+
+    auto pessimisticMax = self().getMemoryLen() - getBase();
+
+    uint32_t max;
+    if (endOffs)
+      max = std::min(*endOffs, pessimisticMax);
+    else
+      max = pessimisticMax;
+
+    return std::make_pair(getBase(), max);
+  }
 };
 
 class LoadIRef : public OpcodeInstrRef<HWInstrRef, HW_LOAD>,
@@ -112,19 +139,11 @@ public:
   WireRef value() { return operand(0)->as<WireRef>(); }
   RegisterRef reg() { return operand(1)->as<RegisterRef>(); }
 
+  uint32_t getMemoryLen() { return *reg().getNumBits(); }
   uint32_t getLen() { return *value().getNumBits(); }
-
-  bool isConstantOffs() { return getNumTerms() == 0; }
 
   bool isFullReg() {
     return getLen() == reg().getNumBits() && isConstantOffs() && getBase() == 0;
-  }
-
-  std::pair<uint32_t, uint32_t> getConstAccessRange() {
-    if (isConstantOffs())
-      return std::make_pair(
-          hasBase() ? base()->as<ConstantRef>().getExactVal() : 0, getLen());
-    return std::make_pair(0, *reg()->numBits);
   }
 };
 
@@ -148,27 +167,11 @@ public:
     return operand(2)->as<TriggerRef>().iref();
   }
 
+  uint32_t getMemoryLen() { return *reg().getNumBits(); }
   uint32_t getLen() { return *value().getNumBits(); }
 
-  bool isConstantOffs() { return getNumTerms() == 0; }
   bool isFullReg() {
     return getLen() == reg().getNumBits() && isConstantOffs() && getBase() == 0;
-  }
-
-  std::pair<uint32_t, uint32_t> getConstAccessRange() {
-    if (isConstantOffs())
-      return std::make_pair(getBase(), getLen());
-
-    Optional<uint32_t> endOffs = getLen();
-    for (auto term : terms()) {
-      auto max = term.getMax();
-      if (!max) {
-        endOffs = nullopt;
-        break;
-      }
-      *endOffs += *max * term.getFact();
-    }
-    return std::make_pair(getBase(), *(endOffs ?: reg().getNumBits()));
   }
 };
 
@@ -182,8 +185,7 @@ public:
   OperandRef out() { return operand(0); }
   OperandRef in() { return operand(1); }
 
-  bool isConstantOffs() { return getNumTerms() == 0; }
-
+  uint32_t getMemoryLen() { return *in()->as<HWValue>().getNumBits(); }
   uint32_t getLen() { return *out()->as<HWValue>().getNumBits(); }
 };
 
@@ -198,8 +200,7 @@ public:
   OperandRef in() { return operand(1); }
   OperandRef val() { return operand(2); }
 
-  bool isConstantOffs() { return getNumTerms() == 0; }
-
+  uint32_t getMemoryLen() { return *out()->as<WireRef>().getNumBits(); }
   uint32_t getLen() { return *val()->as<HWValue>().getNumBits(); }
 };
 

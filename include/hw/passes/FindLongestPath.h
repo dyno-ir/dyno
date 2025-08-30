@@ -53,6 +53,8 @@ class FindLongestPathPass {
     }
 
     auto instr = longestPathInstr;
+    if (!instr)
+      return;
     SmallVec<InstrRef, 16> path;
     path.reserve(*map[instr].length);
     while (1) {

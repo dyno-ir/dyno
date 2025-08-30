@@ -19,12 +19,10 @@
 #include <variant>
 namespace dyno {
 
-class LoopSimplifyPass {
+class LoopSimplifer {
   HWContext &ctx;
-  DeepCopier copier;
-  HWInstrBuilder build;
   AutoCopyDebugInfoStack autoDebugInfo;
-
+  HWInstrBuilder build;
   // inspect yields.
   struct YieldVal {
     HWValue init;
@@ -53,7 +51,7 @@ class LoopSimplifyPass {
     template <> void set<Passthru>(uint, Passthru) {}
   };
 
-  auto getYield(BlockRef block) {
+  static auto getYield(BlockRef block) {
     assert(!block.empty());
     auto yield = block.end().pred().instr();
     assert(yield.isOpc(OP_YIELD));
@@ -71,7 +69,6 @@ class LoopSimplifyPass {
     uint iterYieldIdx;
     HWValue bound;
     DialectOpcode comparison;
-    bool boundOnLeft;
   };
   std::optional<ForLoopCondition>
   analyzeCondition(BlockRef condBlock, ArrayRef<YieldVal> yieldVals) {
@@ -83,7 +80,9 @@ class LoopSimplifyPass {
       return std::nullopt;
     assert(*asWire.getNumBits() == 1);
     auto compInstr = asWire.getDefI();
-    if (!compInstr.isOpc(OP_ICMP_NE, OP_ICMP_SLT, OP_ICMP_ULT))
+    if (!compInstr.isOpc(OP_ICMP_NE, OP_ICMP_SLT, OP_ICMP_ULT, OP_ICMP_SLE,
+                         OP_ICMP_ULE, OP_ICMP_SGT, OP_ICMP_UGT, OP_ICMP_SGE,
+                         OP_ICMP_UGE))
       return std::nullopt;
 
     uint yieldIdx;
@@ -94,8 +93,10 @@ class LoopSimplifyPass {
     for (uint i = 0; i < 2; i++) {
       auto op = compInstr.other(i);
       if (auto asWire = op->dyn_as<WireRef>();
-          asWire && asWire.getDefI().isOpc(OP_UNYIELD)) {
-        yieldIdx = asWire.getDef() - asWire.getDefI().begin();
+          asWire &&
+          HWInstrRef{asWire.getDefI()}.parentBlock(ctx) == condBlock &&
+          asWire.getDefI().isOpc(OP_UNYIELD)) {
+        yieldIdx = asWire.getDef() - *asWire.getDefI().begin();
         if (std::get_if<YieldVal::Increment>(&yieldVals[yieldIdx].variant)) {
           iter = asWire;
           continue;
@@ -113,11 +114,14 @@ class LoopSimplifyPass {
     if (!bound || !iter)
       return std::nullopt;
 
-    return ForLoopCondition{yieldIdx, bound, compInstr.getDialectOpcode(),
-                            boundIdx == 0};
+    auto opc = compInstr.getDialectOpcode();
+    if (boundIdx == 0)
+      opc = reverseOperandOrderICmpOpcode(opc);
+    return ForLoopCondition{yieldIdx, bound, opc};
   }
 
-  bool runOnLoop(InstrRef loop) {
+public:
+  InstrRef runOnLoop(InstrRef loop) {
 
     SmallVec<YieldVal, 8> yieldVals;
     SmallVec<BlockRef, 4> blocks;
@@ -147,7 +151,7 @@ class LoopSimplifyPass {
     }
 
     if (yieldVals.size() == 0)
-      return false;
+      return nullref;
 
     // categorize yields
     for (auto [blockID, block] : Range{blocks}.enumerate()) {
@@ -168,7 +172,7 @@ class LoopSimplifyPass {
             continue;
           }
           if (defI.isOpc(OP_UNYIELD)) {
-            uint idx = asWire.getDef() - defI.begin();
+            uint idx = asWire.getDef() - *defI.begin();
             if (idx == opIdx)
               yieldVals[opIdx].set(blockID, YieldVal::Passthru{});
             else
@@ -186,7 +190,7 @@ class LoopSimplifyPass {
               } else if (auto wire = cur->dyn_as<WireRef>()) {
                 // operand is wire which is just passed through -> iter
                 if (wire.getDefI().isOpc(OP_UNYIELD)) {
-                  uint idx = wire.getDef() - wire.getDef().instr().begin();
+                  uint idx = wire.getDef() - *wire.getDef().instr().begin();
                   if (idx != opIdx)
                     goto complex;
                   operand = wire;
@@ -253,19 +257,106 @@ class LoopSimplifyPass {
       isOldForLoop = true;
     }
     // find loop condition
-    else if (auto result = analyzeCondition(blocks.front(), yieldVals);
-             result &&
-             (!result->boundOnLeft || result->comparison == OP_ICMP_NE) &&
-             (blocks.size() == 1 || blocks.front().size() == 3)) {
+    else if (auto result = analyzeCondition(blocks.front(), yieldVals)) {
+      if (!(blocks.size() == 1 || blocks.front().size() == 3))
+        goto end;
+
       forLower = yieldVals[result->iterYieldIdx].init;
       forUpper = result->bound;
       forStep =
           std::get<YieldVal::Increment>(yieldVals[result->iterYieldIdx].variant)
               .step;
+
+      auto forLowerC = forLower.dyn_as<ConstantRef>();
+      auto forUpperC = forUpper.dyn_as<ConstantRef>();
+      auto forStepC = forStep.dyn_as<ConstantRef>();
+
+      if (!forLowerC || !forUpperC || !forStepC)
+        goto end;
+
+      auto cmpPred = BigInt::ICmpPred(
+          BigInt::ICMP_EQ + (result->comparison.opc - OP_ICMP_EQ.opc));
+      auto initial = BigInt::icmpOp4S(forLowerC, forUpperC, cmpPred);
+      if (!initial) {
+        // no iterations
+        forUpper = yieldVals[result->iterYieldIdx].init;
+        change |= 1;
+        forLoopIter = result->iterYieldIdx;
+        isNewForLoop = true;
+        goto end;
+      }
+
+      if (forStepC.getSignBit() == FourState::S0) {
+        // positive step
+        switch (*result->comparison) {
+        case *OP_ICMP_SLT:
+        case *OP_ICMP_ULT: {
+          auto rem = ((forUpperC - forLowerC) % forStepC);
+          if (!rem.valueEquals(0))
+            rem = forStepC - rem;
+          forUpper = ctx.constBuild().val(forUpperC).add(rem).get();
+          break;
+        }
+        case *OP_ICMP_NE: {
+          auto rem = (forUpperC - forLowerC) % forStepC;
+          if (!rem.valueEquals(0))
+            goto end;
+          break;
+        }
+        case *OP_ICMP_ULE:
+        case *OP_ICMP_SLE: {
+          auto upperPlusOne = forUpperC + "1'b1"_bv;
+          auto rem = ((upperPlusOne - forLowerC) % forStepC);
+          if (!rem.valueEquals(0))
+            rem = forStepC - rem;
+          forUpper = ctx.constBuild().val(upperPlusOne).add(rem).get();
+          break;
+        }
+        default:
+          goto end;
+        }
+      } else if (forStepC.getSignBit() == FourState::S1) {
+        // negative step
+        switch (*result->comparison) {
+        case *OP_ICMP_SGT:
+        case *OP_ICMP_UGT: {
+          auto rem = ((forLowerC - forUpperC) % (-forStepC));
+          if (!rem.valueEquals(0))
+            rem = (-forStepC) - rem;
+          forUpper = ctx.constBuild().val(forUpperC).sub(rem).get();
+          break;
+        }
+        case *OP_ICMP_NE: {
+          auto rem = (forLowerC - forUpperC) % (-forStepC);
+          if (!rem.valueEquals(0))
+            goto end;
+          break;
+        }
+        case *OP_ICMP_UGE:
+        case *OP_ICMP_SGE: {
+          auto upperMinusOne = forUpperC - "1'b1"_bv;
+          auto rem = ((forLowerC - upperMinusOne) % (-forStepC));
+          if (!rem.valueEquals(0))
+            rem = (-forStepC) - rem;
+          forUpper = ctx.constBuild().val(upperMinusOne).sub(rem).get();
+          break;
+        }
+        default:
+          goto end;
+        }
+      }
+
+      // check for overflows
+      auto final =
+          BigInt::icmpOp4S(forLowerC, forUpper.as<ConstantRef>(), cmpPred);
+      if (!final)
+        goto end;
+
       change |= 1;
       forLoopIter = result->iterYieldIdx;
       isNewForLoop = true;
     }
+  end:
     bool isForLoop = isNewForLoop || isOldForLoop;
 
     // apply new yields
@@ -284,7 +375,7 @@ class LoopSimplifyPass {
       newNumYieldVals++;
     }
     if (!change)
-      return false;
+      return nullref;
 
     auto token = autoDebugInfo.addWithToken(loop);
 
@@ -358,7 +449,9 @@ class LoopSimplifyPass {
     build.setInsertPoint(loop);
 
     auto originalNumBlocks = blocks.size();
+    bool destroyFirstBlock = false;
     if (isNewForLoop && blocks.size() == 2) {
+      destroyFirstBlock = true;
       blocks.erase(blocks.begin());
     }
 
@@ -398,19 +491,38 @@ class LoopSimplifyPass {
         continue;
       ibuild.addRef(loop.other(i)->fat());
     }
-    for (uint i = 0; i < originalNumBlocks; i++)
+
+    // not replaced -> gets deleted
+    uint replaceStart = destroyFirstBlock ? 1 : 0;
+    for (uint i = replaceStart; i < originalNumBlocks; i++) {
       loop.def(i).replace(FatDynObjRef<>{nullref});
+    }
 
     build.destroyInstr(loop);
 
-    return true;
+    return ibuild.instr();
   }
 
+public:
+  LoopSimplifer(HWContext &ctx) : ctx(ctx), autoDebugInfo(ctx), build(ctx) {}
+};
+
+class LoopSimplifyPass {
+  HWContext &ctx;
+  LoopSimplifer loopSimplifier;
+
+public:
+  struct Config {
+    bool errorOnNonForLoop = true;
+  };
+  Config config;
+
+private:
   void runOnProcess(ProcessIRef proc) {
     auto instrs = getSCFInstrsPreorder(proc.block());
     for (auto instr : Range{instrs}.reverse()) {
       if (instr.isOpc(OP_FOR, OP_WHILE, OP_DO_WHILE))
-        runOnLoop(instr);
+        loopSimplifier.runOnLoop(instr);
     }
   }
 
@@ -427,7 +539,6 @@ public:
     }
   }
 
-  explicit LoopSimplifyPass(HWContext &ctx)
-      : ctx(ctx), copier(ctx), build(ctx), autoDebugInfo(ctx) {}
+  explicit LoopSimplifyPass(HWContext &ctx) : ctx(ctx), loopSimplifier(ctx) {}
 };
 }; // namespace dyno

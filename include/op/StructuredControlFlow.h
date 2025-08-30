@@ -52,6 +52,30 @@ public:
 
   InstrRef getInnerYieldTrue() { return getBlockYield(getTrueBlock()); }
   InstrRef getInnerYieldFalse() { return getBlockYield(getFalseBlock()); }
+
+  // also implement switch's methods for compatibility.
+  auto getNumCases() { return hasFalseBlock() ? 2 : 1; }
+  auto caseYields() {
+    assert(getNumYieldValues() != 0 && "no yield values");
+    return Range{this->begin(), this->begin() + 1 + hasFalseBlock()}.transform(
+        [](size_t, OperandRef op) -> InstrRef {
+          auto bl = op->as<BlockRef>();
+          if (bl.empty())
+            return nullref;
+          auto last = *std::prev(bl.end());
+          if (!last.isOpc(OP_YIELD))
+            return nullref;
+          return last;
+        });
+  }
+  auto caseBlocks() {
+    assert(getNumYieldValues() != 0 && "no yield values");
+    return Range{this->begin(), this->begin() + 1 + hasFalseBlock()}.transform(
+        [](size_t, OperandRef op) -> BlockRef {
+          auto bl = op->as<BlockRef>();
+          return bl;
+        });
+  }
 };
 
 class CaseInstrRef : public InstrRef {

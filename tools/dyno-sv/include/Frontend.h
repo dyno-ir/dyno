@@ -1152,35 +1152,36 @@ public:
     }
   }
 
-  std::pair<uint32_t, uint32_t>
-  getArrayElemWidthAndLength(const slang::ast::Type &type) {
+  std::tuple<uint32_t, uint32_t, int32_t>
+  getArrayElemWidthAndLengthAndBase(const slang::ast::Type &type) {
     switch (type.kind) {
     case slang::ast::SymbolKind::PackedArrayType: {
       auto &asPArrT = type.as<slang::ast::PackedArrayType>();
-      return std::make_pair(asPArrT.elementType.getBitstreamWidth(),
-                            asPArrT.range.width());
+      return std::make_tuple(asPArrT.elementType.getBitstreamWidth(),
+                             asPArrT.range.width(), asPArrT.range.lower());
       break;
     }
     case slang::ast::SymbolKind::FixedSizeUnpackedArrayType: {
       auto &asUArrT = type.as<slang::ast::FixedSizeUnpackedArrayType>();
-      return std::make_pair(asUArrT.elementType.getBitstreamWidth(),
-                            asUArrT.range.width());
+      return std::make_tuple(asUArrT.elementType.getBitstreamWidth(),
+                             asUArrT.range.width(), asUArrT.range.lower());
     }
     case slang::ast::SymbolKind::TypeAlias: {
       auto &asTypeAlias = type.as<slang::ast::TypeAliasType>();
-      return getArrayElemWidthAndLength(asTypeAlias.targetType.getType());
+      return getArrayElemWidthAndLengthAndBase(
+          asTypeAlias.targetType.getType());
     }
     case slang::ast::SymbolKind::PredefinedIntegerType: {
       auto &asPredefInt = type.as<slang::ast::PredefinedIntegerType>();
-      return std::make_pair(1, asPredefInt.bitWidth);
+      return std::make_tuple(1, asPredefInt.bitWidth, 0);
     }
     case slang::ast::SymbolKind::PackedStructType: {
       auto &asPStruct = type.as<slang::ast::PackedStructType>();
-      return std::make_pair(1, asPStruct.bitWidth);
+      return std::make_tuple(1, asPStruct.bitWidth, 0);
     }
     case slang::ast::SymbolKind::EnumType: {
       auto &asEnumType = type.as<slang::ast::EnumType>();
-      return getArrayElemWidthAndLength(asEnumType.baseType);
+      return getArrayElemWidthAndLengthAndBase(asEnumType.baseType);
     }
     default:
       abort();
@@ -1584,14 +1585,14 @@ public:
         offs = add;
         break;
       }
-      auto [ewidth, ecount] =
-          getArrayElemWidthAndLength(*asRangeS.value().type);
+      auto [ewidth, ecount, shift] =
+          getArrayElemWidthAndLengthAndBase(*asRangeS.value().type);
 
       if (!len.is<ConstantRef>())
         print.error(expr.sourceRange);
 
       return Value::slice(
-          build, *value, ewidth * len.as<ConstantRef>().getExactVal(), 0,
+          build, *value, ewidth * len.as<ConstantRef>().getExactVal(), -shift,
           std::to_array({AddressGenTerm{offs, ewidth, ecount}}), expr.type);
     }
 
@@ -1602,10 +1603,11 @@ public:
       auto index = build.buildUpsize(
           handle_expr(asElemS.selector())->proGetValue(build), 32);
 
-      auto [ewidth, ecount] = getArrayElemWidthAndLength(*asElemS.value().type);
+      auto [ewidth, ecount, shift] =
+          getArrayElemWidthAndLengthAndBase(*asElemS.value().type);
 
       return Value::slice(
-          build, *value, ewidth, 0,
+          build, *value, ewidth, -shift,
           std::to_array({AddressGenTerm{index, ewidth, ecount}}), asElemS.type);
     }
     case slang::ast::ExpressionKind::MemberAccess: {
@@ -1758,7 +1760,8 @@ public:
 
       for (auto &indexSetter : asStructAs.indexSetters) {
         auto idx = handle_expr(*indexSetter.index)->proGetValue(build);
-        auto [esize, ecount] = getArrayElemWidthAndLength(*asStructAs.type);
+        auto [esize, ecount, shift] = getArrayElemWidthAndLengthAndBase(*asStructAs.type);
+        idx = build.buildAdd(idx, ConstantRef::fromU32(shift));
         idx = build.buildMul(idx, ConstantRef::fromU32(esize));
 
         spliceIn(handle_expr(*indexSetter.expr)->proGetValue(build), idx,
@@ -1853,13 +1856,18 @@ public:
       build.buildCall(func, args, 0);
       return std::make_unique<RValue>(nullref, nullptr);
     }
+    case slang::ast::ExpressionKind::StringLiteral: {
+      auto &asStringLit = expr.as<slang::ast::StringLiteral>();
+      auto constant = toDynoConstant(asStringLit.getIntValue());
+      return std::make_unique<RValue>(constant, expr.type);
+    }
+
     case slang::ast::ExpressionKind::ArbitrarySymbol:
     case slang::ast::ExpressionKind::Invalid:
     case slang::ast::ExpressionKind::RealLiteral:
     case slang::ast::ExpressionKind::TimeLiteral:
     case slang::ast::ExpressionKind::NullLiteral:
     case slang::ast::ExpressionKind::UnboundedLiteral:
-    case slang::ast::ExpressionKind::StringLiteral:
     case slang::ast::ExpressionKind::Inside:
     case slang::ast::ExpressionKind::Streaming:
     case slang::ast::ExpressionKind::DataType:

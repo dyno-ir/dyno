@@ -2,6 +2,7 @@
 #include "dyno/Constant.h"
 #include "hw/HWAbstraction.h"
 #include "hw/HWContext.h"
+#include "hw/HWPrinter.h"
 #include "hw/HWValue.h"
 #include "hw/IDs.h"
 #include "hw/LoadStore.h"
@@ -101,7 +102,7 @@ class FlipFlopInferencePass {
     if (!instr.isOpc(HW_MUX))
       return std::nullopt;
     auto mtree =
-        muxTreeAnalysis.analyzeMuxTree(store.value().as<WireRef>().getDefI());
+        muxTreeAnalysis.analyzeMuxTree(store.value().as<WireRef>().getDefI(), false, false);
     if (!mtree)
       return std::nullopt;
     muxTreeAnalysis.simplifyConditions(&*mtree);
@@ -152,6 +153,14 @@ class FlipFlopInferencePass {
     };
 
     auto muxTree = getMuxTree(storeI);
+    if (!muxTree) {
+      DEBUG("FlipFlopInference", {
+        dbgs() << "could not get mux tree, skipping enable inference for: ";
+        dumpInstr(reg, ctx);
+        dbgs() << "store value:\n";
+        dumpDeps(storeI, ctx);
+      })
+    }
     auto *muxTreePtr = muxTree ? &*muxTree : nullptr;
 
     HWValue undef = cbuild.undef(*dValue.getNumBits()).get();

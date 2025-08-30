@@ -5,11 +5,14 @@
 #include "hw/DeepCopy.h"
 #include "hw/HWAbstraction.h"
 #include "hw/HWContext.h"
+#include "hw/HWInstr.h"
 #include "hw/HWPrinter.h"
 #include "hw/HWValue.h"
 #include "hw/IDs.h"
 #include "hw/Wire.h"
 #include "hw/analysis/SCFTraversal.h"
+#include "hw/passes/InstCombine.h"
+#include "hw/passes/LoopSimplify.h"
 #include "op/IDs.h"
 #include "op/StructuredControlFlow.h"
 #include "support/ErrorRecovery.h"
@@ -19,26 +22,10 @@ class LinearizeControlFlowPass {
   HWContext &ctx;
   DeepCopier copier;
   HWInstrBuilder build;
-  SmallVec<InstrRef, 32> worklist;
+  SmallVec<InstrRef, 64> worklist;
   AutoCopyDebugInfoStack autoDebugInfo;
-
-  // if (auto asConst = cond->dyn_as<ConstantRef>();
-  //     asConst && asConst.valueEquals(0)) {
-
-  //   auto copyHook = [&](DeepCopier* self, InstrRef old,
-  //   BlockRef_iterator<true> it) {
-  //     if (old.isOpc(OP_UNYIELD)) {
-  //       for (auto def : old.defs()) {
-  //         def->as<WireRef>().replaceAllUsesWith()
-  //       }
-  //       return true;
-  //     }
-  //     return false;
-  //   };
-  //   copier.deepCopyInstrs(condBlock.begin(), HWInstrRef{loop}.iter(ctx));
-
-  //   return true;
-  // }
+  LoopSimplifer loopSimplify;
+  InstCombinePass &instCombine;
 
 public:
   struct Config {
@@ -90,6 +77,19 @@ private:
       yields.push_back_range(range);
       return true;
     }
+
+    // loops whose iteration depends on the iterator of a parent loop (e.g. for
+    // (j=0; j < i)) have not been handled yet. Re-queue these.
+    if (old.isOpc(OP_FOR, OP_WHILE, OP_DO_WHILE)) {
+      auto newI = self->copyInstr(
+          old, insert,
+          [&](DeepCopier *self, InstrRef old, BlockRef_iterator<true> insert) {
+            return copyAndLinkLoopYields(self, old, insert, iterVal, yields);
+          });
+      worklist.emplace_back(newI);
+      return true;
+    }
+
     return false;
   }
 
@@ -207,16 +207,20 @@ private:
                      !forLoop.getLower()->is<ConstantRef>() ||
                      !forLoop.getStep()->is<ConstantRef>();
     if (illformed)
-      report_fatal_error("ill-formed for loop");
+      return;
 
     BigInt diff = forLoop.getUpper()->as<ConstantRef>() -
                   forLoop.getLower()->as<ConstantRef>();
     BigInt step = forLoop.getStep()->as<ConstantRef>();
+    if (diff.getSignBit() != step.getSignBit())
+      report_fatal_error("ill-formed for loop");
     if (diff.getIs4S() || step.getIs4S())
       report_fatal_error("loop with undefined bounds");
-    auto [div, mod] = BigInt::udivmodOp4S(diff, step);
-    if (!mod.valueEquals(0))
+    auto [div, mod] = BigInt::sdivmodOp4S(diff, step);
+    if (!mod.valueEquals(0)) {
+      dumpInstr(forLoop, ctx);
       report_fatal_error("loop never terminates (diff not divisible by step)");
+    }
     if (!div.getLimitedVal())
       report_fatal_error("too many loop iterations");
 
@@ -240,7 +244,7 @@ private:
                                          yieldValues);
           });
 
-      cbuild.add(step);
+      cbuild.add(forLoop.getStep()->as<ConstantRef>());
       insertIter = endIter.pred();
     }
 
@@ -252,8 +256,9 @@ private:
   }
 
   void runOnProcess(ProcessIRef proc) {
-    auto list = getSCFInstrsPreorder(proc.block());
-    for (auto instr : Range{list}.reverse()) {
+    worklist = getSCFInstrsPreorder(proc.block());
+    while (!worklist.empty()) {
+      auto instr = worklist.pop_back_val();
       switch (*instr.getDialectOpcode()) {
       default:
         continue;
@@ -267,6 +272,21 @@ private:
           continue;
         linearizeSwitch(instr.as<SwitchInstrRef>());
         break;
+
+      case *OP_WHILE:
+      case *OP_DO_WHILE: {
+        // run instcombine in and around the loop
+        instCombine.run(HWInstrRef{instr}.parentBlock(ctx));
+        instCombine.run(instr.def(0)->as<BlockRef>());
+        if (instr.isOpc(OP_WHILE))
+          instCombine.run(instr.def(1)->as<BlockRef>());
+        // we might be able to simplify loops now that we were unable to before.
+        instr = loopSimplify.runOnLoop(instr);
+        if (!instr)
+          continue;
+        assert(instr.isOpc(OP_FOR));
+      }
+        [[fallthrough]];
       case *OP_FOR:
         if (!config.flattenLoops)
           continue;
@@ -287,8 +307,9 @@ public:
       runOnModule(module.iref());
     }
   }
-  explicit LinearizeControlFlowPass(HWContext &ctx)
-      : ctx(ctx), copier(ctx), build(ctx), autoDebugInfo(ctx) {}
+  explicit LinearizeControlFlowPass(HWContext &ctx, InstCombinePass &icb)
+      : ctx(ctx), copier(ctx), build(ctx), autoDebugInfo(ctx),
+        loopSimplify(ctx), instCombine(icb) {}
 };
 
 }; // namespace dyno

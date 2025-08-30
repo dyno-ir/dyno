@@ -391,7 +391,8 @@ template <> struct DenseMapInfo<dyno::DynObjRef> {
                            dyno::ObjID::invalid(), 0};
   }
   static unsigned getHashValue(const dyno::DynObjRef &k) {
-    return std::hash<dyno::DynObjRef>()(k);
+    auto word = std::bit_cast<uint64_t>(k);
+    return hash_combine(hash_u32(uint32_t(word)), hash_u32(word >> 32));
   }
   static bool isEqual(const dyno::DynObjRef &lhs, const dyno::DynObjRef &rhs) {
     return std::bit_cast<uint64_t>(lhs) == std::bit_cast<uint64_t>(rhs);
@@ -406,7 +407,9 @@ template <dyno::IsPureObjRef T> struct DenseMapInfo<T> {
   static constexpr T getTombstoneKey() {
     return T{dyno::ObjID{dyno::ObjID::invalid() - 2}};
   }
-  static unsigned getHashValue(const T &k) { return std::hash<T>()(k); }
+  static unsigned getHashValue(const T &k) {
+    return hash_u32(std::bit_cast<uint32_t>(k));
+  }
   static bool isEqual(const T &lhs, const T &rhs) {
     return std::bit_cast<uint32_t>(lhs) == std::bit_cast<uint32_t>(rhs);
   }

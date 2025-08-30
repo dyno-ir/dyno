@@ -147,6 +147,8 @@ private:
     build.destroyInstr(instr.ref);
     instr.ref = nullref;
     bitAlias.clearCache();
+
+    return ibLHS.instr();
   }
 
   bool tryCombineInstrs(AbstractInstr &lhsAbstr, AbstractInstr &rhsAbstr) {
@@ -160,17 +162,6 @@ private:
     assert(intersectOps.size() != 0 && "heuristic not working?");
     if ((intersectOps.size() + !!matchingConstBits) < 2)
       return false;
-
-    DEBUG("FuzzyCSE", {
-      dbgs() << "heuristically matched instrs:\n";
-      HWPrinter print{dbgs()};
-      print.printInstr(lhsAbstr.ref, ctx);
-      print.printInstr(rhsAbstr.ref, ctx);
-      dbgs() << "matching operand first frags:\n";
-      for (auto [lhs, rhs] : intersectOps) {
-        dbgs() << lhs << ", " << rhs << "\n";
-      }
-    })
 
     DynSymbSet<SmallVec<uint64_t, 1>, 1> lhsCovered, rhsCovered;
     lhsCovered.resize(lhsAbstr.ref.getNumOthers());
@@ -246,6 +237,13 @@ private:
     if (matchingPrefixes.size() == 0)
       return false;
 
+    DEBUG("FuzzyCSE", {
+      dbgs() << "matched instrs:\n";
+      HWPrinter print{dbgs()};
+      print.printInstr(lhsAbstr.ref, ctx);
+      print.printInstr(rhsAbstr.ref, ctx);
+    })
+
     autoDbgInfo.pushDebugInfo(lhsAbstr.ref);
     autoDbgInfo.pushDebugInfo(rhsAbstr.ref);
 
@@ -285,12 +283,25 @@ private:
     build.setInsertPoint(lhsAbstr.ref);
     auto lhsIdxs = Range{intersectOps}.transform(
         [](size_t, auto pair) { return pair.first; });
-    rebuildInstr(lhsAbstr, matchingPrefixes, lhsCovered, lhsIdxs, defW);
+    auto newLHS =
+        rebuildInstr(lhsAbstr, matchingPrefixes, lhsCovered, lhsIdxs, defW);
 
     build.setInsertPoint(rhsAbstr.ref);
     auto rhsIdxs = Range{intersectOps}.transform(
         [](size_t, auto pair) { return pair.second; });
-    rebuildInstr(rhsAbstr, matchingPrefixes, rhsCovered, rhsIdxs, defW);
+    auto newRHS =
+        rebuildInstr(rhsAbstr, matchingPrefixes, rhsCovered, rhsIdxs, defW);
+
+    DEBUG("FuzzyCSE", {
+      dbgs() << "replaced with:\n";
+      HWPrinter print{dbgs()};
+      dbgs() << "shared: ";
+      print.printInstr(ib.instr(), ctx);
+      dbgs() << "new lhs: ";
+      print.printInstr(newLHS, ctx);
+      dbgs() << "new rhs: ";
+      print.printInstr(newRHS, ctx);
+    })
 
     candidates.emplace_back(newInstrAbstr);
     return true;

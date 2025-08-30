@@ -78,6 +78,9 @@ public:
   using value_type = reference;
   using Base::at_unchecked;
 
+  DynSymbSet() = default;
+  DynSymbSet(size_t resizeTo) : DynSymbSet() { this->resize(resizeTo); }
+
   auto size() { return numSymbs; }
   auto at(size_t i) {
     assert(i < numSymbs && "oob");

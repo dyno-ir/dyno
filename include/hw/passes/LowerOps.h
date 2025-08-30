@@ -519,10 +519,53 @@ private:
     destroyMap[instr] = 1;
   }
 
+  void lowerMultiply(InstrRef instr) {
+    auto val = instr.other(0)->as<WireRef>();
+    auto bits = *val.getNumBits();
+    Range facts{instr.other_begin() + 1, instr.other_end()};
+    SmallVec<uint32_t, 4> factIdxs(instr.getNumOthers() - 1);
+    build.setInsertPoint(instr);
+
+    SmallVec<HWValue, 32> partials;
+    while (true) {
+      bool carry = true;
+
+      SmallVec<HWValue, 4> terms;
+      uint sum = 0;
+      for (auto [fact, idx] : facts.zip(factIdxs)) {
+        sum += idx;
+        auto val = build.buildSplice(fact->as<HWValue>(), 1, idx);
+        terms.emplace_back(val);
+
+        if (carry) {
+          idx++;
+          if (idx == bits) {
+            idx = 0;
+            carry = true;
+          } else
+            carry = false;
+        }
+      }
+      auto doAdd = build.buildAnd(terms);
+      auto mask = build.buildRepeat(doAdd, bits);
+      auto shifted = build.buildSLL(val, cbuild.val(bits, sum).get());
+      auto maskedVal = build.buildAnd(shifted, mask);
+      partials.emplace_back(maskedVal);
+      if (carry)
+        break;
+    }
+
+    auto prod = build.buildAdd(partials);
+    instr.def(0)->as<WireRef>().replaceAllUsesWith(prod);
+    destroyMap[instr] = 1;
+  }
+
   void lowerConstantMul(InstrRef instr) {
     // until we implement real multiply.
-    if (instr.getNumOthers() != 2 || !instr.other(1)->is<ConstantRef>())
-      report_fatal_error("unsupported mul");
+    if (instr.getNumOthers() != 2 || !instr.other(1)->is<ConstantRef>()) {
+      lowerMultiply(instr);
+      return;
+    }
 
     auto val = instr.other(0)->as<WireRef>();
     auto c = instr.other(1)->as<ConstantRef>();
@@ -600,10 +643,11 @@ private:
         sel = build.buildAnd(sel, enable);
       auto newWord = build.buildMux(sel, value, word);
 
-      uint32_t numHigh = *cur.getNumBits() - curAddr - elemSize;
-      cur =
-          build.buildConcat(build.buildSplice(cur, numHigh, curAddr + elemSize),
-                            newWord, build.buildTrunc(curAddr, cur));
+      //uint32_t numHigh = *cur.getNumBits() - curAddr - elemSize;
+      cur = build.buildInsert(cur, newWord, curAddr);
+      //cur =
+      //    build.buildConcat(build.buildSplice(cur, numHigh, curAddr + elemSize),
+      //                      newWord, build.buildTrunc(curAddr, cur));
     }
 
     assert(cur.getNumBits() == pad.getNumBits());
@@ -626,7 +670,7 @@ private:
 
     auto resBits = *splice.def(0)->as<WireRef>().getNumBits();
 
-    HWValue cur = splice.other(0)->as<WireRef>();
+    HWValue cur = splice.other(0)->as<HWValue>();
     auto constShift = splice.getBase();
     build.setInsertPoint(splice);
     cur = build.buildSplice(cur, *cur.getNumBits() - constShift, constShift);

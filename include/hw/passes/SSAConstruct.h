@@ -482,14 +482,12 @@ public:
             if (state.untouched && !config.lowerAllDynamic)
               break;
 
-            auto val = state.get(build, 0, *asStore.reg()->numBits, false);
-            val = build.buildInsert(val, asStore.value(), asStore.getBase(),
-                                    asStore.terms());
+            auto [boundAddr, boundLen] = asStore.getConstAccessRange();
 
-            // plain value doesn't check for conflicting triggers.
-            // regState.plainValue(depth, asStore.reg(), val, trigger);
+            auto val = state.get(build, boundAddr, boundLen, false);
+            val = build.buildInsert(val, asStore.value(), 0, asStore.terms());
 
-            regState.get().overwrite(val, 0, 0, len, false, trigger);
+            state.overwrite(val, 0, boundAddr, boundLen, false, trigger);
             destroyList.emplace_back(asStore);
             break;
           }
@@ -521,9 +519,12 @@ public:
             if (val.untouched && !config.lowerAllDynamic)
               break;
 
+            auto [boundAddr, boundLen] = asLoad.getConstAccessRange();
+
             build.setInsertPoint(ctx.getCFG()[asLoad]);
-            auto matVal = build.buildSplice(val.get(build), asLoad.getLen(),
-                                            asLoad.getBase(), asLoad.terms());
+            auto matVal = build.buildSplice(val.get(build, boundAddr, boundLen),
+                                            asLoad.getLen(), 0, asLoad.terms());
+            assert(matVal.getNumBits() == asLoad.defW().getNumBits());
             asLoad.defW().replaceAllUsesWith(matVal);
             destroyList.emplace_back(asLoad);
             break;
@@ -534,6 +535,7 @@ public:
 
         build.setInsertPoint(asLoad.iter(ctx));
         auto newVal = val.get(build, addr, len);
+        assert(newVal.getNumBits() == asLoad.defW().getNumBits());
         asLoad.defW().replaceAllUsesWith(newVal);
         destroyList.emplace_back(asLoad);
         break;
@@ -732,9 +734,11 @@ public:
       for (auto [obj, regState] : regMap) {
         if (regState.stack.empty())
           continue;
-        if (regState.get().untouched)
+        auto &state = regState.get();
+        if (state.untouched)
           continue;
         auto reg = RegisterRef{ctx.getRegs().resolve(obj)};
+        assert(reg.getNumBits() == state.getLen());
 
         uint32_t addr = 0;
         uint32_t len = 0;
@@ -749,10 +753,12 @@ public:
                           .resolve(ObjRef<Trigger>{ObjID{*triggerID}})
                           .iref();
           }
-          build.buildStore(reg, regState.get().get(build, addr, len),
+          assert(reg.getNumBits() == state.getLen());
+          build.buildStore(reg, state.get(build, addr, len, false),
                            config.mode == Config::DEFERRED, trigger, addr);
+          assert(reg.getNumBits() == state.getLen());
         };
-        for (auto frag : regState.get().frags) {
+        for (auto frag : state.frags) {
           if (frag.untouched) {
             commitPrev();
             addr = frag.dstAddr + frag.len;
@@ -772,10 +778,10 @@ public:
     }
 
     for (auto obj : Range{destroyList}.reverse()) {
-      DEBUG("SSAConstruct", {
-        dbgs() << "depth=" << depth << ", destroying: ";
-        dumpObj(obj);
-      })
+      // DEBUG("SSAConstruct", {
+      //   dbgs() << "depth=" << depth << ", destroying: ";
+      //   dumpObj(obj);
+      // })
       build.destroyObj(obj);
     }
   }

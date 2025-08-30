@@ -434,7 +434,6 @@ replace {
 */
 
 
-// these might hinder MUX tree analysis, maybe support output patterns in mux tree analysis?
 match {
   HW_MUX $out, $cond, #1'b1, #1'b0
 }
@@ -447,6 +446,7 @@ replace {
   OP_NOT $out, $cond
 }
 
+// these might hinder MUX tree analysis, maybe support output patterns in mux tree analysis?
 match {
   HW_MUX $out, $cond, #'1, $rhs:HW_WIRE
 }

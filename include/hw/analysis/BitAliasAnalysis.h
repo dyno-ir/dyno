@@ -76,18 +76,19 @@ class BitAliasAnalysis {
       if (first)
         break;
       auto addr = asSplice.getBase();
-      auto len = *asSplice.out()->as<WireRef>().getNumBits();
+      auto len = asSplice.getLen();
       assert(retVal.frags.empty() || retVal.frags.front().dstAddr == 0);
 
       // support unsimplified constant addresses here to avoid explosion
       // in instcombine for long insert/splice sequences. (todo: better fix?)
       asSplice.terms().for_each([&](auto term) {
-        addr += term.getIdx().template as<ConstantRef>().getExactVal() * term.getFact();
+        addr += term.getIdx().template as<ConstantRef>().getExactVal() *
+                term.getFact();
       });
 
       int64_t oobLen = int64_t(addr + len) - retVal.getLen();
       if (addr >= retVal.getLen()) {
-        frame.acc = BitAliasAcc{ctx.constBuild().undef(oobLen)};
+        frame.acc = BitAliasAcc{ctx.constBuild().undef(len)};
         change = 1;
       } else if (oobLen > 0) {
         frame.acc = retVal.getRange(addr, len - oobLen);
@@ -98,6 +99,7 @@ class BitAliasAnalysis {
         frame.acc = retVal.getRange(addr, len);
         change |= nested;
       }
+      assert(frame.acc.getLen() == asSplice.getLen());
       return std::nullopt;
       break;
     }
@@ -115,7 +117,7 @@ class BitAliasAnalysis {
       if (first)
         break;
       auto outLen = *instr.def(0)->as<WireRef>().getNumBits();
-      auto inLen = *instr.other(0)->as<WireRef>().getNumBits();
+      auto inLen = *instr.other(0)->as<HWValue>().getNumBits();
       assert(outLen >= inLen);
       retVal.appendTop(ctx.constBuild().zero(outLen - inLen).get(), 0,
                        outLen - inLen);
@@ -128,7 +130,7 @@ class BitAliasAnalysis {
       if (first)
         break;
       auto outLen = *instr.def(0)->as<WireRef>().getNumBits();
-      auto inLen = *instr.other(0)->as<WireRef>().getNumBits();
+      auto inLen = *instr.other(0)->as<HWValue>().getNumBits();
       assert(outLen >= inLen);
       retVal.appendTop(ctx.constBuild().undef(outLen - inLen).get(), 0,
                        outLen - inLen);
@@ -141,7 +143,7 @@ class BitAliasAnalysis {
       if (first)
         break;
       auto outLen = *instr.def(0)->as<WireRef>().getNumBits();
-      auto inLen = *instr.other(0)->as<WireRef>().getNumBits();
+      auto inLen = *instr.other(0)->as<HWValue>().getNumBits();
       assert(outLen % inLen == 0);
       auto cnt = outLen / inLen;
       frame.acc = retVal;
@@ -160,7 +162,7 @@ class BitAliasAnalysis {
       if (first)
         break;
       auto outLen = *instr.def(0)->as<WireRef>().getNumBits();
-      auto inLen = *instr.other(0)->as<WireRef>().getNumBits();
+      auto inLen = *instr.other(0)->as<HWValue>().getNumBits();
       assert(outLen >= inLen);
       frame.acc = std::move(retVal);
       auto signBit = frame.acc.getRange(inLen - 1, 1);
@@ -191,23 +193,17 @@ class BitAliasAnalysis {
         // support unsimplified constant addresses here to avoid explosion
         // in instcombine for long insert/splice sequences. (todo: better fix?)
         asInsert.terms().for_each([&](auto term) {
-          addr += term.getIdx().template as<ConstantRef>().getExactVal() * term.getFact();
+          addr += term.getIdx().template as<ConstantRef>().getExactVal() *
+                  term.getFact();
         });
-
-        std::print(
-            dbgs(),
-            "analyzed: len={}, addr={}, retVal.getLen()={}, wireLen{}: ", len,
-            addr, retVal.getLen(), *instr.def(0)->as<WireRef>().getNumBits());
-        dumpInstr(instr, ctx);
-        if (instr.def(0)->as<WireRef>().getNumBits() == 516 && addr == 129 && len == 1) {
-          dbgs() << "here\n";
-        }
 
         frame.acc.overwriteNoMaterialize(retVal, 0, addr, len);
         // constant inserts can be lowered to splice, so also mark change if
         // first entry.
         change |= stack.size() == 1;
         change |= nested;
+
+        assert(frame.acc.getLen() == asInsert.getMemoryLen());
         return std::nullopt;
       }
       break;
@@ -218,8 +214,8 @@ class BitAliasAnalysis {
       return std::nullopt;
     }
     }
-    return frame.ref == instr.end() ? std::nullopt
-                                    : std::make_optional(frame.ref);
+    return frame.ref == *instr.end() ? std::nullopt
+                                     : std::make_optional(frame.ref);
   }
 
   SmallVec<Frame, 16> stack;
@@ -268,6 +264,7 @@ public:
         stack.pop_back();
       }
     }
+    assert(retVal.getLen() == *rootWire.getNumBits());
     change |= retVal.defragmentValues(ctx);
     assert(retVal.getLen() == *rootWire.getNumBits());
     if (retVal.frags.size() == 1) {

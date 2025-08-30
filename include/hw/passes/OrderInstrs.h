@@ -164,8 +164,23 @@ private:
 
     block.clear_unsafe();
     auto it = block.end();
+
+
+    InstrRef unyieldInstr = nullref;
+
     for (auto instr : ordered) {
-      it.insertPrev(ctx.getInstrs().resolve(instr));
+      auto ref = ctx.getInstrs().resolve(instr);
+      it.insertPrev(ref);
+      if (ref.isOpc(OP_UNYIELD)) {
+        assert(!unyieldInstr);
+        unyieldInstr = ref;
+      }
+    }
+
+    // make sure unyield is first instr again if it exists
+    if (unyieldInstr) {
+      ctx.getCFG()[unyieldInstr].erase();
+      block.begin().insertPrev(unyieldInstr);
     }
     assert(block.size() == ordered.size());
   }

@@ -79,7 +79,7 @@ public:
   };
   UseType classifyUse(OperandRef use) {
     assert(use.instr() == *this);
-    uint idx = use - other_begin();
+    uint idx = use - *other_begin();
     if (idx == 0)
       return CLOCK;
     if (idx == 2)

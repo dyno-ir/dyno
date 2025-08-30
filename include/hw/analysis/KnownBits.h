@@ -9,6 +9,7 @@
 #include "hw/LoadStore.h"
 #include "hw/Wire.h"
 #include "op/IDs.h"
+#include "support/Debug.h"
 #include "support/DenseMap.h"
 #include <concepts>
 namespace dyno {
@@ -52,6 +53,8 @@ class KnownBitsAnalysis {
       stack.emplace_back(instr.other(frame.idx++)->as<HWValue>(), 0);
     } else {
       retVal = stack.back().acc;
+      assert(retVal.val.getNumBits() ==
+             stack.back().value.as<WireRef>().getNumBits());
       cache.insert(stack.back().value.as<WireRef>(), retVal);
       stack.pop_back();
     }
@@ -124,6 +127,7 @@ public:
           stack.emplace_back(instr.other(0)->as<HWValue>(), 0);
         } else {
           BigInt::notOp4S(retVal.val, retVal.val);
+          assert(retVal.val.getNumBits() == wire.getNumBits());
           cache.insert(wire, retVal);
           stack.pop_back();
         }
@@ -136,6 +140,7 @@ public:
           stack.emplace_back(instr.other(0)->as<HWValue>(), 0);
         } else {
           BigInt::resizeOp4S(retVal.val, retVal.val, *wire.getNumBits());
+          assert(retVal.val.getNumBits() == wire.getNumBits());
           cache.insert(wire, retVal);
           stack.pop_back();
         }
@@ -153,6 +158,7 @@ public:
                               ? PatBigInt::fromFourState(FourState::S0, delta)
                               : PatBigInt::fromSign(retVal.val, delta);
           BigInt::concatOp4S(retVal.val, lhs, retVal.val);
+          assert(retVal.val.getNumBits() == wire.getNumBits());
           cache.insert(wire, retVal);
           stack.pop_back();
         }
@@ -174,7 +180,7 @@ public:
           int64_t oobLen = int64_t(asSplice.getLen() + asSplice.getBase()) -
                            retVal.val.getNumBits();
           if (asSplice.getBase() >= retVal.val.getNumBits()) {
-            retVal.val = PatBigInt::undef(retVal.val.getNumBits());
+            retVal.val = PatBigInt::undef(len);
           } else if (oobLen > 0) {
             BigInt::rangeSelectOp4S(retVal.val, retVal.val, asSplice.getBase(),
                                     len - oobLen);
@@ -184,6 +190,7 @@ public:
             BigInt::rangeSelectOp4S(retVal.val, retVal.val, asSplice.getBase(),
                                     len);
           }
+          assert(retVal.val.getNumBits() == wire.getNumBits());
           cache.insert(wire, retVal);
           stack.pop_back();
         }
@@ -208,10 +215,12 @@ public:
           auto highOffs = asInsert.getBase() + asInsert.getLen();
           BigInt low, high;
           BigInt::rangeSelectOp4S(low, frame.acc.val, 0, asInsert.getBase());
+          assert(frame.acc.val.getNumBits() >= highOffs);
           BigInt::rangeSelectOp4S(high, frame.acc.val, highOffs,
                                   frame.acc.val.getNumBits() - highOffs);
           BigInt::concatOp4S(low, retVal.val, low);
           BigInt::concatOp4S(retVal.val, high, low);
+          assert(retVal.val.getNumBits() == wire.getNumBits());
           cache.insert(wire, retVal);
           stack.pop_back();
         }

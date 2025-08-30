@@ -3,6 +3,7 @@
 #include "hw/HWAbstraction.h"
 #include "hw/HWContext.h"
 #include "support/Bits.h"
+#include "support/Debug.h"
 #include "support/ErrorRecovery.h"
 #include <algorithm>
 #include <cstdint>
@@ -508,7 +509,8 @@ public:
   auto pair() { return std::make_pair(addr(), len()); }
 };
 
-inline auto diffRegisterValues(ArrayRef<RegisterValue *> regVals) {
+inline auto diffRegisterValues(ArrayRef<RegisterValue *> regVals,
+                               bool defragmentDiffs = true) {
   SmallVec<RegValueDiff, 4> diffs;
 
   SmallVec<uint32_t, 4> idxs(regVals.size());
@@ -559,7 +561,7 @@ inline auto diffRegisterValues(ArrayRef<RegisterValue *> regVals) {
 
     if (!equalChunk) {
       // either start a new diff run or extend the last one
-      if (!diffs.empty() &&
+      if (defragmentDiffs && !diffs.empty() &&
           diffs.back().addr() + diffs.back().len() == curAddr &&
           diffs.back().untouched() == !anyTouched &&
           diffs.back().triggerID() == anyTriggerID) {

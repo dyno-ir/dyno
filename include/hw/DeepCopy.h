@@ -70,7 +70,7 @@ public:
   }
   template <IsCopyHook InstrHook>
   InstrRef copyInstr(InstrRef srcInstr, BlockRef_iterator<true> dstIt,
-                     InstrHook &instrCallback) {
+                     InstrHook instrCallback) {
     auto copyInstr = InstrRef{ctx.getInstrs().create(
         srcInstr.getNumOperands(), srcInstr.getDialectOpcode())};
     dstIt.insertPrev(copyInstr);
@@ -103,7 +103,7 @@ public:
 
   template <IsCopyHook InstrHook>
   InstrRef moveInstr(InstrRef srcInstr, BlockRef_iterator<true> dstIt,
-                     InstrHook &instrCallback) {
+                     InstrHook instrCallback) {
     ctx.getCFG()[srcInstr] = dstIt;
     return srcInstr;
   }
