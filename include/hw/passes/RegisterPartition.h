@@ -85,7 +85,7 @@ class RegisterPartitionPass {
     }
 
     DEBUG("RegisterPartition", {
-      dumpInstr(reg);
+      dumpInstr(reg, ctx);
       dbgs() << "found partitions:\n";
       for (auto [back, frag] : Range{part.frags}.mark_back()) {
         dbgs() << "[" << frag.dstAddr << "+:" << frag.len << "]";
@@ -106,15 +106,29 @@ class RegisterPartitionPass {
     for (auto frag : part.frags)
       regs.emplace_back(build.buildRegister(frag.len));
 
+    SmallVec<InstrRef, 4> destroyList;
     for (auto use : reg.oref().uses()) {
       auto instr = use.instr();
       if (instr.isOpc(HW_STORE, HW_STORE_DEFER)) {
         buildSplitStore(part, regs, instr.as<StoreIRef>());
+        destroyList.emplace_back(instr);
       }
       if (instr.isOpc(HW_LOAD)) {
         buildSplitLoad(part, regs, instr.as<LoadIRef>());
+        destroyList.emplace_back(instr);
       }
     }
+
+    build.setInsertPoint(mod.block().end());
+    build.setInsertPoint(build.buildProcess().block().end());
+    for (auto [idx, frag] : Range{part.frags}.enumerate()) {
+      build.buildStore(reg.oref(), build.buildLoad(regs[idx]), false, nullref,
+                       frag.dstAddr);
+    }
+
+    for (auto instr : destroyList)
+      build.destroyInstr(instr);
+    bitAlias.clearCache();
   }
 
   void runOnModule(ModuleIRef mod) {

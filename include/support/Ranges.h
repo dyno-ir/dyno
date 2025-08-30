@@ -182,11 +182,14 @@ public:
   zip_iterator() = default;
   zip_iterator(T it, U it2) : it(it), it2(it2) {}
 
-  value_type operator*() { return std::make_pair(*it, *it2); }
+  value_type operator*() {
+    return std::pair<decltype(*it), decltype(*it2)>(*it, *it2);
+  }
 
   zip_iterator &operator++() {
     ++it;
     ++it2;
+    return *this;
   }
 
   zip_iterator operator++(int) {
@@ -533,26 +536,22 @@ public:
   template <typename T> bool any(T func) {
     return std::any_of(begin(), end(), func);
   }
-
+  template <typename T> auto count_if(T func) {
+    return std::count_if(begin(), end(), func);
+  }
   template <typename T> void for_each(T func) {
     std::for_each(begin(), end(), func);
   }
 
-  Range zip(Range other) {
-    return ::Range{
-        zip_iterator<decltype(beginIt), decltype(other.beginIt)>{begin(),
-                                                                 end()},
-        zip_iterator<decltype(beginIt), decltype(other.beginIt)>{end(),
-                                                                 other.end()},
-    };
+  template <typename T> auto zip(T &other) {
+    return ::Range{zip_iterator{begin(), other.begin()},
+                   zip_iterator{end(), other.end()}};
   }
 
-  Range sorted_intersect(Range other) {
+  template <typename T> auto sorted_intersect(T &other) {
     return ::Range{
-        sorted_intersect_iterator<decltype(beginIt), decltype(other.beginIt)>{
-            begin(), end(), other.begin(), other.end()},
-        sorted_intersect_iterator<decltype(beginIt), decltype(other.beginIt)>{
-            end(), other.end()},
+        sorted_intersect_iterator{begin(), end(), other.begin(), other.end()},
+        sorted_intersect_iterator{end(), other.end()},
     };
   }
 

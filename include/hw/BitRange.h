@@ -67,7 +67,7 @@ public:
   HWValue getAddr() const { return base->as<HWValue>(); }
   HWValue getLen() const {
     auto it = base + 1;
-    assert(it != base.instr().end());
+    assert(it != *base.instr().end());
     return (it)->as<HWValue>();
   }
   BitRangeOperand(OperandRef base) : base(base) {}

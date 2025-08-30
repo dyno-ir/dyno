@@ -234,16 +234,16 @@ public:
           }
           loopIDCnt++;
 
-          DEBUG("ProcessLinearize", {
-            size_t length = stack.end() - it.base();
-            dbgs() << "Found process loop of length " << length << ":\n";
-            size_t i = 0;
-            for (auto it2 = stack.end() - 1; it2 >= it.base(); --it2, ++i) {
-              dbgs() << "Process " << (i + 1) << " of " << length << "\n";
-              dumpInstr(it2->proc.iref());
-              dbgs() << "\n";
-            }
-          });
+          // DEBUG("ProcessLinearize", {
+          //   size_t length = stack.end() - it.base();
+          //   dbgs() << "Found process loop of length " << length << ":\n";
+          //   size_t i = 0;
+          //   for (auto it2 = stack.end() - 1; it2 >= it.base(); --it2, ++i) {
+          //     dbgs() << "Process " << (i + 1) << " of " << length << "\n";
+          //     dumpInstr(it2->proc.iref());
+          //     dbgs() << "\n";
+          //   }
+          // });
 
           stack.pop_back();
           continue;

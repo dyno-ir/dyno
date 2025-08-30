@@ -8,16 +8,21 @@
 #include "hw/FlipFlop.h"
 #include "hw/HWAbstraction.h"
 #include "hw/HWContext.h"
+#include "hw/HWInstr.h"
 #include "hw/HWPrinter.h"
 #include "hw/HWValue.h"
 #include "hw/IDs.h"
 #include "hw/LoadStore.h"
+#include "hw/Register.h"
 #include "hw/Wire.h"
 #include "hw/analysis/BitAliasAnalysis.h"
 #include "hw/analysis/DemandedBits.h"
 #include "hw/analysis/KnownBits.h"
+#include "hw/analysis/RegisterValue.h"
 #include "op/IDs.h"
+#include "op/StructuredControlFlow.h"
 #include "support/Debug.h"
+#include "support/DynBitSet.h"
 #include "support/ErrorRecovery.h"
 #include "support/Utility.h"
 #include <algorithm>
@@ -211,6 +216,49 @@ private:
     return true;
   }
 
+  bool liftMUX(InstrRef instr) {
+    return false;
+    auto selV = instr.other(0)->as<HWValue>();
+    auto trueV = instr.other(1)->as<HWValue>();
+    auto falseV = instr.other(2)->as<HWValue>();
+
+    auto bits = *trueV.getNumBits();
+
+    auto [trueRepr, _] = bitAlias.getReprAliases(trueV);
+    auto [falseRepr, _] = bitAlias.getReprAliases(falseV);
+
+    auto diffs = diffRegisterValues(std::to_array({&trueRepr, &falseRepr}));
+
+    SmallVec<HWValue, 8> outFrags;
+
+    HWInstrBuilder build{ctx, instr};
+    auto handleUnchanged = [&](uint32_t addr, uint32_t len) {
+      outFrags.emplace_back(trueRepr.get(build, addr, len, false));
+    };
+
+    if (diffs.size() <= 1)
+      return false;
+
+    uint32_t last = 0;
+    for (auto &diff : diffs) {
+      if (auto len = diff.addr() - last)
+        handleUnchanged(last, len);
+      auto fragV = build.buildMux(
+          selV, trueRepr.get(build, diff.addr(), diff.len(), false),
+          falseRepr.get(build, diff.addr(), diff.len(), false));
+      outFrags.emplace_back(fragV);
+      last = diff.addr() + diff.len();
+    }
+    if (auto len = bits - last)
+      handleUnchanged(last, len);
+
+    std::reverse(outFrags.begin(), outFrags.end());
+    auto out = build.buildConcat(outFrags);
+    instr.def(0)->as<WireRef>().replaceAllUsesWith(out);
+    deleteMatchedInstr(instr);
+    return true;
+  }
+
   bool simplifyBitAliases(InstrRef instr) {
     auto defW = instr.def(0)->as<WireRef>();
     auto [aliases, change] = bitAlias.getReprAliases(defW);
@@ -231,6 +279,28 @@ private:
       deleteMatchedInstr(instr);
       return true;
     }
+
+    auto matchInsert = [&]() {
+      auto &front = aliases.frags[0];
+      auto &mid = aliases.frags[1];
+      auto &end = aliases.frags[2];
+      if (front.ref != end.ref || front.srcAddr != 0 ||
+          end.srcAddr != end.dstAddr)
+        return false;
+      auto pad = ctx.resolveObj(front.ref).as<HWValue>();
+      if (pad.getNumBits() != aliases.getLen())
+        return false;
+
+      auto midRef = ctx.resolveObj(mid.ref).as<HWValue>();
+      auto val = build.buildSplice(midRef, mid.len, mid.srcAddr);
+      auto out = build.buildInsert(pad, val, mid.dstAddr);
+      replaceUses(defW, out);
+      deleteMatchedInstr(instr);
+      return true;
+    };
+    if (aliases.frags.size() == 3)
+      if (matchInsert())
+        return true;
 
     auto ib = build.buildInstrRaw(HW_CONCAT, 1 + aliases.frags.size());
     build.setInsertPoint(ib.instr());
@@ -309,7 +379,8 @@ private:
     ibAdd.addRef(outWire).other();
     build.setInsertPoint(ibAdd.instr());
     for (auto op : instr.others()) {
-      ibAdd.addRef(build.buildTrunc(activeBits, op->as<HWValue>()));
+      auto truncd = build.buildTrunc(activeBits, op->as<HWValue>());
+      ibAdd.addRef(truncd);
     }
     build.setInsertPoint(instr);
 
@@ -463,12 +534,8 @@ private:
       dyno_unreachable("no 1-ary output value");
     }
 
-    auto operandSorting = [](WireRef lhs, WireRef rhs) {
-      return lhs.getSingleDef()->instr().getObjID() <
-             rhs.getSingleDef()->instr().getObjID();
-    };
-
-    if (!std::is_sorted(operands.begin(), operands.end(), operandSorting))
+    if (!std::is_sorted(operands.begin(), operands.end(),
+                        HWInstrBuilder::commutativeOpWireOrder))
       change = true;
 
     if (!change) {
@@ -478,7 +545,8 @@ private:
     HWInstrBuilder build{ctx};
     build.setInsertPoint(ctx.getCFG()[root]);
 
-    std::stable_sort(operands.begin(), operands.end(), operandSorting);
+    std::sort(operands.begin(), operands.end(),
+              HWInstrBuilder::commutativeOpWireOrder);
 
     ++build.insert;
     auto ibuild = build.buildInstrRaw(opc, 1 + operands.size() +
@@ -508,9 +576,15 @@ private:
     if (store.parentProc(ctx) != proc)
       return false;
     HWInstrBuilder build{ctx, load};
-    replaceUses(load.value(), build.buildSplice(store.value(), load.getLen(),
-                                                load.getBase(), load.terms()));
-    deleteMatchedInstr(load);
+
+    auto val = build.buildSplice(store.value(), load.getLen(), load.getBase(),
+                                 load.terms());
+    if (load.value() != val) {
+      replaceUses(load.value(), val);
+      deleteMatchedInstr(load);
+    } else {
+      deleteMatchedInstr(store);
+    }
 
     return true;
   }
@@ -545,20 +619,6 @@ private:
     }
 
     RegisterRef reg = instr.reg();
-    // If the reg we're storing to is a port of some kind try replacing the
-    // other way around.
-    if (!reg.iref().isOpc(HW_REGISTER_DEF)) {
-      if (!ref.is<RegisterRef>())
-        return false;
-      if (!ref.as<RegisterRef>().iref().isOpc(HW_REGISTER_DEF))
-        return false; // nothing to be done if both are ports.
-      if (inverse)
-        return false;
-      ref.as<RegisterRef>().replaceAllUsesWith(reg);
-      deleteMatchedInstr(instr);
-      return true;
-    }
-
     SmallVec<OperandRef, 4> uses;
     for (auto use : reg.uses()) {
       if (use.instr().isOpc(HW_STORE, HW_STORE_DEFER)) {
@@ -579,6 +639,20 @@ private:
       uses.emplace_back(use);
     }
 
+    // If the reg we're storing to is a port of some kind try replacing the
+    // other way around.
+    if (!reg.iref().isOpc(HW_REGISTER_DEF)) {
+      if (!ref.is<RegisterRef>())
+        return false;
+      if (!ref.as<RegisterRef>().iref().isOpc(HW_REGISTER_DEF))
+        return false; // nothing to be done if both are ports.
+      if (inverse)
+        return false;
+      ref.as<RegisterRef>().replaceAllUsesWith(reg);
+      deleteMatchedInstr(instr);
+      return true;
+    }
+
     auto inverseUse = [&](OperandRef use) {
       auto instr = use.instr();
       HWInstrBuilder build{ctx, instr};
@@ -594,7 +668,7 @@ private:
 
       case *HW_TRIGGER_DEF: {
         auto asTrigger = instr.as<TriggerIRef>();
-        uint idx = use - instr.other_begin();
+        uint idx = use - *instr.other_begin();
         asTrigger.oref()->inverseMode(idx);
         break;
       }
@@ -632,6 +706,83 @@ private:
         deleteMatchedInstr(use.instr());
       }
     }
+
+    deleteMatchedInstr(instr);
+    return true;
+  }
+
+  template <typename Ref> bool simplifyYieldValues(Ref instr) {
+    SmallVec<HWValue, 32> yieldValues;
+    if (instr.getNumYieldValues() == 0)
+      return false;
+    yieldValues.reserve(instr.getNumYieldValues() * instr.getNumCases());
+
+    DynSymbSet<SmallVec<uint64_t, 1>, 1, ~0UL> equal(instr.getNumYieldValues());
+    for (auto [front, yield] : instr.caseYields().mark_front()) {
+      assert(yield);
+      for (auto op : yield)
+        yieldValues.emplace_back(op->template as<HWValue>());
+      if (front)
+        continue;
+      for (auto [i, op] : Range{yield}.enumerate()) {
+        if (op->template as<HWValue>() != yieldValues[i])
+          equal[i] = 0;
+      }
+    }
+
+    auto unused = [&](uint i) {
+      assert(i < instr.getNumYieldValues());
+      return instr.yieldValues()
+                 .begin()[i]
+                 ->template as<WireRef>()
+                 .getNumUses() == 0;
+    };
+
+    auto cnt = Range{equal}.enumerate().count_if(
+        [&](auto pair) { return pair.second || unused(pair.first); });
+
+    // return if nothing changed
+    if (cnt == 0)
+      return false;
+
+    auto rem = instr.getNumYieldValues() - cnt;
+
+    HWInstrBuilder build{ctx};
+
+    // re-build yield instrs
+    for (auto yield : instr.caseYields()) {
+      if (rem != 0) {
+        build.setInsertPoint(HWInstrRef{yield}.parentBlock(ctx).end());
+        auto ib = build.buildInstrRaw(yield.getDialectOpcode(), rem);
+        ib.other();
+        for (auto [i, op] : Range{yield}.enumerate()) {
+          if (equal[i] || unused(i))
+            continue;
+          ib.addRef(op->template as<HWValue>());
+        }
+      }
+      deleteMatchedInstr(yield);
+    }
+
+    // re-build parent instr
+    build.setInsertPoint(instr);
+    auto ib = build.buildInstrRaw(instr.getDialectOpcode(),
+                                  instr.getNumOperands() - cnt);
+    for (auto def : instr.defs()) {
+      int idx = def - instr.getYieldValue(0);
+      if (idx >= 0 && (uint)idx < instr.getNumYieldValues()) {
+        if (unused(idx))
+          continue;
+        if (equal[idx]) {
+          replaceUses(def->template as<WireRef>(), yieldValues[idx]);
+          continue;
+        }
+      }
+      ib.addRef(def->fat());
+    }
+    ib.other();
+    ib.addRefs(instr.others().transform(
+        [](size_t, OperandRef ref) { return ref->fat(); }));
 
     deleteMatchedInstr(instr);
     return true;
@@ -752,6 +903,39 @@ private:
       break;
     }
 
+    case *OP_YIELD: {
+      auto parent = HWInstrRef{instr}.parentBlock(ctx).defI();
+      if (parent.isOpc(OP_IF)) {
+        if (simplifyYieldValues(instr.as<IfInstrRef>()))
+          return true;
+      } else if (parent.isOpc(OP_CASE, OP_CASE_DEFAULT, HW_CASE_Z, HW_CASE_X)) {
+        auto swInstr =
+            HWInstrRef{parent}.parentBlock(ctx).defI().as<SwitchInstrRef>();
+        assert(swInstr.isOpc(OP_SWITCH));
+        if (simplifyYieldValues(swInstr))
+          return true;
+      }
+      break;
+    }
+
+    case *OP_IF: {
+      if (simplifyYieldValues(instr.as<IfInstrRef>()))
+        return true;
+      break;
+    }
+
+    case *OP_SWITCH: {
+      if (simplifyYieldValues(instr.as<SwitchInstrRef>()))
+        return true;
+      break;
+    }
+
+    case *HW_MUX: {
+      if (liftMUX(instr))
+        return true;
+      break;
+    }
+
     default:
       break;
     }
@@ -773,9 +957,7 @@ private:
     return false;
   }
 
-  bool runOnInstr(InstrRef instr) {
-    if (instr.getNumDefs() > 1)
-      return false;
+  bool matchPatternsOnInstr(InstrRef instr) {
     if (instr.getNumDefs() == 1) {
       if (!instr.def(0)->is<WireRef>())
         return false;
@@ -795,11 +977,12 @@ private:
     currentMatched.clear();
     currentReplaced.clear();
 
+    if (instr.getNumDefs() > 1)
+      return false;
     return generated(ctx, currentMatched, currentReplaced, instr);
   }
 
   void newInstrHook(InstrRef ref) {
-    TaggedIRef{ref}.get() = 0;
     for (auto def : ref.defs()) {
       switch (*def->fat().getType()) {
       case *HW_WIRE: {
@@ -829,7 +1012,7 @@ private:
           if (auto asWire = op->dyn_as<WireRef>();
               asWire && asWire.hasSingleUse() && asWire.hasSingleDef()) {
             auto defI = asWire.getDefI();
-            if (!TaggedIRef{defI}.get())
+            if (!TaggedIRef{defI}.get() && defI.getNumDefs() == 1)
               deleteMatchedInstr(defI);
           }
         }
@@ -851,6 +1034,48 @@ private:
     knownBits.clearCache();
   }
 
+  void runOnInstr(InstrRef instr) {
+    if (TaggedIRef{instr}.get())
+      return;
+    auto lastWorklistSize = worklist.size();
+
+    if (!matchPatternsOnInstr(instr))
+      return;
+
+    anyMatchHook();
+
+    DEBUG("instcombine", {
+      HWPrinter print{dbgs()};
+      dbgs() << "initial instructions:\n";
+
+      for (auto instr : currentMatched)
+        print.printInstr(instr, ctx);
+
+      dbgs() << "replaced with:\n";
+
+      for (size_t i = lastWorklistSize, sz = worklist.size(); i < sz; i++)
+        print.printInstr(worklist[i], ctx);
+      if (lastWorklistSize == worklist.size()) {
+        if (!currentReplaced.empty()) {
+          dumpObj(currentReplaced[0]->fat());
+          dbgs() << "\n";
+        } else
+          dbgs() << "<none>\n";
+      }
+    })
+
+    auto newInstrs =
+        ArrayRef<InstrRef>{worklist.begin() + lastWorklistSize, worklist.end()};
+    for (size_t i = 0; i < currentMatched.size(); i++) {
+      oldInstrHook(currentMatched[i], newInstrs);
+    }
+    for (auto operand : currentReplaced) {
+      replacedUseHook(operand);
+    }
+    for (size_t i = lastWorklistSize, sz = worklist.size(); i < sz; i++)
+      newInstrHook(worklist[i]);
+  }
+
   void runOnProcess(ProcessIRef proc) {
     worklist.clear();
     bitAlias.clearCache();
@@ -860,45 +1085,20 @@ private:
       worklist.emplace_back(instr);
     while (!worklist.empty()) {
       auto instr = worklist.pop_back_val();
-      if (TaggedIRef{instr}.get())
-        continue;
-      auto lastWorklistSize = worklist.size();
+      runOnInstr(instr);
+    }
+  }
 
-      if (!runOnInstr(instr))
-        continue;
+  void runOnBlock(BlockRef block) {
+    worklist.clear();
+    bitAlias.clearCache();
+    knownBits.clearCache();
 
-      anyMatchHook();
-
-      DEBUG("instcombine", {
-        HWPrinter print{dbgs()};
-        dbgs() << "initial instructions:\n";
-
-        for (auto instr : currentMatched)
-          print.printInstr(instr, ctx);
-
-        dbgs() << "replaced with:\n";
-
-        for (size_t i = lastWorklistSize, sz = worklist.size(); i < sz; i++)
-          print.printInstr(worklist[i], ctx);
-        if (lastWorklistSize == worklist.size()) {
-          if (!currentReplaced.empty()) {
-            dumpObj(currentReplaced[0]->fat());
-            dbgs() << "\n";
-          } else
-            dbgs() << "<none>\n";
-        }
-      })
-
-      auto newInstrs = ArrayRef<InstrRef>{worklist.begin() + lastWorklistSize,
-                                          worklist.end()};
-      for (size_t i = 0; i < currentMatched.size(); i++) {
-        oldInstrHook(currentMatched[i], newInstrs);
-      }
-      for (auto operand : currentReplaced) {
-        replacedUseHook(operand);
-      }
-      for (size_t i = lastWorklistSize, sz = worklist.size(); i < sz; i++)
-        newInstrHook(worklist[i]);
+    for (auto instr : block)
+      worklist.emplace_back(instr);
+    while (!worklist.empty()) {
+      auto instr = worklist.pop_back_val();
+      runOnInstr(instr);
     }
   }
 
@@ -920,8 +1120,10 @@ public:
     for (auto instr : ctx.getInstrs())
       TaggedIRef{instr}.get() = 0;
 
-    ctx.getInstrs().createHooks.emplace_back(
-        [&](InstrRef ref) { worklist.emplace_back(ref); });
+    ctx.getInstrs().createHooks.emplace_back([&](InstrRef ref) {
+      TaggedIRef{ref}.get() = 0;
+      worklist.emplace_back(ref);
+    });
 
     for (auto mod : ctx.activeModules()) {
       runOnModule(mod.iref());
@@ -929,6 +1131,18 @@ public:
 
     ctx.getInstrs().createHooks.pop_back();
 
+    destroyMarkedInstrs();
+  }
+
+  void run(BlockRef block) {
+    for (auto instr : ctx.getInstrs())
+      TaggedIRef{instr}.get() = 0;
+    ctx.getInstrs().createHooks.emplace_back([&](InstrRef ref) {
+      TaggedIRef{ref}.get() = 0;
+      worklist.emplace_back(ref);
+    });
+    runOnBlock(block);
+    ctx.getInstrs().createHooks.pop_back();
     destroyMarkedInstrs();
   }
 

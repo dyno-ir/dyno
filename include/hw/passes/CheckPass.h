@@ -5,6 +5,8 @@
 #include "hw/HWInstr.h"
 #include "hw/HWPrinter.h"
 #include "hw/IDs.h"
+#include "op/IDs.h"
+#include "slang/ast/SemanticFacts.h"
 #include "support/Debug.h"
 namespace dyno {
 
@@ -16,6 +18,8 @@ public:
   struct Config {
     bool dominance = true;
     bool operandsDefined = true;
+    bool danglingBlocks = true;
+    bool noLoops = false;
   };
 
   Config config;
@@ -29,14 +33,51 @@ public:
     hasError = true;
   }
 
+  template <typename... Ts> void error(BlockRef block, Ts... ts) {
+    dumpObj(block);
+    dbgs() << ": {\n";
+    for (auto instr : block)
+      dumpInstr(instr, ctx);
+    dbgs() << "}\n";
+    dbgs() << "error: ";
+    ((dbgs() << ts), ...);
+    dbgs() << "\n";
+    hasError = true;
+  }
+
   void checkOperands(ModuleIRef mod) {
     Range range{HierBlockRangeIter{mod.block().begin()},
                 HierBlockRangeIter{mod.block().end()}};
     for (auto instr : range) {
-      for (auto op : instr)
+      for (auto op : instr) {
         if (!op->fat()) {
           error(instr, "undefined operand");
         }
+
+        switch (*instr.getDialectOpcode()) {
+#define LAMBDA(opc, ib, cb, bi) case *opc:
+          FOR_HW_SIMPLE_OPS(LAMBDA)
+#undef LAMBDA
+          {
+            if (op.isDef())
+              continue;
+            auto bits = instr.def(0)->as<WireRef>().getNumBits();
+            if (op->as<HWValue>().getNumBits() != bits)
+              error(instr, "operand width mismatch");
+          }
+
+#define LAMBDA(opc, bi) case *opc:
+          FOR_OP_ALL_COMPARE_OPS(LAMBDA)
+#undef LAMBDA
+          {
+            if (op.isDef())
+              continue;
+            auto bits = instr.other(0)->as<HWValue>().getNumBits();
+            if (op->as<HWValue>().getNumBits() != bits)
+              error(instr, "operand width mismatch");
+          }
+        }
+      }
     }
   }
 
@@ -64,6 +105,19 @@ public:
     }
   }
 
+  void checkNoDanglingBlocks() {
+    for (auto block : ctx.getCFG().blocks)
+      if (block->defUse.getNumDefs() == 0)
+        error(block, "dangling block");
+  }
+
+  void checkNoLoops() {
+    for (auto instr : ctx.getInstrs())
+      if (instr.isOpc(OP_FOR, OP_WHILE, OP_DO_WHILE)) {
+        error(instr, "illegal loop");
+      }
+  }
+
   void runOnModule(ModuleIRef mod) {
     if (config.operandsDefined)
       checkOperands(mod);
@@ -78,8 +132,18 @@ public:
     for (auto mod : ctx.activeModules()) {
       runOnModule(mod.iref());
     }
-    if (hasError)
+    if (config.danglingBlocks)
+      checkNoDanglingBlocks();
+    if (config.noLoops)
+      checkNoLoops();
+    if (hasError) {
+      {
+        std::ofstream str{"dump_error.dyno"};
+        HWPrinter print{str};
+        print.printCtx(ctx);
+      }
       exit(-1);
+    }
   }
 };
 }; // namespace dyno

@@ -217,6 +217,9 @@ public:
 
   constexpr DynBitField &operator+=(num_t v) { return (*this) = (*this) + v; }
   constexpr DynBitField &operator-=(num_t v) { return (*this) = (*this) - v; }
+  constexpr DynBitField &operator|=(num_t v) { return (*this) = (*this) | v; }
+  constexpr DynBitField &operator&=(num_t v) { return (*this) = (*this) & v; }
+  constexpr DynBitField &operator^=(num_t v) { return (*this) = (*this) ^ v; }
   constexpr operator num_t() const { return get(); }
 
   constexpr num_t get() const { return (num & mask_ones()) >> pos; }

@@ -107,6 +107,8 @@ public:
     case *OP_SLL:
     case *OP_SRL:
     case *OP_SRA: {
+      if (instr.other(1)->is<ConstantRef>())
+        return 0;
       auto bits = *instr.operand(1)->as<HWValue>().getNumBits();
       return getFanoutDelay(bits) + getDecoderDelay(bits) + *delay[HW_MUX];
     }
@@ -160,7 +162,11 @@ public:
       auto maxVal =
           retVal ? std::max(*retVal, frame.acc) : Optional<uint32_t>{nullopt};
 
-      if (maxVal && frame.idx != instr.getNumOthers()) {
+      if (frame.idx == 0)
+        maxVal = 0;
+
+      if (maxVal && frame.idx != instr.getNumOthers() &&
+          instr.other(frame.idx)->is<HWValue>()) {
         frame.acc = *maxVal;
         stack.emplace_back(instr.other(frame.idx++)->as<HWValue>(), 0, 0);
       } else {

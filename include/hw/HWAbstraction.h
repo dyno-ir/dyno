@@ -165,6 +165,54 @@ public:
     auto rv = buildInstr(opcode, true, first, rest...).defW();                 \
     rv->numBits = first.getNumBits();                                          \
     return rv;                                                                 \
+  }                                                                            \
+  /*note: Destroys the operands array!*/                                       \
+  HWValue ident(MutArrayRef<HWValue> operands) {                               \
+    Range{operands}.sort(commutativeOpOperandOrder);                           \
+    bool multipleConstants = operands.size() >= 2 &&                           \
+                             operands.end()[-1].is<ConstantRef>() &&           \
+                             operands.end()[-2].is<ConstantRef>();             \
+                                                                               \
+    auto bits = *operands[0].getNumBits();                                     \
+    assert(operands.drop_front().all(                                          \
+        [&](HWValue val) { return val.getNumBits() == bits; }));               \
+                                                                               \
+    if (multipleConstants) {                                                   \
+      auto cbuild = ctx.constBuild();                                          \
+      cbuild.val(bits, 0);                                                     \
+                                                                               \
+      size_t index = operands.size() - 1;                                      \
+      while (operands.size() != 0) {                                           \
+        auto last = operands[index].dyn_as<ConstantRef>();                     \
+        cbuild.constFunc(last);                                                \
+        if (!last)                                                             \
+          break;                                                               \
+        index--;                                                               \
+      }                                                                        \
+      index++;                                                                 \
+      operands = MutArrayRef{operands.data(), index};                          \
+      operands.back() = cbuild.get();                                          \
+    }                                                                          \
+                                                                               \
+    if (operands.size() == 1)                                                  \
+      return operands[0];                                                      \
+                                                                               \
+    auto defW = ctx.getWires().create(bits);                                   \
+    auto ib = buildInstrRaw(opcode, 1 + operands.size());                      \
+    ib.addRef(defW).other();                                                   \
+    ib.addRefs(operands);                                                      \
+                                                                               \
+    return defW;                                                               \
+  }
+
+  static bool commutativeOpWireOrder(WireRef lhs, WireRef rhs) {
+    return lhs.getSingleDef()->instr().getObjID() <
+           rhs.getSingleDef()->instr().getObjID();
+  }
+  static bool commutativeOpOperandOrder(HWValue lhs, HWValue rhs) {
+    if (lhs.is<WireRef>() && rhs.is<WireRef>())
+      return commutativeOpWireOrder(lhs.as<WireRef>(), rhs.as<WireRef>());
+    return lhs.is<WireRef>();
   }
 
   FOR_HW_COMM_OPS(COMM_OP)
@@ -425,8 +473,12 @@ private:
 
     auto upper = it;
 
-    if (lower == upper)
-      return buildSplice(lower->as<HWValue>(), numBits, baseAddr - lowerOffs);
+    if (lower == upper) {
+      HWInstrRef instr = buildInstr(HW_SPLICE, true, lower->as<HWValue>(),
+                                    ConstantRef::fromU32(baseAddr - lowerOffs));
+      instr.defW()->numBits = numBits;
+      return instr.defW();
+    }
 
     if (lowerOffs - baseAddr == 0 && upperOffs - baseAddr - numBits == 0) {
       auto concat =
@@ -559,12 +611,12 @@ public:
     if (values.size() == 1) {
       auto val = values.front().first;
       auto range = values.front().second;
-      if (range.isConstant() &&
-          range.getAddr().as<ConstantRef>().valueEquals(0) &&
-          (!range.getLen() ||
-           range.getExactConstantLen() == *val.getNumBits())) {
-        return val;
+      if (range.isConstant()) {
+        return buildSplice(val, range.len.as<ConstantRef>().getExactVal(),
+                           range.addr.as<ConstantRef>().getExactVal());
       }
+      return buildSplice(val, range.len.as<ConstantRef>().getExactVal(), 0,
+                         AddressGenTerm{range.addr, 1});
     }
 
     uint numOperands = 0;
@@ -594,9 +646,15 @@ public:
         continue;
 
       auto val = value;
-      if (!range.isFull())
-        val = buildSplice(val, range.len.as<ConstantRef>().getExactVal(), 0,
-                          AddressGenTerm{range.addr, 1});
+      if (!range.isFull()) {
+        if (range.isConstant()) {
+          val = buildSplice(val, range.len.as<ConstantRef>().getExactVal(),
+                            range.addr.as<ConstantRef>().getExactVal());
+        } else {
+          val = buildSplice(val, range.len.as<ConstantRef>().getExactVal(), 0,
+                            AddressGenTerm{range.addr, 1});
+        }
+      }
       build.addRef(val);
 
       if (numBits) {

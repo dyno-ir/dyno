@@ -974,27 +974,37 @@ public:
       return;
     }
 
-    uint32_t outWords = round_up_div(bitLen, WordBits);
-    do {
-      if constexpr (std::is_same_v<T, BigIntBase>) {
-        if (&out == &src)
-          break;
-      }
+    uint32_t inWords = src.getNumWords();
+    uint32_t outWords = std::min(inWords, round_up_div(bitLen, WordBits));
+
+    if (out.words.size() < outWords)
       out.words.resize(outWords);
-    } while (false);
 
     uint32_t offs = bitOffs / WordBits;
     uint32_t shamt = bitOffs % WordBits;
 
-    for (uint32_t i = 0; i < std::min(outWords, out.words.size()); i++) {
+    auto getWord = [&](size_t i) {
+      if (i >= inWords)
+        return repeatExtend(src.getExtend());
+      return src.getWords()[i];
+    };
+
+    for (uint32_t i = 0; i < outWords; i++) {
       size_t lowI = i + offs;
       size_t highI = i + offs + 1;
 
-      out.words[i] = (src.getWord(lowI) >> shamt) |
+      out.words[i] = (getWord(lowI) >> shamt) |
                      ((highI >= src.getExtNumWords() || shamt == 0)
                           ? 0
-                          : (src.getWord(highI) << (32 - shamt)));
+                          : (getWord(highI) << (32 - shamt)));
     }
+
+    if ((bitOffs & 1) && src.getExtend() == 0b01)
+      out.setExtend(0b10);
+    else if ((bitOffs & 1) && src.getExtend() == 0b10)
+      out.setExtend(0b01);
+    else
+      out.setExtend(src.getExtend());
 
     out.words.resize(outWords);
     out.numBits = bitLen;
@@ -2401,11 +2411,11 @@ inline BigInt operator*(const T0 &lhs, const T1 &rhs) {
 }
 template <BigIntAPI T0, BigIntAPI T1>
 inline BigInt operator/(const T0 &lhs, const T1 &rhs) {
-  return BigInt::udivmodOp<0>(lhs, rhs).first;
+  return BigInt::udivmodOp(lhs, rhs).first;
 }
 template <BigIntAPI T0, BigIntAPI T1>
 inline BigInt operator%(const T0 &lhs, const T1 &rhs) {
-  return BigInt::udivmodOp<0>(lhs, rhs).second;
+  return BigInt::udivmodOp(lhs, rhs).second;
 }
 
 #define OP_ASSIGN_TRIVIAL(identAssign, operator)                               \
@@ -2631,7 +2641,18 @@ public:
   }
 
   Constant &operator[](ObjRef<Constant> ref) { return store[ref]; }
-  void destroy(FatObjRef<Constant> ref) { return store.destroy(ref); }
+  void destroy(FatObjRef<Constant> ref) {
+    uint32_t hash = constantHash(ConstantRef{ref});
+    auto it = map.find(hash);
+    for (; it != map.end(); it = map.find_next(it)) {
+      auto ref = store.resolve(it.val());
+      if (ref == ConstantRef{ref}) {
+        it.erase();
+        break;
+      }
+    }
+    return store.destroy(ref);
+  }
   ConstantRef resolve(ObjRef<Constant> ref) { return store.resolve(ref); }
   ConstantRef resolve(DynObjRef ref) {
     if (ref.isCustom())

@@ -213,6 +213,7 @@ void dumpInstr(InstrRef instr);
 void dumpInstr(InstrRef instr, HWContext &ctx);
 void dumpDeps(InstrRef instr);
 void dumpDeps(InstrRef instr, HWContext &ctx);
+void dumpDeps(InstrRef instr, HWContext &ctx, uint depth);
 void dumpObj(FatDynObjRef<> obj);
 
 }; // namespace dyno

@@ -103,7 +103,7 @@ class AggressiveDeadCodeEliminationPass {
       pushInstr(block.defI());
     }
 
-    if (block.defI().isOpc(OP_CASE, OP_CASE_DEFAULT)) {
+    if (block.defI().isOpc(OP_CASE, OP_CASE_DEFAULT, HW_CASE_Z, HW_CASE_X)) {
       auto instr = ctx.getCFG()[block.defI()].blockRef().defI();
       if (!instrMap[instr])
         pushInstr(instr);
