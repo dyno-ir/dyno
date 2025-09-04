@@ -929,7 +929,7 @@ public:
                     out.getWords().begin());
     };
 
-    if (newSize == lhs.getNumBits()) {
+    if (newSize == lhs.getRawNumBits()) {
       if constexpr (std::is_same_v<T, BigIntBase>)
         if (&out == &lhs)
           return;

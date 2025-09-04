@@ -176,8 +176,6 @@ public:
         .lowerExtract = false,
     };
 
-    printAfterAll = true;
-
     runPass(lowerOps);
     runPass(instCombine);
     runPass(cse, true);

@@ -158,7 +158,7 @@ class FlipFlopInferencePass {
         dbgs() << "could not get mux tree, skipping enable inference for: ";
         dumpInstr(reg, ctx);
         dbgs() << "store value:\n";
-        dumpDeps(storeI, ctx);
+        dumpInstr(storeI, ctx);
       })
     }
     auto *muxTreePtr = muxTree ? &*muxTree : nullptr;

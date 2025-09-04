@@ -1,6 +1,8 @@
 #pragma once
 #include "dyno/IDImpl.h"
 #include "support/Bits.h"
+#include "support/DenseMapInfo.h"
+#include <compare>
 
 namespace dyno {
 
