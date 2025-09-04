@@ -89,7 +89,8 @@ class MuxTreeOptimizationPass {
       SmallBoolExprCNF testExpr;
       testExpr.literals.emplace_back(
           BoolExprLiteral{uint16_t(litIdx), 0, true});
-      SmallBoolExprCNF testExprInv = *testExpr.negated(tree->conditions.size());
+      SmallBoolExprCNF testExprInv =
+          *testExpr.negated2(tree->conditions.size());
 
       SmallVec<uint, 8> trueExprs;
       SmallVec<uint, 8> falseExprs;
@@ -236,13 +237,20 @@ private:
       if (auto asConst = falseV.dyn_as<ConstantRef>();
           asConst && asConst.allBitsUndef())
         return trueV;
-      return build.buildMux(getExprVal(build, tree, tree->entries[0].expr),
-                            trueV, falseV);
+
+      if (tree->entries[0].expr.literals.size() <
+          tree->entries[1].expr.literals.size()) {
+        return build.buildMux(getExprVal(build, tree, tree->entries[0].expr),
+                              trueV, falseV);
+      } else {
+        return build.buildMux(getExprVal(build, tree, tree->entries[1].expr),
+                              falseV, trueV);
+      }
     }
 
     auto [selExpr, peelOffIdx] = getBestMUXExpr(tree);
 
-    auto selExprNeg = selExpr.negated(tree->conditions.size());
+    auto selExprNeg = selExpr.negated2(tree->conditions.size());
     DEBUG("MuxTreeOptimization", {
       dbgs() << "splitting tree on: ";
       selExpr.dump();
@@ -340,6 +348,10 @@ private:
         asConst && asConst.allBitsUndef())
       return leftVal;
 
+    //if (selExprNeg && selExprNeg->literals.size() < selExpr.literals.size()) {
+    //  auto sel = getExprVal(build, tree, *selExprNeg);
+    //  return build.buildMux(sel, leftVal, rightVal);
+    //}
     auto sel = getExprVal(build, tree, selExpr);
     return build.buildMux(sel, rightVal, leftVal);
   }
@@ -357,14 +369,21 @@ private:
         visitedMap[instr] = 1;
         auto muxtreeOpt = analysis.analyzeMuxTree(
             instr, [&](InstrRef ref) { visitedMap[ref] = 1; });
-        if (!muxtreeOpt)
+        if (!muxtreeOpt) {
+          DEBUG("MuxTreeOpt", {
+            dbgs() << "failed to simplify MUX tree at: ";
+            dumpInstr(instr, ctx);
+          })
           continue;
+        }
         auto &muxtree = *muxtreeOpt;
 
-        printMuxTree(&muxtree);
+        // printMuxTree(&muxtree);
         analysis.simplifyConditions(&muxtree);
-        printMuxTree(&muxtree);
+        // printMuxTree(&muxtree);
         analysis.dedupeMuxTreeOutputs(&muxtree);
+        printMuxTree(&muxtree);
+        analysis.pruneDontCareOutputs(ctx, &muxtree);
         printMuxTree(&muxtree);
         auto wire = lowerMuxTreeSimple(&muxtree);
         auto oldWire = instr.def(0)->as<WireRef>();

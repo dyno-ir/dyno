@@ -78,6 +78,8 @@ template <> struct DialectTraits<DIALECT_OP> {
 inline constexpr DialectOpcode
 reverseOperandOrderICmpOpcode(DialectOpcode opc) {
   switch (*opc) {
+  case *OP_ICMP_EQ:
+    return OP_ICMP_EQ;
   case *OP_ICMP_NE:
     return OP_ICMP_NE;
   case *OP_ICMP_SLT:

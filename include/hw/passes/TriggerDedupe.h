@@ -25,6 +25,11 @@ class TriggerDedupePass {
   void runOnModule(ModuleIRef mod) {
     SmallVec<TriggerIRef, 128> destroyList;
     for (auto trigger : mod.triggers()) {
+      if (trigger.oref()->defUse.getNumUses() == 0) {
+        destroyList.emplace_back(trigger);
+        continue;
+      }
+
       auto it = std::find_if(
           canonical.begin(), canonical.end(),
           [&](TriggerIRef rhs) { return triggerDeepEqual(trigger, rhs); });

@@ -1,4 +1,5 @@
 #pragma once
+#include "support/ASAN.h"
 #include "support/Bits.h"
 #include "support/DenseMapInfo.h"
 #include "support/InlineStorage.h"
@@ -75,8 +76,8 @@ public:
     }
     assert(sawTombstone && "hash map full?");
     return std::make_pair(false, iterator{&getBuckets()[bucketIndex],
-                                         cap - seenTombstoneBucket,
-                                         seenTombstoneIdx, offset});
+                                          cap - seenTombstoneBucket,
+                                          seenTombstoneIdx, offset});
   }
 
   iterator findEmptyImpl(const K &k, bool assertNotExist = true) const {
@@ -241,15 +242,15 @@ public:
   using Base::idx;
   using Base::rem;
 
-  DenseMapIterator erase() {
-    bucket->values[idx].~V();
-    bucket->keys[idx].~K();
-    bucket->keys[idx] = DenseMapInfo<K>::getTombstoneKey();
+  // DenseMapIterator erase() {
+  //   bucket->values[idx].~V();
+  //   bucket->keys[idx].~K();
+  //   bucket->keys[idx] = DenseMapInfo<K>::getTombstoneKey();
 
-    DenseMapIterator rv{*this};
-    rv.next();
-    return rv;
-  }
+  //   DenseMapIterator rv{*this};
+  //   rv.next();
+  //   return rv;
+  // }
 
   value_type operator*() {
     return std::pair<const K &, V &>(bucket->keys[idx], bucket->values[idx]);
@@ -275,15 +276,15 @@ public:
   using Base::idx;
   using Base::rem;
 
-  DenseSetIterator erase() {
-    bucket->values[idx].~V();
-    bucket->keys[idx].~K();
-    bucket->keys[idx] = DenseMapInfo<K>::getTombstoneKey();
+  // private:
+  //   DenseSetIterator erase() {
+  //     bucket->keys[idx].~K();
+  //     bucket->keys[idx] = DenseMapInfo<K>::getTombstoneKey();
 
-    DenseSetIterator rv{*this};
-    rv.next();
-    return rv;
-  }
+  //     DenseSetIterator rv{*this};
+  //     rv.next();
+  //     return rv;
+  //   }
 
   value_type operator*() { return bucket->keys[idx]; }
   pointer operator->() { return &bucket->keys[idx]; };
@@ -390,9 +391,18 @@ public:
 
     auto it = begin();
     while (it != end()) {
-      it = it.erase();
+      it = erase(it);
     }
     sz = 0;
+  }
+
+  iterator erase(iterator it) {
+    assert(it != end());
+    auto rv = std::next(it);
+    it.keyMut() = DenseMapInfo<K>::getTombstoneKey();
+    std::destroy_at(&it.val());
+    --sz;
+    return rv;
   }
 
 protected:
@@ -402,7 +412,7 @@ protected:
 
     auto it = begin();
     while (it != end()) {
-      it = it.erase();
+      it = erase(it);
     }
   }
 
@@ -472,6 +482,14 @@ public:
     for (size_t i = 0; i < cap; i++)
       getBuckets()[i].setKeysEmpty();
   }
+  iterator erase(iterator it) {
+    assert(it != end());
+    auto rv = std::next(it);
+    it.keyMut() = DenseMapInfo<K>::getTombstoneKey();
+    --sz;
+    return rv;
+  }
+
   DenseSetBase(size_type cap, size_type sz) : Base(cap, sz) {}
 };
 
@@ -649,8 +667,10 @@ template <typename Base, size_t InlineBuckets> class SmallSetMap : public Base {
 public:
   Bucket *&getBuckets() const { return const_cast<Bucket *&>(buckets); }
   void deleteArr(Bucket *buckets) {
-    if (buckets == *arr)
+    if (buckets == *arr) {
+      ASAN_POISON_MEMORY_REGION(*arr, sizeof(arr));
       return;
+    }
     ::operator delete[](buckets, std::align_val_t(alignof(Bucket)));
   }
 
@@ -717,6 +737,7 @@ public:
   ~SmallSetMap() {
     if (isSmall())
       return;
+    ASAN_UNPOISON_MEMORY_REGION(*arr, sizeof(arr));
     ::operator delete[](buckets, std::align_val_t(alignof(Bucket)));
   }
 };

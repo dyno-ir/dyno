@@ -4,10 +4,11 @@
 #include "hw/HWAbstraction.h"
 #include "hw/HWContext.h"
 #include "hw/HWInstr.h"
-#include "hw/HWPrinter.h"
+#include "hw/HWValue.h"
+#include "hw/LoadStore.h"
 #include "op/IDs.h"
 #include "op/StructuredControlFlow.h"
-#include "support/Debug.h"
+#include "support/Utility.h"
 namespace dyno {
 
 class EarlySharePass {
@@ -39,10 +40,18 @@ private:
   bool isCandidate(InstrRef instr) {
     if (!instr.isOpc(config.opToShare))
       return false;
+    if (config.opToShare == HW_SPLICE) {
+      if (instr.as<SpliceIRef>().isConstantOffs())
+        return false;
+    }
+    if (config.opToShare == HW_INSERT) {
+      if (instr.as<InsertIRef>().isConstantOffs())
+        return false;
+    }
     return true;
   }
 
-  bool tryMerge(ArrayRef<InstrRef> instrs) {
+  bool tryMergeCommOps(ArrayRef<InstrRef> instrs) {
     auto maxOps = instrs[0].getNumOthers();
     auto maxBits = *instrs[0].def(0)->as<WireRef>().getNumBits();
     for (auto instr : Range{instrs}.drop_front()) {
@@ -97,6 +106,87 @@ private:
     return true;
   }
 
+  bool tryMergeSplices(ArrayRef<InstrRef> instrs) {
+    auto base = instrs.front().as<SpliceIRef>();
+    // todo: relax comparison. addressing does not have to be exactly equal,
+    // shared implentation just has to be beneficial.
+    for (auto instr : instrs.drop_front()) {
+      auto splice = instr.as<SpliceIRef>();
+      if (splice.in()->as<HWValue>() != base.in()->as<HWValue>())
+        return false;
+      if (splice.getNumTerms() != base.getNumTerms())
+        return false;
+      if (splice.getBase() != base.getBase())
+        return false;
+      if (splice.getLen() != base.getLen())
+        return false;
+
+      for (auto [a, b] : base.terms().zip(splice.terms())) {
+        if (a.getFact() != b.getFact())
+          return false;
+        if (a.getMax() != b.getMax())
+          return false;
+      }
+    }
+
+    auto numTerms = base.getNumTerms();
+    auto resultBits = base.getLen();
+
+    auto mod = HWInstrRef{instrs[0]}.parentMod(ctx);
+
+    HWInstrBuilder build{ctx};
+    HWInstrBuilder regBuild{ctx};
+    regBuild.setInsertPoint(mod.regs_end());
+
+    SmallVec<RegisterRef, 4> regs;
+    build.setInsertPoint(HWInstrRef{instrs[0]}.parentProc(ctx).block().begin());
+    regs.reserve(numTerms);
+    for (uint i = 0; i < numTerms; i++) {
+      auto reg = regs.emplace_back(regBuild.buildRegister(32));
+      build.buildStore(reg, ctx.constBuild().undef(32).get());
+    }
+    RegisterRef inputReg = regBuild.buildRegister(base.getMemoryLen());
+    build.buildStore(inputReg,
+                     ctx.constBuild().undef(base.getMemoryLen()).get());
+
+    RegisterRef resultReg = regBuild.buildRegister(resultBits);
+
+    for (auto instr : instrs) {
+      auto splice = instr.as<SpliceIRef>();
+      build.setInsertPoint(instr);
+      build.buildStore(inputReg, splice.in()->as<HWValue>());
+      for (auto [i, term] : Range{splice.terms()}.enumerate()) {
+        build.buildStore(regs[i], term.getIdx());
+      }
+      instr.def(0)->as<WireRef>().replaceAllUsesWith(
+          build.buildLoad(resultReg));
+    }
+
+    build.setInsertPoint(mod.regs_end());
+    auto proc = build.buildProcess();
+    build.setInsertPoint(proc.block().end());
+    auto terms =
+        base.terms().transform([&](size_t i, AddressGenTermOperand ref) {
+          build.setInsertPoint(proc.block().begin());
+          return AddressGenTerm{build.buildLoad(regs[i]), ref.getFact(),
+                                ref.getMax()};
+        });
+
+    auto val = build.buildSplice(build.buildLoad(inputReg), base.getLen(),
+                                 base.getBase(), terms);
+    build.setInsertPoint(proc.block().end());
+    build.buildStore(resultReg, val);
+    return true;
+  }
+
+  bool tryMerge(ArrayRef<InstrRef> instrs) {
+    if (config.opToShare.is(OP_ADD, OP_MUL))
+      return tryMergeCommOps(instrs);
+    if (config.opToShare.is(HW_SPLICE))
+      return tryMergeSplices(instrs);
+    dyno_unreachable("merging unimplemented");
+  }
+
   void findMergeCandidates(SmallVecImpl<BlockResult> &results) {
     // iterate, incrementing smallest one every iter.
     // if tryMerge succeeds, replace all with nullref and increment all.
@@ -110,7 +200,7 @@ private:
       return idxs[i] < results[i].candidates.size();
     };
 
-    // To avoid factorial runtime we sort instrs by number of operands
+    // To avoid quadratic runtime we sort instrs by number of operands
     // and bit size first and then only consider merging adjacent instrs.
     while (true) {
       size_t smallestIdx;
@@ -209,7 +299,7 @@ private:
 
   void runOnProcess(ProcessIRef proc) { runOnBlock(proc.block()); }
 
-  void runOnModue(ModuleIRef mod) {
+  void runOnModule(ModuleIRef mod) {
     for (auto proc : mod.procs())
       runOnProcess(proc);
   }
@@ -218,7 +308,7 @@ public:
   explicit EarlySharePass(HWContext &ctx) : ctx(ctx) {}
   void run() {
     for (auto mod : ctx.activeModules()) {
-      runOnModue(mod.iref());
+      runOnModule(mod.iref());
     }
   }
 };

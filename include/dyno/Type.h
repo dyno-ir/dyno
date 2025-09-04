@@ -1,6 +1,7 @@
 #pragma once
 #include "dyno/IDImpl.h"
 #include "support/Bits.h"
+#include "support/DenseMapInfo.h"
 #include <compare>
 
 namespace dyno {
@@ -62,6 +63,10 @@ public:
   template <IsDialectType... Ts> bool is(Ts... ts) {
     return ((ts == *this) || ...);
   }
+
+  constexpr static DialectType invalid() {
+    return DialectType{DialectID::invalid(), TyID::invalid()};
+  }
 };
 
 template <DialectID D> class SpecificDialectType : public DialectType {
@@ -77,3 +82,21 @@ public:
 };
 
 }; // namespace dyno
+
+template <> struct DenseMapInfo<dyno::DialectType> {
+  static constexpr dyno::DialectType getEmptyKey() {
+    return dyno::DialectType{dyno::DialectID::invalid(), dyno::TyID::invalid()};
+  }
+  static constexpr dyno::DialectType getTombstoneKey() {
+    return dyno::DialectType{dyno::DialectID::invalid(),
+                             dyno::TyID::invalid() - 1};
+  }
+  static unsigned getHashValue(const dyno::DialectType &k) {
+    // todo
+    return hash_u32(std::bit_cast<uint16_t>(k));
+  }
+  static bool isEqual(const dyno::DialectType &lhs,
+                      const dyno::DialectType &rhs) {
+    return lhs == rhs;
+  }
+};

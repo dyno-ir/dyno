@@ -126,6 +126,15 @@ public:
         .as<TriggerIRef>();
   }
 
+  ProcessIRef getSingleProcess() {
+    auto it = block().end();
+    assert(it != block().begin());
+    auto proc = std::prev(it);
+    assert(proc->is<ProcessIRef>());
+    assert(proc == block().begin() || !std::prev(proc)->is<ProcessIRef>());
+    return proc->as<ProcessIRef>();
+  }
+
   static bool is_impl(FatObjRef<Instr> ref) {
     return InstrRef{ref}.isOpc(HW_MODULE_DEF, HW_STDCELL_DEF);
   }

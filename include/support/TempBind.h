@@ -45,6 +45,9 @@ public:
   void unbind() { std::destroy_at(&val); }
   T *operator->() { return &val; }
   T &operator*() { return val; }
+  const T *operator->() const { return &val; }
+  const T &operator*() const { return val; }
 
   TempBindVal() {};
+  ~TempBindVal() {};
 };

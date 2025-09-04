@@ -1,8 +1,12 @@
 #pragma once
 #include "dyno/Obj.h"
+#include "hw/Concat.h"
+#include "hw/HWContext.h"
 #include "hw/HWPrinter.h"
 #include "hw/HWValue.h"
+#include "hw/IDs.h"
 #include "hw/Wire.h"
+#include "hw/analysis/BitAliasAnalysis.h"
 #include "op/IDs.h"
 #include "support/Debug.h"
 #include "support/DenseMapInfo.h"
@@ -212,7 +216,7 @@ struct SmallBoolExprCNF {
     // this->dump();
 
     // find superset clauses
-    SmallVec<SmallVec<uint32_t, 8>, 8> uses;
+    SmallVec<SmallDenseMap<uint32_t, uint32_t, 2>, 8> uses;
     uses.resize(numLiterals * 2);
     for (auto [clauseIdx, clause] : clauses().enumerate()) {
       if (clause.size() < 2 || !keepClause.getDyn(clauseIdx))
@@ -220,51 +224,51 @@ struct SmallBoolExprCNF {
       for (auto lit : clause) {
         if (lit.isMarked())
           continue;
-        uses[lit.id << 1 | lit.inverse].emplace_back(clause.idx);
+        uses[lit.id << 1 | lit.inverse].insert(clause.idx, clauseIdx);
       }
     }
+
     for (auto [clauseIdx, clause] : clauses().enumerate()) {
       if (clause.size() < 2 || !keepClause.getDyn(clauseIdx))
         continue;
-      SmallVec<uint32_t, 8> intersect;
+      SmallVec<std::pair<uint32_t, uint32_t>, 8> intersect;
       bool first = true;
 
       for (auto lit : clause) {
         if (lit.isMarked())
           continue;
         auto &other = uses[lit.id << 1 | lit.inverse];
+
         if (first) {
-          intersect = other;
+          intersect.reserve(other.size());
+          for (auto [k, v] : other)
+            intersect.emplace_back(k, v);
           first = false;
           continue;
         }
 
         size_t out = 0;
-        size_t i = 0, j = 0;
-        while (i != intersect.size() && j != other.size()) {
-          if (intersect[i] == other[j]) {
-            intersect[out++] = intersect[i];
-            i++;
-            j++;
-          } else if (intersect[i] < other[j])
-            i++;
-          else
-            j++;
+        for (auto elem : intersect) {
+          auto it = other.find(elem.first);
+          if (it == other.end())
+            continue;
+          assert(it.val() == elem.second);
+          intersect[out++] = elem;
         }
         intersect.downsize(out);
       }
 
       // dbgs() << "compare:\n";
       // clause.dump();
-      for (auto otherIdx : intersect) {
+      for (auto [otherIdx, otherClauseIdx] : intersect) {
         if (otherIdx == clause.idx)
           continue;
         auto clauseIt = ClauseIterator{ClauseRef{this, otherIdx, 0}};
         auto other = *clauseIt;
 
-        uint otherClauseIdx = 0;
-        for (uint i = 0; i < otherIdx; i++)
-          otherClauseIdx += literals[i].clauseBegin;
+        // uint otherClauseIdx = 0;
+        // for (uint i = 0; i < otherIdx; i++)
+        //   otherClauseIdx += literals[i].clauseBegin;
 
         if (!keepClause.getDyn(otherClauseIdx))
           continue;
@@ -274,10 +278,8 @@ struct SmallBoolExprCNF {
         for (auto lit : other) {
           if (lit.isMarked())
             continue;
-          auto &arr = uses[lit.id << 1 | lit.inverse];
-          auto it = std::find(arr.begin(), arr.end(), other.idx);
-          assert(it);
-          arr.erase(it);
+          auto &map = uses[lit.id << 1 | lit.inverse];
+          map.erase(map.find(other.idx));
         }
       }
       // dbgs() << "\n\n";
@@ -357,7 +359,7 @@ struct SmallBoolExprCNF {
             } else {
               keepClause.clearDyn(clauseIdx);
               other[*diffIdx].mark();
-              it.erase();
+              combineMap.erase(it);
 
               for (size_t i = 0; i < litIdx; i++) {
                 auto lit = clause[i];
@@ -371,7 +373,7 @@ struct SmallBoolExprCNF {
                 while (it != combineMap.end()) {
                   auto next = combineMap.find_next(it);
                   if (it.val() == clause.idx)
-                    it.erase();
+                    combineMap.erase(it);
                   it = next;
                 }
               }
@@ -391,7 +393,7 @@ struct SmallBoolExprCNF {
                 while (it != combineMap.end()) {
                   auto next = combineMap.find_next(it);
                   if (it.val() == otherClauseIdx)
-                    it.erase();
+                    combineMap.erase(it);
                   it = next;
                 }
               }
@@ -651,12 +653,22 @@ struct SmallBoolExprCNF {
     uint64_t count = 1;
     SmallVec<ClauseRef, 8> clauseVec;
     for (auto clause : clauses()) {
-      count *= clause.len;
+      // count *= clause.len;
+      dbgs() << count << " * " << clause.len << "\n";
+      auto overflow = __builtin_umull_overflow(count, clause.len, &count);
+      if (overflow) {
+        count = ~0ULL;
+        break;
+      }
+      assert(clause.len);
       clauseVec.emplace_back(clause);
     }
     dbgs() << count << "\n";
     // fixme: SmallBoolExprCNF needs to be replaced with BDD or something...
     if (count > 2000000) {
+      // auto rv = negated2(numLiterals);
+      // rv->simplify(numLiterals);
+      // return rv;
       return std::nullopt;
     }
 
@@ -686,7 +698,131 @@ struct SmallBoolExprCNF {
       }
     }
 
+    auto rv2 = negated2(numLiterals);
+
+    rv2->simplify(numLiterals);
     exprOut.simplify(numLiterals);
+
+    dbgs() << "\n";
+    this->dump3(numLiterals);
+    dbgs() << "\n";
+
+    dbgs() << "this:    ";
+    this->dump();
+    dbgs() << "rv2:     ";
+    rv2->dump();
+    dbgs() << "exprOut: ";
+    exprOut.dump();
+
+    assert(rv2->literals.size() == exprOut.literals.size());
+    return exprOut;
+  }
+
+  std::optional<SmallBoolExprCNF> negated2(uint numLiterals) {
+    if (isTrue()) {
+      SmallBoolExprCNF rv;
+      rv.makeUnsat();
+      return rv;
+    }
+    if (isUnsat()) {
+      SmallBoolExprCNF rv;
+      rv.makeTrue();
+      return rv;
+    }
+
+    SmallVec<ClauseRef, 32> clauseVec;
+    for (auto clause : clauses()) {
+      clauseVec.emplace_back(clause);
+    }
+
+    this->dump3(numLiterals);
+    dbgs() << this->literals.size() << "\n";
+    if (this->literals.size() == 310)
+      dbgs() << "here\n";
+
+    SmallBoolExprCNF exprOut;
+
+    enum {
+      UNINVERSED,
+      INVERSED,
+      UNDEFINED = 3,
+    };
+
+    DynSymbSet<SmallVec<uint64_t, 1>, 2, ~0UL> assignments;
+    assignments.resize(numLiterals);
+
+    struct Frame {
+      Optional<uint16_t> literal = nullopt;
+      uint idx = 0;
+    };
+    SmallVec<Frame, 32> stack;
+    stack.reserve(clauseVec.size());
+    stack.emplace_back();
+
+    while (!stack.empty()) {
+      auto &frame = stack.back();
+
+      // commit full clauses
+      if (stack.size() == clauseVec.size() + 1) {
+        auto pos = exprOut.literals.size();
+        for (auto [litId, assign] : Range{assignments}.enumerate()) {
+          if (assign == UNDEFINED)
+            continue;
+          exprOut.literals.emplace_back(
+              BoolExprLiteral{uint16_t(litId), assign != INVERSED, 0});
+        }
+        assert(exprOut.literals.size() != pos);
+        exprOut.literals[pos].clauseBegin = true;
+        if (frame.literal)
+          assignments[*frame.literal] = UNDEFINED;
+        stack.pop_back();
+        continue;
+      }
+
+      auto i = stack.size() - 1;
+      auto clause = clauseVec[i];
+
+      if (frame.idx == 0) {
+        bool any = Range{clause}.any([&](BoolExprLiteral lit) {
+          return assignments[lit.id] == lit.inverse;
+        });
+        if (any) {
+          frame.idx = clause.size();
+          stack.emplace_back();
+          continue;
+        }
+      }
+
+      // try pushing next idx
+      while (frame.idx < clause.size()) {
+        auto lit = clause[frame.idx];
+        auto state = assignments[lit.id];
+        ++frame.idx;
+
+        // state the same -> we already found it when checking for any above.
+        // state reversed -> dead path
+        // so only undefined matters here.
+        if (state == UNDEFINED) {
+          assignments[lit.id] = lit.inverse;
+          stack.emplace_back(uint16_t(lit.id));
+          goto found_next;
+        }
+      }
+
+      // return scenario
+      if (frame.literal)
+        assignments[*frame.literal] = UNDEFINED;
+      stack.pop_back();
+      continue;
+
+    found_next:;
+      // next scenario
+    }
+
+    if (exprOut.literals.size() == 0)
+      exprOut.makeTrue();
+    exprOut.simplify(numLiterals);
+
     return exprOut;
   }
 
@@ -705,17 +841,46 @@ struct SmallBoolExprCNF {
       dbgs() << "\n";
   }
 
-  void dump2() {
+  void dump2(uint numLiterals) {
     dbgs() << "\n";
     dbgs() << "\n";
+
+    uint cnt = 0;
+    for (auto clause : clauses())
+      cnt++;
+
+    dbgs() << "p " << numLiterals << " " << cnt << "\n";
     for (auto [i, clause] : clauses().enumerate()) {
       for (auto [j, lit] : Range{clause}.enumerate()) {
         if (j != 0)
           dbgs() << " ";
         dbgs() << (lit.inverse ? "-" : "") << (lit.id + 1);
       }
-      dbgs() << "\n";
+      dbgs() << " 0\n";
     }
+  }
+
+  void dump3(uint numLiterals) {
+    dbgs() << "\n";
+    dbgs() << "\n";
+
+    for (uint i = 0; i < numLiterals; i++)
+      dbgs() << "(declare-fun x" << i << " () Bool)\n";
+
+    dbgs() << "(define-fun cnf () Bool\n";
+    dbgs() << "\t(and\n";
+    for (auto [i, clause] : clauses().enumerate()) {
+      dbgs() << "\t\t(or ";
+      for (auto [j, lit] : Range{clause}.enumerate()) {
+        if (lit.inverse)
+          dbgs() << "(not x" << lit.id << ")";
+        else
+          dbgs() << "x" << lit.id;
+        dbgs() << " ";
+      }
+      dbgs() << ")\n";
+    }
+    dbgs() << "\t)\n)";
   }
 
   void addTseitin(SmallBoolExprCNF &expr, uint16_t tseitinLitID) {
@@ -913,7 +1078,7 @@ public:
       return;
     } else if (instr.isOpc(OP_NOT)) {
       analyzeCond(muxtree, cond, instr.other(0)->as<WireRef>());
-      auto negated = cond.negated(muxtree->conditions.size());
+      auto negated = cond.negated2(muxtree->conditions.size());
       if (negated) {
         cond = *negated;
         cond.simplify(muxtree->conditions.size());
@@ -931,7 +1096,6 @@ public:
       return;
     } else if (instr.isOpc(HW_SPLICE)) {
       if (auto offs = instr.other(1)->dyn_as<ConstantRef>()) {
-        // todo: trunc, negate
         cond.literals.emplace_back(getCondIdx(muxtree,
                                               instr.other(0)->as<WireRef>(),
                                               offs.getExactVal()),
@@ -1003,9 +1167,10 @@ public:
       if (operand == instr.other(1)) {
         visitedCallback(instr);
         auto &prefix = prefixes.emplace_back();
-        if (exploreConds)
+        if (exploreConds) {
           analyzeCond(muxtree, prefix, instr.other(0)->as<WireRef>());
-        else {
+          prefix.simplify(muxtree->conditions.size());
+        } else {
           prefix.literals.emplace_back(
               getCondIdx(muxtree, instr.other(0)->as<WireRef>(), 0), 0, 1);
         }
@@ -1016,7 +1181,7 @@ public:
         std::get<1>(worklist.back()) += 1;
         worklist.emplace_back(operand->as<HWValue>(), 1);
         if (operand != instr.other(1)) {
-          auto negated = prefixes.back().negated(muxtree->conditions.size());
+          auto negated = prefixes.back().negated2(muxtree->conditions.size());
           if (!negated)
             return std::nullopt;
           prefixes.back() = *negated;
@@ -1068,6 +1233,37 @@ public:
       entry.expr.simplify(tree->conditions.size());
     }
     tree->entries = std::move(newEntries);
+  }
+
+  void pruneDontCareOutputs(HWContext &ctx, MuxTree *tree) {
+    SmallVec<uint32_t, 4> dcEntries;
+    for (auto [i, entry] : Range{tree->entries}.enumerate()) {
+      auto ref = ctx.resolveObj(entry.output);
+      if (ref.is<ConstantRef>() && ref.as<ConstantRef>().allBitsUndef())
+        dcEntries.emplace_back(i);
+    }
+
+    for (auto idx : dcEntries) {
+      auto &entry = tree->entries[idx];
+      auto inv = entry.expr.negated2(tree->conditions.size());
+      assert(inv);
+      for (auto [otherIdx, otherEntry] : Range{tree->entries}.enumerate()) {
+        if (Range{dcEntries}.find(otherIdx) != dcEntries.end())
+          continue;
+        otherEntry.expr.simplifyWith(*inv, tree->conditions.size());
+      }
+    }
+
+    size_t outIdx = 0;
+    auto cur = dcEntries.begin();
+    for (size_t i = 0; i < tree->entries.size(); i++) {
+      if (cur != dcEntries.end() && i == *cur) {
+        ++cur;
+        continue;
+      }
+      tree->entries[outIdx++] = tree->entries[i];
+    }
+    tree->entries.downsize(outIdx);
   }
 
   void printMuxTree(HWContext &ctx, MuxTree *tree) {

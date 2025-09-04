@@ -70,7 +70,7 @@ class DynSymbSet : public UnsizedSymbSet<Container, SymbolBits, DefaultWord> {
   using Base = UnsizedSymbSet<Container, SymbolBits, DefaultWord>;
 
 protected:
-  size_t numSymbs;
+  size_t numSymbs = 0;
   using Base::storage;
 
 public:
@@ -100,6 +100,26 @@ public:
     this->storage.reserve(round_up_div(i, Base::WordSymbs));
   }
 
+  reference front() {
+    assert(size() != 0);
+    return *begin();
+  }
+
+  reference back() {
+    assert(size() != 0);
+    return end()[-1];
+  }
+
+  void push_back(uint val) {
+    resize(size() + 1);
+    back() = val;
+  }
+
+  void pop_back() {
+    assert(size() != 0);
+    resize(size() - 1);
+  }
+
   class iterator {
     Container::value_type *word;
     size_t symb;
@@ -112,14 +132,22 @@ public:
     using value_type = reference;
     using difference_type = ptrdiff_t;
 
-    iterator &operator+=(size_t val) {
+    iterator &operator+=(ssize_t val) {
       symb += val;
       auto incr = symb / Base::WordSymbs;
       symb %= Base::WordSymbs;
       word += incr;
       return *this;
     }
-    iterator &operator-=(size_t val) { *this += -val; }
+    iterator &operator-=(ssize_t val) { *this += -val; }
+
+    iterator operator+(ssize_t val) {
+      auto copy{*this};
+      copy += val;
+      return copy;
+    }
+    iterator operator-(ssize_t val) { return (*this) + (-val); }
+
     iterator &operator++() { return *this += 1; }
     iterator &operator--() { return *this -= 1; }
     iterator operator++(int) {
@@ -133,8 +161,10 @@ public:
       return old;
     }
 
-    reference operator*() { return reference{*word, symb, SymbolBits}; }
-    reference operator[](size_t i) { return *((*this) + i); }
+    reference operator*() {
+      return reference{*word, symb * SymbolBits, SymbolBits};
+    }
+    reference operator[](ssize_t i) { return *((*this) + i); }
 
     friend difference_type operator-=(iterator lhs, iterator rhs) {
       return (lhs.word - rhs.word) * Base::WordSymbs + (lhs.symb - rhs.symb);

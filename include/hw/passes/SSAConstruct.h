@@ -151,7 +151,7 @@ public:
       auto reg = RegisterRef{ctx.getRegs().resolve(obj)};
 
       RegisterValue lazyLoad{reg, startDepth, true, nullopt};
-      SmallVec<RegisterValue *, 2> vals(wayBlocks.size(), &lazyLoad);
+      SmallVec<RegisterValue *, 4> vals(wayBlocks.size() + 1, &lazyLoad);
 
       bool allUntouched = true;
       ssize_t i = regState.stack.size() - 1;
@@ -160,6 +160,8 @@ public:
         vals[val.depth - startDepth - 1] = &val;
         allUntouched &= val.untouched;
       }
+      if (i >= 0)
+        vals.back() = &regState.stack[i];
 
       if (allUntouched) {
         regState.stack.resize(i + 1);

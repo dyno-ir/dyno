@@ -84,6 +84,7 @@ public:
   AIGNodeTRef(uint32_t idx, bool invert = false, bool custom = false)
       : ObjRef<AIGNode>(AIGObjID{idx, invert, custom}) {}
   AIGNodeTRef(ObjRef<AIGNode> ref) : ObjRef<AIGNode>(ref) {}
+  AIGNodeTRef(nullref_t) : ObjRef<AIGNode>(ObjID::invalid()) {}
 
   static bool is_impl(FatAIGNodeRef);
 };
@@ -311,7 +312,8 @@ public:
   AIGNodeTRef createNOT(AIGNodeTRef lhs) { return lhs.inverted(); }
 
   FatAIGNodeRef createInput() {
-    auto node = store.createSpecial();
+    auto node = store.createSpecial(AIGObjID{ObjID::invalid()},
+                                    AIGObjID{ObjID::invalid()});
     inputs.emplace_back(node);
     return node;
   }

@@ -1,6 +1,7 @@
 #pragma once
 #include "dyno/Constant.h"
 #include "support/ArrayRef.h"
+#include "support/ErrorRecovery.h"
 #include "support/SlabAllocator.h"
 #include <cassert>
 #include <cctype>
@@ -114,11 +115,13 @@ public:
   bool operator!=(Token const &b) const { return !(*this == b); }
 };
 
+// todo config struct
 template <bool ParseNumberLiterals = true, bool ParseInlineCode = true,
-          bool IgnoreBackslash = true, bool CPPStyleComments = true>
+          bool IgnoreBackslash = true, bool CPPStyleComments = true,
+          bool LeadingPercentIdent = false>
 struct Lexer {
   const std::string path;
-  const std::string src;
+  ArrayRef<char> src;
   size_t i = 0;
   size_t lastI = 0;
   uint lineNumber = 1;
@@ -147,7 +150,12 @@ private:
   const size_t NUM_KEYWORDS = strings.size();
 
 public:
-  Lexer(std::string &&src, std::string &&srcPath,
+  Lexer(const std::string &src, std::string &&srcPath,
+        ArrayRef<const char *> operators, ArrayRef<const char *> keywords)
+      : path(srcPath), src(src.c_str(), src.size()), operators(operators),
+        keywords(keywords) {}
+
+  Lexer(ArrayRef<char> src, std::string &&srcPath,
         ArrayRef<const char *> operators, ArrayRef<const char *> keywords)
       : path(srcPath), src(src), operators(operators), keywords(keywords) {}
 
@@ -158,8 +166,8 @@ public:
       return t;
     }
 
-    size_t len = src.length();
-    const char *srcC = src.c_str();
+    size_t len = src.size();
+    const char *srcC = src.data();
 
     while (1) {
       // Skip whitespace
@@ -221,7 +229,8 @@ public:
     }
 
     // Try lexing keywords or tokens
-    if (isalpha(srcC[i]) || srcC[i] == '_') {
+    if (isalpha(srcC[i]) || srcC[i] == '_' ||
+        (src[i] == '%' && LeadingPercentIdent)) {
       size_t identLen = 1;
       while (1) {
         char c = srcC[i + identLen];
@@ -343,19 +352,23 @@ public:
     return Pop();
   }
 
+  [[noreturn]] void printErrorOnPeekToken(const char *error) {
+    fprintf(stderr, "%s:%u: %s\n", path.c_str(), lineNumber, error);
+    auto line = extractEnclosingLine(std::string_view{src}, lastI);
+    uint pos;
+    fprintf(stderr, "%s:%u: %n", path.c_str(), lineNumber, &pos);
+    std::cerr << line << "\n";
+    pos += &src[lastI] - line.begin();
+    for (uint i = 0; i < pos; i++)
+      putc(' ', stderr);
+    fprintf(stderr, "^\n");
+    report_fatal_error("parser error");
+  }
+
   template <typename... Ts> Token peekEnsure(Ts... types) {
     Token t = Peek();
     if (!((t.type == types) || ...)) {
-      fprintf(stderr, "%s:%u: unexpected token\n", path.c_str(), lineNumber);
-      auto line = extractEnclosingLine(std::string_view{src}, lastI);
-      uint pos;
-      fprintf(stderr, "%s:%u: %n", path.c_str(), lineNumber, &pos);
-      std::cerr << line << "\n";
-      pos += &src[lastI] - line.begin();
-      for (uint i = 0; i < pos; i++)
-        putc(' ', stderr);
-      fprintf(stderr, "^\n");
-      exit(-1);
+      printErrorOnPeekToken("unexpected token");
     }
     return t;
   }

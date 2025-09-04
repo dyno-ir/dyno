@@ -2,6 +2,7 @@
 
 #include "hw/HWContext.h"
 #include "hw/HWPrinter.h"
+#include "hw/IDs.h"
 #include "hw/passes/ABC.h"
 #include "hw/passes/AIGConstruct.h"
 #include "hw/passes/AggressiveDeadCodeElimination.h"
@@ -28,6 +29,7 @@
 #include "hw/passes/RemoveBuffers.h"
 #include "hw/passes/SSAConstruct.h"
 #include "hw/passes/SeqToComb.h"
+#include "hw/passes/SimpleMemoryMapping.h"
 #include "hw/passes/TriggerDedupe.h"
 #include "support/Debug.h"
 
@@ -62,6 +64,7 @@ class PassPipeline {
   RegisterPartitionPass regPartition{ctx};
   FuzzyCSEPass fuzzyCse{ctx};
   EarlySharePass earlyShare{ctx};
+  SimpleMemoryMappingPass simpleMemMap{ctx};
 
 public:
   bool printAfterAll = true;
@@ -173,8 +176,6 @@ public:
         .lowerExtract = false,
     };
 
-    // dumpAfterAll = true;
-
     runPass(lowerOps);
     runPass(instCombine);
     runPass(cse, true);
@@ -182,7 +183,11 @@ public:
     runPass(orderInstrs);
     runPass(instCombine);
 
+    earlyShare.config.opToShare = OP_ADD;
     runPass(earlyShare);
+    earlyShare.config.opToShare = HW_SPLICE;
+    runPass(earlyShare);
+
     runPass(instCombine);
     ssaConstr.config.mode = SSAConstructPass::Config::IMMEDIATE;
     runPass(ssaConstr);
@@ -197,7 +202,6 @@ public:
     runPass(linearizeControlFlow);
     ssaConstr.config.mode = SSAConstructPass::Config::IMMEDIATE;
     runPass(ssaConstr);
-
     runPass(instCombine);
     runPass(agressiveDCE);
 
@@ -205,8 +209,13 @@ public:
     runPass(cse, true);
     runPass(orderInstrs);
     runPass(instCombine);
+
+    // runPass(simpleMemMap);
+
+    // dumpDyno("a.dyno");
     runPass(muxTreeOpt);
     runPass(instCombine);
+    // dumpDyno("b.dyno");
 
     runPass(cse, true);
     runPass(fuzzyCse, true);
@@ -216,9 +225,8 @@ public:
     runPass(instCombine);
     runPass(ssaConstr);
     runPass(instCombine);
-    orderInstrs.config.moveStoresBeforeLoads = false;
 
-    // lower everything that can still go through instcombine
+    // lower everything that can still go through regular instcombine
     lowerOps.config = LowerOpsPass::Config{
         .lowerMultiInputAdd = true,
         .lowerAddCompress = false,
@@ -233,16 +241,20 @@ public:
         .lowerExtract = true,
     };
     runPass(lowerOps);
-    dumpDyno();
-    runPass(instCombine);
 
+    // lift MUXs for reg partition
+    instCombine.config.liftMUX = true;
+    runPass(instCombine);
     runPass(regPartition);
     runPass(instCombine);
     runPass(processLinearize);
     runPass(instCombine);
+    runPass(ssaConstr);
+    runPass(instCombine);
     runPass(agressiveDCE);
 
     runPass(flipFlopInference);
+    runPass(triggerDedupe);
     runPass(cse, true);
     runPass(orderInstrs);
     runPass(instCombine);
@@ -263,7 +275,7 @@ public:
     runPass(instCombine);
     runPass(agressiveDCE);
 
-    // lower the rest without re-running instcombine.
+    // lower the rest
     lowerOps.config = LowerOpsPass::Config{
         .lowerMultiInputAdd = true,
         .lowerAddCompress = true,
@@ -278,6 +290,8 @@ public:
         .lowerExtract = true,
     };
     runPass(lowerOps);
+    instCombine.config.fuseCommutative = false;
+    runPass(instCombine);
     runPass(agressiveDCE);
 
     runPass(aigConstr);

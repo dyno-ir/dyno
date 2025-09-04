@@ -6,6 +6,12 @@
 #include <cstdint>
 #include <iterator>
 #include <type_traits>
+
+template <typename T>
+concept CArrayRef = requires {
+  typename std::remove_reference_t<T>;
+} && std::is_array_v<std::remove_reference_t<T>> && std::is_reference_v<T>;
+
 template <typename T> class ArrayRef {
 public:
   using iterator_category = std::random_access_iterator_tag;
@@ -24,40 +30,46 @@ private:
   size_t sz;
 
 public:
-  const_iterator begin() const { return ptr; }
-  const_iterator end() const { return ptr + sz; }
+  constexpr const_iterator begin() const { return ptr; }
+  constexpr const_iterator end() const { return ptr + sz; }
 
-  size_t size() const { return sz; }
-  bool empty() const { return size() == 0; }
+  constexpr size_t size() const { return sz; }
+  constexpr bool empty() const { return size() == 0; }
 
   const_reference operator[](size_t i) {
     assert(i < sz);
     return ptr[i];
   }
 
-  ArrayRef(const_iterator begin, const_iterator end)
+  constexpr ArrayRef(const_iterator begin, const_iterator end)
       : ptr(begin), sz(end - begin) {}
-  ArrayRef(const_iterator begin, size_t size) : ptr(begin), sz(size) {}
+  constexpr ArrayRef(const_iterator begin, size_t size)
+      : ptr(begin), sz(size) {}
 
-  const_reference back() { return ptr[sz - 1]; }
-  const_reference front() { return ptr[0]; }
+  constexpr const_reference back() { return ptr[sz - 1]; }
+  constexpr const_reference front() { return ptr[0]; }
 
-  ArrayRef drop_front() const {
+  constexpr ArrayRef drop_front() const {
     assert(sz >= 1);
     return ArrayRef{ptr + 1, sz - 1};
   }
-  ArrayRef drop_back() const {
+  constexpr ArrayRef drop_back() const {
     assert(sz >= 1);
     return ArrayRef{ptr, sz - 1};
   }
 
-  const_pointer data() { return ptr; }
+  constexpr const_pointer data() { return ptr; }
 
   static constexpr ArrayRef emptyRef() { return ArrayRef{nullptr, size_t(0)}; }
+  template <typename U>
+  constexpr ArrayRef(const U &u) : ArrayRef(u.begin(), u.end()) {}
 
-  template <typename U> ArrayRef(const U &u) : ArrayRef(u.begin(), u.end()) {}
+  template <typename U, size_t N>
+  constexpr ArrayRef(const U (&c_arr)[N]) : ArrayRef(c_arr, c_arr + N) {}
 };
 
+template <typename U, size_t N>
+ArrayRef(const U (&c_arr)[N]) -> ArrayRef<typename std::decay_t<U>>;
 template <typename U> ArrayRef(const U &u) -> ArrayRef<typename U::value_type>;
 
 template <typename T>
@@ -83,28 +95,29 @@ private:
   size_t sz;
 
 public:
-  iterator begin() const { return ptr; }
-  iterator end() const { return ptr + sz; }
+  constexpr iterator begin() const { return ptr; }
+  constexpr iterator end() const { return ptr + sz; }
 
-  size_t size() const { return sz; }
-  bool empty() const { return size() == 0; }
+  constexpr size_t size() const { return sz; }
+  constexpr bool empty() const { return size() == 0; }
 
-  reference operator[](size_t i) const {
+  constexpr reference operator[](size_t i) const {
     assert(i < sz);
     return ptr[i];
   }
 
-  MutArrayRef(iterator begin, iterator end) : ptr(begin), sz(end - begin) {}
-  MutArrayRef(iterator begin, size_t size) : ptr(begin), sz(size) {}
+  constexpr MutArrayRef(iterator begin, iterator end)
+      : ptr(begin), sz(end - begin) {}
+  constexpr MutArrayRef(iterator begin, size_t size) : ptr(begin), sz(size) {}
 
-  reference back() { return ptr[sz - 1]; }
-  reference front() { return ptr[0]; }
+  constexpr reference back() { return ptr[sz - 1]; }
+  constexpr reference front() { return ptr[0]; }
 
-  MutArrayRef drop_front() const {
+  constexpr MutArrayRef drop_front() const {
     assert(sz >= 1);
     return MutArrayRef{ptr + 1, sz - 1};
   }
-  MutArrayRef drop_back() const {
+  constexpr MutArrayRef drop_back() const {
     assert(sz >= 1);
     return MutArrayRef{ptr, sz - 1};
   }
@@ -119,13 +132,15 @@ public:
     std::for_each(begin(), end(), func);
   }
 
-  pointer data() { return ptr; }
+  constexpr pointer data() { return ptr; }
+  constexpr const_pointer data() const { return ptr; }
 
   static constexpr MutArrayRef emptyRef() {
     return MutArrayRef{nullptr, size_t(0)};
   }
 
-  template <typename U> MutArrayRef(U &u) : MutArrayRef(u.begin(), u.end()) {}
+  template <typename U>
+  constexpr MutArrayRef(U &u) : MutArrayRef(u.begin(), u.end()) {}
 };
 
 template <typename U> MutArrayRef(U &u) -> MutArrayRef<typename U::value_type>;

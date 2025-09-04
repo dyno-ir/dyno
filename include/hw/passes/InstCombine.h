@@ -3,6 +3,7 @@
 #include "dyno/Constant.h"
 #include "dyno/CustomInstr.h"
 #include "dyno/HierBlockIterator.h"
+#include "dyno/IDs.h"
 #include "dyno/Instr.h"
 #include "dyno/Opcode.h"
 #include "hw/FlipFlop.h"
@@ -46,6 +47,12 @@ class InstCombinePass {
 
 public:
   using TaggedIRef = CustomInstrRef<InstrRef, uint64_t>;
+
+  struct Config {
+    bool fuseCommutative = true;
+    bool liftMUX = false;
+  };
+  Config config;
 
 private:
   bool knownBitsConstProp(InstrRef instr) {
@@ -217,7 +224,8 @@ private:
   }
 
   bool liftMUX(InstrRef instr) {
-    return false;
+    if (!config.liftMUX)
+      return false;
     auto selV = instr.other(0)->as<HWValue>();
     auto trueV = instr.other(1)->as<HWValue>();
     auto falseV = instr.other(2)->as<HWValue>();
@@ -311,6 +319,81 @@ private:
       ib.addRef(build.buildSplice(ref, frag.len, frag.srcAddr));
     }
     deleteMatchedInstr(instr);
+    return true;
+  }
+
+  bool coalesceConcatOfLoads(InstrRef concat) {
+    SmallVec<HWValue, 8> outOps;
+
+    RegisterRef current = nullref;
+    uint32_t currentDst = 0;
+    uint32_t currentSrc = 0;
+
+    uint32_t bits = 0;
+
+    HWInstrBuilder build{ctx, concat};
+    auto flush = [&]() {
+      if (!current)
+        return;
+      outOps.emplace_back(
+          build.buildLoad(current, bits - currentDst, currentSrc));
+      current = nullref;
+    };
+
+    for (auto op : Range{concat.others()}.reverse()) {
+      if (op->is<ConstantRef>()) {
+        flush();
+        outOps.emplace_back(op->as<ConstantRef>());
+        bits += op->as<ConstantRef>().getNumBits();
+        continue;
+      }
+      auto wire = op->as<WireRef>();
+      auto instr = wire.getDefI();
+
+      // look through splices
+      auto spliceBase = 0;
+      auto spliceLen = wire.getNumBits();
+      if (auto splice = instr.dyn_as<SpliceIRef>();
+          splice && splice.isConstantOffs() && splice.in()->is<WireRef>()) {
+        spliceBase = splice.getBase();
+        spliceLen = splice.getLen();
+        instr = splice.in()->as<WireRef>().getDefI();
+      }
+
+      if (!instr.isOpc(HW_LOAD) || !instr.as<LoadIRef>().isConstantOffs()) {
+        flush();
+        bits += *wire.getNumBits();
+        outOps.emplace_back(wire);
+        continue;
+      }
+      auto load = instr.as<LoadIRef>();
+
+      auto base = load.getBase() + spliceBase;
+
+      if (current &&
+          (current != load.reg() || base != currentSrc + (bits - currentDst))) {
+        flush();
+      }
+
+      if (!current) {
+        current = load.reg();
+        currentSrc = base;
+        currentDst = bits;
+      } else {
+        ;
+      }
+
+      bits += *wire.getNumBits();
+    }
+    flush();
+
+    if (outOps.size() == concat.getNumOthers())
+      return false;
+
+    std::reverse(outOps.begin(), outOps.end());
+    auto out = build.buildConcat(outOps);
+    replaceUses(concat.def(0)->as<WireRef>(), out);
+    deleteMatchedInstr(concat);
     return true;
   }
 
@@ -431,7 +514,8 @@ private:
           //   asWire = defI.other(0)->as<WireRef>();
           //   defI = asWire.getDefI();
           // }
-          if (defI.isOpc(opc) && asWire.hasSingleUse()) {
+          if (defI.isOpc(opc) && asWire.hasSingleUse() &&
+              config.fuseCommutative) {
             stack.emplace_back(defI);
             deleteMatchedInstr(defI);
             change = true;
@@ -472,6 +556,7 @@ private:
           return true;
         }
         [[fallthrough]];
+      case *OP_XOR:
       case *OP_ADD:
         if (constants[0].valueEquals(0)) {
           change |= 1;
@@ -954,10 +1039,17 @@ private:
         return true;
     }
 
+    if (instr.isOpc(HW_CONCAT))
+      if (coalesceConcatOfLoads(instr))
+        return true;
+
     return false;
   }
 
   bool matchPatternsOnInstr(InstrRef instr) {
+    currentMatched.clear();
+    currentReplaced.clear();
+
     if (instr.getNumDefs() == 1) {
       if (!instr.def(0)->is<WireRef>())
         return false;
@@ -967,9 +1059,6 @@ private:
         return true;
       }
     }
-
-    currentMatched.clear();
-    currentReplaced.clear();
 
     if (manual(instr))
       return true;
