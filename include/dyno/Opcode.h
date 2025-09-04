@@ -62,6 +62,10 @@ public:
   template <IsDialectOpcode... Ts> bool is(Ts... ts) {
     return ((ts == *this) || ...);
   }
+
+  constexpr DialectOpcode invalid() {
+    return DialectOpcode{DialectID::invalid(), OpcodeID::invalid()};
+  }
 };
 
 template <DialectID D> class SpecificDialectOpcode : public DialectOpcode {
@@ -100,3 +104,21 @@ public:
 };
 
 }; // namespace dyno
+
+template <> struct DenseMapInfo<dyno::DialectOpcode> {
+  static constexpr dyno::DialectOpcode getEmptyKey() {
+    return dyno::DialectOpcode{dyno::DialectID::invalid(),
+                               dyno::TyID::invalid()};
+  }
+  static constexpr dyno::DialectOpcode getTombstoneKey() {
+    return dyno::DialectOpcode{dyno::DialectID::invalid(),
+                               dyno::TyID::invalid() - 1};
+  }
+  static unsigned getHashValue(const dyno::DialectOpcode &k) {
+    return hash_u32(std::bit_cast<uint32_t>(k));
+  }
+  static bool isEqual(const dyno::DialectOpcode &lhs,
+                      const dyno::DialectOpcode &rhs) {
+    return lhs == rhs;
+  }
+};

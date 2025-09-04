@@ -41,9 +41,7 @@ public:
   Optional<uint32_t> getMax() const { return max; }
 
   AddressGenTerm() = default;
-  AddressGenTerm(HWValue idx, uint32_t fact)
-      : idx(idx), fact(fact), max(nullopt) {}
-  AddressGenTerm(HWValue idx, uint32_t fact, uint32_t max)
+  AddressGenTerm(HWValue idx, uint32_t fact, Optional<uint32_t> max = nullopt)
       : idx(idx), fact(fact), max(max) {}
   AddressGenTerm(AddressGenTermOperand other)
       : idx(other.getIdx()), fact(other.getFact()), max(other.getMax()) {}

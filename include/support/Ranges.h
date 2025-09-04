@@ -543,6 +543,10 @@ public:
     std::for_each(begin(), end(), func);
   }
 
+  template <typename T> auto zip(const T &other) {
+    return ::Range{zip_iterator{begin(), other.begin()},
+                   zip_iterator{end(), other.end()}};
+  }
   template <typename T> auto zip(T &other) {
     return ::Range{zip_iterator{begin(), other.begin()},
                    zip_iterator{end(), other.end()}};

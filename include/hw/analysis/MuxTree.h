@@ -1,8 +1,11 @@
 #pragma once
 #include "dyno/Obj.h"
+#include "hw/Concat.h"
 #include "hw/HWPrinter.h"
 #include "hw/HWValue.h"
+#include "hw/IDs.h"
 #include "hw/Wire.h"
+#include "hw/analysis/BitAliasAnalysis.h"
 #include "op/IDs.h"
 #include "support/Debug.h"
 #include "support/DenseMapInfo.h"
@@ -212,7 +215,7 @@ struct SmallBoolExprCNF {
     // this->dump();
 
     // find superset clauses
-    SmallVec<SmallVec<uint32_t, 8>, 8> uses;
+    SmallVec<SmallDenseMap<uint32_t, uint32_t, 2>, 8> uses;
     uses.resize(numLiterals * 2);
     for (auto [clauseIdx, clause] : clauses().enumerate()) {
       if (clause.size() < 2 || !keepClause.getDyn(clauseIdx))
@@ -220,51 +223,51 @@ struct SmallBoolExprCNF {
       for (auto lit : clause) {
         if (lit.isMarked())
           continue;
-        uses[lit.id << 1 | lit.inverse].emplace_back(clause.idx);
+        uses[lit.id << 1 | lit.inverse].insert(clause.idx, clauseIdx);
       }
     }
+
     for (auto [clauseIdx, clause] : clauses().enumerate()) {
       if (clause.size() < 2 || !keepClause.getDyn(clauseIdx))
         continue;
-      SmallVec<uint32_t, 8> intersect;
+      SmallVec<std::pair<uint32_t, uint32_t>, 8> intersect;
       bool first = true;
 
       for (auto lit : clause) {
         if (lit.isMarked())
           continue;
         auto &other = uses[lit.id << 1 | lit.inverse];
+
         if (first) {
-          intersect = other;
+          intersect.reserve(other.size());
+          for (auto [k, v] : other)
+            intersect.emplace_back(k, v);
           first = false;
           continue;
         }
 
         size_t out = 0;
-        size_t i = 0, j = 0;
-        while (i != intersect.size() && j != other.size()) {
-          if (intersect[i] == other[j]) {
-            intersect[out++] = intersect[i];
-            i++;
-            j++;
-          } else if (intersect[i] < other[j])
-            i++;
-          else
-            j++;
+        for (auto elem : intersect) {
+          auto it = other.find(elem.first);
+          if (it == other.end())
+            continue;
+          assert(it.val() == elem.second);
+          intersect[out++] = elem;
         }
         intersect.downsize(out);
       }
 
       // dbgs() << "compare:\n";
       // clause.dump();
-      for (auto otherIdx : intersect) {
+      for (auto [otherIdx, otherClauseIdx] : intersect) {
         if (otherIdx == clause.idx)
           continue;
         auto clauseIt = ClauseIterator{ClauseRef{this, otherIdx, 0}};
         auto other = *clauseIt;
 
-        uint otherClauseIdx = 0;
-        for (uint i = 0; i < otherIdx; i++)
-          otherClauseIdx += literals[i].clauseBegin;
+        // uint otherClauseIdx = 0;
+        // for (uint i = 0; i < otherIdx; i++)
+        //   otherClauseIdx += literals[i].clauseBegin;
 
         if (!keepClause.getDyn(otherClauseIdx))
           continue;
@@ -274,10 +277,8 @@ struct SmallBoolExprCNF {
         for (auto lit : other) {
           if (lit.isMarked())
             continue;
-          auto &arr = uses[lit.id << 1 | lit.inverse];
-          auto it = std::find(arr.begin(), arr.end(), other.idx);
-          assert(it);
-          arr.erase(it);
+          auto &map = uses[lit.id << 1 | lit.inverse];
+          map.erase(map.find(other.idx));
         }
       }
       // dbgs() << "\n\n";
@@ -357,7 +358,7 @@ struct SmallBoolExprCNF {
             } else {
               keepClause.clearDyn(clauseIdx);
               other[*diffIdx].mark();
-              it.erase();
+              combineMap.erase(it);
 
               for (size_t i = 0; i < litIdx; i++) {
                 auto lit = clause[i];
@@ -371,7 +372,7 @@ struct SmallBoolExprCNF {
                 while (it != combineMap.end()) {
                   auto next = combineMap.find_next(it);
                   if (it.val() == clause.idx)
-                    it.erase();
+                    combineMap.erase(it);
                   it = next;
                 }
               }
@@ -391,7 +392,7 @@ struct SmallBoolExprCNF {
                 while (it != combineMap.end()) {
                   auto next = combineMap.find_next(it);
                   if (it.val() == otherClauseIdx)
-                    it.erase();
+                    combineMap.erase(it);
                   it = next;
                 }
               }
@@ -931,7 +932,6 @@ public:
       return;
     } else if (instr.isOpc(HW_SPLICE)) {
       if (auto offs = instr.other(1)->dyn_as<ConstantRef>()) {
-        // todo: trunc, negate
         cond.literals.emplace_back(getCondIdx(muxtree,
                                               instr.other(0)->as<WireRef>(),
                                               offs.getExactVal()),

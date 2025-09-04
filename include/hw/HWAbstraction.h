@@ -445,44 +445,49 @@ private:
                                    uint32_t baseAddr) {
     if (!wire.hasSingleDef() || !wire.getDefI().isOpc(HW_CONCAT))
       return nullref;
-    auto instr = wire.getDefI();
+    auto concat = wire.getDefI();
 
     uint32_t bits = 0;
     uint32_t lowerOffs, upperOffs;
-    auto it = *instr.other_end() - 1;
 
-    lowerOffs = bits;
-    while (bits < baseAddr) {
+    // concat operands are in reverse (big endian) order
+    auto it = *concat.other_end() - 1;
+
+    while (bits < baseAddr && it != (concat.other_begin() - 1)) {
       if (!it->as<HWValue>().getNumBits()) [[unlikely]]
         return nullref;
-      lowerOffs = bits;
       bits += *it->as<HWValue>().getNumBits();
       --it;
     }
+    // bits now >= baseAddr
 
     auto lower = it;
+    lowerOffs = bits;
 
-    upperOffs = bits;
-    while (bits < baseAddr + numBits) {
+    while (bits < baseAddr + numBits && it != (concat.other_begin() - 1)) {
       if (!it->as<HWValue>().getNumBits()) [[unlikely]]
         return nullref;
-      upperOffs = 0;
       bits += *it->as<HWValue>().getNumBits();
       --it;
     }
+    upperOffs = bits;
+
+    // bits now >= baseAddr + numBits
 
     auto upper = it;
 
     if (lower == upper) {
-      HWInstrRef instr = buildInstr(HW_SPLICE, true, lower->as<HWValue>(),
-                                    ConstantRef::fromU32(baseAddr - lowerOffs));
-      instr.defW()->numBits = numBits;
-      return instr.defW();
+      auto prev = std::next(lower); // inverse iteration
+      auto prevOffs = lowerOffs - *prev->as<HWValue>().getNumBits();
+      assert(*prev->as<HWValue>().getNumBits() >= numBits);
+      return buildSplice(prev->as<HWValue>(), numBits, baseAddr - prevOffs);
     }
 
-    if (lowerOffs - baseAddr == 0 && upperOffs - baseAddr - numBits == 0) {
-      auto concat =
-          buildInstr(HW_CONCAT, true, Range{upper, lower}.as<HWValue>());
+    if (lowerOffs == baseAddr && upperOffs - lowerOffs == numBits) {
+      if (upper + 1 == lower)
+        return lower->as<HWValue>();
+      auto concat = buildInstr(HW_CONCAT, true,
+                               Range{upper + 1, lower + 1}.as<HWValue>());
       concat.defW()->numBits = numBits;
       return concat.defW();
     }

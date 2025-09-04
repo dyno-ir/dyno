@@ -12,6 +12,7 @@
 #include "hw/IDs.h"
 #include "hw/Process.h"
 #include "op/IDs.h"
+#include "support/ArrayRef.h"
 #include "support/TempBind.h"
 #include <fstream>
 #include <ostream>
@@ -19,6 +20,7 @@
 namespace dyno {
 
 class HWPrinter : public Printer {
+public:
   static constexpr std::array<const DialectInfo *, NUM_DIALECTS> dialectIs{
 #define HEADER
 #define FOOTER
@@ -40,6 +42,24 @@ class HWPrinter : public Printer {
 #define ADD_OP(x) DialectTraits<x>::opcInfo
 #include "dyno/DialectIDs.inc"
   };
+
+  // maybe make interfaces work with these instead --- requires reworking
+  // InterfaceTraits though.
+  static constexpr std::array<ArrayRef<TyInfo>, NUM_DIALECTS> typeInfoArrays{
+#define HEADER
+#define FOOTER
+#define LAST
+#define ADD_OP(x) DialectTraits<x>::tyInfo
+#include "dyno/DialectIDs.inc"
+  };
+  static constexpr std::array<ArrayRef<OpcodeInfo>, NUM_DIALECTS>
+      opcodeInfoArrays{
+#define HEADER
+#define FOOTER
+#define LAST
+#define ADD_OP(x) DialectTraits<x>::opcInfo
+#include "dyno/DialectIDs.inc"
+      };
 
   Interface<DialectInfo> dialectI{dialectIs.data()};
   Interface<TyInfo> tyI{tyIs.data()};

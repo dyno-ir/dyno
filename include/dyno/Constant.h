@@ -2,6 +2,7 @@
 
 #include "support/ArrayRef.h"
 #include "support/Bits.h"
+#include "support/Debug.h"
 #include "support/DenseMultimap.h"
 #include "support/Optional.h"
 #include "support/SmallVec.h"
@@ -18,6 +19,7 @@
 #include <ios>
 #include <iostream>
 #include <iterator>
+#include <optional>
 #include <ostream>
 #include <string>
 #include <type_traits>
@@ -927,6 +929,14 @@ public:
                     out.getWords().begin());
     };
 
+    if (newSize == lhs.getNumBits()) {
+      if constexpr (std::is_same_v<T, BigIntBase>)
+        if (&out == &lhs)
+          return;
+      out = lhs;
+      return;
+    }
+
     // truncate
     if (newSize < lhs.getRawNumBits()) {
       out.words.resize(std::min(lhs.getNumWords(),
@@ -957,12 +967,14 @@ public:
     }
 
     // else we need to materialize lhs's extend bits
+    auto lhsWords = lhs.getNumWords();
     out.words.resize(lhs.getExtNumWords());
-    for (size_t i = lhs.getNumWords(); i < lhs.getExtNumWords(); i++)
-      out.getWords()[i] = lhs.getWord(i);
+    std::fill(&out.words[lhsWords], out.words.end(),
+              repeatExtend(lhs.getExtend()));
 
     out.numBits = newSize;
     Extend{out.field} = extendPat;
+    out.normalize();
   }
 
 public:
@@ -2069,7 +2081,8 @@ public:
     LENGTH_DOES_NOT_FIT_IN_32,
     UNKNOWN_BASE,
     ILLEGAL_DIGIT,
-    TOO_MANY_DIGITS_GIVEN
+    TOO_MANY_DIGITS_GIVEN,
+    INVALID_FORMAT
   };
 
   constexpr static BigIntBase parseDec(const char *&ptr) {
@@ -2247,6 +2260,107 @@ public:
     return ParseVlogResult(acc, isSigned,
                            numBits ? ParseVlogResult::SIZED
                                    : ParseVlogResult::UNSIZED);
+  }
+
+  static constexpr std::expected<BigInt, ParseError>
+  parseDyno(const char *&ptr, const char *end) {
+    uint32_t len;
+    auto [endPtr, ec] = std::from_chars(ptr, end, len);
+
+    if (ec == std::errc::result_out_of_range)
+      return std::unexpected(ParseError::LENGTH_DOES_NOT_FIT_IN_32);
+    if (ec != std::errc())
+      return std::unexpected(ParseError::INVALID_FORMAT);
+    ptr = endPtr;
+
+    if (ptr == end || *ptr != '\'')
+      return std::unexpected(ParseError::INVALID_FORMAT);
+    ++ptr;
+
+    if (len == 0)
+      return BigInt::fromU64(0, 0);
+
+    if (ptr == end)
+      return std::unexpected(ParseError::INVALID_FORMAT);
+
+    uint base;
+    switch (*ptr) {
+    case 'h':
+      base = 16;
+      break;
+    case 'd':
+      base = 10;
+      break;
+    case 'o':
+      base = 8;
+      break;
+    case 'b':
+      base = 2;
+      break;
+    default:
+      return std::unexpected(ParseError::UNKNOWN_BASE);
+    }
+
+    if (++ptr == end)
+      return std::unexpected(ParseError::INVALID_FORMAT);
+
+    auto xdigit = [](char c) -> Optional<uint> {
+      if (c >= '0' && c <= '9')
+        return c - '0';
+      if (c >= 'a' && c <= 'f')
+        return c - 'a' + 10;
+      if (c >= 'A' && c <= 'F')
+        return c - 'a' + 10;
+      return nullopt;
+    };
+
+    auto parsePack = [&]() -> std::pair<const char *, std::optional<BigInt>> {
+      auto *digitsEnd = ptr;
+      while (digitsEnd != end) {
+        auto digit = xdigit(*digitsEnd);
+        if (!digit || *digit >= base)
+          break;
+        ++digitsEnd;
+      }
+
+      if (base == 16)
+        return std::pair(digitsEnd, parseHex(ArrayRef{ptr, digitsEnd}));
+      if (base == 10)
+        return std::pair(digitsEnd, parseDec(ArrayRef{ptr, digitsEnd}));
+      dyno_unreachable("unsupported");
+    };
+
+    auto [packEndPtr, num] = parsePack();
+    if (!num)
+      return std::unexpected(ParseError::INVALID_FORMAT);
+    ptr = packEndPtr;
+
+    if ((*num).getNumBits() > len)
+      return std::unexpected(ParseError::TOO_MANY_DIGITS_GIVEN);
+    BigInt::resizeOp4S(*num, *num, len);
+
+    if (ptr == endPtr || *ptr != '?')
+      return *num;
+    ++ptr;
+
+    if (ptr == end)
+      return std::unexpected(ParseError::INVALID_FORMAT);
+
+    auto [unkEndPtr, unkNum] = parsePack();
+    if (!num)
+      return std::unexpected(ParseError::INVALID_FORMAT);
+    ptr = unkEndPtr;
+
+    if ((*unkNum).getNumBits() > len)
+      return std::unexpected(ParseError::TOO_MANY_DIGITS_GIVEN);
+    BigInt::resizeOp4S(*unkNum, *unkNum, len);
+
+    num->conv2To4State();
+    unkNum->conv2To4State();
+    BigInt::shlOp(*unkNum, *unkNum, 1);
+    BigInt::orOp(*num, *num, *unkNum);
+
+    return *num;
   }
 
   template <typename T, std::invocable<BigInt &, const BigInt &,
@@ -2622,6 +2736,11 @@ public:
     acc ^= hash_u32(constant.getNumWords());
     for (const auto word : constant.getWords())
       acc ^= hash_u32(word);
+
+    if (acc == DenseMapInfo<uint32_t>::getEmptyKey() ||
+        acc == DenseMapInfo<uint32_t>::getTombstoneKey()) [[unlikely]] {
+      acc = 0;
+    }
     return acc;
   }
 
@@ -2635,22 +2754,32 @@ public:
         return ref;
     }
 
+    for (auto [k, v] : map) {
+      auto ref = store.resolve(v);
+      assert(bigInt != ConstantRef{ref});
+    }
+
     auto ref = store.create(bigInt.getNumWords(), bigInt);
     map.insert(hash, ref);
     return ref;
   }
 
   Constant &operator[](ObjRef<Constant> ref) { return store[ref]; }
-  void destroy(FatObjRef<Constant> ref) {
+  void destroy(ConstantRef ref) {
     uint32_t hash = constantHash(ConstantRef{ref});
     auto it = map.find(hash);
-    for (; it != map.end(); it = map.find_next(it)) {
-      auto ref = store.resolve(it.val());
-      if (ref == ConstantRef{ref}) {
-        it.erase();
-        break;
+    assert(it != map.end());
+    size_t cnt = 0;
+    for (; it != map.end();) {
+      auto next = map.find_next(it);
+      auto cand = store.resolve(it.val());
+      if (cand == ref) {
+        map.erase(it);
+        cnt++;
       }
+      it = next;
     }
+    assert(cnt == 1);
     return store.destroy(ref);
   }
   ConstantRef resolve(ObjRef<Constant> ref) { return store.resolve(ref); }

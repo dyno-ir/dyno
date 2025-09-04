@@ -51,6 +51,8 @@ class BitAliasAnalysis {
     }
     bool nested = stack.size() >= 3;
     bool notRoot = stack.size() >= 2;
+    bool rootIsConcatOrInsert =
+        stack[0].ref.instr().isOpc(HW_CONCAT, HW_INSERT);
 
     switch (*instr.getDialectOpcode()) {
     case *HW_CONCAT: {
@@ -98,6 +100,7 @@ class BitAliasAnalysis {
       } else {
         frame.acc = retVal.getRange(addr, len);
         change |= nested;
+        change |= notRoot && !rootIsConcatOrInsert;
       }
       assert(frame.acc.getLen() == asSplice.getLen());
       return std::nullopt;
@@ -110,6 +113,7 @@ class BitAliasAnalysis {
       auto len = *instr.def(0)->as<WireRef>().getNumBits();
       frame.acc = retVal.getRange(0, len);
       change |= nested;
+      change |= notRoot && !rootIsConcatOrInsert;
       return std::nullopt;
     }
 
@@ -123,6 +127,7 @@ class BitAliasAnalysis {
                        outLen - inLen);
       frame.acc = std::move(retVal);
       change |= nested;
+      change |= notRoot && !rootIsConcatOrInsert;
       return std::nullopt;
     }
 
@@ -136,6 +141,7 @@ class BitAliasAnalysis {
                        outLen - inLen);
       frame.acc = std::move(retVal);
       change |= nested;
+      change |= notRoot && !rootIsConcatOrInsert;
       return std::nullopt;
     }
 
@@ -169,6 +175,7 @@ class BitAliasAnalysis {
       for (uint i = 0; i < (outLen - inLen); i++)
         frame.acc.appendTop(signBit);
       change |= nested;
+      change |= notRoot && !rootIsConcatOrInsert;
       return std::nullopt;
     }
 
@@ -198,9 +205,6 @@ class BitAliasAnalysis {
         });
 
         frame.acc.overwriteNoMaterialize(retVal, 0, addr, len);
-        // constant inserts can be lowered to splice, so also mark change if
-        // first entry.
-        change |= stack.size() == 1;
         change |= nested;
 
         assert(frame.acc.getLen() == asInsert.getMemoryLen());

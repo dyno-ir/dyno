@@ -1,5 +1,6 @@
 #pragma once
 
+#include "support/ASAN.h"
 #include "support/Ranges.h"
 #include <algorithm>
 #include <cassert>
@@ -36,6 +37,7 @@ public:
       this->arr = std::launder(reinterpret_cast<T *>(storage.storage));
       this->cap = N;
       this->sz = 0;
+      ASAN_UNPOISON_MEMORY_REGION(this->arr, N);
     }
     this->SmallVecImpl<T>::operator=(std::move(o));
     return *this;
@@ -54,6 +56,7 @@ public:
       this->arr = std::launder(reinterpret_cast<T *>(storage.storage));
       this->cap = N;
       this->sz = 0;
+      ASAN_UNPOISON_MEMORY_REGION(this->arr, N);
     }
     this->SmallVecImpl<T>::operator=(o);
     return *this;
@@ -117,8 +120,10 @@ private:
   void destroyElts() { std::destroy_n(begin(), sz); }
 
   void deallocate() {
-    if (isSmall())
+    if (isSmall()) {
+      ASAN_POISON_MEMORY_REGION(getInlineArrPtr(), cap);
       return;
+    }
     ::operator delete[](arr);
   }
 
@@ -136,7 +141,10 @@ private:
 protected:
   SmallVecImpl(T *arr, size_type cap) : sz(0), cap(cap), arr(arr) {}
 
-  ~SmallVecImpl() { destroy(); }
+  ~SmallVecImpl() {
+    destroy();
+    ASAN_UNPOISON_MEMORY_REGION(getInlineArrPtr(), cap);
+  }
 
   SmallVecImpl(T *arr, size_type cap, const SmallVecImpl &o)
       : SmallVecImpl(arr, cap) {

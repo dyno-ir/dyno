@@ -219,7 +219,7 @@ public:
     }
 
     DEBUG("LoopSimplify", {
-      dumpInstr(loop);
+      dumpInstr(loop, ctx);
       dbgs() << "yield analysis results:\n";
       for (auto [i, val] : Range{yieldVals}.enumerate()) {
         dbgs() << "yield val #" << i << ": ";

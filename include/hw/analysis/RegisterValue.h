@@ -680,11 +680,12 @@ struct RegisterRegions : public RegisterFrags<RegisterRegionsFragment> {
   explicit RegisterRegions(uint32_t len) : RegisterFrags({{{}, 0, len}}) {}
 };
 
+
 struct RegisterPartitionFragment {
   uint32_t dstAddr;
   uint32_t len;
 };
-
+// for finding atomically accessed regions.
 struct RegisterPartitions : public RegisterFrags<RegisterPartitionFragment, 4> {
   using Fragment = RegisterPartitionFragment;
 

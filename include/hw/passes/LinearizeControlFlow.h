@@ -282,7 +282,7 @@ private:
           instCombine.run(instr.def(1)->as<BlockRef>());
         // we might be able to simplify loops now that we were unable to before.
         instr = loopSimplify.runOnLoop(instr);
-        if (!instr)
+        if (!instr /*|| !instr.isOpc(OP_FOR)*/)
           continue;
         assert(instr.isOpc(OP_FOR));
       }

@@ -38,8 +38,9 @@ int main(int argc, char **argv) {
   std::cout << "\n\n\n";
 
   PassPipeline pipeline{ctx};
-  pipeline.printAfterAll = true;
+  pipeline.printAfterAll = false;
   pipeline.checkAfterAll = true;
+  pipeline.dumpAfterAll = false;
   debugType = 1;
   pipeline.runOptPipeline();
   pipeline.runLoweringPipeline();
