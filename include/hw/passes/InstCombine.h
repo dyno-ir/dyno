@@ -556,6 +556,7 @@ private:
           return true;
         }
         [[fallthrough]];
+      case *OP_XOR:
       case *OP_ADD:
         if (constants[0].valueEquals(0)) {
           change |= 1;

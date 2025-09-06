@@ -254,6 +254,7 @@ public:
     runPass(agressiveDCE);
 
     runPass(flipFlopInference);
+    runPass(triggerDedupe);
     runPass(cse, true);
     runPass(orderInstrs);
     runPass(instCombine);

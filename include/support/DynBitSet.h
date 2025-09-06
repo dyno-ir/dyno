@@ -161,7 +161,9 @@ public:
       return old;
     }
 
-    reference operator*() { return reference{*word, symb, SymbolBits}; }
+    reference operator*() {
+      return reference{*word, symb * SymbolBits, SymbolBits};
+    }
     reference operator[](ssize_t i) { return *((*this) + i); }
 
     friend difference_type operator-=(iterator lhs, iterator rhs) {

@@ -185,6 +185,27 @@ public:
       str << ")";
       break;
     }
+    case AIG_FAT_NODE.type: {
+      FatAIGNodeRef node = ref.as<FatAIGNodeRef>();
+      auto printOperand = [&](AIGNodeTRef node) {
+        if (node.getObjID() == ObjID::invalid()) {
+          str << "null";
+          return;
+        }
+        if (node.invert())
+          str << "!";
+        str << "$" << node.idx();
+      };
+
+      str << "fat_node(";
+      printOperand(node.as<AIGNodeTRef>());
+      str << ", ";
+      printOperand(node->node.op[0]);
+      str << ", ";
+      printOperand(node->node.op[1]);
+      str << ")";
+      break;
+    }
     default:
       return false;
     }

@@ -212,7 +212,8 @@ public:
     return os;
   }
 
-  std::string toString(int base = 16, bool unsized = false) {
+  __attribute__((used)) std::string toString(int base = 16,
+                                             bool unsized = false) {
     std::stringstream str;
     toStream(str, base, unsized);
     return str.str();
@@ -341,7 +342,9 @@ public:
         return false;
     }
     auto bits = self().getRawNumBits();
-    uint32_t mask = (bits % 32 == 0) ? ~0U : bit_mask_ones<uint32_t>(bits % 32);
+    uint32_t mask = (bits % 32 == 0 || self().isExtended())
+                        ? ~0U
+                        : bit_mask_ones<uint32_t>(bits % 32);
 
     auto lastWord = self().getWords().back();
     if ((lastWord & repeatBits(0b10U, 2)) != (repeatBits(0b10U, 2) & mask))
