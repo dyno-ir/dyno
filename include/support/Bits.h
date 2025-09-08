@@ -1,4 +1,5 @@
 #pragma once
+#include "support/ErrorRecovery.h"
 #include <bit>
 #include <cassert>
 #include <climits>
@@ -60,6 +61,15 @@ template <typename T> constexpr T round_up_div(T dividend, T divisor) {
 }
 
 template <typename T>
+constexpr T checked_mul(T multiplicand, T multiplier,
+                        const char *message = "checked multiply overflow") {
+  T out;
+  if (__builtin_mul_overflow(multiplicand, multiplier, &out)) [[unlikely]]
+    report_fatal_error(message);
+  return out;
+}
+
+template <typename T>
 static constexpr unsigned repeatBits(T x, unsigned xBits) {
   unsigned fact = xBits;
   assert(!(x & bit_mask_zeros<unsigned>(xBits)));
@@ -95,6 +105,10 @@ static constexpr uint32_t hash_combine(uint32_t a, uint32_t b) {
   return a ^ (b + 0x9e3779b9 + (a << 6) + (a >> 2));
 }
 
+static constexpr uint64_t hash_combine(uint64_t a, uint64_t b) {
+  return a ^ (b + 0x9e3779b97f4a7c15ull + (a << 6) + (a >> 2));
+}
+
 static constexpr uint32_t hash_u32(uint32_t a) {
   a = (a ^ 61) ^ (a >> 16);
   a = a + (a << 3);
@@ -102,6 +116,12 @@ static constexpr uint32_t hash_u32(uint32_t a) {
   a = a * 0x27d4eb2d;
   a = a ^ (a >> 15);
   return a;
+}
+
+static constexpr uint64_t hash_u64(uint64_t a) {
+  a ^= a >> 33;
+  a *= 0xff51afd7ed558ccdull;
+  return a ^ (a >> 32);
 }
 
 // split integer into regions of N bits, return 1000... for each region if equal

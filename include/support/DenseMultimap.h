@@ -23,8 +23,9 @@ class DenseMultimapBase
                           DenseMultimapIterator<Bucket, K, V>> {
   using Base =
       DenseMapBase<Derived, K, V, Bucket, DenseMultimapIterator<Bucket, K, V>>;
-  using iterator = Base::iterator;
   using size_type = Base::size_type;
+public:
+  using iterator = Base::iterator;
 
 protected:
   using Base::cap;

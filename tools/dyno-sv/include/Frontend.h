@@ -746,8 +746,19 @@ public:
         break;
       }
 
-      default:
+      case slang::ast::SymbolKind::WildcardImport: {
+        break;
+      }
+
+      case slang::ast::SymbolKind::Genvar: {
+        break;
+      }
+
+      default: {
+        std::cerr << "unsupported slang symbol: " << member.kind << "\n";
+        print.error(member.location);
         abort();
+      }
       }
     }
   }
@@ -1010,6 +1021,7 @@ public:
 
       DialectOpcode opc;
       switch (asCase.condition) {
+      case slang::ast::CaseStatementCondition::Inside:
       case slang::ast::CaseStatementCondition::Normal:
         opc = OP_CASE;
         break;
@@ -1019,9 +1031,8 @@ public:
       case slang::ast::CaseStatementCondition::WildcardJustZ:
         opc = HW_CASE_Z;
         break;
-      case slang::ast::CaseStatementCondition::Inside:
-        // what is this?
-        print.error(asCase.sourceRange);
+        //// what is this?
+        //print.error(asCase.sourceRange);
         break;
       }
 
@@ -1862,13 +1873,22 @@ public:
       return std::make_unique<RValue>(constant, expr.type);
     }
 
+    case slang::ast::ExpressionKind::Inside: {
+      auto &asInside = expr.as<slang::ast::InsideExpression>();
+      auto val = handle_expr(asInside.left());
+      SmallVec<HWValue, 4> vals;
+      for (auto range : asInside.rangeList()) {
+        dbgs() << range->kind << "\n";
+      }
+      break;
+    }
+
     case slang::ast::ExpressionKind::ArbitrarySymbol:
     case slang::ast::ExpressionKind::Invalid:
     case slang::ast::ExpressionKind::RealLiteral:
     case slang::ast::ExpressionKind::TimeLiteral:
     case slang::ast::ExpressionKind::NullLiteral:
     case slang::ast::ExpressionKind::UnboundedLiteral:
-    case slang::ast::ExpressionKind::Inside:
     case slang::ast::ExpressionKind::Streaming:
     case slang::ast::ExpressionKind::DataType:
     case slang::ast::ExpressionKind::TypeReference:

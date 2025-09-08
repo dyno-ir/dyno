@@ -128,7 +128,7 @@ public:
   template <std::invocable<Bucket *, size_type> T>
   bool growIfOversized(T &&reinsertFunc) {
     auto max = cap * Bucket::entriesPerBucket;
-    auto pct = (max / 2) + (max / 4) + (max / 8) + (max / 16) + (max / 32);
+    auto pct = (max / 2) + (max / 4) + (max / 8) + (max / 16);
     if (sz >= pct) {
       grow(reinsertFunc);
       return true;

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Bits.h"
+#include "support/ArrayRef.h"
 #include <bit>
 #include <cassert>
 #include <cstddef>
@@ -81,7 +82,7 @@ public:
   DynSymbSet() = default;
   DynSymbSet(size_t resizeTo) : DynSymbSet() { this->resize(resizeTo); }
 
-  auto size() { return numSymbs; }
+  auto size() const { return numSymbs; }
   auto at(size_t i) {
     assert(i < numSymbs && "oob");
     return at_unchecked(i);
@@ -118,6 +119,31 @@ public:
   void pop_back() {
     assert(size() != 0);
     resize(size() - 1);
+  }
+
+  bool operator==(const DynSymbSet &other) const {
+    if (numSymbs != other.numSymbs)
+      return false;
+
+    size_t min = std::min(this->storage.size(), other.storage.size());
+    for (size_t i = 0; i < min; i++) {
+      if (this->raw()[i] != other.raw()[i])
+        return false;
+    }
+
+    for (size_t i = min; i < this->storage.size(); i++)
+      if (this->raw()[i] != DefaultWord)
+        return false;
+
+    for (size_t i = min; i < other.storage.size(); i++)
+      if (other.raw()[i] != DefaultWord)
+        return false;
+
+    return true;
+  }
+
+  ArrayRef<typename Container::value_type> raw() const {
+    return ArrayRef{storage};
   }
 
   class iterator {
@@ -178,6 +204,21 @@ public:
   iterator end() {
     return iterator{storage.begin() + (numSymbs / Base::WordSymbs),
                     (numSymbs % Base::WordSymbs)};
+  }
+};
+
+template <typename Container, size_t SymbolBits,
+          Container::value_type DefaultWord>
+struct std::hash<DynSymbSet<Container, SymbolBits, DefaultWord>> {
+  size_t
+  operator()(const DynSymbSet<Container, SymbolBits, DefaultWord> &set) const {
+    std::hash<typename Container::value_type> hashElem;
+    size_t acc = 0;
+    for (auto elem : set.raw()) {
+      acc = hash_combine(acc, hashElem(elem));
+    }
+    acc = hash_combine(acc, set.size());
+    return acc;
   }
 };
 

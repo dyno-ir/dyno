@@ -8,6 +8,7 @@
 #include "hw/Wire.h"
 #include "hw/analysis/BitAliasAnalysis.h"
 #include "op/IDs.h"
+#include "support/Bits.h"
 #include "support/Debug.h"
 #include "support/DenseMapInfo.h"
 #include "support/DenseMultimap.h"
@@ -16,7 +17,7 @@
 #include "support/SmallVec.h"
 #include <bit>
 #include <cstdint>
-#include <unordered_map>
+#include <support/TwoLevelSet.h>
 namespace dyno {
 
 struct BoolExprLiteral {
@@ -638,85 +639,6 @@ struct SmallBoolExprCNF {
   }
   void makeUnsat() { literals.clear(); }
 
-  std::optional<SmallBoolExprCNF> negated(uint numLiterals) {
-    if (isTrue()) {
-      SmallBoolExprCNF rv;
-      rv.makeUnsat();
-      return rv;
-    }
-    if (isUnsat()) {
-      SmallBoolExprCNF rv;
-      rv.makeTrue();
-      return rv;
-    }
-
-    uint64_t count = 1;
-    SmallVec<ClauseRef, 8> clauseVec;
-    for (auto clause : clauses()) {
-      // count *= clause.len;
-      dbgs() << count << " * " << clause.len << "\n";
-      auto overflow = __builtin_umull_overflow(count, clause.len, &count);
-      if (overflow) {
-        count = ~0ULL;
-        break;
-      }
-      assert(clause.len);
-      clauseVec.emplace_back(clause);
-    }
-    dbgs() << count << "\n";
-    // fixme: SmallBoolExprCNF needs to be replaced with BDD or something...
-    if (count > 2000000) {
-      // auto rv = negated2(numLiterals);
-      // rv->simplify(numLiterals);
-      // return rv;
-      return std::nullopt;
-    }
-
-    SmallBoolExprCNF exprOut;
-    for (uint32_t i = 0; i < count; i++) {
-      uint32_t n = i;
-
-      auto pos = exprOut.literals.size();
-
-      for (auto clause : clauseVec) {
-        uint32_t rem = n % clause.len;
-        n /= clause.len;
-        auto lit = clause[rem];
-        lit.clauseBegin = false;
-        lit.inverse = !lit.inverse;
-        exprOut.literals.emplace_back(lit);
-      }
-      exprOut.literals[pos].clauseBegin = true;
-
-      if (exprOut.literals.size() > 1024) {
-        auto sat = exprOut.simplify(numLiterals);
-        if (sat.has_value() && sat.value() == true)
-          exprOut.literals.clear();
-        if (sat.has_value() && sat.value() == false) {
-          return exprOut;
-        }
-      }
-    }
-
-    auto rv2 = negated2(numLiterals);
-
-    rv2->simplify(numLiterals);
-    exprOut.simplify(numLiterals);
-
-    dbgs() << "\n";
-    this->dump3(numLiterals);
-    dbgs() << "\n";
-
-    dbgs() << "this:    ";
-    this->dump();
-    dbgs() << "rv2:     ";
-    rv2->dump();
-    dbgs() << "exprOut: ";
-    exprOut.dump();
-
-    assert(rv2->literals.size() == exprOut.literals.size());
-    return exprOut;
-  }
 
   std::optional<SmallBoolExprCNF> negated2(uint numLiterals) {
     if (isTrue()) {
@@ -735,12 +657,8 @@ struct SmallBoolExprCNF {
       clauseVec.emplace_back(clause);
     }
 
-    this->dump3(numLiterals);
-    dbgs() << this->literals.size() << "\n";
-    if (this->literals.size() == 310)
-      dbgs() << "here\n";
-
-    SmallBoolExprCNF exprOut;
+    //dbgs() << "uninverted: ";
+    // this->dump(numLiterals);
 
     enum {
       UNINVERSED,
@@ -748,7 +666,8 @@ struct SmallBoolExprCNF {
       UNDEFINED = 3,
     };
 
-    DynSymbSet<SmallVec<uint64_t, 1>, 2, ~0UL> assignments;
+    using SymbSet = DynSymbSet<SmallVec<uint64_t, 2>, 2, ~0UL>;
+    SymbSet assignments;
     assignments.resize(numLiterals);
 
     struct Frame {
@@ -759,20 +678,95 @@ struct SmallBoolExprCNF {
     stack.reserve(clauseVec.size());
     stack.emplace_back();
 
+    // double lastProgress = 0;
+    // auto reportProgress = [&]() {
+    //   double scale = 1.0;
+    //   double progress = 0;
+    //   uint i = 0;
+    //   while (scale > 0.00001 && i < stack.size() && i < clauseVec.size()) {
+    //     if (stack[i].idx != 0)
+    //       progress +=
+    //           scale * ((stack[i].idx - 1) / double(clauseVec[i].size()));
+    //     scale *= 1. / double(clauseVec[i].size());
+    //     i++;
+    //   }
+
+    //   if (progress > lastProgress + 0.00001) {
+    //     dbgs() << "progress " << progress * 100 << "%\n";
+    //     lastProgress = progress;
+    //   }
+    // };
+
+    auto isSuperset = [&](const SymbSet &subset, const SymbSet &superset) {
+      constexpr uint64_t mask = repeatBits<uint64_t>(0b10, 2);
+      for (auto [sub, super] : Range{subset.raw()}.zip(superset.raw())) {
+
+        auto defMaskSub = sub & mask;
+        defMaskSub |= defMaskSub >> 1;
+        defMaskSub = ~defMaskSub;
+
+        auto defMaskSuper = super & mask;
+        defMaskSuper |= defMaskSuper >> 1;
+        defMaskSuper = ~defMaskSuper;
+
+        if ((defMaskSub & defMaskSuper) != defMaskSub)
+          return false;
+        if (((sub ^ super) & defMaskSub))
+          return false;
+      }
+
+      return true;
+    };
+
+    TwoLevelSet<SymbSet> clauseSet;
     while (!stack.empty()) {
+      // reportProgress();
+
       auto &frame = stack.back();
+
+      // stop if the current clause already exists (we can only generate
+      // supersets then).
+      if (frame.idx == 0 && frame.literal) {
+        if (clauseSet.find(assignments) != clauseSet.end()) {
+          if (frame.literal)
+            assignments[*frame.literal] = UNDEFINED;
+          stack.pop_back();
+          continue;
+        }
+
+        bool superset = Range{clauseSet}.any(
+            [&](auto pair) { return isSuperset(pair.second, assignments); });
+
+        if (superset) {
+          if (frame.literal)
+            assignments[*frame.literal] = UNDEFINED;
+          stack.pop_back();
+          continue;
+        }
+      }
 
       // commit full clauses
       if (stack.size() == clauseVec.size() + 1) {
-        auto pos = exprOut.literals.size();
+
+        for (auto it = clauseSet.begin(); it != clauseSet.end();) {
+          if (isSuperset(assignments, it.val()))
+            it = clauseSet.erase(it);
+          else
+            ++it;
+        }
+
+        clauseSet.insert(assignments);
+
+        SmallBoolExprCNF exprOut;
         for (auto [litId, assign] : Range{assignments}.enumerate()) {
           if (assign == UNDEFINED)
             continue;
           exprOut.literals.emplace_back(
               BoolExprLiteral{uint16_t(litId), assign != INVERSED, 0});
         }
-        assert(exprOut.literals.size() != pos);
-        exprOut.literals[pos].clauseBegin = true;
+        exprOut.literals[0].clauseBegin = true;
+        // exprOut.dump();
+
         if (frame.literal)
           assignments[*frame.literal] = UNDEFINED;
         stack.pop_back();
@@ -819,9 +813,27 @@ struct SmallBoolExprCNF {
       // next scenario
     }
 
-    if (exprOut.literals.size() == 0)
+    SmallBoolExprCNF exprOut;
+    for (auto [_, v] : clauseSet) {
+      auto pos = exprOut.literals.size();
+      for (auto [litId, assign] : Range{v}.enumerate()) {
+        if (assign == UNDEFINED)
+          continue;
+        exprOut.literals.emplace_back(
+            BoolExprLiteral{uint16_t(litId), assign != INVERSED, 0});
+      }
+      assert(exprOut.literals.size() != pos);
+      exprOut.literals[pos].clauseBegin = true;
+    }
+
+    if (exprOut.literals. size() == 0)
       exprOut.makeTrue();
     exprOut.simplify(numLiterals);
+
+    // dbgs() << "raw: ";
+    // exprOut.dump();
+    // dbgs() << "simple: ";
+    // exprOut.dump();
 
     return exprOut;
   }
@@ -1235,13 +1247,16 @@ public:
     tree->entries = std::move(newEntries);
   }
 
-  void pruneDontCareOutputs(HWContext &ctx, MuxTree *tree) {
+  bool pruneDontCareOutputs(HWContext &ctx, MuxTree *tree) {
     SmallVec<uint32_t, 4> dcEntries;
     for (auto [i, entry] : Range{tree->entries}.enumerate()) {
       auto ref = ctx.resolveObj(entry.output);
       if (ref.is<ConstantRef>() && ref.as<ConstantRef>().allBitsUndef())
         dcEntries.emplace_back(i);
     }
+
+    if (dcEntries.empty())
+      return false;
 
     for (auto idx : dcEntries) {
       auto &entry = tree->entries[idx];
@@ -1264,6 +1279,8 @@ public:
       tree->entries[outIdx++] = tree->entries[i];
     }
     tree->entries.downsize(outIdx);
+
+    return true;
   }
 
   void printMuxTree(HWContext &ctx, MuxTree *tree) {

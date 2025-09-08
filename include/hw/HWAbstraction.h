@@ -759,6 +759,11 @@ public:
       return ctx.constBuild().val(value.as<ConstantRef>()).repeat(count).get();
     }
 
+    if (count == 1)
+      return value;
+    if (count == 0)
+      return ConstantRef::zeroBitZero();
+
     auto rv = buildInstr(HW_REPEAT, true, value).defW();
 
     if (value.getNumBits()) {
