@@ -347,7 +347,13 @@ match {
 }
 replace $out -> $in
 
-
+// move constants to RHS
+match {
+  $opc{OP_ICMP_EQ, OP_ICMP_NE} $out, $lhs:CORE_CONSTANT, $rhs:HW_WIRE
+}
+replace {
+  $opc $out, $rhs, $lhs
+}
 
 // NOT Opt
 match {
@@ -446,6 +452,7 @@ replace {
   OP_NOT $out, $cond
 }
 
+/*
 // these might hinder MUX tree analysis, maybe support output patterns in mux tree analysis?
 match {
   HW_MUX $out, $cond, #'1, $rhs:HW_WIRE
@@ -480,7 +487,7 @@ replace {
   HW_REPEAT $temp:wire_like2($out), $conv_inv
   OP_AND $out, $temp, $lhs
 }
-
+*/
 
 match {
   OP_TRUNC $out, $in:CORE_CONSTANT

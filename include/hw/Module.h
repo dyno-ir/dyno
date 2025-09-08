@@ -128,10 +128,13 @@ public:
 
   ProcessIRef getSingleProcess() {
     auto it = block().end();
-    assert(it != block().begin());
+    if (it == block().begin())
+      return nullref;
     auto proc = std::prev(it);
-    assert(proc->is<ProcessIRef>());
-    assert(proc == block().begin() || !std::prev(proc)->is<ProcessIRef>());
+    if (!proc->is<ProcessIRef>())
+      return nullref;
+    if (proc != block().begin() && std::prev(proc)->is<ProcessIRef>())
+      return nullref;
     return proc->as<ProcessIRef>();
   }
 

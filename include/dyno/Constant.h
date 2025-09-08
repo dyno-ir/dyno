@@ -825,6 +825,11 @@ public:
   }
 
   template <typename T0>
+  constexpr static uint32_t trailingNonUnk(const T0 &val) {
+    return trailingZeros(unknownMask(val));
+  }
+
+  template <typename T0>
   constexpr static uint32_t countBitsExact(const T0 &val, bool bit) {
     uint32_t cnt = 0;
     for (uint i = 0; i < val.getExtNumWords(); i++) {

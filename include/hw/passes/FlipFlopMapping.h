@@ -120,8 +120,12 @@ class FlipFlopMappingPass {
     auto bits = *instr.q()->numBits;
     AbstractFF abstr;
     auto mod = instr.parentMod(ctx);
-    //build.setInsertPoint(mod.regs_end());
-    build.setInsertPoint(mod.getSingleProcess().block().end());
+    auto proc = mod.getSingleProcess();
+    if (!proc) {
+      build.setInsertPoint(mod.block().end());
+      proc = build.buildProcess();
+    }
+    build.setInsertPoint(proc.block().end());
     FFWires wires;
     WireRef dWire = build.buildLoad(instr.d());
     SmallVec<HWValue, 32> qWires;

@@ -22,6 +22,7 @@
 #include "hw/analysis/RegisterValue.h"
 #include "op/IDs.h"
 #include "op/StructuredControlFlow.h"
+#include "support/Bits.h"
 #include "support/Debug.h"
 #include "support/DynBitSet.h"
 #include "support/ErrorRecovery.h"
@@ -896,21 +897,62 @@ private:
       return false;
     }
 
+    bool change = false;
+
+    auto checkedMul = [](auto lhs, auto rhs) {
+      return checked_mul(lhs, rhs, "address does not fit into 32 bits");
+    };
+
     uint32_t baseOffs = instr.getBase();
-    SmallVec<AddressGenTermOperand, 4> terms;
+    SmallVec<AddressGenTerm, 4> terms;
     for (auto term : instr.terms()) {
       if (auto asConst = term.getIdx().template dyn_as<ConstantRef>()) {
-        uint32_t out;
-        if (__builtin_umul_overflow(asConst.getExactVal(), term.getFact(),
-                                    &out))
-          report_fatal_error("address does not fit into 32 bits");
-        baseOffs += out;
+        baseOffs += checkedMul(asConst.getExactVal(), term.getFact());
+        change = true;
         continue;
       }
+
+      auto asWire = term.getIdx().template as<WireRef>();
+      if (asWire.getDefI().isOpc(OP_MUL) &&
+          asWire.getDefI().getNumOthers() == 2 &&
+          asWire.getDefI().other(1)->template is<ConstantRef>()) {
+        auto mul = asWire.getDefI();
+        auto constant = mul.other(1)->template as<ConstantRef>();
+        auto max = term.getMax();
+        if (max)
+          *max = round_up_div(*max, constant.getExactVal());
+        terms.emplace_back(mul.other(0)->template as<HWValue>(),
+                           checkedMul(term.getFact(), constant.getExactVal()),
+                           max);
+        change = true;
+        continue;
+      }
+
+      auto known = knownBits.getKnownBits(asWire);
+      assert(known.getNumBits() == 32);
+      if (auto numKnown = BigInt::trailingNonUnk(known); numKnown > 0) {
+        assert(numKnown != 32 && "const prop should have handled this");
+        BigInt::resizeOp4S(known, known, numKnown);
+        assert(!known.getIs4S());
+
+        baseOffs += checkedMul(known.getExactVal(), term.getFact());
+
+        auto newIdx = build.buildZExt(
+            32, build.buildSplice(asWire, *asWire.getNumBits() - numKnown,
+                                  numKnown));
+        auto fact = 1u << numKnown;
+        auto max = term.getMax();
+        if (max)
+          *max = round_up_div(*max, fact);
+        terms.emplace_back(newIdx, checkedMul(term.getFact(), fact), max);
+        change = true;
+        continue;
+      }
+
       terms.emplace_back(term);
     }
 
-    if (terms.size() == instr.getNumTerms())
+    if (!change)
       return false;
 
     uint termDiff = instr.getNumTerms() - terms.size();

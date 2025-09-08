@@ -32,15 +32,6 @@ class MuxTreeOptimizationPass {
   HWContext &ctx;
   HWInstrBuilder build;
 
-  struct Selector {
-    HWValue signal;
-    SmallVec<InstrRef, 4> depending;
-  };
-
-  struct MuxTree2 {
-    SmallVec<Selector, 4> selector;
-  };
-
   void printMuxTree(MuxTree *tree) {
     DEBUG("MuxTreeOptimization", {
       dbgs() << "mux tree at: ";
@@ -367,6 +358,10 @@ private:
       switch (*instr.getDialectOpcode()) {
       case *HW_MUX:
         visitedMap[instr] = 1;
+        DEBUG("MuxTreeOpt", {
+          dbgs() << "inspecting mux tree at: ";
+          dumpInstr(instr, ctx);
+        })
         auto muxtreeOpt = analysis.analyzeMuxTree(
             instr, [&](InstrRef ref) { visitedMap[ref] = 1; });
         if (!muxtreeOpt) {
@@ -383,7 +378,9 @@ private:
         // printMuxTree(&muxtree);
         analysis.dedupeMuxTreeOutputs(&muxtree);
         printMuxTree(&muxtree);
-        analysis.pruneDontCareOutputs(ctx, &muxtree);
+        auto pruned = analysis.pruneDontCareOutputs(ctx, &muxtree);
+        //if (!pruned)
+        //  continue;
         printMuxTree(&muxtree);
         auto wire = lowerMuxTreeSimple(&muxtree);
         auto oldWire = instr.def(0)->as<WireRef>();
