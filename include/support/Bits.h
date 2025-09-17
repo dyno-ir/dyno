@@ -69,6 +69,12 @@ constexpr T checked_mul(T multiplicand, T multiplier,
   return out;
 }
 
+template <typename T> constexpr T ceil_to_pow2(T x) {
+  if (x <= 1)
+    return 1;
+  return T(1) << (std::bit_width(x - 1));
+}
+
 template <typename T>
 static constexpr unsigned repeatBits(T x, unsigned xBits) {
   unsigned fact = xBits;
@@ -105,7 +111,7 @@ static constexpr uint32_t hash_combine(uint32_t a, uint32_t b) {
   return a ^ (b + 0x9e3779b9 + (a << 6) + (a >> 2));
 }
 
-static constexpr uint64_t hash_combine(uint64_t a, uint64_t b) {
+static constexpr uint64_t hash_combine64(uint64_t a, uint64_t b) {
   return a ^ (b + 0x9e3779b97f4a7c15ull + (a << 6) + (a >> 2));
 }
 

@@ -34,6 +34,7 @@ public:
     };
     Mode mode = IMMEDIATE;
     bool lowerAllDynamic = true;
+    bool dynamicToFullRegAccess = true;
   };
   Config config;
 
@@ -485,9 +486,17 @@ public:
               break;
 
             auto [boundAddr, boundLen] = asStore.getConstAccessRange();
+            uint32_t insertBase = 0;
+
+            if (config.dynamicToFullRegAccess) {
+              boundAddr = 0;
+              boundLen = len;
+              insertBase = asStore.getBase();
+            }
 
             auto val = state.get(build, boundAddr, boundLen, false);
-            val = build.buildInsert(val, asStore.value(), 0, asStore.terms());
+            val = build.buildInsert(val, asStore.value(), insertBase,
+                                    asStore.terms());
 
             state.overwrite(val, 0, boundAddr, boundLen, false, trigger);
             destroyList.emplace_back(asStore);
@@ -522,10 +531,18 @@ public:
               break;
 
             auto [boundAddr, boundLen] = asLoad.getConstAccessRange();
+            uint32_t spliceBase = 0;
+
+            if (config.dynamicToFullRegAccess) {
+              boundAddr = 0;
+              boundLen = len;
+              spliceBase = asLoad.getBase();
+            }
 
             build.setInsertPoint(ctx.getCFG()[asLoad]);
-            auto matVal = build.buildSplice(val.get(build, boundAddr, boundLen),
-                                            asLoad.getLen(), 0, asLoad.terms());
+            auto matVal =
+                build.buildSplice(val.get(build, boundAddr, boundLen),
+                                  asLoad.getLen(), spliceBase, asLoad.terms());
             assert(matVal.getNumBits() == asLoad.defW().getNumBits());
             asLoad.defW().replaceAllUsesWith(matVal);
             destroyList.emplace_back(asLoad);

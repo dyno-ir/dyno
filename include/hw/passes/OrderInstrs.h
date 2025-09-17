@@ -87,11 +87,11 @@ private:
         return;
       if (ctx.getCFG()[instr].blockRef() != block) {
         assert(!instr.isOpc(OP_UNYIELD));
-        dbgs() << "out of block:\n";
-        HWPrinter print{dbgs()};
-        print.printInstr(block.defI(), ctx);
-        dbgs() << "in question:\n";
-        print.printInstr(instr, ctx);
+        //dbgs() << "out of block:\n";
+        //HWPrinter print{dbgs()};
+        //print.printInstr(block.defI(), ctx);
+        //dbgs() << "in question:\n";
+        //print.printInstr(instr, ctx);
       }
 
       uses.emplace_back(instr);

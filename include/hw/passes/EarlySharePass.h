@@ -51,7 +51,7 @@ private:
     return true;
   }
 
-  bool tryMergeCommOps(ArrayRef<InstrRef> instrs) {
+  InstrRef tryMergeCommOps(ArrayRef<InstrRef> instrs) {
     auto maxOps = instrs[0].getNumOthers();
     auto maxBits = *instrs[0].def(0)->as<WireRef>().getNumBits();
     for (auto instr : Range{instrs}.drop_front()) {
@@ -103,34 +103,37 @@ private:
     ib.addRef(defW).other();
     ib.addRefs(range);
 
-    return true;
+    return ib.instr();
   }
 
-  bool tryMergeSplices(ArrayRef<InstrRef> instrs) {
-    auto base = instrs.front().as<SpliceIRef>();
+  template <typename T = SpliceIRef>
+  InstrRef tryMergeSpliceInsert(ArrayRef<InstrRef> instrs) {
+    auto base = instrs.front().as<T>();
     // todo: relax comparison. addressing does not have to be exactly equal,
-    // shared implentation just has to be beneficial.
+    // shared implementation just has to be beneficial.
     for (auto instr : instrs.drop_front()) {
-      auto splice = instr.as<SpliceIRef>();
-      if (splice.in()->as<HWValue>() != base.in()->as<HWValue>())
-        return false;
+      auto splice = instr.as<T>();
+      if (splice.in()->template as<HWValue>() !=
+          base.in()->template as<HWValue>())
+        return nullref;
       if (splice.getNumTerms() != base.getNumTerms())
-        return false;
+        return nullref;
       if (splice.getBase() != base.getBase())
-        return false;
+        return nullref;
       if (splice.getLen() != base.getLen())
-        return false;
+        return nullref;
 
       for (auto [a, b] : base.terms().zip(splice.terms())) {
         if (a.getFact() != b.getFact())
-          return false;
+          return nullref;
         if (a.getMax() != b.getMax())
-          return false;
+          return nullref;
       }
     }
 
     auto numTerms = base.getNumTerms();
-    auto resultBits = base.getLen();
+    auto resultBits =
+        std::is_same_v<T, SpliceIRef> ? base.getLen() : base.getMemoryLen();
 
     auto mod = HWInstrRef{instrs[0]}.parentMod(ctx);
 
@@ -149,12 +152,20 @@ private:
     build.buildStore(inputReg,
                      ctx.constBuild().undef(base.getMemoryLen()).get());
 
+    RegisterRef valueReg;
+    if constexpr (requires { base.val(); }) {
+      valueReg = regBuild.buildRegister(base.getLen());
+    }
+
     RegisterRef resultReg = regBuild.buildRegister(resultBits);
 
     for (auto instr : instrs) {
-      auto splice = instr.as<SpliceIRef>();
+      auto splice = instr.as<T>();
       build.setInsertPoint(instr);
-      build.buildStore(inputReg, splice.in()->as<HWValue>());
+      build.buildStore(inputReg, splice.in()->template as<HWValue>());
+      if constexpr (requires { base.val(); }) {
+        build.buildStore(valueReg, splice.val()->template as<HWValue>());
+      }
       for (auto [i, term] : Range{splice.terms()}.enumerate()) {
         build.buildStore(regs[i], term.getIdx());
       }
@@ -167,27 +178,38 @@ private:
     build.setInsertPoint(proc.block().end());
     auto terms =
         base.terms().transform([&](size_t i, AddressGenTermOperand ref) {
+          auto point = build.insert;
           build.setInsertPoint(proc.block().begin());
-          return AddressGenTerm{build.buildLoad(regs[i]), ref.getFact(),
-                                ref.getMax()};
+          auto rv = AddressGenTerm{build.buildLoad(regs[i]), ref.getFact(),
+                                   ref.getMax()};
+          build.setInsertPoint(proc.block().end());
+          return rv;
         });
+    HWValue val;
+    if constexpr (requires { base.val(); }) {
+      val = build.buildInsert(build.buildLoad(inputReg),
+                              build.buildLoad(valueReg), base.getBase(), terms);
+    } else {
+      val = build.buildSplice(build.buildLoad(inputReg), base.getLen(),
+                              base.getBase(), terms);
+    }
 
-    auto val = build.buildSplice(build.buildLoad(inputReg), base.getLen(),
-                                 base.getBase(), terms);
     build.setInsertPoint(proc.block().end());
     build.buildStore(resultReg, val);
-    return true;
+    return val.as<WireRef>().getDefI();
   }
 
-  bool tryMerge(ArrayRef<InstrRef> instrs) {
+  InstrRef tryMerge(ArrayRef<InstrRef> instrs) {
     if (config.opToShare.is(OP_ADD, OP_MUL))
       return tryMergeCommOps(instrs);
     if (config.opToShare.is(HW_SPLICE))
-      return tryMergeSplices(instrs);
+      return tryMergeSpliceInsert<SpliceIRef>(instrs);
+    if (config.opToShare.is(HW_INSERT))
+      return tryMergeSpliceInsert<InsertIRef>(instrs);
     dyno_unreachable("merging unimplemented");
   }
 
-  void findMergeCandidates(SmallVecImpl<BlockResult> &results) {
+  auto findMergeCandidates(SmallVecImpl<BlockResult> &results) {
     // iterate, incrementing smallest one every iter.
     // if tryMerge succeeds, replace all with nullref and increment all.
 
@@ -195,6 +217,8 @@ private:
 
     SmallVec<uint32_t, 16> mergeCandidates;
     SmallVec<uint32_t, 4> mergeCandidatesStartIdxs;
+
+    SmallVec<InstrRef, 4> mergedInstrs;
 
     auto hasMore = [&](size_t i) -> bool {
       return idxs[i] < results[i].candidates.size();
@@ -226,13 +250,14 @@ private:
       if (curInstrs.size() < 2)
         break;
 
-      if (tryMerge(curInstrs)) {
+      if (auto mergedInstr = tryMerge(curInstrs)) {
         for (size_t i = 0; i < results.size(); ++i) {
           if (!hasMore(i))
             continue;
           results[i].candidates[idxs[i]] = nullref;
           ++idxs[i];
         }
+        mergedInstrs.emplace_back(mergedInstr);
       } else {
         ++idxs[smallestIdx];
       }
@@ -247,6 +272,8 @@ private:
       }
       res.candidates.downsize(idx);
     }
+
+    return mergedInstrs;
   }
 
   void handleMultiway(BlockResult &curRes, ArrayRef<BlockRef> blocks) {
@@ -258,7 +285,14 @@ private:
       res.sort();
     }
 
-    findMergeCandidates(results);
+    auto mergedInstrs = findMergeCandidates(results);
+
+    for (auto res : results) {
+      curRes.candidates.push_back_range(Range{res.candidates});
+    }
+
+    // also make sucessfully merged instrs candidates again.
+    curRes.candidates.push_back_range(Range{mergedInstrs});
   }
 
   BlockResult runOnBlock(BlockRef block) {

@@ -665,8 +665,7 @@ template <> struct InterfaceTraits<OpcodeInfo> {
   }
 };
 
-template <typename Base, DialectOpcode... Opc>
-class OpcodeInstrRef : public Base {
+template <typename Base, auto... Opc> class OpcodeInstrRef : public Base {
 public:
   using Base::Base;
   static bool is_impl(FatObjRef<Instr> ref) {
