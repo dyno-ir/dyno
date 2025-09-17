@@ -151,8 +151,8 @@ protected:
     (*this) = o;
   };
   SmallVecImpl &operator=(const SmallVecImpl &o) {
-    this->resize(o.size());
-    std::copy(o.begin(), o.end(), this->begin());
+    this->resize_no_init(o.size());
+    std::uninitialized_copy(o.begin(), o.end(), this->begin());
     return *this;
   };
 
@@ -181,8 +181,8 @@ protected:
       sz = o.sz;
     } else {
       destroyElts();
-      resize(o.size());
-      std::move(o.begin(), o.end(), this->begin());
+      resize_no_init(o.size());
+      std::uninitialized_move(o.begin(), o.end(), this->begin());
       sz = o.sz;
     }
 

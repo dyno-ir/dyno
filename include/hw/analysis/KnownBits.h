@@ -48,9 +48,12 @@ class KnownBitsAnalysis {
   SmallVec<Frame, 16> stack;
   KnownBitsVal retVal;
 
-  void pushNextOrReturn(Frame &frame, InstrRef instr) {
+  void pushNextOrReturn(Frame &frame, InstrRef instr, bool inv = false) {
+    auto n = instr.getNumOthers();
     if (frame.idx != instr.getNumOthers()) {
-      stack.emplace_back(instr.other(frame.idx++)->as<HWValue>(), 0);
+      auto idx = inv ? (n - frame.idx - 1) : frame.idx;
+      stack.emplace_back(instr.other(idx)->as<HWValue>(), 0);
+      frame.idx++;
     } else {
       retVal = stack.back().acc;
       assert(retVal.val.getNumBits() ==
@@ -112,7 +115,6 @@ public:
     getArithKnownBits(frame, instr, bigIntF<BigInt, BigInt>);                  \
     break;
         FOR_HW_SIMPLE_OPS(LAMBDA)
-        LAMBDA(HW_CONCAT, _, _, BigInt::concatOp4S)
 #undef LAMBDA
 #define LAMBDA(opc, pred)                                                      \
   case *opc:                                                                   \
@@ -120,6 +122,18 @@ public:
     break;
         FOR_OP_ALL_COMPARE_OPS(LAMBDA)
 #undef LAMBDA
+
+      case *HW_CONCAT: {
+        if (frame.idx == 0)
+          ;
+        else if (frame.idx == 1)
+          frame.acc = retVal;
+        else {
+          BigInt::concatOp4S(frame.acc.val, retVal.val, frame.acc.val);
+        }
+        pushNextOrReturn(frame, instr, true);
+        break;
+      }
 
       case *OP_NOT: {
         if (frame.idx == 0) {
@@ -212,15 +226,9 @@ public:
           frame.idx++;
           stack.emplace_back(asInsert.val()->as<HWValue>(), 0);
         } else {
-          auto highOffs = asInsert.getBase() + asInsert.getLen();
-          BigInt low, high;
-          BigInt::rangeSelectOp4S(low, frame.acc.val, 0, asInsert.getBase());
-          assert(frame.acc.val.getNumBits() >= highOffs);
-          BigInt::rangeSelectOp4S(high, frame.acc.val, highOffs,
-                                  frame.acc.val.getNumBits() - highOffs);
-          BigInt::concatOp4S(low, retVal.val, low);
-          BigInt::concatOp4S(retVal.val, high, low);
-          assert(retVal.val.getNumBits() == wire.getNumBits());
+          BigInt::insertOp4S(frame.acc.val, frame.acc.val, retVal.val,
+                             asInsert.getBase());
+          retVal = std::move(frame.acc);
           cache.insert(wire, retVal);
           stack.pop_back();
         }

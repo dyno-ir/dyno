@@ -56,13 +56,17 @@ class BitAliasAnalysis {
 
     switch (*instr.getDialectOpcode()) {
     case *HW_CONCAT: {
-      if (first)
-        break;
-      retVal.appendTop(frame.acc);
-      frame.acc = std::move(retVal);
-      frame.ref += 1;
-      change |= notRoot;
-      break;
+      if (!first) {
+        frame.acc.appendTop(retVal);
+        frame.ref += 1;
+        change |= notRoot;
+      }
+
+      // reverse order to avoid copying
+      return frame.ref == *instr.end()
+                 ? std::nullopt
+                 : std::make_optional(
+                       instr.other(instr.getNumOthers() - frame.ref.getNum()));
     }
 
     case *HW_SPLICE: {

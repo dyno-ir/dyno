@@ -798,6 +798,8 @@ struct CodeGen {
 
     ops[startIdx].scanForward.bodyLen = ops.size() - condIdx;
 
+
+
     return nextObj ? nextIdx : idx;
   }
 
@@ -931,6 +933,11 @@ struct CodeGen {
           incrOrUndef(max, 1);
           continue;
         }
+        if (op->is<MatchMacro>()) {
+          incrOrUndef(min, 1);
+          incrOrUndef(max, 1);
+          continue;
+        }
         if (auto anyorder = op->dyn_as<MatchAnyorder>()) {
           stack.emplace_back(anyorder->objects);
           continue;
@@ -1000,6 +1007,7 @@ struct CodeGen {
         auto *nextIdx =
             i == instr->operands.size() - 1 ? nullptr : instr->operands[i + 1];
         opIdx = checkPack(opIdx, endIdx, pack, nextIdx);
+        // todo: with resulting pack size, min operands and actual num operands check if match still possible
         if (nextIdx) {
           low++;
         }

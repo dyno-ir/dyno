@@ -215,9 +215,9 @@ struct std::hash<DynSymbSet<Container, SymbolBits, DefaultWord>> {
     std::hash<typename Container::value_type> hashElem;
     size_t acc = 0;
     for (auto elem : set.raw()) {
-      acc = hash_combine(acc, hashElem(elem));
+      acc = hash_combine64(acc, hashElem(elem));
     }
-    acc = hash_combine(acc, set.size());
+    acc = hash_combine64(acc, set.size());
     return acc;
   }
 };

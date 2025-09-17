@@ -2,6 +2,7 @@
 #include "support/Bits.h"
 #include "support/SmallVec.h"
 #include <cstddef>
+#include <exception>
 #include <memory>
 
 template <typename SizeT = uint32_t, SizeT slab_size = 8 * 4096>
@@ -132,3 +133,40 @@ public:
   size_type size() { return this->Base::size(); }
 };
 
+// slab allocator for mixed size objects. no longer supports fast indexing
+// anyways, so are slabs linked-list based.
+// template <typename size_type = uint32_t, size_type slab_size = 8 * 4096>
+// class MixedSizeSlabAllocator {
+//   constexpr static size_type payload_size = slab_size - sizeof(uintptr_t);
+//   struct Slab {
+//     uint8_t payload[payload_size];
+//     Slab *prev;
+//   };
+//   Slab *cur;
+//   size_type pos;
+
+//   void makeSlab() {
+//     auto *ptr = malloc(slab_size);
+//     if (!ptr) [[unlikely]]
+//       std::terminate();
+//     pos = 0;
+//     cur = ptr;
+//   }
+
+//   void allocate(size_type size, size_type align) {
+//     assert(align <= slab_size && "can't align larger than slab size");
+//     assert(size <= payload_size && "can't alloc larger than payload size");
+//     assert(std::popcount(align) == 1 && "non pow2 align");
+
+//     // align
+//     if (pos & (align - 1)) {
+//       pos &= ~(align - 1);
+//       pos += align;
+//     }
+
+//     if (pos + size > payload_size)
+//       makeSlab();
+//   }
+
+//   MixedSizeSlabAllocator() { makeSlab(); }
+// };

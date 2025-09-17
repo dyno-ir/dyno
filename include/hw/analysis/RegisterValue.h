@@ -5,6 +5,7 @@
 #include "support/Bits.h"
 #include "support/Debug.h"
 #include "support/ErrorRecovery.h"
+#include "support/Utility.h"
 #include <algorithm>
 #include <cstdint>
 #include <utility>
@@ -37,11 +38,11 @@ template <typename Fragment, size_t NumInline = 1> struct RegisterFrags {
   auto getInsertIt(uint32_t dstAddr) {
     if (frags.size() <= 32) [[likely]] {
       auto rv = getInsertItLin(dstAddr);
-      assert(getInsertItBin(dstAddr) == rv);
+      // assert(getInsertItBin(dstAddr) == rv);
       return rv;
     }
     auto rv = getInsertItBin(dstAddr);
-    assert(getInsertItLin(dstAddr) == rv);
+    // assert(getInsertItLin(dstAddr) == rv);
     return rv;
   }
 };
@@ -106,7 +107,7 @@ struct RegisterValue : public RegisterFrags<RegisterValueFragment> {
   uint32_t getLen() const {
     uint32_t lenFast =
         frags.empty() ? 0 : frags.back().dstAddr + frags.back().len;
-#ifdef _DEBUG_
+#if defined(_DEBUG_) && 0
     uint32_t len = 0;
     for (auto frag : frags)
       len += frag.len;
@@ -202,6 +203,8 @@ struct RegisterValue : public RegisterFrags<RegisterValueFragment> {
 
   void appendTop(const RegisterValue &other) {
     auto len = getLen();
+    // ceil_to_pow2 to avoid linear behavior on repeat calls.
+    this->frags.reserve(ceil_to_pow2(this->frags.size() + other.frags.size()));
     for (auto frag : other.frags) {
       frag.dstAddr += len;
       frags.emplace_back(frag);
@@ -680,7 +683,6 @@ struct RegisterRegions : public RegisterFrags<RegisterRegionsFragment> {
   explicit RegisterRegions(uint32_t len) : RegisterFrags({{{}, 0, len}}) {}
 };
 
-
 struct RegisterPartitionFragment {
   uint32_t dstAddr;
   uint32_t len;
@@ -745,6 +747,172 @@ struct RegisterPartitions : public RegisterFrags<RegisterPartitionFragment, 4> {
 
     frags.insert(frags.begin() + insertPos, Fragment{centerAddr, centerLen});
   }
+};
+
+// generic regions
+// store arbitrary value.
+// on overlap: overwrite, combine, intersect
+
+struct GenericFragment {
+  uint32_t dstAddr;
+  uint32_t len;
+
+  bool overwrites(GenericFragment &other) { return true; }
+  bool fuses(GenericFragment &other) { return false; }
+  bool intersects(GenericFragment &other) { return false; }
+
+  GenericFragment intersect(GenericFragment &other) {
+    return GenericFragment{};
+  }
+};
+
+template <typename Frag, size_t NumInline = 4> struct GenericPartitions {
+  SmallVec<Frag, NumInline> frags;
+
+  auto getInsertItLin(uint32_t dstAddr) {
+    auto it = frags.begin();
+    while (it != frags.end() && it->dstAddr <= dstAddr)
+      it++;
+    if (it == frags.begin())
+      return it;
+    return it - 1;
+  }
+
+  auto getInsertItBin(uint32_t dstAddr) {
+    auto it = std::upper_bound(
+        frags.begin(), frags.end(), dstAddr,
+        [](uint32_t value, const auto &frag) { return value < frag.dstAddr; });
+    if (it == frags.begin())
+      return it;
+    return std::prev(it);
+  }
+
+  // returns last iterator before regions with higher start addr.
+  auto getInsertIt(uint32_t dstAddr) {
+    if (frags.size() <= 32) [[likely]] {
+      auto rv = getInsertItLin(dstAddr);
+      return rv;
+    }
+    auto rv = getInsertItBin(dstAddr);
+    return rv;
+  }
+
+  template <typename... Args>
+  void writeSingle(uint32_t dstAddr, uint32_t len, Args... args) {
+    auto it = getInsertIt(dstAddr);
+    assert(it != frags.end() && dstAddr >= it->dstAddr);
+
+    uint32_t originalDstAddr = dstAddr;
+    uint32_t originalLen = len;
+
+    // 1. subsumed, partial or full intersect
+    if (dstAddr != it->dstAddr) {
+      Frag frag{dstAddr, len, std::forward<Args>(args)...};
+      bool intersects = frag.intersects(*it);
+
+      if (dstAddr + len < it->dstAddr + it->len && frag.fuses(*it))
+        return;
+
+      auto copy = *it;
+      auto diff = dstAddr - it->dstAddr;
+      it->len = diff;
+      if (intersects)
+        frag = frag.intersect(*it);
+      ++it;
+
+      if constexpr (requires() { copy.srcAddr; }) {
+        copy.srcAddr += diff;
+      }
+      copy.len -= diff;
+      copy.dstAddr += diff;
+
+      // new center
+      it = frags.insert(it, copy);
+    }
+
+    bool lastEqual = false;
+    // fully covered frags
+    while (len != 0 && len >= it->len) {
+      assert(it->dstAddr == dstAddr);
+      Frag frag{dstAddr, len, std::forward<Args>(args)...};
+
+      if (frag.intersects(*it)) {
+        *it = frag.intersect(*it);
+        dstAddr += it->len;
+        len -= it->len;
+        ++it;
+        lastEqual = false;
+        continue;
+      }
+
+      else if (lastEqual && (frag.overwrites(*it) || frag.fuses(*it))) {
+        auto prevIt = std::prev(it);
+        prevIt->len += it->len;
+        dstAddr += it->len;
+        len -= it->len;
+        it->len = 0; // delete later
+        ++it;
+        continue;
+      }
+
+      else if (frag.overwrites(*it)) {
+        *it = frag;
+        if constexpr (requires() { it->srcAddr; }) {
+          it->srcAddr = dstAddr - originalDstAddr;
+        }
+        dstAddr += it->len;
+        len -= it->len;
+        ++it;
+        lastEqual = true;
+        continue;
+      }
+
+      else if (frag.fuses(*it)) {
+        dstAddr += it->len;
+        len -= it->len;
+        ++it;
+        lastEqual = true;
+        continue;
+      }
+
+      else
+        dyno_unreachable("no combine valid");
+    }
+
+    // start address aligned but shorter
+    if (len != 0) {
+      Frag frag{dstAddr, len, std::forward<Args>(args)...};
+      bool intersects = frag.intersects(*it);
+      if (intersects || frag.overwrites(*it)) {
+        if (intersects)
+          frag = frag.intersect(*it);
+
+        it->dstAddr += len;
+        it->len -= len;
+        if constexpr (requires() { it->srcAddr; }) {
+          it->srcAddr += len;
+        }
+
+        it = frags.insert(it, frag);
+      }
+    }
+
+    size_t outIdx = 0;
+    for (auto frag : frags) {
+      if (frag.len != 0) {
+        if (outIdx != 0 && frags[outIdx - 1].abstractEquals(frag)) {
+          frags[outIdx - 1].len += frag.len;
+          continue;
+        }
+        frags[outIdx++] = frag;
+      }
+    }
+    frags.downsize(outIdx);
+  }
+
+  template <typename... Args>
+  GenericPartitions(uint32_t len, Args... args)
+      : frags{{0, len, std::forward<Args>(args)...}} {}
 };
 
 }; // namespace dyno

@@ -18,7 +18,7 @@ public:
   DialectID dialect;
 
 protected:
-  explicit DialectType(unsigned combined)
+  explicit constexpr DialectType(unsigned combined)
       : type(combined & bit_mask_ones<TyID::num_t>()),
         dialect(combined >> bit_mask_sz<TyID::num_t>) {
     assert(combined <= bit_mask_ones<uint16_t>(bit_mask_sz<TyID::num_t> +

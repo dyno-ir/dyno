@@ -18,7 +18,7 @@ public:
   DialectID dialect;
 
 protected:
-  explicit DialectOpcode(uint32_t combined)
+  constexpr explicit DialectOpcode(uint32_t combined)
       : opc(combined & bit_mask_ones<OpcodeID::num_t>()),
         dialect(combined >> bit_mask_sz<OpcodeID::num_t>) {
     assert(combined <= bit_mask_ones<uint32_t>(bit_mask_sz<OpcodeID::num_t> +

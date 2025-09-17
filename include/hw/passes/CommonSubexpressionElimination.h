@@ -13,6 +13,7 @@
 #include "hw/IDs.h"
 #include "hw/Register.h"
 #include "hw/analysis/ControlFlow.h"
+#include "hw/analysis/SCFTraversal.h"
 #include "op/IDs.h"
 #include "support/Bits.h"
 #include "support/Debug.h"
@@ -92,6 +93,13 @@ class CommonSubexpressionEliminationPass {
   DestroyMap<Instr> instrDestroy;
   ControlFlowAnalysis controlFlowAnalysis;
 
+public:
+  struct Config {
+    bool differentBlocks = true;
+  };
+  Config config;
+
+private:
   static bool ignoreForCSE(InstrRef instr) {
     return instr.isOpc(
         HW_STORE, HW_STORE_DEFER, HW_ASSERT_DEFER, OP_ASSERT, HW_PRINT_DEFER,
@@ -157,12 +165,24 @@ class CommonSubexpressionEliminationPass {
   }
 
   void runOnProcess(ProcessIRef proc) {
-    map.clear();
-    Range range{StableHierBlockRangeIter{proc.block().begin()},
-                StableHierBlockRangeIter{proc.block().end()}};
-    for (auto instr : range) {
-      if (!ignoreForCSE(instr)) {
-        runOnInstr(instr);
+    if (config.differentBlocks) {
+      map.clear();
+      Range range{StableHierBlockRangeIter{proc.block().begin()},
+                  StableHierBlockRangeIter{proc.block().end()}};
+      for (auto instr : range) {
+        if (!ignoreForCSE(instr)) {
+          runOnInstr(instr);
+        }
+      }
+    }
+    else {
+      auto blocks = getSCFBlocksPreorder(proc.block());
+      for (auto block : blocks) {
+        map.clear();
+        for (auto instr : block) {
+          if (!ignoreForCSE(instr))
+            runOnInstr(instr);
+        }
       }
     }
   }

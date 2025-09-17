@@ -45,12 +45,16 @@ public:
       : idx(idx), fact(fact), max(max) {}
   AddressGenTerm(AddressGenTermOperand other)
       : idx(other.getIdx()), fact(other.getFact()), max(other.getMax()) {}
+  friend bool operator==(const AddressGenTerm &lhs, const AddressGenTerm &rhs) {
+    return lhs.idx == rhs.idx && lhs.fact == rhs.fact && lhs.max == rhs.max;
+  }
 };
 template <typename Derived> class AddressGenMixin {
   Derived &self() { return *static_cast<Derived *>(this); }
+  const Derived &self() const { return *static_cast<const Derived *>(this); }
   static constexpr uint TermSize = 3;
 
-  uint getTermsBaseIndex() { return self().addressGenBaseIndex() + 1; }
+  uint getTermsBaseIndex() const { return self().addressGenBaseIndex() + 1; }
 
 public:
   auto terms() {
@@ -86,7 +90,7 @@ public:
     return hasBase() ? base()->template as<ConstantRef>().getExactVal() : 0;
   }
 
-  uint getNumTerms() {
+  uint getNumTerms() const {
     if (!hasBase())
       return 0;
     auto n = self().getNumOthers() - getTermsBaseIndex();
@@ -94,7 +98,7 @@ public:
     return n / TermSize;
   }
 
-  bool hasBase() {
+  bool hasBase() const {
     return self().getNumOthers() > self().addressGenBaseIndex();
   }
 
@@ -126,10 +130,22 @@ public:
   }
 };
 
+template <typename U, typename T>
+inline bool addressingFragsEqual(AddressGenMixin<T> &lhs,
+                                 AddressGenMixin<U> &rhs) {
+  if (lhs.getNumTerms() != rhs.getNumTerms())
+    return false;
+  for (auto [lhs, rhs] : lhs.terms().zip(rhs.terms())) {
+    if (AddressGenTerm{lhs} != AddressGenTerm{rhs})
+      return false;
+  }
+  return true;
+}
+
 class LoadIRef : public OpcodeInstrRef<HWInstrRef, HW_LOAD>,
                  public AddressGenMixin<LoadIRef> {
 public:
-  uint addressGenBaseIndex() { return 1; }
+  uint addressGenBaseIndex() const { return 1; }
 
 public:
   using OpcodeInstrRef::OpcodeInstrRef;
@@ -148,7 +164,7 @@ public:
 class StoreIRef : public OpcodeInstrRef<HWInstrRef, HW_STORE, HW_STORE_DEFER>,
                   public AddressGenMixin<StoreIRef> {
 public:
-  uint addressGenBaseIndex() { return hasTrigger() ? 3 : 2; }
+  uint addressGenBaseIndex() const { return hasTrigger() ? 3 : 2; }
 
 public:
   using OpcodeInstrRef::OpcodeInstrRef;
@@ -156,10 +172,10 @@ public:
   HWValue value() { return operand(0)->as<HWValue>(); }
   RegisterRef reg() { return operand(1)->as<RegisterRef>(); }
 
-  bool hasTrigger() {
+  bool hasTrigger() const {
     return getNumOperands() > 2 && operand(2)->is<TriggerRef>();
   }
-  TriggerIRef trigger() {
+  TriggerIRef trigger() const {
     if (!hasTrigger())
       return nullref;
     return operand(2)->as<TriggerRef>().iref();
@@ -176,7 +192,7 @@ public:
 class SpliceIRef : public OpcodeInstrRef<HWInstrRef, HW_SPLICE>,
                    public AddressGenMixin<SpliceIRef> {
 public:
-  uint addressGenBaseIndex() { return 1; }
+  uint addressGenBaseIndex() const { return 1; }
 
 public:
   using OpcodeInstrRef::OpcodeInstrRef;
@@ -190,7 +206,7 @@ public:
 class InsertIRef : public OpcodeInstrRef<HWInstrRef, HW_INSERT>,
                    public AddressGenMixin<InsertIRef> {
 public:
-  uint addressGenBaseIndex() { return 2; }
+  uint addressGenBaseIndex() const { return 2; }
 
 public:
   using OpcodeInstrRef::OpcodeInstrRef;

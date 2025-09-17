@@ -312,6 +312,20 @@ macro chk_wire $self, $len [{
     goto $fail;
 }]
 
+macro chk_wire_constant $self, $len [{
+  if (!(*$self.begin())->is<WireRef>())
+    goto $fail;
+  if (!(*$len.begin())->as<ConstantRef>().valueEquals(*(*$self.begin())->as<WireRef>().getNumBits()))
+    goto $fail;
+}]
+
+macro chk_wire_like $self, $like [{
+  if (!(*$self.begin())->is<WireRef>())
+    goto $fail;
+  if (*(*$self.begin())->as<WireRef>().getNumBits() == *(*$like.begin())->as<WireRef>().getNumBits())
+    goto $fail;
+}]
+
 match {
   HW_SPLICE $sign, $x, $splice_offs:chk_const_len_of_minus1($x)
   HW_REPEAT $temp, $sign:chk_wire(#32'd1)
@@ -497,6 +511,51 @@ with [{
   $constTrunc = temp;
 }]
 replace $out -> $constTrunc
+
+
+// fuse padding into insert instructions
+// low side -> add to base offset
+match {
+  HW_SPLICE $short, $in, $offs:CORE_CONSTANT
+  HW_INSERT $inserted, $short:HW_WIRE, $insval, $base, $terms...
+  OP_TRUNC $low, $in
+  HW_CONCAT $out, $pre..., $inserted:HW_WIRE, $low:chk_wire_constant($offs), $post...
+}
+with [{
+  auto offsVal = (*$offs.begin())->as<ConstantRef>().getExactVal();
+  auto shortSize = *(*$short.begin())->as<WireRef>().getNumBits();
+  FatDynObjRef<> newWire = ctx.getWires().create(offsVal + shortSize);
+  $temp = newWire;
+  FatDynObjRef<> newWire2 = ctx.getWires().create(offsVal + shortSize);
+  $temp2 = newWire2;
+}]
+replace {
+  OP_TRUNC $temp, $in
+  HW_INSERT $temp2, $temp, $insval, const_add($offs, $base), $terms...
+  HW_CONCAT $out, $pre..., $temp2, $post...
+}
+
+// high side -> limited w/ max bounds
+match {
+  OP_TRUNC $short, $in
+  HW_INSERT $inserted, $short:HW_WIRE, $insval, $base, $terms...
+  HW_SPLICE $high, $in, $offs
+  HW_CONCAT $out, /*$pre..., */$high:HW_WIRE, $inserted:chk_wire_constant($offs), $post...
+}
+with [{
+  auto offsVal = (*$offs.begin())->as<ConstantRef>().getExactVal();
+  auto highSize = *(*$high.begin())->as<WireRef>().getNumBits();
+  FatDynObjRef<> newWire = ctx.getWires().create(offsVal + highSize);
+  $temp = newWire;
+  FatDynObjRef<> newWire2 = ctx.getWires().create(offsVal + highSize);
+  $temp2 = newWire2;
+}]
+replace {
+  OP_TRUNC $temp, $in
+  HW_INSERT $temp2, $temp, $insval, $base, $terms...
+  HW_CONCAT $out, /*$pre..., */$temp2, $post...
+}
+
 
 /*
 macro wire32 -> $rv [{

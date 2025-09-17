@@ -16,7 +16,7 @@ public:
     return &it.val();
   }
 
-  void insert(Ref ref, Result result) { map.insert(ref, result); }
+  void insert(Ref ref, Result result) { map.insert(ref, std::move(result)); }
 };
 
 }; // namespace dyno

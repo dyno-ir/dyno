@@ -234,7 +234,7 @@ private:
     auto bits = *trueV.getNumBits();
 
     auto [trueRepr, _] = bitAlias.getReprAliases(trueV);
-    auto [falseRepr, _] = bitAlias.getReprAliases(falseV);
+    auto [falseRepr, __] = bitAlias.getReprAliases(falseV);
 
     auto diffs = diffRegisterValues(std::to_array({&trueRepr, &falseRepr}));
 
@@ -266,6 +266,54 @@ private:
     instr.def(0)->as<WireRef>().replaceAllUsesWith(out);
     deleteMatchedInstr(instr);
     return true;
+  }
+
+  bool fuseInserts(InsertIRef insert) {
+    // todo: directly fuse all in chain instead of just two
+    auto inWire = insert.in()->dyn_as<WireRef>();
+    while (inWire && inWire.getNumUses() == 1 &&
+           inWire.getDefI().isOpc(HW_INSERT)) {
+      auto other = inWire.getDefI().as<InsertIRef>();
+      // todo: doesn't actually have to be exactly equal. Constant offset is
+      // also fine.
+      if (!addressingFragsEqual(insert, other))
+        return false;
+
+      auto thisBase = insert.getBase();
+      auto thisLen = insert.getLen();
+
+      auto otherBase = other.getBase();
+      auto otherLen = other.getLen();
+
+      // no intersect or touching
+      if (std::max(thisBase, otherBase) >
+          std::min(thisBase + thisLen, otherBase + otherLen)) {
+        inWire = other.in()->dyn_as<WireRef>();
+        continue;
+      }
+
+      auto low = std::min(thisBase, otherBase);
+      auto high = std::max(thisBase + thisLen, otherBase + otherLen);
+      auto len = high - low;
+
+      HWInstrBuilder build{ctx, insert};
+
+      // use RegisterValue for easy merging
+      RegisterValue val{nullref, len, 0, false, nullopt};
+      val.overwrite(other.val()->as<HWValue>(), 0, otherBase - low, otherLen);
+      val.overwrite(insert.val()->as<HWValue>(), 0, thisBase - low, thisLen);
+
+      auto outWire =
+          build.buildInsert(insert.in()->as<HWValue>(), val.get(build, false),
+                            low, insert.terms());
+      insert.out()->as<WireRef>().replaceAllUsesWith(outWire);
+      // skip inserting other
+      other.out()->as<WireRef>().replaceAllUsesWith(other.in()->as<HWValue>());
+      deleteMatchedInstr(other);
+      deleteMatchedInstr(insert);
+      return true;
+    }
+    return false;
   }
 
   bool simplifyBitAliases(InstrRef instr) {
@@ -930,8 +978,8 @@ private:
 
       auto known = knownBits.getKnownBits(asWire);
       assert(known.getNumBits() == 32);
-      if (auto numKnown = BigInt::trailingNonUnk(known); numKnown > 0) {
-        assert(numKnown != 32 && "const prop should have handled this");
+      if (auto numKnown = BigInt::trailingNonUnk(known);
+          numKnown > 0 && numKnown != 32) {
         BigInt::resizeOp4S(known, known, numKnown);
         assert(!known.getIs4S());
 
@@ -1083,6 +1131,10 @@ private:
 
     if (instr.isOpc(HW_CONCAT))
       if (coalesceConcatOfLoads(instr))
+        return true;
+
+    if (instr.isOpc(HW_INSERT))
+      if (fuseInserts(instr.as<InsertIRef>()))
         return true;
 
     return false;

@@ -18,6 +18,7 @@
 #include "hw/passes/FuzzyCSE.h"
 #include "hw/passes/InstCombine.h"
 #include "hw/passes/LinearizeControlFlow.h"
+#include "hw/passes/LoadCoalesce.h"
 #include "hw/passes/LoopSimplify.h"
 #include "hw/passes/LowerOps.h"
 #include "hw/passes/ModuleInline.h"
@@ -65,6 +66,7 @@ class PassPipeline {
   FuzzyCSEPass fuzzyCse{ctx};
   EarlySharePass earlyShare{ctx};
   SimpleMemoryMappingPass simpleMemMap{ctx};
+  LoadCoalescePass loadCoalesce{ctx};
 
 public:
   bool printAfterAll = true;
@@ -95,6 +97,12 @@ public:
     runPass(instCombine);
     runPass(moduleInline);
     runPass(triggerDedupe);
+
+    cse.config.differentBlocks = false;
+    runPass(cse);
+    cse.config.differentBlocks = true;
+    runPass(instCombine);
+
     runPass(seqToComb);
     ssaConstr.config.mode = SSAConstructPass::Config::IMMEDIATE;
     runPass(ssaConstr);
@@ -102,8 +110,11 @@ public:
     runPass(ssaConstr);
     ssaConstr.config.mode = SSAConstructPass::Config::DEFERRED;
     runPass(ssaConstr);
-
     runPass(instCombine);
+
+    runPass(loadCoalesce);
+    runPass(instCombine);
+
     runPass(loopSimplify);
     runPass(agressiveDCE);
     runPass(cse, true);
@@ -146,6 +157,7 @@ public:
     linearizeControlFlow.config.flattenLoops = 1;
     linearizeControlFlow.config.flattenMultiway = 0;
     checkPass.config.noLoops = true;
+    dumpDyno("a.dyno");
     runPass(linearizeControlFlow);
     // processLinearize.config.retainInnerDeps = 0;
     // processLinearize.config.retainIODeps = 0;
@@ -187,6 +199,8 @@ public:
     runPass(earlyShare);
     earlyShare.config.opToShare = HW_SPLICE;
     runPass(earlyShare);
+    earlyShare.config.opToShare = HW_INSERT;
+    runPass(earlyShare);
 
     runPass(instCombine);
     ssaConstr.config.mode = SSAConstructPass::Config::IMMEDIATE;
@@ -224,6 +238,7 @@ public:
     runPass(orderInstrs);
     runPass(instCombine);
     runPass(ssaConstr);
+    instCombine.config.liftMUX = true;
     runPass(instCombine);
 
     // lower everything that can still go through regular instcombine
@@ -240,11 +255,12 @@ public:
         .lowerInsert = true,
         .lowerExtract = true,
     };
+    dumpDyno("pre_lower.dyno");
     runPass(lowerOps);
 
     // lift MUXs for reg partition
     instCombine.config.liftMUX = true;
-    runPass(instCombine);
+    // runPass(instCombine);
     runPass(regPartition);
     runPass(instCombine);
     runPass(processLinearize);
@@ -259,11 +275,14 @@ public:
     runPass(orderInstrs);
     runPass(instCombine);
     // re-run mux tree opt to remove loopback MUXs after ff inference
-    runPass(muxTreeOpt);
+    dumpDyno("pre_mux_opt.dyno");
+    // runPass(muxTreeOpt);
     runPass(instCombine);
+    dumpDyno("postmux_opt.dyno");
 
     runLibertyPipeline();
-
+    // todo: don't re-order after ffmap or canonicalize cylic deps in
+    // orderInstrs. otherwise we get a break at random point in the cycle.
     runPass(ffMap, true);
     runPass(instCombine);
     runPass(processLinearize);
@@ -294,7 +313,9 @@ public:
     runPass(instCombine);
     runPass(agressiveDCE);
 
+    dumpDyno("a.dyno");
     runPass(aigConstr);
+    dumpDyno("b.dyno");
     runPass(agressiveDCE);
     runPass(abc);
     runPass(agressiveDCE);
