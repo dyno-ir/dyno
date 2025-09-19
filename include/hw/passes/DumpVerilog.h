@@ -197,6 +197,7 @@ class DumpVerilogPass {
       }
 
       default:
+        dumpInstr(instr, ctx);
         report_fatal_error("verilog dump not implemented for instruction");
         break;
       }

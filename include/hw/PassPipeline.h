@@ -224,7 +224,7 @@ public:
     runPass(orderInstrs);
     runPass(instCombine);
 
-    // runPass(simpleMemMap);
+    //runPass(simpleMemMap);
 
     // dumpDyno("a.dyno");
     runPass(muxTreeOpt);
@@ -257,6 +257,7 @@ public:
     };
     dumpDyno("pre_lower.dyno");
     runPass(lowerOps);
+    runPass(cse);
 
     // lift MUXs for reg partition
     instCombine.config.liftMUX = true;
@@ -276,12 +277,12 @@ public:
     runPass(instCombine);
     // re-run mux tree opt to remove loopback MUXs after ff inference
     dumpDyno("pre_mux_opt.dyno");
-    // runPass(muxTreeOpt);
+    runPass(muxTreeOpt);
     runPass(instCombine);
     dumpDyno("postmux_opt.dyno");
 
     runLibertyPipeline();
-    // todo: don't re-order after ffmap or canonicalize cylic deps in
+    // todo: don't re-order after fmap or canonicalize cylic deps in
     // orderInstrs. otherwise we get a break at random point in the cycle.
     runPass(ffMap, true);
     runPass(instCombine);

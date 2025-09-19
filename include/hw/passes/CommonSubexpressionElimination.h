@@ -106,7 +106,8 @@ private:
         HW_PRINT, OP_IF, OP_WHILE, OP_DO_WHILE, OP_FOR, OP_CALL, OP_SWITCH,
         OP_YIELD, OP_UNYIELD, OP_CASE, OP_CASE_DEFAULT, HW_CASE_Z, HW_CASE_X,
         HW_COMB_PROCESS_DEF, HW_INIT_PROCESS_DEF, HW_FINAL_PROCESS_DEF,
-        HW_SEQ_PROCESS_DEF, HW_LATCH_PROCESS_DEF, HW_NETLIST_PROCESS_DEF);
+        HW_SEQ_PROCESS_DEF, HW_LATCH_PROCESS_DEF, HW_NETLIST_PROCESS_DEF,
+        AIG_OUTPUT, AIG_INPUT);
   }
 
   void runOnInstr(InstrRef instr) {
@@ -174,8 +175,7 @@ private:
           runOnInstr(instr);
         }
       }
-    }
-    else {
+    } else {
       auto blocks = getSCFBlocksPreorder(proc.block());
       for (auto block : blocks) {
         map.clear();

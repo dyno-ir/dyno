@@ -805,6 +805,8 @@ template <typename Frag, size_t NumInline = 4> struct GenericPartitions {
     uint32_t originalDstAddr = dstAddr;
     uint32_t originalLen = len;
 
+    uint32_t originalTotalLen = getLen();
+
     // 1. subsumed, partial or full intersect
     if (dstAddr != it->dstAddr) {
       Frag frag{dstAddr, len, std::forward<Args>(args)...};
@@ -830,24 +832,25 @@ template <typename Frag, size_t NumInline = 4> struct GenericPartitions {
       it = frags.insert(it, copy);
     }
 
-    bool lastEqual = false;
+    Frag *lastEqual = nullptr;
     // fully covered frags
     while (len != 0 && len >= it->len) {
       assert(it->dstAddr == dstAddr);
       Frag frag{dstAddr, len, std::forward<Args>(args)...};
 
       if (frag.intersects(*it)) {
+        auto temp = it->len;
         *it = frag.intersect(*it);
+        it->len = temp;
         dstAddr += it->len;
         len -= it->len;
         ++it;
-        lastEqual = false;
+        lastEqual = nullptr;
         continue;
       }
 
       else if (lastEqual && (frag.overwrites(*it) || frag.fuses(*it))) {
-        auto prevIt = std::prev(it);
-        prevIt->len += it->len;
+        lastEqual->len += it->len;
         dstAddr += it->len;
         len -= it->len;
         it->len = 0; // delete later
@@ -856,22 +859,24 @@ template <typename Frag, size_t NumInline = 4> struct GenericPartitions {
       }
 
       else if (frag.overwrites(*it)) {
+        auto temp = it->len;
         *it = frag;
+        it->len = temp;
         if constexpr (requires() { it->srcAddr; }) {
           it->srcAddr = dstAddr - originalDstAddr;
         }
         dstAddr += it->len;
         len -= it->len;
+        lastEqual = it;
         ++it;
-        lastEqual = true;
         continue;
       }
 
       else if (frag.fuses(*it)) {
         dstAddr += it->len;
         len -= it->len;
+        lastEqual = it;
         ++it;
-        lastEqual = true;
         continue;
       }
 
@@ -908,6 +913,17 @@ template <typename Frag, size_t NumInline = 4> struct GenericPartitions {
       }
     }
     frags.downsize(outIdx);
+
+    uint cur = 0;
+    for (auto frag : frags) {
+      assert(frag.dstAddr == cur);
+      cur = frag.dstAddr + frag.len;
+    }
+    assert(originalTotalLen == getLen());
+  }
+
+  uint32_t getLen() const {
+    return frags.empty() ? 0 : frags.back().dstAddr + frags.back().len;
   }
 
   template <typename... Args>

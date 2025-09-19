@@ -154,13 +154,12 @@ class MuxTreeOptimizationPass {
     return std::pair(selExpr, nullopt);
   }
 
-  static std::pair<WireRef, bool>
+  static std::pair<HWValue, bool>
   getLiteralVal(HWInstrBuilder &build, MuxTree *tree, BoolExprLiteral cond) {
     auto &ctx = build.ctx;
-    WireRef out = ctx.getWires().resolve(tree->conditions[cond.id].wire);
+    HWValue out = ctx.getWires().resolve(tree->conditions[cond.id].wire);
     if (out.getNumBits() != 1)
-      out = build.buildSplice(out, 1u, tree->conditions[cond.id].idx)
-                .as<WireRef>();
+      out = build.buildSplice(out, 1u, tree->conditions[cond.id].idx);
 
     return std::make_pair(out, !!cond.inverse);
   }
@@ -178,7 +177,7 @@ public:
       for (auto lit : clause) {
         auto [val, inv] = getLiteralVal(build, tree, lit);
         if (inv)
-          val = build.buildNot(val).as<WireRef>();
+          val = build.buildNot(val);
         orOperands.emplace_back(val);
       }
       if (orOperands.size() == 1)
@@ -339,10 +338,11 @@ private:
         asConst && asConst.allBitsUndef())
       return leftVal;
 
-    //if (selExprNeg && selExprNeg->literals.size() < selExpr.literals.size()) {
-    //  auto sel = getExprVal(build, tree, *selExprNeg);
-    //  return build.buildMux(sel, leftVal, rightVal);
-    //}
+    // if (selExprNeg && selExprNeg->literals.size() < selExpr.literals.size())
+    // {
+    //   auto sel = getExprVal(build, tree, *selExprNeg);
+    //   return build.buildMux(sel, leftVal, rightVal);
+    // }
     auto sel = getExprVal(build, tree, selExpr);
     return build.buildMux(sel, rightVal, leftVal);
   }
@@ -379,8 +379,8 @@ private:
         analysis.dedupeMuxTreeOutputs(&muxtree);
         printMuxTree(&muxtree);
         auto pruned = analysis.pruneDontCareOutputs(ctx, &muxtree);
-        //if (!pruned)
-        //  continue;
+        // if (!pruned)
+        //   continue;
         printMuxTree(&muxtree);
         auto wire = lowerMuxTreeSimple(&muxtree);
         auto oldWire = instr.def(0)->as<WireRef>();

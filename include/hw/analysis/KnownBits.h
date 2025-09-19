@@ -52,8 +52,8 @@ class KnownBitsAnalysis {
     auto n = instr.getNumOthers();
     if (frame.idx != instr.getNumOthers()) {
       auto idx = inv ? (n - frame.idx - 1) : frame.idx;
-      stack.emplace_back(instr.other(idx)->as<HWValue>(), 0);
       frame.idx++;
+      stack.emplace_back(instr.other(idx)->as<HWValue>(), 0);
     } else {
       retVal = stack.back().acc;
       assert(retVal.val.getNumBits() ==

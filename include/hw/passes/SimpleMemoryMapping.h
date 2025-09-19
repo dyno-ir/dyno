@@ -27,14 +27,19 @@ class SimpleMemoryMappingPass {
 
     enum class UnselectedReadVal { LAST, INVALID };
   };
+  struct InputRegister {
+    StoreIRef store;
+    LoadIRef load;
+  };
   struct ReadPort {
     SpliceIRef splice;
+    std::optional<InputRegister> addrReg;
+    std::optional<InputRegister> dataReg;
   };
   struct WritePort {
     InsertIRef insert;
-    SmallVec<WireRef, 4> enablesValues;
-    DynSymbSet<SmallVec<uint64_t, 1>, 1> enablePolarities;
-    auto enables() { return Range{enablesValues}.zip(enablePolarities); }
+    WireRef enable;
+    bool enablePolarity;
   };
 
   HWContext &ctx;
@@ -71,7 +76,7 @@ class SimpleMemoryMappingPass {
 
       assert(instr.isOpc(HW_STORE_DEFER));
 
-      if (!walkWriteTree(out, instr.as<StoreIRef>()))
+      if (!walkWriteTree2(out, instr.as<StoreIRef>()))
         return false;
     }
 
@@ -94,74 +99,143 @@ class SimpleMemoryMappingPass {
 
   // Walk MUX/INSERT network to find all write ports and their associated
   // enables.
-  bool walkWriteTree(SmallVecImpl<WritePort> &out, StoreIRef store) {
-    struct Frame {
-      WireRef wire;
-      uint idx;
-    };
-    if (!store.value().is<WireRef>())
-      return false;
-    SmallVec<Frame, 4> stack{Frame{store.value().as<WireRef>(), 0}};
-    WritePort prefix;
+  // bool walkWriteTree(SmallVecImpl<WritePort> &out, StoreIRef store) {
+  //   struct Frame {
+  //     WireRef wire;
+  //     uint idx;
+  //   };
+  //   if (!store.value().is<WireRef>())
+  //     return false;
+  //   SmallVec<Frame, 4> stack{Frame{store.value().as<WireRef>(), 0}};
+  //   WritePort prefix;
 
-    while (!stack.empty()) {
-      auto &frame = stack.back();
-      auto instr = frame.wire.getDefI();
-      coveredUses.findOrInsert(instr);
+  //   while (!stack.empty()) {
+  //     auto &frame = stack.back();
+  //     auto instr = frame.wire.getDefI();
+  //     coveredUses.findOrInsert(instr);
 
-      switch (*instr.getDialectOpcode()) {
-      case *HW_MUX: {
-        auto sel = instr.other(0)->as<WireRef>();
-        if (frame.idx == 0) {
-          prefix.enablesValues.emplace_back(sel.as<WireRef>());
-          prefix.enablePolarities.push_back(1);
-        } else if (frame.idx == 1) {
-          prefix.enablePolarities.back() = 0;
-        } else if (frame.idx == 2) {
-          prefix.enablesValues.pop_back();
-          prefix.enablePolarities.pop_back();
-          stack.pop_back();
-          break;
+  //     switch (*instr.getDialectOpcode()) {
+  //     case *HW_MUX: {
+  //       auto sel = instr.other(0)->as<WireRef>();
+  //       if (frame.idx == 0) {
+  //         prefix.enablesValues.emplace_back(sel.as<WireRef>());
+  //         prefix.enablePolarities.push_back(1);
+  //       } else if (frame.idx == 1) {
+  //         prefix.enablePolarities.back() = 0;
+  //       } else if (frame.idx == 2) {
+  //         prefix.enablesValues.pop_back();
+  //         prefix.enablePolarities.pop_back();
+  //         stack.pop_back();
+  //         break;
+  //       }
+  //       auto val = instr.other(frame.idx + 1)->dyn_as<WireRef>();
+  //       if (!val)
+  //         return false;
+  //       frame.idx++;
+  //       stack.emplace_back(val, 0);
+  //       break;
+  //     }
+  //     case *HW_INSERT: {
+  //       auto asInsert = instr.as<InsertIRef>();
+  //       auto &copy = out.emplace_back(prefix);
+  //       copy.insert = asInsert;
+
+  //       auto pad = asInsert.in()->dyn_as<WireRef>();
+  //       if (!pad)
+  //         return false;
+
+  //       stack.pop_back();
+  //       stack.emplace_back(pad, 0);
+  //       break;
+  //     }
+
+  //     case *HW_LOAD: {
+  //       auto asLoad = instr.as<LoadIRef>();
+  //       // todo: support partial loads.
+  //       if (!asLoad.isFullReg())
+  //         return false;
+  //       if (asLoad.reg() != store.reg())
+  //         return false;
+
+  //       stack.pop_back();
+  //       break;
+  //     }
+
+  //     default:
+  //       return false;
+  //     }
+  //   }
+
+  //   return true;
+  // }
+
+  bool walkWriteTree2(SmallVecImpl<WritePort> &out, StoreIRef store) {
+    HWValue cur = store.value();
+
+    while (true) {
+      auto wire = cur.dyn_as<WireRef>();
+      if (!wire)
+        return false;
+      auto instr = wire.getDefI();
+
+      WireRef enable = nullref;
+      bool enablePolarity = false;
+
+      if (instr.isOpc(HW_MUX)) {
+        enable = instr.other(0)->as<WireRef>();
+        auto trueV = instr.other(1)->dyn_as<WireRef>();
+        auto falseV = instr.other(2)->dyn_as<WireRef>();
+        if (!trueV || !falseV)
+          return false;
+
+        coveredUses.insert(instr);
+
+        if (auto ins = trueV.getDefI().dyn_as<InsertIRef>();
+            ins && ins.in()->as<HWValue>() == falseV) {
+          cur = trueV;
+          wire = trueV;
+          instr = wire.getDefI();
+          enablePolarity = true;
+        } else if (auto ins = falseV.getDefI().dyn_as<InsertIRef>();
+                   ins && ins.in()->as<HWValue>() == trueV) {
+          cur = falseV;
+          wire = falseV;
+          instr = wire.getDefI();
+          enablePolarity = false;
         }
-        auto val = instr.other(frame.idx + 1)->dyn_as<WireRef>();
-        if (!val)
-          return false;
-        frame.idx++;
-        stack.emplace_back(val, 0);
-        break;
-      }
-      case *HW_INSERT: {
-        auto asInsert = instr.as<InsertIRef>();
-        auto &copy = out.emplace_back(prefix);
-        copy.insert = asInsert;
-
-        auto pad = asInsert.in()->dyn_as<WireRef>();
-        if (!pad)
-          return false;
-
-        stack.pop_back();
-        stack.emplace_back(pad, 0);
-        break;
-      }
-
-      case *HW_LOAD: {
+      } else if (instr.isOpc(HW_LOAD)) {
         auto asLoad = instr.as<LoadIRef>();
-        // todo: support partial loads.
-        if (!asLoad.isFullReg())
-          return false;
         if (asLoad.reg() != store.reg())
           return false;
-
-        stack.pop_back();
-        break;
+        if (!asLoad.isFullReg())
+          return false;
+        return true;
       }
 
-      default:
+      if (instr.isOpc(HW_INSERT)) {
+        auto insert = instr.as<InsertIRef>();
+        out.emplace_back(insert, enable, enablePolarity);
+        cur = insert.in()->as<HWValue>();
+        coveredUses.insert(insert);
+      } else
         return false;
-      }
     }
+  }
 
-    return true;
+  // maybe actually make this an analysis
+  std::optional<InputRegister> mergeInputRegister(HWValue value) {
+    auto wire = value.dyn_as<WireRef>();
+    if (!wire)
+      return std::nullopt;
+    auto load = wire.getDefI().dyn_as<LoadIRef>();
+    if (!load || !load.isConstantOffs())
+      return std::nullopt;
+    auto store = load.reg().iref().getSingleStore();
+    if (!store || !store.isOpc(HW_STORE_DEFER) ||
+        !store.as<StoreIRef>().isConstantOffs())
+      return std::nullopt;
+
+    return InputRegister{store, load};
   }
 
   void runOnRegister(RegisterIRef reg) {
@@ -182,14 +256,9 @@ class SimpleMemoryMappingPass {
 
       dbgs() << "write ports:\n";
       for (auto &port : writePorts) {
-        dbgs() << "en {";
-        for (auto [val, pol] : port.enables()) {
-          if (pol == 0)
-            dbgs() << "!";
-          dumpObj(val);
-          dbgs() << ", ";
-        }
-        dbgs() << "}: ";
+        dbgs() << "en";
+        dumpObj(port.enable);
+        dbgs() << " = " << port.enablePolarity << ": ";
         dumpInstr(port.insert);
       }
 

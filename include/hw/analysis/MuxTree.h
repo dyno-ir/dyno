@@ -639,7 +639,6 @@ struct SmallBoolExprCNF {
   }
   void makeUnsat() { literals.clear(); }
 
-
   std::optional<SmallBoolExprCNF> negated2(uint numLiterals) {
     if (isTrue()) {
       SmallBoolExprCNF rv;
@@ -657,8 +656,8 @@ struct SmallBoolExprCNF {
       clauseVec.emplace_back(clause);
     }
 
-    //dbgs() << "uninverted: ";
-    // this->dump(numLiterals);
+    // dbgs() << "uninverted: ";
+    //  this->dump(numLiterals);
 
     enum {
       UNINVERSED,
@@ -826,7 +825,7 @@ struct SmallBoolExprCNF {
       exprOut.literals[pos].clauseBegin = true;
     }
 
-    if (exprOut.literals. size() == 0)
+    if (exprOut.literals.size() == 0)
       exprOut.makeTrue();
     exprOut.simplify(numLiterals);
 
@@ -893,15 +892,6 @@ struct SmallBoolExprCNF {
       dbgs() << ")\n";
     }
     dbgs() << "\t)\n)";
-  }
-
-  void addTseitin(SmallBoolExprCNF &expr, uint16_t tseitinLitID) {
-    assert(0 && "todo");
-    // proxy implies all clauses
-    for (auto clause : expr.clauses()) {
-      literals.push_back_range(Range{clause});
-      literals.emplace_back(BoolExprLiteral{tseitinLitID, 1, false});
-    }
   }
 
   void purgeLiteral(BoolExprLiteral purgeLit) {
@@ -1126,7 +1116,8 @@ public:
   std::optional<MuxTree> analyzeMuxTree(InstrRef root,
                                         bool matchMultiUse = false,
                                         bool exploreConds = true) {
-    return analyzeMuxTree(root, [](InstrRef) {}, matchMultiUse, exploreConds);
+    return analyzeMuxTree(
+        root, [](InstrRef) {}, matchMultiUse, exploreConds);
   }
 
   std::optional<MuxTree>

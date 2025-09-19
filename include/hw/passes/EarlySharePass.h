@@ -51,7 +51,7 @@ private:
     return true;
   }
 
-  InstrRef tryMergeCommOps(ArrayRef<InstrRef> instrs) {
+  InstrRef tryMergeCommOps(BlockRef parentBlock, ArrayRef<InstrRef> instrs) {
     auto maxOps = instrs[0].getNumOthers();
     auto maxBits = *instrs[0].def(0)->as<WireRef>().getNumBits();
     for (auto instr : Range{instrs}.drop_front()) {
@@ -107,7 +107,8 @@ private:
   }
 
   template <typename T = SpliceIRef>
-  InstrRef tryMergeSpliceInsert(ArrayRef<InstrRef> instrs) {
+  InstrRef tryMergeSpliceInsert(BlockRef parentBlock,
+                                ArrayRef<InstrRef> instrs) {
     auto base = instrs.front().as<T>();
     // todo: relax comparison. addressing does not have to be exactly equal,
     // shared implementation just has to be beneficial.
@@ -174,42 +175,48 @@ private:
     }
 
     build.setInsertPoint(mod.regs_end());
-    auto proc = build.buildProcess();
-    build.setInsertPoint(proc.block().end());
+    // auto proc = build.buildProcess();
+    // build.setInsertPoint(proc.block().end());
+    auto pivot = parentBlock.end();
+    if (pivot.pred()->isOpc(OP_YIELD))
+      --pivot;
+    build.setInsertPoint(pivot);
+
     auto terms =
         base.terms().transform([&](size_t i, AddressGenTermOperand ref) {
           auto point = build.insert;
-          build.setInsertPoint(proc.block().begin());
+          build.setInsertPoint(pivot.pred());
           auto rv = AddressGenTerm{build.buildLoad(regs[i]), ref.getFact(),
                                    ref.getMax()};
-          build.setInsertPoint(proc.block().end());
+          build.setInsertPoint(pivot);
           return rv;
         });
     HWValue val;
     if constexpr (requires { base.val(); }) {
-      val = build.buildInsert(build.buildLoad(inputReg),
+      val = build.buildInsert(base.in()->template as<HWValue>(),
                               build.buildLoad(valueReg), base.getBase(), terms);
     } else {
-      val = build.buildSplice(build.buildLoad(inputReg), base.getLen(),
+      val = build.buildSplice(base.in()->template as<HWValue>(), base.getLen(),
                               base.getBase(), terms);
     }
 
-    build.setInsertPoint(proc.block().end());
+    build.setInsertPoint(pivot);
     build.buildStore(resultReg, val);
     return val.as<WireRef>().getDefI();
   }
 
-  InstrRef tryMerge(ArrayRef<InstrRef> instrs) {
+  InstrRef tryMerge(BlockRef parentBlock, ArrayRef<InstrRef> instrs) {
     if (config.opToShare.is(OP_ADD, OP_MUL))
-      return tryMergeCommOps(instrs);
+      return tryMergeCommOps(parentBlock, instrs);
     if (config.opToShare.is(HW_SPLICE))
-      return tryMergeSpliceInsert<SpliceIRef>(instrs);
+      return tryMergeSpliceInsert<SpliceIRef>(parentBlock, instrs);
     if (config.opToShare.is(HW_INSERT))
-      return tryMergeSpliceInsert<InsertIRef>(instrs);
+      return tryMergeSpliceInsert<InsertIRef>(parentBlock, instrs);
     dyno_unreachable("merging unimplemented");
   }
 
-  auto findMergeCandidates(SmallVecImpl<BlockResult> &results) {
+  auto findMergeCandidates(BlockRef parentBlock,
+                           SmallVecImpl<BlockResult> &results) {
     // iterate, incrementing smallest one every iter.
     // if tryMerge succeeds, replace all with nullref and increment all.
 
@@ -250,7 +257,7 @@ private:
       if (curInstrs.size() < 2)
         break;
 
-      if (auto mergedInstr = tryMerge(curInstrs)) {
+      if (auto mergedInstr = tryMerge(parentBlock, curInstrs)) {
         for (size_t i = 0; i < results.size(); ++i) {
           if (!hasMore(i))
             continue;
@@ -276,7 +283,8 @@ private:
     return mergedInstrs;
   }
 
-  void handleMultiway(BlockResult &curRes, ArrayRef<BlockRef> blocks) {
+  void handleMultiway(BlockRef parentBlock, BlockResult &curRes,
+                      ArrayRef<BlockRef> blocks) {
     SmallVec<BlockResult, 4> results;
     results.reserve(blocks.size());
 
@@ -285,7 +293,7 @@ private:
       res.sort();
     }
 
-    auto mergedInstrs = findMergeCandidates(results);
+    auto mergedInstrs = findMergeCandidates(parentBlock, results);
 
     for (auto res : results) {
       curRes.candidates.push_back_range(Range{res.candidates});
@@ -305,7 +313,7 @@ private:
           break;
         auto blocks =
             std::to_array({asIf.getTrueBlock(), asIf.getFalseBlock()});
-        handleMultiway(res, blocks);
+        handleMultiway(block, res, blocks);
         break;
       }
 
@@ -316,7 +324,7 @@ private:
         SmallVec<BlockRef, 4> blocks;
         blocks.reserve(asSwitch.getNumCases());
         blocks.push_back_range(asSwitch.caseBlocks());
-        handleMultiway(res, blocks);
+        handleMultiway(block, res, blocks);
         break;
       }
 

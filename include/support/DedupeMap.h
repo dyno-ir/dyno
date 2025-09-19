@@ -23,7 +23,7 @@ public:
     }
 
     auto it = map.find(hash);
-    for (; it; it = map.find_next(it)) {
+    for (; it != map.end(); it = map.find_next(it)) {
       if (container[it.val()] == t) [[likely]]
         return it.val();
     }
