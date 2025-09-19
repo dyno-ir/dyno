@@ -1469,7 +1469,7 @@ public:
 
     // copy RHS extend into out
     std::fill(out.words.begin() + rhsWords, out.words.begin() + rhsExtWords,
-              rhs.getExtend());
+              repeatExtend(rhs.getExtend()));
 
     size_t lhsOffs = rhsBits / WordBits;
     size_t lhsShamt = rhsBits % WordBits;
@@ -1959,11 +1959,11 @@ public:
   constexpr static void insertOp4S(BigIntBase &out, const T0 &lhs,
                                    const T1 &rhs, uint32_t addr) {
 
-    //dbgs() << "\n\n";
-    //lhs.toStream(dbgs(), 2);
-    //dbgs() << "\n";
-    //rhs.toStream(dbgs(), 2);
-    //dbgs() << "\n" << addr << "\n";
+    // dbgs() << "\n\n";
+    // lhs.toStream(dbgs(), 2);
+    // dbgs() << "\n";
+    // rhs.toStream(dbgs(), 2);
+    // dbgs() << "\n" << addr << "\n";
 
     bool custom = rhs.getIs4S() || lhs.getIs4S();
     if (lhs.getIs4S() && !rhs.getIs4S()) {
@@ -1977,8 +1977,8 @@ public:
     } else
       insertOp(out, lhs, rhs, custom ? 2 * addr : addr);
 
-    //out.toStream(dbgs(), 2);
-    //dbgs() << "\n";
+    // out.toStream(dbgs(), 2);
+    // dbgs() << "\n";
   }
 
   template <BigIntAPI T0>

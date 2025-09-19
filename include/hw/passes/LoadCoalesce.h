@@ -46,7 +46,6 @@ class LoadCoalescePass {
 
   void runOnProcess(ModuleIRef mod, ProcessIRef proc) {
     for (auto reg : mod.regs()) {
-      dumpInstr(reg, ctx);
       auto [loads, regions] = findLoadsAndRegions(reg, proc);
 
       bool lastActive = false;

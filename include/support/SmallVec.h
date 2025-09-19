@@ -266,6 +266,8 @@ public:
     cap = n;
   }
 
+  void reserve_safe(size_type n) { reserve(ceil_to_pow2(n)); }
+
   bool isSmall() { return arr == getInlineArrPtr(); }
 
   size_type size() const { return sz; }
