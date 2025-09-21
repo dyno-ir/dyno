@@ -865,7 +865,7 @@ public:
     uint32_t cnt = 0;
     for (uint i = 0; i < val.getExtNumWords(); i++) {
       cnt += std::popcount(
-          n_equal_mask<2>(val.getWord4S(i), repeatBits(bit.val, 2)));
+          n_equal_mask<2>(val.getWord4S(i), repeatBits<uint32_t>(bit.val, 2)));
     }
     return cnt;
   }

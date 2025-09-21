@@ -466,8 +466,9 @@ replace {
   OP_NOT $out, $cond
 }
 
-/*
+
 // these might hinder MUX tree analysis, maybe support output patterns in mux tree analysis?
+/*
 match {
   HW_MUX $out, $cond, #'1, $rhs:HW_WIRE
 }
@@ -502,6 +503,77 @@ replace {
   OP_AND $out, $temp, $lhs
 }
 */
+
+
+match {
+  HW_MUX $out, $cond, #1'b1, $rhs:HW_WIRE
+}
+replace {
+  OP_OR $out, $cond, $rhs
+}
+
+match {
+  HW_MUX $out, $cond, $rhs:HW_WIRE, #1'b1
+}
+replace {
+  OP_NOT $conv_inv:wire_like($cond), $cond
+  OP_OR $out, $conv_inv, $rhs
+}
+
+match {
+  HW_MUX $out, $cond, $lhs:HW_WIRE, #1'b0
+}
+replace {
+  OP_AND $out, $cond, $lhs
+}
+
+match {
+  HW_MUX $out, $cond, #1'b0, $lhs:HW_WIRE
+}
+replace {
+  OP_NOT $conv_inv:wire_like($cond), $cond
+  OP_AND $out, $conv_inv, $lhs
+}
+
+match {
+  HW_MUX $a, $sel_a, $x, $y
+  HW_MUX $out, $sel_b, $a:HW_WIRE, $y
+}
+replace {
+  OP_AND $temp:wire_like($sel_a), $sel_a, $sel_b
+  HW_MUX $out, $temp, $x, $y
+}
+
+match {
+  HW_MUX $a, $sel_a, $y, $x
+  HW_MUX $out, $sel_b, $a:HW_WIRE, $y
+}
+replace {
+  OP_NOT $sel_a_inv:wire_like2($sel_a), $sel_a
+  OP_AND $temp:wire_like($sel_a), $sel_a_inv, $sel_b
+  HW_MUX $out, $temp, $x, $y
+}
+
+match {
+  HW_MUX $a, $sel_a, $x, $y
+  HW_MUX $out, $sel_b, $y, $a:HW_WIRE
+}
+replace {
+  OP_NOT $sel_b_inv:wire_like2($sel_a), $sel_b
+  OP_AND $temp:wire_like($sel_a), $sel_a, $sel_b_inv
+  HW_MUX $out, $temp, $x, $y
+}
+
+match {
+  HW_MUX $a, $sel_a, $y, $x
+  HW_MUX $out, $sel_b, $y, $a:HW_WIRE
+}
+replace {
+  OP_OR $temp:wire_like($sel_a), $sel_a, $sel_b
+  HW_MUX $out, $temp, $y, $x
+}
+
+
 
 match {
   OP_TRUNC $out, $in:CORE_CONSTANT

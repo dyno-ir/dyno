@@ -234,13 +234,16 @@ public:
     runPass(orderInstrs);
     runPass(instCombine);
     runPass(ssaConstr);
-
-    instCombine.config.liftMUX = true;
     runPass(instCombine);
     runPass(cse);
     runPass(instCombine);
 
     runPass(muxTreeOpt);
+    runPass(cse);
+    runPass(instCombine);
+
+    instCombine.config.liftMUX = true;
+    runPass(instCombine);
     runPass(cse);
     runPass(instCombine);
 
@@ -283,7 +286,7 @@ public:
     // re-run mux tree opt to remove loopback MUXs after ff inference
     dumpDyno("pre_mux_opt.dyno");
     muxTreeOpt.config.dontCareMUXsOnly = true;
-    muxTreeOpt.config.exploreConditions = true;
+    muxTreeOpt.config.exploreConditions = false;
     runPass(muxTreeOpt);
     runPass(instCombine);
     dumpDyno("postmux_opt.dyno");
