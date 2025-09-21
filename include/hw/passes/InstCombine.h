@@ -76,6 +76,8 @@ private:
     assert(newVal.getNumBits() == wire.getNumBits());
     wire.replaceAllUsesWith(
         newVal, [&](OperandRef ref) { currentReplaced.emplace_back(ref); });
+    knownBits.replaceAt(wire, newVal);
+    bitAlias.replaceAt(wire, newVal);
   }
 
   bool reduceBitWidth(InstrRef instr) {
@@ -236,34 +238,48 @@ private:
     auto [trueRepr, _] = bitAlias.getReprAliases(trueV);
     auto [falseRepr, __] = bitAlias.getReprAliases(falseV);
 
-    auto diffs = diffRegisterValues(std::to_array({&trueRepr, &falseRepr}));
+    // auto diffs =
+    //     diffRegisterValues(std::to_array({&trueRepr, &falseRepr}), false,
+    //     true);
 
     SmallVec<HWValue, 8> outFrags;
 
     HWInstrBuilder build{ctx, instr};
-    auto handleUnchanged = [&](uint32_t addr, uint32_t len) {
-      outFrags.emplace_back(trueRepr.get(build, addr, len, false));
-    };
 
-    if (diffs.size() <= 1)
+    // do not change if no differences or if everything different
+    // if (diffs.size() == 1 && diffs.front().addr() == 0 &&
+    //    diffs.front().len() == bits)
+    //  return false;
+
+    auto seams =
+        regValueFindCommonSeams(std::to_array({&trueRepr, &falseRepr}));
+    assert(seams.size() >= 2);
+    if (seams.size() == 2)
       return false;
 
-    uint32_t last = 0;
-    for (auto &diff : diffs) {
-      if (auto len = diff.addr() - last)
-        handleUnchanged(last, len);
-      auto fragV = build.buildMux(
-          selV, trueRepr.get(build, diff.addr(), diff.len(), false),
-          falseRepr.get(build, diff.addr(), diff.len(), false));
+    auto handle = [&](uint32_t addr, uint32_t len) {
+      auto fragV = build.buildMux(selV, trueRepr.get(build, addr, len, false),
+                                  falseRepr.get(build, addr, len, false));
       outFrags.emplace_back(fragV);
-      last = diff.addr() + diff.len();
+    };
+
+    uint32_t last = 0;
+    for (auto seam : Range{seams}.drop_front()) {
+      auto len = seam - last;
+      handle(last, len);
+      last = seam;
+      // auto fragV = build.buildMux(
+      //     selV, trueRepr.get(build, diff.addr(), diff.len(), false),
+      //     falseRepr.get(build, diff.addr(), diff.len(), false));
+      // outFrags.emplace_back(fragV);
+      // last = diff.addr() + diff.len();
     }
     if (auto len = bits - last)
-      handleUnchanged(last, len);
+      handle(last, len);
 
     std::reverse(outFrags.begin(), outFrags.end());
     auto out = build.buildConcat(outFrags);
-    instr.def(0)->as<WireRef>().replaceAllUsesWith(out);
+    replaceUses(instr.def(0)->as<WireRef>(), out);
     deleteMatchedInstr(instr);
     return true;
   }
@@ -306,9 +322,9 @@ private:
       auto outWire =
           build.buildInsert(insert.in()->as<HWValue>(), val.get(build, false),
                             low, insert.terms());
-      insert.out()->as<WireRef>().replaceAllUsesWith(outWire);
+      replaceUses(insert.out()->as<WireRef>(), outWire);
       // skip inserting other
-      other.out()->as<WireRef>().replaceAllUsesWith(other.in()->as<HWValue>());
+      replaceUses(other.out()->as<WireRef>(), other.in()->as<HWValue>());
       deleteMatchedInstr(other);
       deleteMatchedInstr(insert);
       return true;
@@ -316,57 +332,141 @@ private:
     return false;
   }
 
+  bool simplifyDeMorgan(InstrRef instr) {
+    uint inverted = 0;
+    for (auto op : instr.others()) {
+      if (op->is<WireRef>() && op->as<WireRef>().getDefI().isOpc(OP_NOT))
+        inverted++;
+    }
+    if (inverted <= round_up_div(instr.getNumOthers(), 2u))
+      return false;
+
+    HWInstrBuilder build{ctx, instr};
+    SmallVec<HWValue, 8> ops;
+    ops.reserve(instr.getNumOthers());
+    for (auto op : instr.others())
+      ops.emplace_back(build.buildNot(op->as<HWValue>()));
+
+    HWValue val;
+    if (instr.isOpc(OP_OR))
+      val = build.buildAnd(ops);
+    else
+      val = build.buildOr(ops);
+
+    instr.def(0)->as<WireRef>().replaceAllUsesWith(val);
+    deleteMatchedInstr(instr);
+    return true;
+  }
+
   bool simplifyBitAliases(InstrRef instr) {
+    // Main function for canoncializing addressing. This gets quite ugly, we
+    // have to match instrs to see if the existing canonical pattern exists
+    // already (return false if it does) and else build it. Currently doing all
+    // the compares manually. Maybe implement this w/ DSL or continuous CSE (
+    // build abstract instructions and check if equal to actual) in the future.
+
     auto defW = instr.def(0)->as<WireRef>();
     auto [aliases, change] = bitAlias.getReprAliases(defW);
     assert(aliases.frags.size() != 0);
-    if (!change)
-      return false;
     HWInstrBuilder build{ctx, instr};
+
+    auto operandEqualsFrag = [&](HWValue val,
+                                 RegisterValueFragment &frag) -> HWValue {
+      auto instr = !val.is<WireRef>() ? nullref : val.as<WireRef>().getDefI();
+      auto fragRef = ctx.resolveObj(frag.ref);
+      if (frag.srcAddr == 0 && frag.ref == val && frag.len == val.getNumBits())
+        return nullref;
+      if (frag.srcAddr == 0) {
+        if (instr && instr.isOpc(OP_TRUNC) &&
+            instr.other(0)->as<HWValue>() == frag.ref)
+          return nullref;
+        return build.buildTrunc(frag.len, fragRef);
+      } else {
+        if (instr && instr.isOpc(HW_SPLICE) &&
+            instr.as<SpliceIRef>().isConstantOffs() &&
+            instr.as<SpliceIRef>().getBase() == frag.srcAddr &&
+            instr.as<SpliceIRef>().getLen() == frag.len &&
+            instr.as<SpliceIRef>().in()->thin() == frag.ref)
+          return nullref;
+        return build.buildSplice(fragRef, frag.len, frag.srcAddr);
+      }
+    };
 
     if (aliases.frags.size() == 1) {
       auto &frag = aliases.frags.front();
-      HWValue val = ctx.resolveObj(frag.ref);
-      HWValue out;
-      if (frag.srcAddr == 0)
-        out = build.buildTrunc(frag.len, val);
-      else
-        out = build.buildSplice(val, frag.len, frag.srcAddr);
-      replaceUses(defW, out);
+      auto repl = operandEqualsFrag(defW, frag);
+      if (!repl)
+        return false;
+      replaceUses(defW, repl);
       deleteMatchedInstr(instr);
       return true;
     }
 
-    auto matchInsert = [&]() {
+    auto matchInsert = [&]() -> Optional<int> {
       auto &front = aliases.frags[0];
       auto &mid = aliases.frags[1];
       auto &end = aliases.frags[2];
       if (front.ref != end.ref || front.srcAddr != 0 ||
           end.srcAddr != end.dstAddr)
-        return false;
+        return nullopt;
       auto pad = ctx.resolveObj(front.ref).as<HWValue>();
       if (pad.getNumBits() != aliases.getLen())
-        return false;
-
+        return nullopt;
       auto midRef = ctx.resolveObj(mid.ref).as<HWValue>();
-      auto val = build.buildSplice(midRef, mid.len, mid.srcAddr);
-      auto out = build.buildInsert(pad, val, mid.dstAddr);
+      HWValue midVal;
+
+      if (instr.isOpc(HW_INSERT)) {
+        auto insert = instr.as<InsertIRef>();
+        if (insert.isConstantOffs() && insert.in()->thin() == front.ref &&
+            insert.getLen() == mid.len && insert.getBase() == mid.dstAddr &&
+            insert.getMemoryLen() == (front.len + mid.len + end.len)) {
+          if (insert.val()->thin() == mid.ref)
+            return false;
+          midVal = operandEqualsFrag(insert.val()->as<HWValue>(), mid);
+          if (!midVal)
+            return false;
+        } else
+          midVal = build.buildSplice(midRef, mid.len, mid.srcAddr);
+      } else
+        midVal = build.buildSplice(midRef, mid.len, mid.srcAddr);
+
+      auto out = build.buildInsert(pad, midVal, mid.dstAddr);
       replaceUses(defW, out);
       deleteMatchedInstr(instr);
       return true;
     };
     if (aliases.frags.size() == 3)
-      if (matchInsert())
-        return true;
+      if (auto rv = matchInsert())
+        return *rv;
+
+    SmallVec<HWValue, 16> operands;
+    bool anyMismatch = false;
+
+    InstrRef concat =
+        (instr.isOpc(HW_CONCAT) && instr.getNumOthers() == aliases.frags.size())
+            ? instr
+            : nullref;
+    for (uint i = 0; i < aliases.frags.size(); i++) {
+      auto &frag = aliases.frags[aliases.frags.size() - i - 1];
+      auto ref = ctx.resolveObj(frag.ref);
+      auto existing = concat ? concat.other(i)->as<HWValue>() : nullref;
+      auto op = operandEqualsFrag(existing, frag);
+      if (!op) {
+        assert(existing);
+        operands.emplace_back(existing);
+      } else {
+        operands.emplace_back(op);
+        anyMismatch = true;
+      }
+    }
+
+    if (!anyMismatch)
+      return false;
 
     auto ib = build.buildInstrRaw(HW_CONCAT, 1 + aliases.frags.size());
     build.setInsertPoint(ib.instr());
     ib.addRef(instr.def(0)->as<WireRef>()).other();
-    // instr.def(0).replace(FatDynObjRef{nullref});
-    for (auto frag : Range{aliases.frags}.reverse()) {
-      auto ref = ctx.resolveObj(frag.ref);
-      ib.addRef(build.buildSplice(ref, frag.len, frag.srcAddr));
-    }
+    ib.addRefs(operands);
     deleteMatchedInstr(instr);
     return true;
   }
@@ -601,7 +701,7 @@ private:
       case *OP_OR:
         if (constants[0].valueEqualsS(-1)) {
           deleteMatchedInstr(root);
-          oldDefW.replaceAllUsesWith(cbuild.ones(*oldDefW->numBits).get());
+          replaceUses(oldDefW, cbuild.ones(*oldDefW->numBits).get());
           return true;
         }
         [[fallthrough]];
@@ -615,7 +715,7 @@ private:
       case *OP_AND:
         if (constants[0].valueEquals(0)) {
           deleteMatchedInstr(root);
-          oldDefW.replaceAllUsesWith(cbuild.zero(*oldDefW->numBits).get());
+          replaceUses(oldDefW, cbuild.zero(*oldDefW->numBits).get());
           return true;
         }
         if (constants[0].valueEqualsS(-1)) {
@@ -634,17 +734,17 @@ private:
         case *OP_ADD:
         case *OP_OR: {
           deleteMatchedInstr(root);
-          oldDefW.replaceAllUsesWith(cbuild.zero(*oldDefW->numBits).get());
+          replaceUses(oldDefW, cbuild.zero(*oldDefW->numBits).get());
           return true;
         }
         case *OP_MUL: {
           deleteMatchedInstr(root);
-          oldDefW.replaceAllUsesWith(cbuild.one(*oldDefW->numBits).get());
+          replaceUses(oldDefW, cbuild.one(*oldDefW->numBits).get());
           return true;
         }
         case *OP_AND: {
           deleteMatchedInstr(root);
-          oldDefW.replaceAllUsesWith(cbuild.ones(*oldDefW->numBits).get());
+          replaceUses(oldDefW, cbuild.ones(*oldDefW->numBits).get());
           return true;
         }
         default:
@@ -660,9 +760,9 @@ private:
       case *OP_MUL:
         deleteMatchedInstr(root);
         if (constants.size() == 1)
-          oldDefW.replaceAllUsesWith(constants[0]);
+          replaceUses(oldDefW, constants[0]);
         else
-          oldDefW.replaceAllUsesWith(operands[0]);
+          replaceUses(oldDefW, operands[0]);
         return true;
       }
       dyno_unreachable("no 1-ary output value");
@@ -1120,6 +1220,10 @@ private:
         return true;
     }
 
+    if (instr.isOpc(OP_AND, OP_OR))
+      if (simplifyDeMorgan(instr))
+        return true;
+
     if (instr.isOpc(OP_ICMP_EQ, OP_ICMP_NE, /*OP_ICMP_CEQ, OP_ICMP_CNE,
                     OP_ICMP_WEQ, OP_ICMP_WNE, OP_ICMP_CZEQ, OP_ICMP_CZNE,
                     OP_ICMP_CXEQ, OP_ICMP_CXNE,*/
@@ -1165,11 +1269,17 @@ private:
     return generated(ctx, currentMatched, currentReplaced, instr);
   }
 
+  void recomputeAnalysesAtDefWire(WireRef wire) {
+    knownBits.recomputeAt(wire);
+    bitAlias.recomputeAt(wire);
+  }
+
   void newInstrHook(InstrRef ref) {
     for (auto def : ref.defs()) {
       switch (*def->fat().getType()) {
       case *HW_WIRE: {
         auto asWire = def->as<WireRef>();
+        recomputeAnalysesAtDefWire(asWire);
         for (auto use : asWire.uses())
           worklist.emplace_back(use.instr());
         break;
@@ -1213,8 +1323,8 @@ private:
   }
 
   void anyMatchHook() {
-    bitAlias.clearCache();
-    knownBits.clearCache();
+    // bitAlias.clearCache();
+    // knownBits.clearCache();
   }
 
   void runOnInstr(InstrRef instr) {
@@ -1308,11 +1418,15 @@ public:
       worklist.emplace_back(ref);
     });
 
+    // ctx.getWires().createHooks.emplace_back(
+    //     [&](WireRef wire) { knownBits.cache.clear(wire); });
+
     for (auto mod : ctx.activeModules()) {
       runOnModule(mod.iref());
     }
 
     ctx.getInstrs().createHooks.pop_back();
+    // ctx.getWires().createHooks.pop_back();
 
     destroyMarkedInstrs();
   }

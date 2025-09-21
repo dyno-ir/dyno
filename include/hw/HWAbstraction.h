@@ -304,13 +304,20 @@ public:
   }
 
   template <IsAnyHWValue T> HWValue buildRedXor(T val) {
-    if (val.template is<ConstantRef>()) {
-      return ConstantRef::fromFourState(
-          BigInt::reductionXOROp4S(val.template as<ConstantRef>()));
+    SmallVec<HWValue, 32> bits;
+    bits.reserve(*val.getNumBits());
+    for (uint i = 0; i < *val.getNumBits(); i++) {
+      bits.emplace_back(buildSplice(val, 1, i));
     }
-    auto rv = buildInstr(HW_RED_XOR, true, val).defW();
-    rv->numBits = 1;
-    return rv;
+    return buildXor(bits);
+    // todo: backend support for HW_RED_XOR
+    // if (val.template is<ConstantRef>()) {
+    //   return ConstantRef::fromFourState(
+    //       BigInt::reductionXOROp4S(val.template as<ConstantRef>()));
+    // }
+    // auto rv = buildInstr(HW_RED_XOR, true, val).defW();
+    // rv->numBits = 1;
+    // return rv;
   }
 
   HWValue buildExt(uint32_t newSize, HWValue value, bool sign) {
@@ -780,8 +787,11 @@ public:
     if (auto asConst = value.dyn_as<ConstantRef>()) {
       return ctx.constBuild().val(asConst).bitNOT().get();
     }
-    auto rv = buildInstr(OP_NOT, true, value).defW();
-    rv->numBits = value.getNumBits();
+    auto wire = value.as<WireRef>();
+    if (wire.getDefI().isOpc(OP_NOT))
+      return wire.getDefI().other(0)->as<HWValue>();
+    auto rv = buildInstr(OP_NOT, true, wire).defW();
+    rv->numBits = wire.getNumBits();
     return rv;
   }
 

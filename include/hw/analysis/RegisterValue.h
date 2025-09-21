@@ -513,7 +513,8 @@ public:
 };
 
 inline auto diffRegisterValues(ArrayRef<RegisterValue *> regVals,
-                               bool defragmentDiffs = true) {
+                               bool defragmentDiffs = true,
+                               bool fragmentationDiffMode = false) {
   SmallVec<RegValueDiff, 4> diffs;
 
   SmallVec<uint32_t, 4> idxs(regVals.size());
@@ -562,6 +563,8 @@ inline auto diffRegisterValues(ArrayRef<RegisterValue *> regVals,
     }
     uint32_t chunkLen = overlapEnd - curAddr;
 
+    equalChunk &= !fragmentationDiffMode;
+
     if (!equalChunk) {
       // either start a new diff run or extend the last one
       if (defragmentDiffs && !diffs.empty() &&
@@ -582,6 +585,60 @@ inline auto diffRegisterValues(ArrayRef<RegisterValue *> regVals,
       if (curAddr == end)
         idxs[i]++;
     }
+  }
+
+  return diffs;
+}
+inline auto regValueFindCommonSeams(ArrayRef<RegisterValue *> regVals) {
+  SmallVec<uint32_t, 4> diffs;
+
+  SmallVec<uint32_t, 4> idxs(regVals.size());
+
+  uint32_t curAddr = 0;
+
+  while (true) {
+    uint32_t overlapEnd = UINT32_MAX;
+
+    bool allEqual = true;
+    uint32_t dstAddr;
+
+    for (size_t i = 0; i < regVals.size(); i++) {
+      uint32_t addr;
+      uint32_t end;
+      if (idxs[i] == regVals[i]->frags.size()) {
+        addr = regVals[i]->getLen();
+        end = addr;
+      } else {
+        auto &frag = regVals[i]->frags[idxs[i]];
+        addr = frag.dstAddr;
+        end = frag.dstAddr + frag.len;
+      }
+
+      overlapEnd = std::min(overlapEnd, end);
+      if (i == 0)
+        dstAddr = addr;
+      else
+        allEqual &= addr == dstAddr;
+    }
+
+    //if (allEqual)
+    diffs.emplace_back(dstAddr);
+    curAddr = overlapEnd;
+
+    // advance fragment indices when we hit their end
+    bool any = false;
+    for (size_t i = 0; i < regVals.size(); i++) {
+      if (regVals[i]->frags.size() == idxs[i])
+        continue;
+      any = true;
+      auto frag = regVals[i]->frags[idxs[i]];
+      uint32_t end = frag.dstAddr + frag.len;
+      if (curAddr == end || allEqual) {
+        idxs[i]++;
+      }
+    }
+    if (!any)
+      break;
   }
 
   return diffs;
@@ -746,6 +803,10 @@ struct RegisterPartitions : public RegisterFrags<RegisterPartitionFragment, 4> {
     }
 
     frags.insert(frags.begin() + insertPos, Fragment{centerAddr, centerLen});
+  }
+
+  uint32_t getLen() const {
+    return frags.empty() ? 0 : frags.back().dstAddr + frags.back().len;
   }
 };
 

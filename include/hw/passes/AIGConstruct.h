@@ -133,6 +133,24 @@ public:
     wireToAIGNode[instr.def(0)->as<WireRef>()] =
         ThinArrayRef<AIGNodeTRef>{pos, numBits};
   }
+  void buildInsert(InsertIRef insert) {
+    assert(insert.isConstantOffs());
+
+    uint32_t pos = wireToAIGNodeStorage.size();
+    for (uint i = 0; i < insert.getMemoryLen(); i++) {
+      if (i >= insert.getBase() && i < insert.getBase() + insert.getLen()) {
+        wireToAIGNodeStorage.emplace_back(
+            resolveBit(insert.val()->as<HWValue>(), i - insert.getBase()));
+        continue;
+      }
+      wireToAIGNodeStorage.emplace_back(
+          resolveBit(insert.in()->as<HWValue>(), i));
+    }
+    uint32_t numBits = wireToAIGNodeStorage.size() - pos;
+    assert(numBits == insert.getMemoryLen());
+    wireToAIGNode[insert.out()->as<WireRef>()] =
+        ThinArrayRef<AIGNodeTRef>{pos, numBits};
+  }
   void buildRepeat(InstrRef instr) {
     uint32_t pos = wireToAIGNodeStorage.size();
     auto val = instr.other(0)->as<HWValue>();
@@ -210,23 +228,23 @@ class AIGConstructPass {
       if (use.instr().isOpc(AIG_INPUT))
         return;
 
-    //auto nodes = abuild.resolveWire(wire);
-    //if (std::all_of(nodes.begin(), nodes.end(),
-    //                [](AIGNodeTRef ref) { return ref.isSpecial(); })) {
-    //  auto ibuild = build.buildInstrRaw(HW_CONCAT, nodes.size() + 1);
-    //  build.setInsertPoint(ibuild.instr());
-    //  ibuild.addRef(wire).other();
-    //  for (auto node : Range{nodes}.reverse()) {
-    //    auto fat = aigRef->aig.store.resolve(node).as<FatAIGNodeRef>();
-    //    auto def = *fat->defUse.getSingleDef();
-    //    auto instr = def.instr();
-    //    assert(instr.isOpc(AIG_INPUT));
-    //    auto val = build.buildSplice(instr.other(0)->as<HWValue>(), 1,
-    //                                 def - *instr.def_begin());
-    //    ibuild.addRef(val);
-    //  }
-    //  return;
-    //}
+    // auto nodes = abuild.resolveWire(wire);
+    // if (std::all_of(nodes.begin(), nodes.end(),
+    //                 [](AIGNodeTRef ref) { return ref.isSpecial(); })) {
+    //   auto ibuild = build.buildInstrRaw(HW_CONCAT, nodes.size() + 1);
+    //   build.setInsertPoint(ibuild.instr());
+    //   ibuild.addRef(wire).other();
+    //   for (auto node : Range{nodes}.reverse()) {
+    //     auto fat = aigRef->aig.store.resolve(node).as<FatAIGNodeRef>();
+    //     auto def = *fat->defUse.getSingleDef();
+    //     auto instr = def.instr();
+    //     assert(instr.isOpc(AIG_INPUT));
+    //     auto val = build.buildSplice(instr.other(0)->as<HWValue>(), 1,
+    //                                  def - *instr.def_begin());
+    //     ibuild.addRef(val);
+    //   }
+    //   return;
+    // }
 
     auto &aig = abuild.aig;
     auto arr = abuild.buildOutput(wire);
@@ -331,6 +349,9 @@ class AIGConstructPass {
       break;
     case *HW_CONCAT:
       abuild.buildConcat(instr);
+      break;
+    case *HW_INSERT:
+      abuild.buildInsert(instr);
       break;
 
     case *OP_TRUNC:

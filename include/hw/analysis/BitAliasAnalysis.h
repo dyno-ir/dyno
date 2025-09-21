@@ -11,12 +11,13 @@
 #include "hw/IDs.h"
 #include "hw/LoadStore.h"
 #include "hw/Wire.h"
+#include "hw/analysis/CacheInvalidation.h"
 #include "hw/analysis/RegisterValue.h"
 #include "op/IDs.h"
 #include "support/Debug.h"
 #include <optional>
 namespace dyno {
-class BitAliasAnalysis {
+class BitAliasAnalysis : public CacheInvalidation<BitAliasAnalysis> {
   HWContext &ctx;
   bool change;
 
@@ -71,6 +72,9 @@ class BitAliasAnalysis {
 
     case *HW_SPLICE: {
       auto asSplice = instr.as<SpliceIRef>();
+      if (asSplice.out()->as<WireRef>().getObjID() == 79 &&
+          asSplice.out()->as<WireRef>().getNumBits() == 64)
+        dbgs() << "here\n";
       if (asSplice.getNumTerms() != 0 && !asSplice.terms().all([](auto term) {
             return term.getIdx().template is<ConstantRef>();
           })) {
@@ -228,9 +232,10 @@ class BitAliasAnalysis {
 
   SmallVec<Frame, 16> stack;
   BitAliasAcc retVal;
-  AnalysisCache<ObjRef<Wire>, BitAliasAcc> cache;
 
 public:
+  AnalysisCache<ObjRef<Wire>, BitAliasAcc> cache;
+
   BitAliasAnalysis(HWContext &ctx) : ctx(ctx) {}
   std::pair<RegisterValue, bool> getReprAliases(HWValue root) {
     if (auto asConst = root.dyn_as<ConstantRef>()) {
@@ -288,6 +293,8 @@ public:
     }
     return std::make_pair(RegisterValue{retVal}, change);
   }
+
+  RegisterValue get(HWValue root) { return getReprAliases(root).first; }
 
   void clearCache() { cache.clearAll(); }
 };

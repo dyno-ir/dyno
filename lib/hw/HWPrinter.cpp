@@ -24,6 +24,10 @@ __attribute__((used)) void dumpDeps(InstrRef instr) {
   print.reset();
   print.printDeps(instr);
 }
+__attribute__((used)) void dumpDeps(InstrRef instr, uint maxDepth) {
+  print.reset();
+  print.printDeps(instr, maxDepth);
+}
 __attribute__((used)) void dumpDeps(InstrRef instr, HWContext &ctx) {
   print.reset();
   print.printDeps(instr, ctx);

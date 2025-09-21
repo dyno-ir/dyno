@@ -32,6 +32,15 @@ class MuxTreeOptimizationPass {
   HWContext &ctx;
   HWInstrBuilder build;
 
+public:
+  struct Config {
+    bool dontCareMUXsOnly = false;
+    bool reverseMUXsForSmallerExprs = false;
+    bool exploreConditions = false;
+  };
+  Config config;
+
+private:
   void printMuxTree(MuxTree *tree) {
     DEBUG("MuxTreeOptimization", {
       dbgs() << "mux tree at: ";
@@ -183,6 +192,7 @@ public:
       if (orOperands.size() == 1)
         andOperands.emplace_back(orOperands.front());
       else {
+        Range{orOperands}.sort(HWInstrBuilder::commutativeOpOperandOrder);
         auto wire = build.buildInstr(OP_OR, true, ArrayRef{orOperands}).defW();
         wire->numBits = 1;
         andOperands.emplace_back(wire);
@@ -192,6 +202,7 @@ public:
     if (andOperands.size() == 1)
       sel = andOperands[0];
     else {
+      Range{andOperands}.sort(HWInstrBuilder::commutativeOpOperandOrder);
       auto wire = build.buildInstr(OP_AND, true, ArrayRef{andOperands}).defW();
       wire->numBits = 1;
       sel = wire;
@@ -228,13 +239,15 @@ private:
           asConst && asConst.allBitsUndef())
         return trueV;
 
-      if (tree->entries[0].expr.literals.size() <
-          tree->entries[1].expr.literals.size()) {
-        return build.buildMux(getExprVal(build, tree, tree->entries[0].expr),
-                              trueV, falseV);
-      } else {
+      if (config.reverseMUXsForSmallerExprs &&
+          tree->entries[0].expr.literals.size() >
+              tree->entries[1].expr.literals.size()) {
         return build.buildMux(getExprVal(build, tree, tree->entries[1].expr),
                               falseV, trueV);
+
+      } else {
+        return build.buildMux(getExprVal(build, tree, tree->entries[0].expr),
+                              trueV, falseV);
       }
     }
 
@@ -338,11 +351,11 @@ private:
         asConst && asConst.allBitsUndef())
       return leftVal;
 
-    // if (selExprNeg && selExprNeg->literals.size() < selExpr.literals.size())
-    // {
-    //   auto sel = getExprVal(build, tree, *selExprNeg);
-    //   return build.buildMux(sel, leftVal, rightVal);
-    // }
+    if (config.reverseMUXsForSmallerExprs && selExprNeg &&
+        selExprNeg->literals.size() < selExpr.literals.size()) {
+      auto sel = getExprVal(build, tree, *selExprNeg);
+      return build.buildMux(sel, leftVal, rightVal);
+    }
     auto sel = getExprVal(build, tree, selExpr);
     return build.buildMux(sel, rightVal, leftVal);
   }
@@ -363,7 +376,8 @@ private:
           dumpInstr(instr, ctx);
         })
         auto muxtreeOpt = analysis.analyzeMuxTree(
-            instr, [&](InstrRef ref) { visitedMap[ref] = 1; });
+            instr, [&](InstrRef ref) { visitedMap[ref] = 1; }, false,
+            config.exploreConditions);
         if (!muxtreeOpt) {
           DEBUG("MuxTreeOpt", {
             dbgs() << "failed to simplify MUX tree at: ";
@@ -377,11 +391,19 @@ private:
         analysis.simplifyConditions(&muxtree);
         // printMuxTree(&muxtree);
         analysis.dedupeMuxTreeOutputs(&muxtree);
-        printMuxTree(&muxtree);
+        // printMuxTree(&muxtree);
         auto pruned = analysis.pruneDontCareOutputs(ctx, &muxtree);
-        // if (!pruned)
-        //   continue;
-        printMuxTree(&muxtree);
+        if (!pruned && config.dontCareMUXsOnly)
+          continue;
+        // printMuxTree(&muxtree);
+        if (!config.exploreConditions) {
+          auto nonOverlapping = analysis.simplifyNonOverlapping(ctx, &muxtree);
+          // printMuxTree(&muxtree);
+          if (nonOverlapping)
+            analysis.simplifyConditions(&muxtree);
+          // printMuxTree(&muxtree);
+        }
+
         auto wire = lowerMuxTreeSimple(&muxtree);
         auto oldWire = instr.def(0)->as<WireRef>();
         if (wire != oldWire)

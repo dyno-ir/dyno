@@ -229,12 +229,14 @@ public:
     printInstr(instr);
   }
 
-  void printDeps(InstrRef instr) {
-    for (auto use : instr.others()) {
-      if (!Operand::isDefUseOperand(*use))
-        continue;
-      printDeps(use->as<FatDynObjRef<InstrDefUse>>()->getSingleDef()->instr());
-    }
+  void printDeps(InstrRef instr, uint maxDepth = -1) {
+    if (maxDepth)
+      for (auto use : instr.others()) {
+        if (!Operand::isDefUseOperand(*use))
+          continue;
+        printDeps(use->as<FatDynObjRef<InstrDefUse>>()->getSingleDef()->instr(),
+                  maxDepth - 1);
+      }
     printInstr(instr);
   }
   void printDeps(InstrRef instr, HWContext &ctx, uint maxDepth = -1) {

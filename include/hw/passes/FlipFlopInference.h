@@ -8,6 +8,7 @@
 #include "hw/LoadStore.h"
 #include "hw/SensList.h"
 #include "hw/Wire.h"
+#include "hw/analysis/KnownBits.h"
 #include "hw/analysis/MuxTree.h"
 #include "hw/passes/MuxTreeOptimization.h"
 #include "support/ErrorRecovery.h"
@@ -24,6 +25,9 @@ class FlipFlopInferencePass {
   findReset(StoreIRef store,
             ArrayRef<std::pair<RegisterRef, bool>> resetCandidates,
             MuxTree *muxTree) {
+    if (!muxTree)
+      return std::make_pair(nullref, 0);
+
     SmallVec<std::pair<SmallBoolExprCNF, uint>, 2> resetExprs;
     if (auto asConst = store.value().dyn_as<ConstantRef>())
       return std::pair(asConst, 0);
@@ -64,6 +68,28 @@ class FlipFlopInferencePass {
     return std::make_pair(nullref, 0);
   }
 
+  std::pair<ConstantRef, uint>
+  findReset2(StoreIRef store,
+             ArrayRef<std::pair<RegisterRef, bool>> resetCandidates) {
+    KnownBitsAnalysis knownBits;
+    for (auto [i, cand] : Range{resetCandidates}.enumerate()) {
+      auto [reg, pol] = cand;
+      SmallVec<std::pair<ObjRef<Wire>, BigInt>, 4> assignments;
+      for (auto use : reg.uses()) {
+        if (!use.instr().isOpc(HW_LOAD))
+          continue;
+        assignments.emplace_back(use.instr().def(0)->as<WireRef>(),
+                                 BigInt::fromU64(pol, 1));
+      }
+
+      auto val = knownBits.getKnownBitsWith(store.value(), assignments);
+
+      if (!val.getIs4S())
+        return std::make_pair(ctx.constBuild().val(val).get(), i);
+    }
+    return std::make_pair(nullref, 0);
+  }
+
   bool isQLoad(RegisterIRef q, HWValue value) {
     if (!value.is<WireRef>())
       return false;
@@ -101,8 +127,8 @@ class FlipFlopInferencePass {
     auto instr = wire.getDefI();
     if (!instr.isOpc(HW_MUX))
       return std::nullopt;
-    auto mtree =
-        muxTreeAnalysis.analyzeMuxTree(store.value().as<WireRef>().getDefI(), false, false);
+    auto mtree = muxTreeAnalysis.analyzeMuxTree(
+        store.value().as<WireRef>().getDefI(), false, false);
     if (!mtree)
       return std::nullopt;
     muxTreeAnalysis.simplifyConditions(&*mtree);
@@ -186,8 +212,7 @@ class FlipFlopInferencePass {
         resetCandidates = {get(0), get(1)};
       }
       uint resetIndex = 0;
-      std::tie(resetValue, resetIndex) =
-          findReset(storeI, resetCandidates, muxTreePtr);
+      std::tie(resetValue, resetIndex) = findReset2(storeI, resetCandidates);
       if (!resetValue)
         report_fatal_error("reset sensitivity but no reset value found");
       rstReg = resetCandidates[resetIndex];

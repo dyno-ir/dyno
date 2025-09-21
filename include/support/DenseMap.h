@@ -625,14 +625,14 @@ public:
     std::uninitialized_default_construct_n(buckets, 1);
   }
 
-  LargeSetMap(const LargeSetMap &other) {
+  LargeSetMap(const LargeSetMap &other) : Base(1, 0) {
     buckets = (Bucket *)::operator new[](sizeof(Bucket) * other.cap,
                                          std::align_val_t(alignof(Bucket)));
     std::uninitialized_copy_n(other.buckets, other.cap, buckets);
     this->cap = other.cap;
     this->sz = other.sz;
   }
-  LargeSetMap(LargeSetMap &&other) {
+  LargeSetMap(LargeSetMap &&other) : Base(1, 0) {
     this->buckets = other.buckets;
     this->cap = other.cap;
     this->sz = other.sz;
