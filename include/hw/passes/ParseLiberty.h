@@ -507,12 +507,18 @@ class ParseLibertyPass {
   HWContext &ctx;
 
 public:
+  struct Config {
+    std::string path;
+  };
+  Config config;
+
   void run() {
-    std::string path = "sky130_fd_sc_hd__tt_025C_1v80.lib";
-    std::ifstream ifs{path};
+    std::ifstream ifs{config.path};
+    if (!ifs)
+      report_fatal_error("could not open liberty file");
     std::string code(std::istreambuf_iterator<char>{ifs},
                      std::istreambuf_iterator<char>{});
-    LibertyLexer lex{std::move(code), std::move(path)};
+    LibertyLexer lex{std::move(code), std::string(config.path)};
     LibertyParser parse{lex};
     auto block = parse.parse();
     if (!block)

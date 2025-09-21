@@ -1512,8 +1512,8 @@ public:
       out.expandUntil(sz);
 
     auto mask = shamt == 0 ? 0 : bit_mask_zeros<uint32_t>(shamt);
-    if (endAddr < WordBits)
-      mask |= bit_mask_ones<uint32_t>(WordBits - endAddr, endAddr);
+    if (shamt + rhs.getRawNumBits() < WordBits)
+      mask |= bit_mask_zeros<uint32_t>(shamt + rhs.getRawNumBits());
     out.words[offs] &= mask;
     out.words[offs] |= rhs.getWord(0) << shamt;
 
@@ -2498,6 +2498,7 @@ private:
     }
   }
 
+public:
   constexpr void normalize() {
     assert(words.size() <= getExtNumWords() ||
            (numBits == 0 && words.size() == 1));
@@ -2517,6 +2518,7 @@ private:
     }
   }
 
+private:
   // opposite of normalize
   constexpr void expand() {
     auto oldSize = getNumWords();

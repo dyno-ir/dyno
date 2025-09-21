@@ -9,6 +9,7 @@
 #include "hw/LoadStore.h"
 #include "hw/analysis/BitAliasAnalysis.h"
 #include "hw/analysis/RegisterValue.h"
+#include "support/Utility.h"
 #include <algorithm>
 namespace dyno {
 
@@ -51,6 +52,7 @@ class RegisterPartitionPass {
       if (frag.dstAddr + frag.len - store.getBase() > store.getLen())
         break;
       auto newReg = regs[i];
+      assert(frag.len != 0);
       auto val = build.buildSplice(store.value(), frag.len,
                                    frag.dstAddr - store.getBase());
       build.buildStore(newReg, val, store.isOpc(HW_STORE_DEFER),
@@ -62,15 +64,21 @@ class RegisterPartitionPass {
                       LoadIRef load) {
     SmallVec<HWValue, 4> frags;
     HWInstrBuilder build{ctx, load};
-    for (auto [i, frag] : Range{part.frags}.enumerate()) {
-      if (frag.dstAddr < load.getBase())
-        continue;
-      if (frag.dstAddr + frag.len - load.getBase() > load.getLen())
-        break;
+    auto it = part.getInsertIt(load.getBase());
+    for (; it != part.frags.end(); ++it) {
+      auto &frag = *it;
+      auto i = it - part.frags.begin();
 
-      auto load = build.buildLoad(regs[i], frag.len, 0);
-      frags.emplace_back(load);
+      if (frag.dstAddr >= load.getBase() + load.getLen())
+        break;
+      auto start = std::max(frag.dstAddr, load.getBase());
+      auto end =
+          std::min(frag.dstAddr + frag.len, load.getBase() + load.getLen());
+      assert(end > start);
+      auto val = build.buildLoad(regs[i], end - start, start - frag.dstAddr);
+      frags.emplace_back(val);
     }
+    assert(!frags.empty());
     std::reverse(frags.begin(), frags.end());
     auto val = build.buildConcat(ArrayRef{frags});
     load.def(0)->as<WireRef>().replaceAllUsesWith(val);
@@ -101,6 +109,9 @@ class RegisterPartitionPass {
     if (part.frags.size() <= 1)
       return;
 
+    if (part.getLen() != reg.getNumBits())
+      part.addPartition(part.getLen(), *reg.getNumBits() - part.getLen());
+
     SmallVec<RegisterRef, 4> regs;
     regs.reserve(part.frags.size());
     for (auto frag : part.frags)
@@ -112,11 +123,11 @@ class RegisterPartitionPass {
       if (instr.isOpc(HW_STORE, HW_STORE_DEFER)) {
         buildSplitStore(part, regs, instr.as<StoreIRef>());
         destroyList.emplace_back(instr);
-      }
-      if (instr.isOpc(HW_LOAD)) {
+      } else if (instr.isOpc(HW_LOAD)) {
         buildSplitLoad(part, regs, instr.as<LoadIRef>());
         destroyList.emplace_back(instr);
-      }
+      } else
+        dyno_unreachable("unsupported");
     }
 
     build.setInsertPoint(mod.block().end());

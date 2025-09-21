@@ -79,10 +79,18 @@ public:
       std::print(std::cerr, "\n\nIR after {}:\n", __PRETTY_FUNCTION__);
       HWPrinter{std::cerr}.printCtx(ctx);
     }
-    if (dumpAfterAll)
-      dumpDyno();
+    static int idx = 0;
+    // if (dumpAfterAll)
+    //   dumpDyno(std::string("dumps/_") + std::to_string(idx++) +
+    //            __PRETTY_FUNCTION__);
+    dumpDyno();
     if (checkAfterAll && !skipCheck)
       checkPass.run();
+  }
+
+  void setLibertyPath(const std::string &path) {
+    parseLiberty.config.path = path;
+    abc.config.path = path;
   }
 
   void runOptPipeline() {
@@ -216,29 +224,24 @@ public:
     runPass(linearizeControlFlow);
     ssaConstr.config.mode = SSAConstructPass::Config::IMMEDIATE;
     runPass(ssaConstr);
+    runPass(loadCoalesce);
     runPass(instCombine);
     runPass(agressiveDCE);
 
     runPass(instCombine);
     runPass(cse, true);
-    runPass(orderInstrs);
-    runPass(instCombine);
-
-    //runPass(simpleMemMap);
-
-    // dumpDyno("a.dyno");
-    runPass(muxTreeOpt);
-    runPass(instCombine);
-    // dumpDyno("b.dyno");
-
-    runPass(cse, true);
     runPass(fuzzyCse, true);
-    orderInstrs.config.assertNoCircularDeps = true;
-    orderInstrs.config.moveStoresBeforeLoads = true;
     runPass(orderInstrs);
     runPass(instCombine);
     runPass(ssaConstr);
+
     instCombine.config.liftMUX = true;
+    runPass(instCombine);
+    runPass(cse);
+    runPass(instCombine);
+
+    runPass(muxTreeOpt);
+    runPass(cse);
     runPass(instCombine);
 
     // lower everything that can still go through regular instcombine
@@ -272,11 +275,15 @@ public:
 
     runPass(flipFlopInference);
     runPass(triggerDedupe);
-    runPass(cse, true);
-    runPass(orderInstrs);
+    runPass(cse);
     runPass(instCombine);
+    runPass(cse);
+    runPass(instCombine);
+
     // re-run mux tree opt to remove loopback MUXs after ff inference
     dumpDyno("pre_mux_opt.dyno");
+    muxTreeOpt.config.dontCareMUXsOnly = true;
+    muxTreeOpt.config.exploreConditions = true;
     runPass(muxTreeOpt);
     runPass(instCombine);
     dumpDyno("postmux_opt.dyno");

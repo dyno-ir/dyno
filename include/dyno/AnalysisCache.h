@@ -1,4 +1,5 @@
 #pragma once
+#include "Instr.h"
 #include "support/DenseMap.h"
 
 namespace dyno {
@@ -17,6 +18,13 @@ public:
   }
 
   void insert(Ref ref, Result result) { map.insert(ref, std::move(result)); }
+  void clear(Ref ref) {
+    auto it = map.find(ref);
+    if (it)
+      map.erase(it);
+  }
+
+  auto &raw() { return map; }
 };
 
 }; // namespace dyno

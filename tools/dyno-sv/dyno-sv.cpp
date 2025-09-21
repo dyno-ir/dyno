@@ -7,11 +7,19 @@ using namespace dyno;
 int main(int argc, char **argv) {
   slang::driver::Driver driver;
   driver.addStandardArgs();
+
+  std::optional<std::string> libertyFile = std::nullopt;
+  driver.cmdLine.add("--liberty", libertyFile,
+                     "Liberty file (stdcell definitions)");
+
   if (!driver.parseCommandLine(argc, argv))
     return 1;
 
   if (!driver.processOptions())
     return 1;
+
+  if (!libertyFile)
+    libertyFile = "sky130_fd_sc_hd__tt_025C_1v80.lib";
 
   std::unique_ptr<slang::ast::Compilation> compilation;
 
@@ -38,9 +46,10 @@ int main(int argc, char **argv) {
   std::cout << "\n\n\n";
 
   PassPipeline pipeline{ctx};
-  pipeline.printAfterAll = true;
+  pipeline.setLibertyPath(*libertyFile);
+  pipeline.printAfterAll = false;
   pipeline.checkAfterAll = true;
-  pipeline.dumpAfterAll = false;
+  pipeline.dumpAfterAll = true;
   debugType = 1;
   pipeline.runOptPipeline();
   pipeline.runLoweringPipeline();

@@ -6,13 +6,12 @@
 #include "hw/HWPrinter.h"
 #include "hw/IDs.h"
 #include "op/IDs.h"
-#include "slang/ast/SemanticFacts.h"
 #include "support/Debug.h"
 namespace dyno {
 
 class CheckPass {
   HWContext &ctx;
-  bool hasError;
+  bool hasError = false;
 
 public:
   struct Config {

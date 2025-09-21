@@ -8,13 +8,14 @@
 #include "hw/IDs.h"
 #include "hw/LoadStore.h"
 #include "hw/Wire.h"
+#include "hw/analysis/CacheInvalidation.h"
 #include "op/IDs.h"
 #include "support/Debug.h"
 #include "support/DenseMap.h"
 #include <concepts>
 namespace dyno {
 
-class KnownBitsAnalysis {
+class KnownBitsAnalysis : public CacheInvalidation<KnownBitsAnalysis> {
 
   struct KnownBitsVal {
     BigInt val;
@@ -38,6 +39,11 @@ class KnownBitsAnalysis {
                std::invocable<const BigInt &, const BigInt &> auto func) {
       val = func(val, other.val);
     }
+
+    bool operator==(const KnownBitsVal &other) const {
+      return val == other.val;
+    }
+    bool operator==(const BigInt &other) const { return val == other; }
   };
 
   struct Frame {
@@ -90,9 +96,16 @@ public:
   AnalysisCache<ObjRef<Wire>, KnownBitsVal> cache;
 
   BigInt getKnownBits(HWValue rootVal) {
-
+    retVal.val = BigInt{};
     stack.emplace_back(rootVal, 0);
     while (!stack.empty()) {
+
+      if (retVal.val.getWords().data() != nullptr && retVal.val.getNumBits()) {
+        auto tst = retVal;
+        tst.val.normalize();
+        assert(tst.val == retVal.val);
+      }
+
       auto &frame = stack.back();
       if (auto asConst = frame.value.dyn_as<ConstantRef>()) {
         retVal = KnownBitsVal{asConst};
@@ -235,6 +248,28 @@ public:
         break;
       }
 
+      case *HW_MUX: {
+        if (frame.idx == 0) {
+          frame.idx++;
+          stack.emplace_back(instr.other(0)->as<HWValue>(), 0);
+        } else if (frame.idx == 1) {
+          frame.idx++;
+          assert(retVal.val.getNumBits() == 1);
+          if (retVal.val.getIs4S()) {
+            retVal = KnownBitsVal{PatBigInt::undef(*wire.getNumBits())};
+            stack.pop_back();
+          } else {
+            stack.emplace_back(
+                instr.other(1 + retVal.val.valueEquals(0))->as<HWValue>());
+          }
+        } else {
+          // retVal = retVal;
+          cache.insert(wire, retVal);
+          stack.pop_back();
+        }
+        break;
+      }
+
       default:
         retVal = KnownBitsVal{PatBigInt::undef(*wire.getNumBits())};
         stack.pop_back();
@@ -245,7 +280,17 @@ public:
     return retVal.val;
   }
 
-  void clearCache() { cache.clearAll(); }
+  auto get(HWValue root) { return getKnownBits(root); }
+
+  auto getKnownBitsWith(HWValue val,
+                        ArrayRef<std::pair<ObjRef<Wire>, BigInt>> assignments) {
+    cache.clearAll();
+    for (auto [wire, val] : assignments)
+      cache.insert(wire, KnownBitsVal{val});
+    auto rv = getKnownBits(val);
+    cache.clearAll();
+    return rv;
+  }
 };
 
 }; // namespace dyno

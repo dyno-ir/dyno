@@ -1274,6 +1274,92 @@ public:
     return true;
   }
 
+  bool simplifyNonOverlapping(HWContext &ctx, MuxTree *tree) {
+
+    SmallDenseMap<ObjRef<Wire>, Optional<uint32_t>, 4> map;
+
+    auto signalToICMP = [&](MuxTree::InputSignal sig) -> InstrRef {
+      auto wire = ctx.getWires().resolve(sig.wire);
+      if (!wire.getDefI().isOpc(OP_ICMP_EQ) ||
+          !wire.getDefI().other(1)->is<ConstantRef>())
+        return nullref;
+      assert(sig.idx == 0);
+      return wire.getDefI();
+    };
+
+    // find multi-used ICMPs to expand
+    for (auto &entry : tree->entries) {
+      if (entry.expr.isTrue())
+        return false;
+      for (auto clause : entry.expr.clauses()) {
+        for (auto lit : clause) {
+          auto sig = tree->conditions[lit.id];
+          auto icmp = signalToICMP(sig);
+          if (!icmp)
+            continue;
+          auto cmpWire = icmp.other(0)->as<WireRef>();
+          auto [found, it] = map.findOrInsert(cmpWire, 0);
+          if (clause.size() != 1)
+            it.val() = nullopt;
+          else if (it.val())
+            *it.val() += 1;
+        }
+      }
+    }
+
+    SmallDenseMap<MuxTree::InputSignal, uint32_t, 4> inputSigMap;
+    for (auto [i, sig] : Range{tree->conditions}.enumerate())
+      inputSigMap.insert(sig, i);
+
+    auto pushBackExpandedICMP = [&](SmallBoolExprCNF &expr, InstrRef icmp,
+                                    bool inverse) {
+      auto val = icmp.other(1)->as<ConstantRef>();
+      auto wire = icmp.other(0)->as<WireRef>();
+
+      for (uint i = 0; i < val.getNumBits(); i++) {
+        MuxTree::InputSignal sig{wire, i};
+        auto idx =
+            inputSigMap.findOrInsert(sig, inputSigMap.size()).second.val();
+        auto idx16 = (uint16_t)idx;
+        assert(idx16 == idx);
+
+        auto bit = val.getBit(i);
+        bool val = inverse ^ (bit.val == FourState::S1);
+        if (!bit.isUnk())
+          expr.literals.emplace_back(
+              BoolExprLiteral{idx16, !val, i == 0 || !inverse});
+      }
+    };
+
+    for (auto &entry : tree->entries) {
+      SmallBoolExprCNF expr;
+      expr.literals.reserve_safe(entry.expr.literals.size());
+      for (auto lit : entry.expr.literals) {
+        auto sig = tree->conditions[lit.id];
+        auto icmp = signalToICMP(sig);
+        if (!icmp)
+          goto push_back_simple;
+        if (map.find(icmp.other(0)->as<WireRef>()).val().value_or(0) < 2)
+          goto push_back_simple;
+        pushBackExpandedICMP(expr, icmp, lit.inverse);
+        continue;
+      push_back_simple:
+        expr.literals.emplace_back(lit);
+      }
+
+      entry.expr = std::move(expr);
+    }
+
+    if (inputSigMap.size() == tree->conditions.size())
+      return false;
+
+    tree->conditions.resize(inputSigMap.size());
+    for (auto [sig, idx] : inputSigMap)
+      tree->conditions[idx] = sig;
+
+    return true;
+  }
+
   void printMuxTree(HWContext &ctx, MuxTree *tree) {
     DEBUG("MuxTreeAnalysis", {
       dbgs() << "mux tree at: ";
