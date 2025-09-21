@@ -145,6 +145,9 @@ public:
   ArrayRef<typename Container::value_type> raw() const {
     return ArrayRef{storage};
   }
+  MutArrayRef<typename Container::value_type> raw() {
+    return MutArrayRef{storage};
+  }
 
   class iterator {
     Container::value_type *word;

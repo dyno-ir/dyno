@@ -266,6 +266,7 @@ private:
     uint32_t last = 0;
     for (auto seam : Range{seams}.drop_front()) {
       auto len = seam - last;
+      assert(len != 0);
       handle(last, len);
       last = seam;
       // auto fragV = build.buildMux(
@@ -353,7 +354,7 @@ private:
     else
       val = build.buildOr(ops);
 
-    instr.def(0)->as<WireRef>().replaceAllUsesWith(val);
+    replaceUses(instr.def(0)->as<WireRef>(), build.buildNot(val));
     deleteMatchedInstr(instr);
     return true;
   }

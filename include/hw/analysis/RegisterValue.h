@@ -590,7 +590,7 @@ inline auto diffRegisterValues(ArrayRef<RegisterValue *> regVals,
   return diffs;
 }
 inline auto regValueFindCommonSeams(ArrayRef<RegisterValue *> regVals) {
-  SmallVec<uint32_t, 4> diffs;
+  SmallVec<uint32_t, 4> diffs{0};
 
   SmallVec<uint32_t, 4> idxs(regVals.size());
 
@@ -622,7 +622,7 @@ inline auto regValueFindCommonSeams(ArrayRef<RegisterValue *> regVals) {
     }
 
     //if (allEqual)
-    diffs.emplace_back(dstAddr);
+    diffs.emplace_back(overlapEnd);
     curAddr = overlapEnd;
 
     // advance fragment indices when we hit their end
@@ -630,12 +630,12 @@ inline auto regValueFindCommonSeams(ArrayRef<RegisterValue *> regVals) {
     for (size_t i = 0; i < regVals.size(); i++) {
       if (regVals[i]->frags.size() == idxs[i])
         continue;
-      any = true;
       auto frag = regVals[i]->frags[idxs[i]];
       uint32_t end = frag.dstAddr + frag.len;
       if (curAddr == end || allEqual) {
         idxs[i]++;
       }
+      any |= regVals[i]->frags.size() != idxs[i];
     }
     if (!any)
       break;

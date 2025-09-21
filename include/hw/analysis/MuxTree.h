@@ -677,25 +677,6 @@ struct SmallBoolExprCNF {
     stack.reserve(clauseVec.size());
     stack.emplace_back();
 
-    // double lastProgress = 0;
-    // auto reportProgress = [&]() {
-    //   double scale = 1.0;
-    //   double progress = 0;
-    //   uint i = 0;
-    //   while (scale > 0.00001 && i < stack.size() && i < clauseVec.size()) {
-    //     if (stack[i].idx != 0)
-    //       progress +=
-    //           scale * ((stack[i].idx - 1) / double(clauseVec[i].size()));
-    //     scale *= 1. / double(clauseVec[i].size());
-    //     i++;
-    //   }
-
-    //   if (progress > lastProgress + 0.00001) {
-    //     dbgs() << "progress " << progress * 100 << "%\n";
-    //     lastProgress = progress;
-    //   }
-    // };
-
     auto isSuperset = [&](const SymbSet &subset, const SymbSet &superset) {
       constexpr uint64_t mask = repeatBits<uint64_t>(0b10, 2);
       for (auto [sub, super] : Range{subset.raw()}.zip(superset.raw())) {
@@ -717,9 +698,13 @@ struct SmallBoolExprCNF {
       return true;
     };
 
+    const size_t maxIters = 100000;
+    size_t iters = 0;
+
     TwoLevelSet<SymbSet> clauseSet;
     while (!stack.empty()) {
-      // reportProgress();
+      if (iters++ > maxIters)
+        return std::nullopt;
 
       auto &frame = stack.back();
 
@@ -733,26 +718,26 @@ struct SmallBoolExprCNF {
           continue;
         }
 
-        bool superset = Range{clauseSet}.any(
-            [&](auto pair) { return isSuperset(pair.second, assignments); });
+        // bool superset = Range{clauseSet}.any(
+        //     [&](auto pair) { return isSuperset(pair.second, assignments); });
 
-        if (superset) {
-          if (frame.literal)
-            assignments[*frame.literal] = UNDEFINED;
-          stack.pop_back();
-          continue;
-        }
+        // if (superset) {
+        //   if (frame.literal)
+        //     assignments[*frame.literal] = UNDEFINED;
+        //   stack.pop_back();
+        //   continue;
+        // }
       }
 
       // commit full clauses
       if (stack.size() == clauseVec.size() + 1) {
 
-        for (auto it = clauseSet.begin(); it != clauseSet.end();) {
-          if (isSuperset(assignments, it.val()))
-            it = clauseSet.erase(it);
-          else
-            ++it;
-        }
+        // for (auto it = clauseSet.begin(); it != clauseSet.end();) {
+        //   if (isSuperset(assignments, it.val()))
+        //     it = clauseSet.erase(it);
+        //   else
+        //     ++it;
+        // }
 
         clauseSet.insert(assignments);
 
@@ -978,6 +963,92 @@ struct SmallBoolExprCNF {
     // this->dump();
     simplify(numLiterals);
     // this->dump();
+  }
+
+  void addAsGlobalOR2(SmallBoolExprCNF &other, uint numLiterals) {
+    if (isTrue())
+      return;
+    if (isUnsat()) {
+      *this = other;
+      return;
+    }
+    if (other.isTrue()) {
+      *this = other;
+      return;
+    }
+    if (other.isUnsat()) {
+      return;
+    }
+
+    enum {
+      UNINVERSED,
+      INVERSED,
+      UNDEFINED = 3,
+    };
+    using SymbSet = DynSymbSet<SmallVec<uint64_t, 2>, 2, ~0UL>;
+    TwoLevelSet<SymbSet> clauseSet;
+
+    auto combine = [&](const SymbSet &lhsSet,
+                       const SymbSet &rhsSet) -> std::optional<SymbSet> {
+      constexpr uint64_t mask = repeatBits<uint64_t>(0b10, 2);
+      SymbSet out{lhsSet.size()};
+      size_t i = 0;
+      for (auto [lhs, rhs] : Range{lhsSet.raw()}.zip(rhsSet.raw())) {
+        auto defMaskLhs = ~lhs & mask;
+        auto defMaskRhs = ~rhs & mask;
+
+        auto defMask = defMaskLhs | defMaskRhs;
+        auto sharedDefMask = defMaskLhs & defMaskRhs;
+
+        // trivially true
+        if ((lhs & (sharedDefMask >> 1)) != (rhs & (sharedDefMask >> 1)))
+          return std::nullopt;
+
+        auto undefMask = ~defMask & mask;
+
+        auto word = (undefMask) | (undefMask >> 1) | ((defMaskLhs >> 1) & lhs) |
+                    ((defMaskRhs >> 1) & rhs);
+        out.raw()[i++] = word;
+      }
+      return out;
+    };
+
+    auto convert = [numLiterals](SmallBoolExprCNF &expr) {
+      SmallVec<SymbSet, 16> sets;
+      for (auto clause : expr.clauses()) {
+        auto &set = sets.emplace_back(numLiterals);
+        for (auto lit : clause)
+          set[lit.id] = lit.inverse;
+      }
+      return sets;
+    };
+    auto lhsSets = convert(*this);
+    auto rhsSets = convert(other);
+    literals.clear();
+
+    for (auto &lhs : lhsSets) {
+      for (auto &rhs : rhsSets) {
+        auto cmb = combine(lhs, rhs);
+        if (!cmb)
+          continue;
+        clauseSet.insert(*cmb);
+      }
+    }
+
+    for (auto [_, v] : clauseSet) {
+      auto pos = literals.size();
+      for (auto [litId, assign] : Range{v}.enumerate()) {
+        if (assign == UNDEFINED)
+          continue;
+        literals.emplace_back(
+            BoolExprLiteral{uint16_t(litId), assign == INVERSED, 0});
+      }
+      assert(literals.size() != pos);
+      literals[pos].clauseBegin = true;
+    }
+    if (literals.size() == 0)
+      makeTrue();
+    simplify(numLiterals);
   }
 
   auto evalWithBoundVars2(SmallBoolExprCNF &orig, SmallBoolExprCNF &expr,
@@ -1252,7 +1323,8 @@ public:
     for (auto idx : dcEntries) {
       auto &entry = tree->entries[idx];
       auto inv = entry.expr.negated2(tree->conditions.size());
-      assert(inv);
+      if (!inv)
+        continue;
       for (auto [otherIdx, otherEntry] : Range{tree->entries}.enumerate()) {
         if (Range{dcEntries}.find(otherIdx) != dcEntries.end())
           continue;
