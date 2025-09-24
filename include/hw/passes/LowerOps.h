@@ -62,10 +62,10 @@ private:
       }
       operands.emplace_back(op->as<HWValue>(), delayEst.value_or(UINT32_MAX));
     }
-    std::sort(operands.begin(), operands.end(),
-              [](const auto &lhs, const auto &rhs) {
-                return lhs.second > rhs.second;
-              });
+    std::stable_sort(operands.begin(), operands.end(),
+                     [](const auto &lhs, const auto &rhs) {
+                       return lhs.second > rhs.second;
+                     });
     return operands;
   }
 
@@ -599,24 +599,77 @@ private:
     }
     // build binary tree
 
-    uint32_t addressBit = 0;
+    constexpr bool twoStage = false;
+    constexpr bool highFirst = false;
 
-    while ((1ULL << addressBit) < elemCount) {
-      size_t outIdx = 0;
-      auto sel = build.buildSplice(address, 1, addressBit);
-      for (uint i = 0; i < array.size(); i += 2) {
-        if (i == array.size() - 1)
-          array[outIdx++] = array.back();
-        else
-          array[outIdx++] = build.buildMux(sel, array[i + 1], array[i]);
+    if (twoStage) {
+      auto oneHot = buildDecoder(address, elemCount);
+      for (uint i = 0; i < elemCount; i++) {
+        auto mask =
+            build.buildRepeat(build.buildSplice(oneHot, 1, i), elemSize);
+        array[i] = build.buildAnd(array[i], mask);
+      }
+      return build.buildOr(array);
+    } else if (highFirst) {
+      uint addrHigh = clog2(elemCount);
+      auto count = ceil_to_pow2(elemCount);
+      value = build.buildExt(count * elemSize, value, OP_ANYEXT);
+      for (uint i = addrHigh; i-- > 0;) {
+        count /= 2;
+        auto mid = count * elemSize;
+        value = build.buildMux(build.buildSplice(address, 1, i),
+                               build.buildSplice(value, mid, mid),
+                               build.buildTrunc(mid, value));
+      }
+      assert(*value.getNumBits() == elemSize);
+      return value;
+    } else {
+      uint32_t addressBit = 0;
+      while ((1ULL << addressBit) < elemCount) {
+        size_t outIdx = 0;
+        auto sel = build.buildSplice(address, 1, addressBit);
+        for (uint i = 0; i < array.size(); i += 2) {
+          if (i == array.size() - 1)
+            array[outIdx++] = array.back();
+          else
+            array[outIdx++] = build.buildMux(sel, array[i + 1], array[i]);
+        }
+
+        array.downsize(outIdx);
+        addressBit++;
       }
 
-      array.downsize(outIdx);
-      addressBit++;
+      assert(array.size() == 1);
+      return array[0];
+    }
+  }
+
+  HWValue buildDecoder(HWValue addr, uint32_t elemCount) {
+    auto bits = clog2(elemCount);
+
+    SmallVec<HWValue, 8> trueBits;
+    SmallVec<HWValue, 8> falseBits;
+    auto invAddr = build.buildNot(addr);
+
+    for (uint i = 0; i < bits; i++) {
+      trueBits.emplace_back(build.buildSplice(addr, 1, i));
+      falseBits.emplace_back(build.buildSplice(invAddr, 1, i));
     }
 
-    assert(array.size() == 1);
-    return array[0];
+    SmallVec<HWValue, 8> operands;
+    operands.resize(bits);
+
+    SmallVec<HWValue, 64> oneHotBits;
+    oneHotBits.reserve(elemCount);
+
+    for (uint i = elemCount - 1; i-- > 0;) {
+      for (uint j = 0; j < bits; j++) {
+        operands[j] = (i & (1ULL << j)) ? trueBits[j] : falseBits[j];
+      }
+      oneHotBits.emplace_back(build.buildAnd(operands));
+    }
+
+    return build.buildConcat(oneHotBits);
   }
 
   HWValue lowerSimpleInsert(HWValue pad, HWValue value, uint32_t baseOffs,
@@ -630,8 +683,10 @@ private:
 
     HWValue cur = pad;
 
-    auto oneHot = build.buildSLL(cbuild.val(elemCount, 1).get(),
-                                 build.buildResize(address, elemCount, false));
+    auto oneHot = // buildDecoder(address, elemCount);
+        build.buildSLL(cbuild.val(elemCount, 1).get(),
+                       build.buildResize(address, elemCount, false));
+
     for (uint i = 0; i < elemCount; i++) {
       auto size = std::min(elemSize, *pad.getNumBits() - i * fact);
       auto curAddr = baseOffs + i * fact;
@@ -643,11 +698,12 @@ private:
         sel = build.buildAnd(sel, enable);
       auto newWord = build.buildMux(sel, value, word);
 
-      //uint32_t numHigh = *cur.getNumBits() - curAddr - elemSize;
+      // uint32_t numHigh = *cur.getNumBits() - curAddr - elemSize;
       cur = build.buildInsert(cur, newWord, curAddr);
-      //cur =
-      //    build.buildConcat(build.buildSplice(cur, numHigh, curAddr + elemSize),
-      //                      newWord, build.buildTrunc(curAddr, cur));
+      // cur =
+      //     build.buildConcat(build.buildSplice(cur, numHigh, curAddr +
+      //     elemSize),
+      //                       newWord, build.buildTrunc(curAddr, cur));
     }
 
     assert(cur.getNumBits() == pad.getNumBits());
@@ -929,5 +985,4 @@ public:
   explicit LowerOpsPass(HWContext &ctx)
       : ctx(ctx), build(ctx), cbuild(ctx.getConstants()), autoDebugInfo(ctx) {}
 };
-
 }; // namespace dyno

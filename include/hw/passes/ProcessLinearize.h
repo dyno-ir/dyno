@@ -30,7 +30,7 @@ class ProcessLinearizePass {
 
     uint8_t bitField = 0;
     uint32_t loopID = LOOPID_NONE;
-    SmallDenseSet<ProcessIRef, 1> predsSet;
+    SmallDenseSet<ObjRef<Instr>, 1> predsSet;
     // todo: currently we only use bool value of this, replace if not required.
     BitSet dependingOutputs;
     BitSet dependingInputs;
@@ -234,16 +234,16 @@ public:
           }
           loopIDCnt++;
 
-          // DEBUG("ProcessLinearize", {
-          //   size_t length = stack.end() - it.base();
-          //   dbgs() << "Found process loop of length " << length << ":\n";
-          //   size_t i = 0;
-          //   for (auto it2 = stack.end() - 1; it2 >= it.base(); --it2, ++i) {
-          //     dbgs() << "Process " << (i + 1) << " of " << length << "\n";
-          //     dumpInstr(it2->proc.iref());
-          //     dbgs() << "\n";
-          //   }
-          // });
+          DEBUG("ProcessLinearize", {
+            size_t length = stack.end() - it.base();
+            dbgs() << "Found process loop of length " << length << ":\n";
+            size_t i = 0;
+            for (auto it2 = stack.end() - 1; it2 >= it.base(); --it2, ++i) {
+              dbgs() << "Process " << (i + 1) << " of " << length << "\n";
+              dumpInstr(it2->proc.iref());
+              dbgs() << "\n";
+            }
+          });
 
           stack.pop_back();
           continue;
@@ -253,7 +253,9 @@ public:
       }
 
       if (entry.it != custom.predsSet.end()) {
-        stack.emplace_back(entry.it.key().proc(), Iterator{});
+        auto ref = entry.it.key();
+        auto proc = ctx.getInstrs().resolve(ref).as<ProcessIRef>();
+        stack.emplace_back(proc.proc(), Iterator{});
         stack.back().proc.setCustom(0);
         ++entry.it;
         continue;
@@ -300,21 +302,27 @@ public:
       // propagate depending outputs.
       for (auto proc : Range{ordered}.reverse()) {
         auto &custom = map[proc.proc()];
-        for (auto pred : Range{custom.predsSet}) {
+        for (auto obj : Range{custom.predsSet}) {
+          auto pred = ctx.getInstrs().resolve(obj).as<ProcessIRef>();
           custom.dependingOutputs |= map[pred.proc()].dependingOutputs;
         }
       }
       // propagate depending inputs.
       for (auto proc : Range{ordered}) {
         auto &custom = map[proc.proc()];
-        for (auto pred : Range{custom.predsSet}) {
+        for (auto obj : Range{custom.predsSet}) {
+          auto pred = ctx.getInstrs().resolve(obj).as<ProcessIRef>();
           custom.dependingInputs |= map[pred.proc()].dependingInputs;
         }
       }
 
       DEBUG(
-          "ProcessLinearize", std::cerr << "ordered:\n";
-          for (auto proc : ordered) { dumpInstr(proc); } dbgs() << "\n\n\n";)
+          "ProcessLinearize", std::cerr << "ordered:\n"; {
+            for (auto proc : ordered) {
+              dumpInstr(proc);
+            }
+            dbgs() << "\n\n\n";
+          })
 
       size_t cnt = ordered.size();
       SmallVec<uint32_t, 16> toMerge;

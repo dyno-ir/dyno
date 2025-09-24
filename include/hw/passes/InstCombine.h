@@ -26,6 +26,7 @@
 #include "support/Debug.h"
 #include "support/DynBitSet.h"
 #include "support/ErrorRecovery.h"
+#include "support/SmallVec.h"
 #include "support/Utility.h"
 #include <algorithm>
 
@@ -281,6 +282,88 @@ private:
     std::reverse(outFrags.begin(), outFrags.end());
     auto out = build.buildConcat(outFrags);
     replaceUses(instr.def(0)->as<WireRef>(), out);
+    deleteMatchedInstr(instr);
+    return true;
+  }
+
+  bool sinkMUX(InstrRef instr) {
+    if (config.liftMUX)
+      return false;
+    assert(instr.isOpc(HW_CONCAT));
+
+    SmallVec<std::pair<uint32_t, uint32_t>, 4> ranges;
+    size_t lastI = 0;
+    HWValue lastSel;
+    bool active = false;
+
+    auto commit = [&](size_t i) {
+      if (!active || i == lastI)
+        return;
+      active = false;
+      if (i - lastI >= 2)
+        ranges.emplace_back(lastI, i - lastI);
+      lastI = i;
+    };
+
+    for (auto [i, op] : Range{instr.others()}.enumerate()) {
+      if (auto wire = op->dyn_as<WireRef>();
+          wire && wire.getDefI().isOpc(HW_MUX)) {
+        auto mux = wire.getDefI();
+        auto sel = mux.other(0)->as<HWValue>();
+        if (sel != lastSel)
+          commit(i);
+        if (!active) {
+          lastI = i;
+          lastSel = sel;
+        }
+        active = true;
+        continue;
+      }
+      commit(i);
+    }
+    commit(instr.getNumOthers());
+
+    if (ranges.empty())
+      return false;
+
+    HWInstrBuilder build{ctx, instr};
+
+    SmallVec<HWValue, 8> vals;
+    uint32_t lastEnd = 0;
+    for (auto range : ranges) {
+      if (range.first != lastEnd) {
+        vals.push_back_range(Range{instr.other_begin() + lastEnd,
+                                   instr.other_begin() + range.first}
+                                 .deref()
+                                 .as<HWValue>());
+      }
+
+      auto ops = Range{instr.other_begin() + range.first,
+                       instr.other_begin() + range.first + range.second};
+
+      SmallVec<HWValue, 4> trueVals;
+      SmallVec<HWValue, 4> falseVals;
+      for (auto op : ops) {
+        auto mux = op->as<WireRef>().getDefI();
+        assert(mux.isOpc(HW_MUX));
+        trueVals.emplace_back(mux.other(1)->as<HWValue>());
+        falseVals.emplace_back(mux.other(2)->as<HWValue>());
+      }
+      auto sel =
+          (*ops.begin())->as<WireRef>().getDefI().other(0)->as<HWValue>();
+      vals.emplace_back(build.buildMux(sel, build.buildConcat(trueVals),
+                                       build.buildConcat(falseVals)));
+      lastEnd = range.first + range.second;
+    }
+    if (instr.getNumOthers() != lastEnd) {
+      vals.push_back_range(Range{instr.other_begin() + lastEnd,
+                                 instr.other_begin() + instr.getNumOthers()}
+                               .deref()
+                               .as<HWValue>());
+    }
+
+    auto val = build.buildConcat(vals);
+    replaceUses(instr.def(0)->as<WireRef>(), val);
     deleteMatchedInstr(instr);
     return true;
   }
@@ -1236,6 +1319,10 @@ private:
 
     if (instr.isOpc(HW_CONCAT))
       if (coalesceConcatOfLoads(instr))
+        return true;
+
+    if (instr.isOpc(HW_CONCAT))
+      if (sinkMUX(instr))
         return true;
 
     if (instr.isOpc(HW_INSERT))

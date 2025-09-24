@@ -953,6 +953,7 @@ public:
   }
 
   IfInstrRef buildIfElse(HWValue cond, uint yieldPrealloc = 0) {
+    assert(cond.getNumBits() == 1);
     InstrRef instrRef =
         InstrRef{ctx.getInstrs().create(3 + yieldPrealloc, OP_IF)};
     insertInstr(instrRef);
@@ -970,6 +971,7 @@ public:
   }
 
   IfInstrRef buildIf(HWValue cond) {
+    assert(cond.getNumBits() == 1);
     InstrRef instrRef = InstrRef{ctx.getInstrs().create(2, OP_IF)};
     insertInstr(instrRef);
     InstrBuilder build{instrRef};
@@ -1288,6 +1290,7 @@ public:
   }
 
   HWValue buildMux(HWValue sel, HWValue trueV, HWValue falseV) {
+    assert(sel.getNumBits() == 1);
     assert(trueV.getNumBits() == falseV.getNumBits());
     auto rv = buildInstr(HW_MUX, true, sel, trueV, falseV).defW();
     rv->numBits = trueV.getNumBits();

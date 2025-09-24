@@ -141,10 +141,10 @@ public:
       // todo: what about multiple and collisions?
       return *range.begin();
     }
-    case HW_WIRE.type: {
-      // todo properly (or just not)
-      return ref.getObjID() + 10000;
-    }
+    //case HW_WIRE.type: {
+    //  // todo properly (or just not)
+    //  return ref.getObjID() + 10000;
+    //}
     }
     return std::nullopt;
   }

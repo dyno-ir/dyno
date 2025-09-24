@@ -60,8 +60,6 @@ class LoadCoalescePass {
       if (activeCnt == loads.size())
         continue;
 
-      // fixme: assuming defragmented
-
       HWInstrBuilder build{ctx, proc.block().begin()};
       for (auto frag : Range{regions.frags}.filter(
                [](auto &frag) { return frag.active; })) {
@@ -72,9 +70,11 @@ class LoadCoalescePass {
               std::min(oldAddr + oldLen, frag.dstAddr + frag.len)) {
             assert(oldAddr >= frag.dstAddr &&
                    oldAddr + oldLen <= frag.dstAddr + frag.len);
-            oldLoad.value().replaceAllUsesWith(build.buildSplice(
-                ldVal, oldLoad.getLen(), oldLoad.getBase() - frag.dstAddr,
-                oldLoad.terms()));
+            auto value = build.buildSplice(ldVal, oldLoad.getLen(),
+                                           oldLoad.getBase() - frag.dstAddr,
+                                           oldLoad.terms());
+            assert(value.getNumBits() == oldLoad.getLen());
+            oldLoad.value().replaceAllUsesWith(value);
           }
         }
       }

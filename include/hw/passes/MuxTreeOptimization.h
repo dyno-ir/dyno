@@ -220,6 +220,10 @@ private:
   }
 
   HWValue lowerMuxTreeSimple(MuxTree *tree) {
+    if (tree->entries.empty())
+      return ctx.constBuild()
+          .undef(*tree->root.def(0)->as<WireRef>().getNumBits())
+          .get();
     // left = false, right = true
     if (tree->root)
       build.setInsertPoint(tree->root);

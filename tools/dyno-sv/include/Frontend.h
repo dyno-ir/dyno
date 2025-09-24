@@ -433,7 +433,8 @@ public:
     // if the current module is an interface, expose all its vars as ports.
     if (node.isInterface()) {
       std::string ifName{node.name};
-      dbgs() << "interface: " << body.getDeclaringDefinition()->name << "\n";
+      // dbgs() << "interface: " << body.getDeclaringDefinition()->name << "\n";
+      // dbgs() << "interface: " << body.getDeclaringDefinition()->name << "\n";
       for (auto ifPort : extractIFModuleVars(body)) {
         auto reg = build.buildPort(module, HW_REF_REGISTER_DEF);
         reg->numBits = ifPort->getType().getBitstreamWidth();
@@ -446,7 +447,17 @@ public:
 
   void handle_modules() {
     // can probably do this in parallel
+    SmallVec<std::pair<const slang::ast::InstanceBodySymbol *, ObjRef<Module>>,
+             32>
+        modules;
     for (auto [slangMod, dynoMod] : moduleMap) {
+      modules.emplace_back(slangMod, dynoMod);
+    }
+    Range{modules}.stable_sort([](auto a, auto b) {
+      return a.second.getObjID() < b.second.getObjID();
+    });
+
+    for (auto [slangMod, dynoMod] : modules) {
       ModuleRef fDynoMod{dynoMod, ctx.getModules()[dynoMod]};
       mod = fDynoMod.getSingleDef()->instr();
       vars.clear();
@@ -1022,6 +1033,8 @@ public:
       DialectOpcode opc;
       switch (asCase.condition) {
       case slang::ast::CaseStatementCondition::Inside:
+        print.error(asCase.sourceRange);
+        break;
       case slang::ast::CaseStatementCondition::Normal:
         opc = OP_CASE;
         break;
@@ -1030,9 +1043,6 @@ public:
         break;
       case slang::ast::CaseStatementCondition::WildcardJustZ:
         opc = HW_CASE_Z;
-        break;
-        //// what is this?
-        //print.error(asCase.sourceRange);
         break;
       }
 
@@ -1477,9 +1487,11 @@ public:
         val = build.buildICmp(operandVal,
                               ctx.constBuild().zeroLike(operandVal).get(),
                               BigInt::ICMP_EQ);
+        break;
       case slang::ast::UnaryOperator::BitwiseXnor:
         val = build.buildXor(build.buildRedXor(operandVal),
                              ConstantRef::fromFourState(FourState::S1));
+        break;
 
       case slang::ast::UnaryOperator::LogicalNot:
         val = build.buildICmp(operandVal,
@@ -1656,7 +1668,7 @@ public:
         return std::make_unique<RValue>(val, expr.type);
       }
 
-      auto ifElse = build.buildIfElse(sel, 1);
+      auto ifElse = build.buildIfElse(makeBool(sel), 1);
 
       build.pushInsertPoint(ifElse.getTrueBlock().end());
       build.buildYield(handle_expr(asCond.left())->proGetValue(build));
@@ -1771,7 +1783,8 @@ public:
 
       for (auto &indexSetter : asStructAs.indexSetters) {
         auto idx = handle_expr(*indexSetter.index)->proGetValue(build);
-        auto [esize, ecount, shift] = getArrayElemWidthAndLengthAndBase(*asStructAs.type);
+        auto [esize, ecount, shift] =
+            getArrayElemWidthAndLengthAndBase(*asStructAs.type);
         idx = build.buildAdd(idx, ConstantRef::fromU32(shift));
         idx = build.buildMul(idx, ConstantRef::fromU32(esize));
 
