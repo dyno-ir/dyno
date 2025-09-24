@@ -423,7 +423,9 @@ template <dyno::IsFatObjRef T> struct DenseMapInfo<T> {
   static constexpr T getTombstoneKey() {
     return T{dyno::ObjID{dyno::ObjID::invalid() - 2}, nullptr};
   }
-  static unsigned getHashValue(const T &k) { return std::hash<T>()(k); }
+  static unsigned getHashValue(const T &k) {
+    return DenseMapInfo<dyno::ObjRef<typename T::value_type>>::getHashValue(k);
+  }
   static bool isEqual(const T &lhs, const T &rhs) {
     return lhs.rawNoPtr() == rhs.rawNoPtr();
   }

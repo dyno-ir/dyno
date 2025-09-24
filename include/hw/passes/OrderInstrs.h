@@ -87,11 +87,11 @@ private:
         return;
       if (ctx.getCFG()[instr].blockRef() != block) {
         assert(!instr.isOpc(OP_UNYIELD));
-        //dbgs() << "out of block:\n";
-        //HWPrinter print{dbgs()};
-        //print.printInstr(block.defI(), ctx);
-        //dbgs() << "in question:\n";
-        //print.printInstr(instr, ctx);
+        // dbgs() << "out of block:\n";
+        // HWPrinter print{dbgs()};
+        // print.printInstr(block.defI(), ctx);
+        // dbgs() << "in question:\n";
+        // print.printInstr(instr, ctx);
       }
 
       uses.emplace_back(instr);
@@ -99,10 +99,11 @@ private:
   }
 
   void prioritzeUses(MutArrayRef<OperandRef> uses) {
-    std::sort(uses.begin(), uses.end(), [](OperandRef lhs, OperandRef rhs) {
-      return lhs->as<FatDynObjRef<InstrDefUse>>()->getNumUses() <
-             rhs->as<FatDynObjRef<InstrDefUse>>()->getNumUses();
-    });
+    std::stable_sort(
+        uses.begin(), uses.end(), [](OperandRef lhs, OperandRef rhs) {
+          return lhs->as<FatDynObjRef<InstrDefUse>>()->getNumUses() <
+                 rhs->as<FatDynObjRef<InstrDefUse>>()->getNumUses();
+        });
   }
 
   void visit(BlockRef block, InstrRef root,
@@ -164,7 +165,6 @@ private:
 
     block.clear_unsafe();
     auto it = block.end();
-
 
     InstrRef unyieldInstr = nullref;
 

@@ -28,6 +28,7 @@
 #include "hw/passes/ProcessLinearize.h"
 #include "hw/passes/RegisterPartition.h"
 #include "hw/passes/RemoveBuffers.h"
+#include "hw/passes/RemoveInitProcs.h"
 #include "hw/passes/SSAConstruct.h"
 #include "hw/passes/SeqToComb.h"
 #include "hw/passes/SimpleMemoryMapping.h"
@@ -67,11 +68,13 @@ class PassPipeline {
   EarlySharePass earlyShare{ctx};
   SimpleMemoryMappingPass simpleMemMap{ctx};
   LoadCoalescePass loadCoalesce{ctx};
+  RemoveInitProcsPass removeInit{ctx};
 
 public:
   bool printAfterAll = true;
   bool checkAfterAll = true;
   bool dumpAfterAll = false;
+  int idx = 0;
 
   template <typename T> void runPass(T &pass, bool skipCheck = false) {
     pass.run();
@@ -79,11 +82,10 @@ public:
       std::print(std::cerr, "\n\nIR after {}:\n", __PRETTY_FUNCTION__);
       HWPrinter{std::cerr}.printCtx(ctx);
     }
-    static int idx = 0;
-    // if (dumpAfterAll)
-    //   dumpDyno(std::string("dumps/_") + std::to_string(idx++) +
-    //            __PRETTY_FUNCTION__);
-    dumpDyno();
+    if (dumpAfterAll)
+      dumpDyno(std::string("dumps/_") + std::to_string(idx++) +
+               __PRETTY_FUNCTION__);
+    // dumpDyno();
     if (checkAfterAll && !skipCheck)
       checkPass.run();
   }
@@ -96,11 +98,7 @@ public:
   void runOptPipeline() {
     // std::print(std::cerr, "\n\nInitial IR:\n");
     // HWPrinter{std::cerr}.printCtx(ctx);
-    {
-      std::ofstream ostr("initial.dyno");
-      dumpDyno(ostr);
-    }
-
+    runPass(removeInit);
     runPass(funcInline);
     runPass(instCombine);
     runPass(moduleInline);
@@ -165,13 +163,22 @@ public:
     linearizeControlFlow.config.flattenLoops = 1;
     linearizeControlFlow.config.flattenMultiway = 0;
     checkPass.config.noLoops = true;
-    dumpDyno("a.dyno");
+    // dumpDyno("a.dyno");
     runPass(linearizeControlFlow);
-    // processLinearize.config.retainInnerDeps = 0;
-    // processLinearize.config.retainIODeps = 0;
-    // runPass(processLinearize);
-    // ssaConstr.config.mode = SSAConstructPass::Config::IMMEDIATE;
-    // runPass(ssaConstr);
+    processLinearize.config.retainInnerDeps = 0;
+    processLinearize.config.retainIODeps = 0;
+    //runPass(ssaConstr);
+    //runPass(loadCoalesce);
+    //runPass(instCombine);
+    //runPass(cse, true);
+    //orderInstrs.config.assertNoCircularDeps = true;
+    //orderInstrs.config.moveStoresBeforeLoads = false;
+    //runPass(orderInstrs);
+
+    runPass(processLinearize);
+    ssaConstr.config.mode = SSAConstructPass::Config::IMMEDIATE;
+    runPass(ssaConstr);
+    runPass(loadCoalesce);
     runPass(instCombine);
     runPass(cse, true);
 
@@ -231,6 +238,7 @@ public:
     runPass(instCombine);
     runPass(cse, true);
     runPass(fuzzyCse, true);
+    orderInstrs.config.moveStoresBeforeLoads = true;
     runPass(orderInstrs);
     runPass(instCombine);
     runPass(ssaConstr);
@@ -261,21 +269,27 @@ public:
         .lowerInsert = true,
         .lowerExtract = true,
     };
-    dumpDyno("pre_lower.dyno");
+    // dumpDyno("pre_lower.dyno");
     runPass(lowerOps);
     runPass(cse);
 
     // lift MUXs for reg partition
     instCombine.config.liftMUX = true;
-    // runPass(instCombine);
+    runPass(instCombine);
+    runPass(cse);
+    runPass(instCombine);
     runPass(regPartition);
     runPass(instCombine);
+
     runPass(processLinearize);
     runPass(instCombine);
     runPass(ssaConstr);
     runPass(instCombine);
     runPass(agressiveDCE);
 
+    // sink MUXs again for ff inference
+    instCombine.config.liftMUX = false;
+    runPass(instCombine);
     runPass(flipFlopInference);
     runPass(triggerDedupe);
     runPass(cse);
@@ -284,16 +298,17 @@ public:
     runPass(instCombine);
 
     // re-run mux tree opt to remove loopback MUXs after ff inference
-    dumpDyno("pre_mux_opt.dyno");
+    // dumpDyno("pre_mux_opt.dyno");
     muxTreeOpt.config.dontCareMUXsOnly = true;
     muxTreeOpt.config.exploreConditions = false;
     runPass(muxTreeOpt);
     runPass(instCombine);
-    dumpDyno("postmux_opt.dyno");
+    // dumpDyno("postmux_opt.dyno");
 
     runLibertyPipeline();
     // todo: don't re-order after fmap or canonicalize cylic deps in
     // orderInstrs. otherwise we get a break at random point in the cycle.
+
     runPass(ffMap, true);
     runPass(instCombine);
     runPass(processLinearize);
@@ -324,9 +339,9 @@ public:
     runPass(instCombine);
     runPass(agressiveDCE);
 
-    dumpDyno("a.dyno");
+    //dumpDyno("a.dyno");
     runPass(aigConstr);
-    dumpDyno("b.dyno");
+    // dumpDyno("b.dyno");
     runPass(agressiveDCE);
     runPass(abc);
     runPass(agressiveDCE);

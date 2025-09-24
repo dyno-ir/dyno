@@ -5,6 +5,7 @@
 #include "hw/SensList.h"
 #include "support/ErrorRecovery.h"
 #include "support/Lexer.h"
+#include "support/MMap.h"
 #include "support/SlabAllocator.h"
 #include "support/Utility.h"
 #include <fstream>
@@ -35,8 +36,8 @@ public:
     op_semicolon
   };
 
-  LibertyLexer(std::string &&src, std::string &&srcPath)
-      : Lexer(std::move(src), std::move(srcPath), Operators, Keywords) {}
+  LibertyLexer(ArrayRef<char> src, std::string &&srcPath)
+      : Lexer(src, std::move(srcPath), Operators, Keywords) {}
 };
 
 class LibertyParser {
@@ -513,12 +514,10 @@ public:
   Config config;
 
   void run() {
-    std::ifstream ifs{config.path};
-    if (!ifs)
+    MMap mmap{config.path};
+    if (!mmap)
       report_fatal_error("could not open liberty file");
-    std::string code(std::istreambuf_iterator<char>{ifs},
-                     std::istreambuf_iterator<char>{});
-    LibertyLexer lex{std::move(code), std::string(config.path)};
+    LibertyLexer lex{mmap, std::string(config.path)};
     LibertyParser parse{lex};
     auto block = parse.parse();
     if (!block)

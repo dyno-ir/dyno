@@ -20,12 +20,14 @@ public:
       close(fd);
       return;
     }
-    auto len = st.st_size;
-    auto *ptr = mmap(nullptr, len, PROT_READ, MAP_PRIVATE, fd, 0);
+    auto len = st.st_size + 1;
+    auto *ptr = mmap(nullptr, len, PROT_READ | PROT_WRITE, MAP_PRIVATE, fd, 0);
     close(fd);
     if (ptr == MAP_FAILED)
       return;
 
+    // null-terminate for string applications
+    reinterpret_cast<char *>(ptr)[st.st_size] = 0;
     arr = MutArrayRef<char>{static_cast<char *>(ptr), size_t(len)};
   }
   ~MMap() {
@@ -36,4 +38,5 @@ public:
   size_t size() const { return arr.size(); }
   const char *data() const { return arr.data(); }
   operator ArrayRef<char>() const { return arr; }
+  explicit operator bool() const { return size() != 0; }
 };
