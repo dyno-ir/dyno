@@ -2,6 +2,7 @@
 #include "aig/AIG.h"
 #include "aig/AIGPrinter.h"
 #include "aig/IDs.h"
+#include "dynomite/IDs.h"
 #include "dyno/IDs.h"
 #include "dyno/InstrPrinter.h"
 #include "dyno/Obj.h"

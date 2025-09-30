@@ -10,6 +10,9 @@
 #include <cstdint>
 #include <functional>
 #include <type_traits>
+
+typedef unsigned uint;
+
 namespace dyno {
 
 template <typename T> struct ObjTraits;
@@ -323,13 +326,22 @@ template <typename T> struct ObjTraits {
   /*using FatRefT = FatDynObjRef<T>;*/
 };
 
+template <typename T>
+concept TrailingObj = requires(T x) {
+  T::getAllocSize(size_t{0});
+  x.getAllocSize();
+};
+
 template <typename Derived, typename T> class TrailingObjArr {
 private:
   Derived &derived() { return static_cast<Derived &>(*this); }
   const Derived &derived() const { return static_cast<const Derived &>(*this); }
 
 protected:
-  TrailingObjArr() { static_assert(alignof(T) <= alignof(Derived)); }
+  TrailingObjArr() {
+    static_assert(alignof(T) <= alignof(Derived));
+    static_assert(TrailingObj<Derived>);
+  }
   T *trailing() { return reinterpret_cast<T *>(&derived() + 1); }
   const T *trailing() const {
     return reinterpret_cast<const T *>(&derived() + 1);
@@ -343,12 +355,6 @@ public:
   size_t getAllocSize() { return getAllocSize(derived().getNumTrailing()); }
 };
 static_assert(sizeof(FatDynObjRef<>) == 16);
-
-template <typename T>
-concept TrailingObj = requires(T x) {
-  T::getAllocSize(size_t{0});
-  x.getAllocSize();
-};
 
 template <typename T> bool ObjRef<T>::is_impl(const DynObjRef &Ref) {
   return Ref.getType() == Traits::ty;

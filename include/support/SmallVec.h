@@ -217,6 +217,9 @@ public:
     return *obj;
   }
 
+  void push_back(const T &val) { emplace_back(val); }
+  void push_back(T &&val) { emplace_back(std::move(val)); }
+
   void clear() {
     destroyElts();
     sz = 0;

@@ -139,15 +139,23 @@ static constexpr T n_equal_mask(T lhs, T rhs) {
   return lhsSC;
 }
 
+template <typename T>
+constexpr T bit_select(T val, unsigned i, unsigned n = 1) {
+  unsigned pos = i * n;
+  return (bit_mask_ones<T>(n, pos) & val) >> pos;
+}
+
 // fixme: these should use a shared base but then template param deduction
 // fails.
-template <std::integral NumT, unsigned N, unsigned Pos> class BitField {
+template <std::unsigned_integral NumT, unsigned N, unsigned Pos>
+class BitField {
   NumT &num;
 
 public:
   using num_t = NumT;
   using num_signed_t = std::make_signed_t<NumT>;
 
+  static constexpr num_t mask_sz = bit_mask_sz<num_t>;
   static constexpr num_t mask_ones = bit_mask_ones<num_t>(N, Pos);
   static constexpr num_t mask_zeros = bit_mask_zeros<num_t>(N, Pos);
 
@@ -157,7 +165,29 @@ public:
   static constexpr unsigned size = N;
   static constexpr unsigned pos = Pos;
 
-  explicit constexpr BitField(num_t &v) : num(v) {}
+private:
+  template <unsigned SubN, unsigned SubPos> struct make_SubField {
+    static_assert(SubPos + SubN <= N);
+    using type = BitField<NumT, SubN, SubPos + Pos>;
+  };
+
+public:
+  template <unsigned SubN, unsigned SubPos>
+  using SubField = make_SubField<SubN, SubPos>::type;
+
+  template <unsigned HiN = mask_sz - (Pos + N)>
+  using HiField = BitField<NumT, HiN, Pos + N>;
+  ;
+
+  static constexpr num_t getClr(num_t num) { return num & mask_zeros; }
+  static constexpr num_t getSet(num_t num) { return num | mask_ones; }
+  static constexpr num_t getSet(num_t num, num_t v) {
+    assert((v & mask_ones_noshift) == v);
+    return getClr(num) | (v << pos);
+  }
+  static constexpr num_t getVal(num_t num) { return (num & mask_ones) >> pos; }
+
+  constexpr explicit BitField(num_t &v) : num(v) {}
 
   constexpr BitField &operator=(num_t v) {
     set(v);
@@ -169,21 +199,29 @@ public:
 
   constexpr operator num_t() const { return get(); }
 
-  constexpr num_t get() const { return (num & mask_ones) >> pos; }
+  constexpr num_t get() const { return getVal(num); }
 
   constexpr void clr() { num &= mask_zeros; }
 
   constexpr void set() { num |= mask_ones; }
 
-  constexpr void set(num_t v) {
-    assert((v & mask_ones_noshift) == v);
-    clr();
-    num |= v << pos;
-  }
+  constexpr void set(num_t v) { num = getSet(num, v); }
 
   constexpr void flip() { num ^= mask_ones; }
 
   constexpr unsigned count() { return std::popcount(num & mask_ones); }
+
+  template <unsigned SubN, unsigned SubPos> auto subField() {
+    return SubField<SubN, SubPos>(num);
+  }
+
+  template <typename T> auto subField() {
+    return SubField<T::size, T::pos>(num);
+  }
+
+  num_t getNumClr() { return getClr(num); }
+  num_t getNumSet() { return getSet(num); }
+  num_t getNumSet(num_t v) { return getSet(num, v); }
 };
 
 template <std::integral NumT, unsigned N, unsigned Pos>

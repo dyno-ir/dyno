@@ -10,7 +10,7 @@ template <typename T> class ObjPool {
 public:
   using Traits = ObjTraits<T>;
   using value_type = T;
-  using vec_type = std::vector<T *>;//Traits::template vec_type<T *>;
+  using vec_type = std::vector<T *>;
 
   struct FreeNode {
     FreeNode *next;
@@ -61,45 +61,6 @@ private:
   }
 
 public:
-  class iterator {
-  public:
-    using iterator_category = std::forward_iterator_tag;
-    using value_type = T::value_type;
-    using pointer = T::pointer;
-    using reference = T::reference;
-    using difference_type = T::difference_type;
-
-    iterator() = default;
-    iterator(T it, T itEnd) : it(it), itEnd(itEnd) {}
-
-    reference operator*() { return **it; }
-
-    iterator &operator++() {
-      do {
-        ++it;
-      } while (it != itEnd && *it == nullptr);
-      return *this;
-    }
-
-    iterator operator++(int) {
-      iterator tmp(*this);
-      ++(*this);
-      return tmp;
-    }
-
-    friend bool operator==(const iterator &a, const iterator &b) {
-      return a.it == b.it;
-    }
-
-    friend bool operator!=(const iterator &a, const iterator &b) {
-      return a.it != b.it;
-    }
-
-  private:
-    Traits::vec_type::iterator it;
-    Traits::vec_type::iterator itEnd;
-  };
-
   ObjPool() {}
 
   ~ObjPool() {
@@ -133,29 +94,6 @@ public:
   ObjPool(ObjPool &&) = delete;
   ObjPool &operator=(const ObjPool &) = delete;
   ObjPool &operator=(ObjPool &&) = delete;
-};
-
-template <typename T, typename Derived> class ObjPoolStore {
-private:
-  ObjPool<T> pool;
-  using Traits = ObjTraits<T>;
-
-public:
-  template <typename... Args> FatDynObjRef<T> &create(Args &&...args) {
-    return pool.new_object(std::forward<Args>(args)...);
-  }
-
-  T &get(DynObjRef ref) {
-    assert(ref.getDialectID() == Traits::dialect);
-    assert(ref.getTyID() == Traits::ty);
-    return pool[ref.getObjID()];
-  }
-
-  void destroy(DynObjRef ref) { pool.delete_object(get(ref), ref.getObjID()); }
-  void destroy(FatDynObjRef<T> ref) { pool.delete_object(*ref, ref.thin().obj); }
-
-  auto begin() { return pool.begin(); }
-  auto end() { return pool.end(); }
 };
 
 } // namespace dyno
