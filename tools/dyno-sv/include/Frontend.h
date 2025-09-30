@@ -446,7 +446,6 @@ public:
   }
 
   void handle_modules() {
-    // can probably do this in parallel
     SmallVec<std::pair<const slang::ast::InstanceBodySymbol *, ObjRef<Module>>,
              32>
         modules;
@@ -457,6 +456,7 @@ public:
       return a.second.getObjID() < b.second.getObjID();
     });
 
+    // can probably do this in parallel
     for (auto [slangMod, dynoMod] : modules) {
       ModuleRef fDynoMod{dynoMod, ctx.getModules()[dynoMod]};
       mod = fDynoMod.getSingleDef()->instr();

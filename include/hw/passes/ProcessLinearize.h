@@ -14,7 +14,9 @@
 #include "support/DynBitSet.h"
 #include "support/Utility.h"
 #include <algorithm>
+#include <ctime>
 #include <iterator>
+#include <random>
 
 namespace dyno {
 
@@ -31,6 +33,8 @@ class ProcessLinearizePass {
     uint8_t bitField = 0;
     uint32_t loopID = LOOPID_NONE;
     SmallDenseSet<ObjRef<Instr>, 1> predsSet;
+    SmallVec<ObjRef<Instr>, 4> predsVec;
+    uint numRefs = 0;
     // todo: currently we only use bool value of this, replace if not required.
     BitSet dependingOutputs;
     BitSet dependingInputs;
@@ -163,6 +167,11 @@ public:
                   })
                   .discard_optional());
 
+          for (auto writer : writers) {
+            auto proc = ObjRef<Process>{ObjID{writer}};
+            map[proc].numRefs++;
+          }
+
           if (regIsAnyInput && config.retainIODeps) {
             readRegions.getAccessors(addr, len);
             auto lowIt = readRegions.getInsertIt(addr);
@@ -192,12 +201,25 @@ public:
       if (regIsAnyInput)
         inputIdxCnt += readRegions.frags.size();
     }
+
+    for (auto [proc, custom] : map) {
+      if (!ctx.getProcs().exists(proc))
+        continue;
+      custom.predsVec.reserve(custom.predsSet.size());
+      custom.predsVec.push_back_range(Range{custom.predsSet});
+      Range{custom.predsVec}.stable_sort([&](ObjRef<Instr> a, ObjRef<Instr> b) {
+        auto procA = ctx.getInstrs().resolve(a).as<ProcessIRef>().proc();
+        auto procB = ctx.getInstrs().resolve(b).as<ProcessIRef>().proc();
+        return map[procA].numRefs < map[procB].numRefs;
+      });
+    }
   }
 
   uint32_t loopIDCnt = 1;
 
   void visit2(SmallVecImpl<ProcessIRef> &ordered, ProcessIRef root) {
-    using Iterator = decltype(Custom::predsSet)::iterator;
+    // using Iterator = decltype(Custom::predsSet)::iterator;
+    using Iterator = decltype(Custom::predsVec)::iterator;
     struct Frame {
       ProcessRef proc;
       Iterator it;
@@ -249,11 +271,11 @@ public:
           continue;
         }
         custom.bitField |= Custom::PRE_VISITED;
-        entry.it = custom.predsSet.begin();
+        entry.it = custom.predsVec.begin();
       }
 
-      if (entry.it != custom.predsSet.end()) {
-        auto ref = entry.it.key();
+      if (entry.it != custom.predsVec.end()) {
+        auto ref = *entry.it;
         auto proc = ctx.getInstrs().resolve(ref).as<ProcessIRef>();
         stack.emplace_back(proc.proc(), Iterator{});
         stack.back().proc.setCustom(0);
@@ -292,6 +314,10 @@ public:
 
   void linearize(ModuleIRef module) {
     SmallVec<ProcessIRef, 16> ordered;
+    // SmallVec<ProcessIRef, 16> procs;
+    // procs.push_back_range(module.procs());
+    // std::shuffle(procs.begin(), procs.end(),
+    //              std::mt19937{std::random_device{}()});
     for (auto proc : module.procs()) {
       if (ignoredKind(proc))
         continue;
@@ -397,13 +423,13 @@ public:
   }
 
   void runOnModule(ModuleIRef module) {
+    map.clear();
+    map.resize(ctx.getProcs().numIDs());
     findDeps(module);
     linearize(module);
   }
 
   void run() {
-    map.clear();
-    map.resize(ctx.getProcs().numIDs());
     for (auto mod : ctx.activeModules()) {
       runOnModule(ModuleRef{mod}.iref());
     }

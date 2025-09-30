@@ -393,6 +393,7 @@ public:
     uint32_t kwFunction = lexer.GetIdentIdx("function");
     uint32_t kwFF = lexer.GetIdentIdx("ff");
     uint32_t kwLatch = lexer.GetIdentIdx("latch");
+    uint32_t kwArea = lexer.GetIdentIdx("area");
 
     if (block->name != kwLibrary)
       err();
@@ -409,11 +410,22 @@ public:
       if (object->params.size() != 1 ||
           object->params.front().type != Token::STRING_LITERAL)
         err();
-      auto mod =
-          ctx.createModule(object->params[0].strLit.value, HW_STDCELL_DEF);
+
+      auto info = ctx.getStdCellInfos().create();
+      auto mod = ctx.createStdCell(object->params[0].strLit.value, info);
 
       build.setInsertPoint(mod.block().end());
       portNameMap.clear();
+
+      for (auto var : object->vars) {
+        if (var.name.type != Token::IDENTIFIER)
+          continue;
+        if (var.name.ident.idx == kwArea) {
+          if (var.val.type != Token::NUMERIC_LITERAL)
+            err();
+          info->area = std::stod(std::string(var.val.numericLit.value));
+        }
+      }
 
       for (auto sub : object->blocks) {
         if (sub->name == kwFF || sub->name == kwLatch) {
@@ -492,6 +504,8 @@ public:
       }
 
       while (!ffList.empty()) {
+        // fixme: is assuming all outputs are flop flop q's
+        info->isFlipFlop = true;
         auto [out0, out1, block] = ffList.pop_back_val();
         HWInstrBuilder regBuild{ctx};
         regBuild.setInsertPoint(mod.regs_end());

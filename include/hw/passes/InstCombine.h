@@ -75,10 +75,22 @@ private:
 
   void replaceUses(WireRef wire, HWValue newVal) {
     assert(newVal.getNumBits() == wire.getNumBits());
-    wire.replaceAllUsesWith(
-        newVal, [&](OperandRef ref) { currentReplaced.emplace_back(ref); });
     knownBits.replaceAt(wire, newVal);
     bitAlias.replaceAt(wire, newVal);
+
+    size_t pos = currentReplaced.size();
+    wire.replaceAllUsesWith(
+        newVal, [&](OperandRef ref) { currentReplaced.emplace_back(ref); });
+
+    for (size_t i = pos; i < currentReplaced.size(); i++) {
+      auto instr = currentReplaced[i].instr();
+      for (auto def : instr.defs()) {
+        if (!def->is<HWValue>())
+          continue;
+        knownBits.recomputeAt(def->as<HWValue>());
+        bitAlias.recomputeAt(def->as<HWValue>());
+      }
+    }
   }
 
   bool reduceBitWidth(InstrRef instr) {
@@ -1367,6 +1379,7 @@ private:
       switch (*def->fat().getType()) {
       case *HW_WIRE: {
         auto asWire = def->as<WireRef>();
+        assert(asWire.getNumDefs() == 1);
         recomputeAnalysesAtDefWire(asWire);
         for (auto use : asWire.uses())
           worklist.emplace_back(use.instr());

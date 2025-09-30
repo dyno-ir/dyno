@@ -23,7 +23,7 @@ using HWOpcode = SpecificDialectOpcode<DialectID{DIALECT_HW}>;
   x(HW_MODULE,       3 | TY_DEF_USE_START) \
   x(HW_SENS_MODES,   4) \
   x(HW_TRIGGER,      5 | TY_DEF_USE_START) \
-  x(HW_MEMORY,       6 | TY_DEF_USE_START)
+  x(HW_STDCELL_INFO, 6)
 // clang-format on
 
 #define ENUM_EXPAND(ident, idx) ident = idx,

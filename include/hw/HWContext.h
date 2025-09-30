@@ -4,8 +4,10 @@
 #include "dyno/IDs.h"
 #include "dyno/NewDeleteObjStore.h"
 #include "hw/DebugInfo.h"
+#include "hw/IDs.h"
 #include "hw/Module.h"
 #include "hw/SensList.h"
+#include "hw/StdCellInfo.h"
 #include "hw/Wire.h"
 
 namespace dyno {
@@ -22,6 +24,7 @@ class HWContext {
   CFG cfg;
   NewDeleteObjStore<Instr> instrs;
   NewDeleteObjStore<AIGObj> aigObjs;
+  NewDeleteObjStore<StdCellInfo> stdCellInfos;
 
 public:
   auto &getConstants() { return constants; }
@@ -34,6 +37,7 @@ public:
   auto &getCFG() { return cfg; }
   auto &getTriggers() { return triggers; }
   auto &getAIGs() { return aigObjs; }
+  auto &getStdCellInfos() { return stdCellInfos; }
   SourceLocInfo<Instr> sourceLocInfo;
   ValueNameInfo<Register> regNameInfo;
 
@@ -43,6 +47,17 @@ public:
     auto moduleInstr = InstrRef{instrs.create(2, defOpc)};
 
     InstrBuilder{moduleInstr}.addRef(moduleRef).addRef(createBlock());
+    return moduleInstr;
+  }
+
+  ModuleIRef createStdCell(std::string_view name, StdCellInfoRef info) {
+    auto moduleRef = modules.create(std::string(name));
+    auto moduleInstr = InstrRef{instrs.create(3, HW_STDCELL_DEF)};
+
+    InstrBuilder{moduleInstr}
+        .addRef(moduleRef)
+        .addRef(createBlock())
+        .addRef(info);
     return moduleInstr;
   }
 

@@ -53,6 +53,10 @@ public:
           error(instr, "undefined operand");
         }
 
+        if (op.isDef() && op->is<WireRef>())
+          if (op->as<WireRef>().getNumDefs() != 1)
+            error(instr, "multi-def operand");
+
         switch (*instr.getDialectOpcode()) {
 #define LAMBDA(opc, ib, cb, bi) case *opc:
           FOR_HW_SIMPLE_OPS(LAMBDA)

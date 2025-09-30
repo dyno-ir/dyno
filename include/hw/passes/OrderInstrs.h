@@ -55,8 +55,13 @@ private:
     }
     case *OP_SWITCH: {
       auto asSwitch = instr.as<SwitchInstrRef>();
-      for (auto sub : asSwitch.caseBlocks())
+      for (auto caseInstr : asSwitch.block()) {
+        for (auto use : caseInstr.others())
+          handleUse(block, use, uses);
+      }
+      for (auto sub : asSwitch.caseBlocks()) {
         handleUsesInSubBlock(block, sub, uses);
+      }
       break;
     }
     case *OP_FOR: {

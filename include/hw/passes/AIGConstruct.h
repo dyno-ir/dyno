@@ -166,6 +166,16 @@ public:
         ThinArrayRef<AIGNodeTRef>{pos, numBits};
   }
 
+  void buildNOP(WireRef out, HWValue in) {
+    uint32_t pos = wireToAIGNodeStorage.size();
+    auto val = in;
+    for (uint i = 0; i < *val.getNumBits(); i++) {
+      wireToAIGNodeStorage.emplace_back(resolveBit(val, i));
+    }
+    uint32_t numBits = wireToAIGNodeStorage.size() - pos;
+    wireToAIGNode[out] = ThinArrayRef<AIGNodeTRef>{pos, numBits};
+  }
+
   void buildExtTrunc(WireRef out, WireRef in, bool sign = false) {
     auto inNumBits = *in.getNumBits();
     auto outNumBits = *out.getNumBits();
@@ -335,6 +345,19 @@ class AIGConstructPass {
     }
     case *HW_MUX: {
       assert(instr.getNumOperands() == 4);
+      // if (instr.other(1)->is<ConstantRef>() &&
+      //     instr.other(1)->as<ConstantRef>().allBitsUndef()) {
+      //   abuild.buildNOP(instr.def(0)->as<WireRef>(),
+      //                   instr.other(2)->as<HWValue>());
+      //   break;
+      // }
+      // if (instr.other(2)->is<ConstantRef>() &&
+      //     instr.other(2)->as<ConstantRef>().allBitsUndef()) {
+      //   abuild.buildNOP(instr.def(0)->as<WireRef>(),
+      //                   instr.other(1)->as<HWValue>());
+      //   break;
+      // }
+
       abuild.buildMUX(
           instr.def(0)->as<WireRef>(), instr.other(0)->as<HWValue>(),
           instr.other(1)->as<HWValue>(), instr.other(2)->as<HWValue>());
