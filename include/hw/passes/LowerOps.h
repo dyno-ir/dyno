@@ -98,7 +98,7 @@ private:
   }
 
   void lowerMultiInputAdd(InstrRef add) {
-    const uint maxCompressIns = 3;
+    const unsigned maxCompressIns = 3;
 
     if (add.getNumOthers() <= 2)
       return;
@@ -141,7 +141,7 @@ private:
           std::find_if(operands.begin(), operands.end(), [&](const auto &pair) {
             return pair.second < worstDelay;
           });
-      uint pos = it - operands.begin();
+      unsigned pos = it - operands.begin();
 
       operands.resize(operands.size() + 2);
       std::move_backward(operands.begin() + pos, operands.end() - 2,
@@ -287,7 +287,7 @@ private:
   }
 
   void lowerBitwise(InstrRef instr) {
-    const uint maxFactor = 2;
+    const unsigned maxFactor = 2;
 
     if (instr.getNumOthers() <= 2)
       return;
@@ -457,7 +457,7 @@ private:
     auto inBoundsShamtBits = clog2(valueBits);
 
     HWValue shiftVal = value;
-    for (uint i = 0; i < inBoundsShamtBits; i++) {
+    for (unsigned i = 0; i < inBoundsShamtBits; i++) {
       auto shifted =
           shiftByConstant(instr.getDialectOpcode(), shiftVal, 1u << i);
       auto cond = build.buildSplice(shamt, 1, i);
@@ -500,7 +500,7 @@ private:
     instr.def(0).replace(FatDynObjRef<>{nullref});
     build.setInsertPoint(ibOR.instr());
 
-    for (uint i = 0; i < bits; i++) {
+    for (unsigned i = 0; i < bits; i++) {
       auto bit = build.buildSplice(bitsMask, 1, i);
       ibOR.addRef(bit);
     }
@@ -531,7 +531,7 @@ private:
       bool carry = true;
 
       SmallVec<HWValue, 4> terms;
-      uint sum = 0;
+      unsigned sum = 0;
       for (auto [fact, idx] : facts.zip(factIdxs)) {
         sum += idx;
         auto val = build.buildSplice(fact->as<HWValue>(), 1, idx);
@@ -578,7 +578,7 @@ private:
     add.addRef(instr.def(0)->as<WireRef>()).other();
     instr.def(0).replace(FatDynObjRef{nullref});
 
-    for (uint i = 0; i < c.getNumBits(); i++) {
+    for (unsigned i = 0; i < c.getNumBits(); i++) {
       if (c.getBit(i) != FourState::S1)
         continue;
       add.addRef(build.buildSLL(val, cbuild.val(*val.getNumBits(), i).get()));
@@ -592,7 +592,7 @@ private:
         *(elemCountOpt ?: round_up_div(*value.getNumBits(), fact));
     SmallVec<HWValue, 64> array;
     array.reserve(elemCount);
-    for (uint i = 0; i < elemCount; i++) {
+    for (unsigned i = 0; i < elemCount; i++) {
       auto size = std::min(elemSize, *value.getNumBits() - i * fact);
       array.emplace_back(build.buildExt(
           elemSize, build.buildSplice(value, size, i * fact), OP_ANYEXT));
@@ -604,17 +604,17 @@ private:
 
     if (twoStage) {
       auto oneHot = buildDecoder(address, elemCount);
-      for (uint i = 0; i < elemCount; i++) {
+      for (unsigned i = 0; i < elemCount; i++) {
         auto mask =
             build.buildRepeat(build.buildSplice(oneHot, 1, i), elemSize);
         array[i] = build.buildAnd(array[i], mask);
       }
       return build.buildOr(array);
     } else if (highFirst) {
-      uint addrHigh = clog2(elemCount);
+      unsigned addrHigh = clog2(elemCount);
       auto count = ceil_to_pow2(elemCount);
       value = build.buildExt(count * elemSize, value, OP_ANYEXT);
-      for (uint i = addrHigh; i-- > 0;) {
+      for (unsigned i = addrHigh; i-- > 0;) {
         count /= 2;
         auto mid = count * elemSize;
         value = build.buildMux(build.buildSplice(address, 1, i),
@@ -628,7 +628,7 @@ private:
       while ((1ULL << addressBit) < elemCount) {
         size_t outIdx = 0;
         auto sel = build.buildSplice(address, 1, addressBit);
-        for (uint i = 0; i < array.size(); i += 2) {
+        for (unsigned i = 0; i < array.size(); i += 2) {
           if (i == array.size() - 1)
             array[outIdx++] = array.back();
           else
@@ -651,7 +651,7 @@ private:
     SmallVec<HWValue, 8> falseBits;
     auto invAddr = build.buildNot(addr);
 
-    for (uint i = 0; i < bits; i++) {
+    for (unsigned i = 0; i < bits; i++) {
       trueBits.emplace_back(build.buildSplice(addr, 1, i));
       falseBits.emplace_back(build.buildSplice(invAddr, 1, i));
     }
@@ -662,8 +662,8 @@ private:
     SmallVec<HWValue, 64> oneHotBits;
     oneHotBits.reserve(elemCount);
 
-    for (uint i = elemCount - 1; i-- > 0;) {
-      for (uint j = 0; j < bits; j++) {
+    for (unsigned i = elemCount - 1; i-- > 0;) {
+      for (unsigned j = 0; j < bits; j++) {
         operands[j] = (i & (1ULL << j)) ? trueBits[j] : falseBits[j];
       }
       oneHotBits.emplace_back(build.buildAnd(operands));
@@ -687,7 +687,7 @@ private:
         build.buildSLL(cbuild.val(elemCount, 1).get(),
                        build.buildResize(address, elemCount, false));
 
-    for (uint i = 0; i < elemCount; i++) {
+    for (unsigned i = 0; i < elemCount; i++) {
       auto size = std::min(elemSize, *pad.getNumBits() - i * fact);
       auto curAddr = baseOffs + i * fact;
       assert(size);

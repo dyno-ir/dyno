@@ -38,7 +38,7 @@ public:
     assert(list.signals.size() < 16 && "can only store small sens lists");
     uint32_t obj = 0;
     for (size_t i = 0; i < list.signals.size(); i++) {
-      obj |= (uint(list.signals[i].second) << (i * 2));
+      obj |= (unsigned(list.signals[i].second) << (i * 2));
     }
 
     return FatObjRef<SensModesTag>{ObjID{obj}, (SensModesTag *)nullptr, 1};
@@ -47,7 +47,7 @@ public:
     assert(modes.size() < 16 && "can only store small sens lists");
     uint32_t obj = 0;
     for (size_t i = 0; i < modes.size(); i++) {
-      obj |= (uint(modes[i]) << (i * 2));
+      obj |= (unsigned(modes[i]) << (i * 2));
     }
 
     return FatObjRef<SensModesTag>{ObjID{obj}, (SensModesTag *)nullptr, 1};

@@ -33,7 +33,7 @@ public:
   IfInstrRef(const InstrRef &ref) : InstrRef(ref) {}
 
   bool hasFalseBlock() { return getNumDefs() >= 2; }
-  uint getNumYieldValues() { return getNumDefs() < 2 ? 0 : getNumDefs() - 2; }
+  unsigned getNumYieldValues() { return getNumDefs() < 2 ? 0 : getNumDefs() - 2; }
 
   auto yieldValues() { return Range{this->def_begin() + 2, this->def_end()}; }
 
@@ -45,7 +45,7 @@ public:
     return this->operand(1)->as<BlockRef>();
   }
   // do not ref specific value vreg like Wire here
-  OperandRef getYieldValue(uint n = 0) {
+  OperandRef getYieldValue(unsigned n = 0) {
     assert(n < getNumYieldValues());
     return this->operand(2 + n);
   }
@@ -99,8 +99,8 @@ public:
   auto cond() { return this->other(0); }
 
   auto getNumCases() { return block().size(); }
-  auto getYieldValue(uint i) { return *(yieldValues().begin() + i); }
-  uint getNumYieldValues() {
+  auto getYieldValue(unsigned i) { return *(yieldValues().begin() + i); }
+  unsigned getNumYieldValues() {
     return yieldValues().end() - yieldValues().begin();
   };
 
@@ -127,17 +127,17 @@ public:
   using InstrRef::InstrRef;
   WhileInstrRef(const InstrRef &ref) : InstrRef(ref) {}
 
-  uint getNumYieldValues() { return (getNumDefs() - 2); }
+  unsigned getNumYieldValues() { return (getNumDefs() - 2); }
   auto inputValues() { return Range{this->other_begin(), this->other_end()}; }
   auto yieldValues() { return Range{this->def_begin() + 2, this->def_end()}; }
 
   BlockRef getCondBlock() { return this->operand(0)->as<BlockRef>(); }
   BlockRef getBodyBlock() { return this->operand(1)->as<BlockRef>(); }
-  FatDynObjRef<> getYieldValue(uint n = 0) {
+  FatDynObjRef<> getYieldValue(unsigned n = 0) {
     assert(n < getNumYieldValues());
     return this->operand(2 + n)->as<FatDynObjRef<>>();
   }
-  FatDynObjRef<> getInputValue(uint n = 0) {
+  FatDynObjRef<> getInputValue(unsigned n = 0) {
     assert(n < getNumYieldValues());
     return this->operand(getNumDefs() + n)->as<FatDynObjRef<>>();
   }
@@ -153,16 +153,16 @@ public:
   using InstrRef::InstrRef;
   DoWhileInstrRef(const InstrRef &ref) : InstrRef(ref) {}
 
-  uint getNumYieldValues() { return (getNumDefs() - 1); }
+  unsigned getNumYieldValues() { return (getNumDefs() - 1); }
   auto inputValues() { return Range{this->other_begin(), this->other_end()}; }
   auto yieldValues() { return Range{this->def_begin() + 1, this->def_end()}; }
 
   BlockRef getBlock() { return this->operand(0)->as<BlockRef>(); }
-  FatDynObjRef<> getYieldValue(uint n = 0) {
+  FatDynObjRef<> getYieldValue(unsigned n = 0) {
     assert(n < getNumYieldValues());
     return this->operand(1 + n)->as<FatDynObjRef<>>();
   }
-  FatDynObjRef<> getInputValue(uint n = 0) {
+  FatDynObjRef<> getInputValue(unsigned n = 0) {
     assert(n < getNumYieldValues());
     return this->operand(getNumDefs() + n)->as<FatDynObjRef<>>();
   }
@@ -174,7 +174,7 @@ class ForInstrRef : public InstrRef {
 public:
   using InstrRef::InstrRef;
 
-  uint getNumYieldValues() { return (getNumDefs() - 1); }
+  unsigned getNumYieldValues() { return (getNumDefs() - 1); }
   BlockRef getBlock() { return this->operand(0)->as<BlockRef>(); }
 
   auto yieldValues() { return Range{this->def_begin() + 1, this->def_end()}; }

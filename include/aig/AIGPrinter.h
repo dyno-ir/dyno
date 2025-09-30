@@ -30,12 +30,12 @@ public:
 
     for (auto [idx, node] : Range{aig.store.thin}.enumerate()) {
       for (auto &op : node->op)
-        std::print(os, "{} -> {}{}\n", (uint)op.idx(), idx,
+        std::print(os, "{} -> {}{}\n", (unsigned)op.idx(), idx,
                    op.invert() ? "[style=dotted]" : "");
     }
 
     for (auto [idx, out] : Range{outputs}.enumerate()) {
-      std::print(os, "{} -> output_{}{}\n", (uint)out->op[0].idx(), idx,
+      std::print(os, "{} -> output_{}{}\n", (unsigned)out->op[0].idx(), idx,
                  out->op[0].invert() ? "[style=dotted]" : "");
     }
 

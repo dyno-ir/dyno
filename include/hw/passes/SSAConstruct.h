@@ -21,7 +21,7 @@ namespace dyno {
 
 class SSAConstructPass {
   HWContext &ctx;
-  uint depth = 0;
+  unsigned depth = 0;
   ObjMapVec<Instr, bool> isNewInstr;
   AutoCopyDebugInfoStack autoDebugInfo;
 
@@ -44,7 +44,7 @@ private:
   struct RegState {
     SmallVec<RegisterValue, 4> stack;
 
-    RegisterValue &getOrSetDefault(uint depth, RegisterRef reg) {
+    RegisterValue &getOrSetDefault(unsigned depth, RegisterRef reg) {
       if (!stack.empty() && stack.back().depth == depth)
         return stack.back();
       else {
@@ -58,17 +58,17 @@ private:
       return stack.back();
     }
 
-    bool has(uint depth) {
+    bool has(unsigned depth) {
       if (stack.empty())
         return false;
       return stack.back().depth == depth;
     }
 
-    void clear(uint depth, RegisterRef reg) {
+    void clear(unsigned depth, RegisterRef reg) {
       getOrSetDefault(depth, reg) = RegisterValue{reg, depth, true, nullopt};
     }
 
-    void plainValue(uint depth, RegisterRef reg, HWValue value,
+    void plainValue(unsigned depth, RegisterRef reg, HWValue value,
                     TriggerID trigger) {
       getOrSetDefault(depth, reg) =
           RegisterValue{value, *reg->numBits, depth, false, trigger};
@@ -209,7 +209,7 @@ public:
   }
 
   // todo: unmutable array ref, requires fixing const block iter
-  template <uint numLoopBlocks>
+  template <unsigned numLoopBlocks>
   auto analyzeAndCreateLoopYields(HWInstrBuilder &build, InstrRef loopInstr,
                                   MutArrayRef<BlockRef> loopBlocks) {
     assert(loopBlocks.size() == numLoopBlocks);
@@ -319,8 +319,8 @@ public:
   auto analyzeAndCreateLoopYields<1>(HWInstrBuilder &build, InstrRef loopInstr,
                                      MutArrayRef<BlockRef> loopBlocks) {
     assert(loopBlocks.size() == 1);
-    uint startDepth = depth - 1;
-    uint bodyDepth = depth;
+    unsigned startDepth = depth - 1;
+    unsigned bodyDepth = depth;
 
     SmallVec<std::tuple<RegisterRef, std::pair<uint32_t, uint32_t>, TriggerID>,
              4>
@@ -572,15 +572,15 @@ public:
         auto res = runOnMultiway(proc, blocks);
 
         // Create yields for modified register values.
-        uint addedYieldVals = res.yieldVals[0].size();
+        unsigned addedYieldVals = res.yieldVals[0].size();
         if (addedYieldVals == 0) {
           if (!asIf.hasFalseBlock())
             build.destroyObj(falseBlock);
           break;
         }
 
-        uint oldYieldVals = asIf.getNumYieldValues();
-        uint newYieldVals = addedYieldVals + oldYieldVals;
+        unsigned oldYieldVals = asIf.getNumYieldValues();
+        unsigned newYieldVals = addedYieldVals + oldYieldVals;
 
         for (size_t i = 0; i < blocks.size(); i++) {
           auto [oldYield, newYield] =

@@ -20,7 +20,7 @@ class DelayAnalysis {
 
   struct Frame {
     HWValue value;
-    uint idx;
+    unsigned idx;
     uint32_t acc;
   };
   SmallVec<Frame, 16> stack;
@@ -47,14 +47,14 @@ class DelayAnalysis {
   uint32_t getAddDelay(uint32_t bits, uint32_t operands) {
     if (operands <= 1)
       return 0;
-    const uint compressInputs = 3;
-    const uint compressDelay = 2;
+    const unsigned compressInputs = 3;
+    const unsigned compressDelay = 2;
 
-    uint reductionDelay =
-        (uint)std::ceil(std::log2(operands / 2) /
+    unsigned reductionDelay =
+        (unsigned)std::ceil(std::log2(operands / 2) /
                         std::log2(operands / compressInputs)) *
         compressDelay;
-    uint carryDelay = std::log2(bits);
+    unsigned carryDelay = std::log2(bits);
     return reductionDelay + carryDelay;
   }
 

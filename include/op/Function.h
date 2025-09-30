@@ -50,7 +50,7 @@ public:
   FunctionIRef(const InstrRef &ref) : InstrRef(ref) {}
 
   FunctionRef func() { return this->def()->as<FunctionRef>(); }
-  uint getNumParams() { return func()->params.size(); }
+  unsigned getNumParams() { return func()->params.size(); }
   BlockRef getBlock() { return this->def(1)->as<BlockRef>(); }
 
   static bool is_impl(const FatObjRef<Instr> &ref) {

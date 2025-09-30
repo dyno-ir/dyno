@@ -139,7 +139,7 @@ struct SmallBoolExprCNF {
   }
 
   std::optional<bool>
-  simplifyImpl(uint numLiterals, SmallVecImpl<Optional<uint8_t>> &known,
+  simplifyImpl(unsigned numLiterals, SmallVecImpl<Optional<uint8_t>> &known,
                UnsizedBitSet<SmallVec<uint64_t, 2>, ~uint64_t(0)> &keepClause) {
     // for clauses size > 1 either delete known vals or the entire clause.
     UnsizedBitSet<SmallVec<uint64_t, 2>> ignoreClause;
@@ -151,9 +151,9 @@ struct SmallBoolExprCNF {
             ignoreClause.getDyn(clauseIdx))
           continue;
 
-        uint nonMarkedLen = 0;
-        uint numDeleted = 0;
-        uint nonDeletedIdx = ~0U;
+        unsigned nonMarkedLen = 0;
+        unsigned numDeleted = 0;
+        unsigned nonDeletedIdx = ~0U;
 
         SmallVec<Optional<uint8_t>, 16> contains(numLiterals);
 
@@ -189,7 +189,7 @@ struct SmallBoolExprCNF {
         }
 
         if (numDeleted != 0) {
-          uint rem = nonMarkedLen - numDeleted;
+          unsigned rem = nonMarkedLen - numDeleted;
           if (rem == 0) {
             // unsat
             makeUnsat();
@@ -267,8 +267,8 @@ struct SmallBoolExprCNF {
         auto clauseIt = ClauseIterator{ClauseRef{this, otherIdx, 0}};
         auto other = *clauseIt;
 
-        // uint otherClauseIdx = 0;
-        // for (uint i = 0; i < otherIdx; i++)
+        // unsigned otherClauseIdx = 0;
+        // for (unsigned i = 0; i < otherIdx; i++)
         //   otherClauseIdx += literals[i].clauseBegin;
 
         if (!keepClause.getDyn(otherClauseIdx))
@@ -454,7 +454,7 @@ struct SmallBoolExprCNF {
   }
 
   bool findAndDedupeKnown(
-      uint numLiterals, SmallVecImpl<Optional<uint8_t>> &known,
+      unsigned numLiterals, SmallVecImpl<Optional<uint8_t>> &known,
       UnsizedBitSet<SmallVec<uint64_t, 2>, ~uint64_t(0)> &keepClause) {
 
     for (auto [clauseIdx, clause] : Range{clauses()}.enumerate()) {
@@ -476,7 +476,7 @@ struct SmallBoolExprCNF {
     return true;
   }
 
-  std::optional<bool> simplify(uint numLiterals) {
+  std::optional<bool> simplify(unsigned numLiterals) {
     if (isTrue())
       return true;
     if (isUnsat())
@@ -493,7 +493,7 @@ struct SmallBoolExprCNF {
   }
 
   // assuming other is simplified.
-  std::optional<bool> simplifyWith(SmallBoolExprCNF &other, uint numLiterals,
+  std::optional<bool> simplifyWith(SmallBoolExprCNF &other, unsigned numLiterals,
                                    bool checkSAT = true) {
     this->addAsGlobalAND(other);
     auto res = this->simplify(numLiterals);
@@ -537,7 +537,7 @@ struct SmallBoolExprCNF {
 
         if (other.len != clause.len)
           goto next;
-        for (uint i = 0; i < clause.len; i++)
+        for (unsigned i = 0; i < clause.len; i++)
           if (other[i] != clause[i])
             goto next;
         deleteClause.setDyn(clauseIdx);
@@ -562,7 +562,7 @@ struct SmallBoolExprCNF {
     return std::nullopt;
   }
 
-  bool satSolve(uint numLiterals) {
+  bool satSolve(unsigned numLiterals) {
     SmallVec<Optional<uint8_t>, 16> known(numLiterals);
     SmallVec<uint8_t, 16> polarity(numLiterals);
     for (auto lit : literals) {
@@ -639,7 +639,7 @@ struct SmallBoolExprCNF {
   }
   void makeUnsat() { literals.clear(); }
 
-  std::optional<SmallBoolExprCNF> negated2(uint numLiterals) {
+  std::optional<SmallBoolExprCNF> negated2(unsigned numLiterals) {
     if (isTrue()) {
       SmallBoolExprCNF rv;
       rv.makeUnsat();
@@ -671,7 +671,7 @@ struct SmallBoolExprCNF {
 
     struct Frame {
       Optional<uint16_t> literal = nullopt;
-      uint idx = 0;
+      unsigned idx = 0;
     };
     SmallVec<Frame, 32> stack;
     stack.reserve(clauseVec.size());
@@ -837,11 +837,11 @@ struct SmallBoolExprCNF {
       dbgs() << "\n";
   }
 
-  void dump2(uint numLiterals) {
+  void dump2(unsigned numLiterals) {
     dbgs() << "\n";
     dbgs() << "\n";
 
-    uint cnt = 0;
+    unsigned cnt = 0;
     for (auto clause : clauses())
       cnt++;
 
@@ -856,11 +856,11 @@ struct SmallBoolExprCNF {
     }
   }
 
-  void dump3(uint numLiterals) {
+  void dump3(unsigned numLiterals) {
     dbgs() << "\n";
     dbgs() << "\n";
 
-    for (uint i = 0; i < numLiterals; i++)
+    for (unsigned i = 0; i < numLiterals; i++)
       dbgs() << "(declare-fun x" << i << " () Bool)\n";
 
     dbgs() << "(define-fun cnf () Bool\n";
@@ -930,7 +930,7 @@ struct SmallBoolExprCNF {
 
     literals.push_back_range(Range{other.literals});
   }
-  void addAsGlobalOR(SmallBoolExprCNF &other, uint numLiterals) {
+  void addAsGlobalOR(SmallBoolExprCNF &other, unsigned numLiterals) {
     if (isTrue())
       return;
     if (isUnsat()) {
@@ -965,7 +965,7 @@ struct SmallBoolExprCNF {
     // this->dump();
   }
 
-  void addAsGlobalOR2(SmallBoolExprCNF &other, uint numLiterals) {
+  void addAsGlobalOR2(SmallBoolExprCNF &other, unsigned numLiterals) {
     if (isTrue())
       return;
     if (isUnsat()) {
@@ -1052,7 +1052,7 @@ struct SmallBoolExprCNF {
   }
 
   auto evalWithBoundVars2(SmallBoolExprCNF &orig, SmallBoolExprCNF &expr,
-                          SmallBoolExprCNF &exprNeg, uint numLiterals) {
+                          SmallBoolExprCNF &exprNeg, unsigned numLiterals) {
     SmallBoolExprCNF outTrue = orig;
     auto trueBranchRes = outTrue.simplifyWith(expr, numLiterals);
     bool trueBranchSat = !trueBranchRes.has_value() || trueBranchRes.value();
@@ -1127,7 +1127,7 @@ public:
       wire = wire.getDefI().other(0)->as<WireRef>();
       auto constant = instr.other(1)->as<ConstantRef>();
 
-      for (uint i = 0; i < constant.getNumBits(); i++) {
+      for (unsigned i = 0; i < constant.getNumBits(); i++) {
         switch (constant.getBit(i)) {
         case FourState::S0:
           cond.literals.emplace_back(getCondIdx(muxtree, wire, i), 1, 1);
@@ -1388,7 +1388,7 @@ public:
       auto val = icmp.other(1)->as<ConstantRef>();
       auto wire = icmp.other(0)->as<WireRef>();
 
-      for (uint i = 0; i < val.getNumBits(); i++) {
+      for (unsigned i = 0; i < val.getNumBits(); i++) {
         MuxTree::InputSignal sig{wire, i};
         auto idx =
             inputSigMap.findOrInsert(sig, inputSigMap.size()).second.val();

@@ -122,7 +122,7 @@ class ConstantMapping {
 
     // note: could use repeat to reduce operand count
 
-    for (uint i = val.getNumBits(); i-- > 0;) {
+    for (unsigned i = val.getNumBits(); i-- > 0;) {
       if (val.getBit(i) == FourState::S1)
         ib.addRef(oneW);
       else

@@ -430,11 +430,11 @@ public:
     return use_begin();
   }
 
-  iterator getDef(uint n) {
+  iterator getDef(unsigned n) {
     assert(n < numDefs);
     return def_begin() + n;
   }
-  iterator getUse(uint n) {
+  iterator getUse(unsigned n) {
     assert(n + numDefs < refs.size());
     return use_begin() + n;
   }
@@ -478,7 +478,7 @@ public:
   }
   void setEraseHook(erase_hook_t eraseHook) { this->eraseHook = eraseHook; }
 
-  void manual_move(uint from, uint to) {
+  void manual_move(unsigned from, unsigned to) {
     if (to == from)
       return;
     assert(to <= refs.size());
@@ -491,7 +491,7 @@ public:
     refs[to]->ref.setCustom(to);
   }
 
-  void manual_insert(uint idx, OperandRef opRef) {
+  void manual_insert(unsigned idx, OperandRef opRef) {
     assert(idx <= refs.size());
     if (idx == refs.size()) {
       refs.emplace_back(opRef);
@@ -678,26 +678,26 @@ public:
   }
 };
 
-template <typename Base, uint NumCategories, auto ClassifierF>
+template <typename Base, unsigned NumCategories, auto ClassifierF>
 class CategoricalDefUse : public Base {
 public:
-  using classifier_func_t = uint (*)(typename Base::operand_ref_t);
+  using classifier_func_t = unsigned (*)(typename Base::operand_ref_t);
   std::array<uint32_t, NumCategories> catBounds = {};
   CategoricalDefUse() {
     this->setEraseHook(erase);
     this->setInsertHook(insert);
   }
-  static uint
+  static unsigned
   classifyIdx(CategoricalDefUse<Base, NumCategories, ClassifierF> *self,
-              uint idx) {
+              unsigned idx) {
     // i bet this is faster than binary search
     for (size_t i = 0; i < NumCategories; i++)
       if (self->catBounds[i] > idx)
         return i;
     dyno_unreachable("not classified");
   }
-  static uint classifyIdxBinSearch(
-      CategoricalDefUse<Base, NumCategories, ClassifierF> *self, uint idx) {
+  static unsigned classifyIdxBinSearch(
+      CategoricalDefUse<Base, NumCategories, ClassifierF> *self, unsigned idx) {
     size_t lb = 0;
     size_t ub = NumCategories - 1;
 
@@ -722,10 +722,10 @@ public:
         static_cast<CategoricalDefUse<Base, NumCategories, ClassifierF> *>(
             base);
 
-    uint useClassID = ClassifierF(ref);
+    unsigned useClassID = ClassifierF(ref);
     // O(#categories) insertion, keeps inter-category order but not intra (base
     // case of this for use+def is implemented in instrDefUse)
-    for (uint id = NumCategories - 1; id != useClassID; id--) {
+    for (unsigned id = NumCategories - 1; id != useClassID; id--) {
       base->manual_move(self->catBounds[id - 1], self->catBounds[id]);
       self->catBounds[id]++;
     }
@@ -738,10 +738,10 @@ public:
         static_cast<CategoricalDefUse<Base, NumCategories, ClassifierF> *>(
             base);
 
-    uint useClassID = classifyIdx(self, ref.getCustom());
+    unsigned useClassID = classifyIdx(self, ref.getCustom());
     // move last ref in same category into slot we're freeing
     base->manual_move(self->catBounds[useClassID] - 1, ref.getCustom());
-    for (uint id = useClassID; id < NumCategories - 1; id++) {
+    for (unsigned id = useClassID; id < NumCategories - 1; id++) {
       // move last of next category into last of current category (now first of
       // next category)
       base->manual_move(self->catBounds[id + 1] - 1, self->catBounds[id] - 1);
@@ -753,7 +753,7 @@ public:
     return true;
   }
 
-  auto usesOfCategory(uint uc) {
+  auto usesOfCategory(unsigned uc) {
     return Range{this->begin() + ((uc == 0) ? 0 : catBounds[uc - 1]),
                  this->begin() + catBounds[uc]};
   }

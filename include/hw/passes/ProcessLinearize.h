@@ -34,7 +34,7 @@ class ProcessLinearizePass {
     uint32_t loopID = LOOPID_NONE;
     SmallDenseSet<ObjRef<Instr>, 1> predsSet;
     SmallVec<ObjRef<Instr>, 4> predsVec;
-    uint numRefs = 0;
+    unsigned numRefs = 0;
     // todo: currently we only use bool value of this, replace if not required.
     BitSet dependingOutputs;
     BitSet dependingInputs;
@@ -70,8 +70,8 @@ public:
 
   void findDeps(ModuleIRef module) {
 
-    uint inputIdxCnt = 0;
-    uint outputIdxCnt = 0;
+    unsigned inputIdxCnt = 0;
+    unsigned outputIdxCnt = 0;
 
     for (auto reg : module.regs()) {
       bool regIsAnyInput = reg.isOpc(
@@ -175,8 +175,8 @@ public:
           if (regIsAnyInput && config.retainIODeps) {
             readRegions.getAccessors(addr, len);
             auto lowIt = readRegions.getInsertIt(addr);
-            uint bitsI = inputIdxCnt + (lowIt - readRegions.frags.begin());
-            uint bitsLen =
+            unsigned bitsI = inputIdxCnt + (lowIt - readRegions.frags.begin());
+            unsigned bitsLen =
                 (readRegions.getInsertIt(addr + len - 1) + 1) - lowIt;
             map[procI.proc()].dependingInputs.setRangeDyn(bitsI, bitsLen);
           }

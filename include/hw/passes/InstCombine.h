@@ -429,7 +429,7 @@ private:
   }
 
   bool simplifyDeMorgan(InstrRef instr) {
-    uint inverted = 0;
+    unsigned inverted = 0;
     for (auto op : instr.others()) {
       if (op->is<WireRef>() && op->as<WireRef>().getDefI().isOpc(OP_NOT))
         inverted++;
@@ -542,7 +542,7 @@ private:
         (instr.isOpc(HW_CONCAT) && instr.getNumOthers() == aliases.frags.size())
             ? instr
             : nullref;
-    for (uint i = 0; i < aliases.frags.size(); i++) {
+    for (unsigned i = 0; i < aliases.frags.size(); i++) {
       auto &frag = aliases.frags[aliases.frags.size() - i - 1];
       auto ref = ctx.resolveObj(frag.ref);
       auto existing = concat ? concat.other(i)->as<HWValue>() : nullref;
@@ -998,7 +998,7 @@ private:
 
       case *HW_TRIGGER_DEF: {
         auto asTrigger = instr.as<TriggerIRef>();
-        uint idx = use - *instr.other_begin();
+        unsigned idx = use - *instr.other_begin();
         asTrigger.oref()->inverseMode(idx);
         break;
       }
@@ -1060,7 +1060,7 @@ private:
       }
     }
 
-    auto unused = [&](uint i) {
+    auto unused = [&](unsigned i) {
       assert(i < instr.getNumYieldValues());
       return instr.yieldValues()
                  .begin()[i]
@@ -1100,7 +1100,7 @@ private:
                                   instr.getNumOperands() - cnt);
     for (auto def : instr.defs()) {
       int idx = def - instr.getYieldValue(0);
-      if (idx >= 0 && (uint)idx < instr.getNumYieldValues()) {
+      if (idx >= 0 && (unsigned)idx < instr.getNumYieldValues()) {
         if (unused(idx))
           continue;
         if (equal[idx]) {
@@ -1199,8 +1199,8 @@ private:
     if (!change)
       return false;
 
-    uint termDiff = instr.getNumTerms() - terms.size();
-    uint numOperands = instr.getNumOperands() - termDiff * 3;
+    unsigned termDiff = instr.getNumTerms() - terms.size();
+    unsigned numOperands = instr.getNumOperands() - termDiff * 3;
     bool removeBaseOffs = terms.size() == 0 && baseOffs == 0;
     if (removeBaseOffs)
       numOperands--;

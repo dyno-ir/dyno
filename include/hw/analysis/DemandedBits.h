@@ -14,7 +14,7 @@ namespace dyno {
 template <typename AccT, auto NextFunc> class DownwardAnalysis {
   struct Frame {
     FatDynObjRef<InstrDefUse> ref;
-    uint idx;
+    unsigned idx;
     AccT acc;
 
     Frame(FatDynObjRef<> ref) : ref(ref), idx(0) {}
@@ -76,7 +76,7 @@ struct DemandedBitsAnalysis {
       demanded |= other.demanded;
     }
 
-    void ensureSize(uint size) {
+    void ensureSize(unsigned size) {
       if (isMostPessimistic()) {
         demanded = BigInt::fromI64(-1, size);
         return;
@@ -88,7 +88,7 @@ struct DemandedBitsAnalysis {
       assert(demanded.getNumBits() == size);
     }
 
-    void finalize(FatDynObjRef<InstrDefUse> use, uint useIdx,
+    void finalize(FatDynObjRef<InstrDefUse> use, unsigned useIdx,
                   FatDynObjRef<InstrDefUse> def) {
       auto wire = def.as<WireRef>();
       auto instr = wire.getDefI();
@@ -128,7 +128,7 @@ struct DemandedBitsAnalysis {
   };
 
   static FatDynObjRef<> demandedBitsNextFunc(FatDynObjRef<InstrDefUse> ref,
-                                             uint idx, DemandedBitsAcc &acc) {
+                                             unsigned idx, DemandedBitsAcc &acc) {
     auto asWire = ref.as<WireRef>();
     if (idx == asWire.getNumUses())
       return nullref;

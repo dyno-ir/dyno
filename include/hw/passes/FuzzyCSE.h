@@ -35,7 +35,7 @@ class FuzzyCSEPass {
   struct AbstractInstr {
     SmallVec<std::pair<uint16_t, AbstractValue>, 4> operands;
     InstrRef ref;
-    uint idx;
+    unsigned idx;
   };
 
 public:
@@ -358,7 +358,7 @@ private:
     }
 
     worklist.resize(candidates.size());
-    for (uint i = 0; i < worklist.size(); i++)
+    for (unsigned i = 0; i < worklist.size(); i++)
       worklist[i] = i;
 
     while (!worklist.empty()) {

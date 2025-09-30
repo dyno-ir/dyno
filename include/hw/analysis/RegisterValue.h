@@ -216,7 +216,7 @@ struct RegisterValue : public RegisterFrags<RegisterValueFragment> {
       return false;
     // clean up constants
     bool rv = false;
-    for (uint i = 0; i < frags.size(); i++) {
+    for (unsigned i = 0; i < frags.size(); i++) {
       auto &low = frags[i];
       if (low.ref.is<ObjRef<Constant>>() && low.srcAddr != 0) {
         auto newConst =
@@ -228,9 +228,9 @@ struct RegisterValue : public RegisterFrags<RegisterValueFragment> {
     }
 
     bool any = false;
-    uint highIdx = 1;
+    unsigned highIdx = 1;
 
-    for (uint i = 0; true; i++) {
+    for (unsigned i = 0; true; i++) {
       auto &low = frags[i];
       if (low.dstAddr == ~0u)
         continue;
@@ -274,7 +274,7 @@ struct RegisterValue : public RegisterFrags<RegisterValueFragment> {
       return rv;
 
     size_t outputIdx = 0;
-    for (uint i = 0; i < frags.size(); i++) {
+    for (unsigned i = 0; i < frags.size(); i++) {
       if (frags[i].dstAddr == ~0u)
         continue;
       frags[outputIdx++] = frags[i];
@@ -975,7 +975,7 @@ template <typename Frag, size_t NumInline = 4> struct GenericPartitions {
     }
     frags.downsize(outIdx);
 
-    uint cur = 0;
+    unsigned cur = 0;
     for (auto frag : frags) {
       assert(frag.dstAddr == cur);
       cur = frag.dstAddr + frag.len;

@@ -229,7 +229,7 @@ public:
     printInstr(instr);
   }
 
-  void printDeps(InstrRef instr, uint maxDepth = -1) {
+  void printDeps(InstrRef instr, unsigned maxDepth = -1) {
     if (maxDepth)
       for (auto use : instr.others()) {
         if (!Operand::isDefUseOperand(*use))
@@ -239,7 +239,7 @@ public:
       }
     printInstr(instr);
   }
-  void printDeps(InstrRef instr, HWContext &ctx, uint maxDepth = -1) {
+  void printDeps(InstrRef instr, HWContext &ctx, unsigned maxDepth = -1) {
     if (maxDepth)
       for (auto use : instr.others()) {
         if (!Operand::isDefUseOperand(*use))
@@ -256,7 +256,7 @@ void dumpInstr(InstrRef instr);
 void dumpInstr(InstrRef instr, HWContext &ctx);
 void dumpDeps(InstrRef instr);
 void dumpDeps(InstrRef instr, HWContext &ctx);
-void dumpDeps(InstrRef instr, HWContext &ctx, uint depth);
+void dumpDeps(InstrRef instr, HWContext &ctx, unsigned depth);
 void dumpObj(FatDynObjRef<> obj);
 
 }; // namespace dyno

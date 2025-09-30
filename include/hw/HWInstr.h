@@ -9,8 +9,8 @@ public:
   using InstrRef::InstrRef;
   HWInstrRef(const InstrRef &ref) : InstrRef(ref) {}
 
-  WireRef operandW(uint n) { return operand(n)->as<WireRef>(); }
-  WireRef defW(uint n = 0) {
+  WireRef operandW(unsigned n) { return operand(n)->as<WireRef>(); }
+  WireRef defW(unsigned n = 0) {
     assert(n < getNumDefs());
     return operandW(n);
   }

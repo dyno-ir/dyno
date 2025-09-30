@@ -67,7 +67,7 @@ private:
     SmallVec<RegisterRef, 4> regs;
     build.setInsertPoint(HWInstrRef{instrs[0]}.parentProc(ctx).block().begin());
     regs.reserve(maxOps);
-    for (uint i = 0; i < maxOps; i++) {
+    for (unsigned i = 0; i < maxOps; i++) {
       auto reg = regs.emplace_back(regBuild.buildRegister(maxBits));
       build.buildStore(reg, ctx.constBuild().undef(maxBits).get());
     }
@@ -80,7 +80,7 @@ private:
         build.buildStore(
             regs[i], build.buildExt(maxBits, use->as<HWValue>(), OP_ANYEXT));
       }
-      for (uint i = instr.getNumOthers(); i < regs.size(); i++)
+      for (unsigned i = instr.getNumOthers(); i < regs.size(); i++)
         build.buildStore(regs[i], ctx.constBuild().zero(maxBits).get());
 
       auto reqBits = *instr.def()->as<WireRef>().getNumBits();
@@ -145,7 +145,7 @@ private:
     SmallVec<RegisterRef, 4> regs;
     build.setInsertPoint(HWInstrRef{instrs[0]}.parentProc(ctx).block().begin());
     regs.reserve(numTerms);
-    for (uint i = 0; i < numTerms; i++) {
+    for (unsigned i = 0; i < numTerms; i++) {
       auto reg = regs.emplace_back(regBuild.buildRegister(32));
       build.buildStore(reg, ctx.constBuild().undef(32).get());
     }

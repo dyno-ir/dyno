@@ -398,19 +398,19 @@ public:
     this->custom() = custom;
   }
 
-  static constexpr PatBigInt undef(uint bits) {
+  static constexpr PatBigInt undef(unsigned bits) {
     return PatBigInt{2 * bits, FourState::SX, 1};
   }
-  static constexpr PatBigInt undef2(uint bits) {
+  static constexpr PatBigInt undef2(unsigned bits) {
     return PatBigInt{2 * bits, FourState::SZ, 1};
   }
-  static constexpr PatBigInt fromFourState(FourState state, uint bits) {
+  static constexpr PatBigInt fromFourState(FourState state, unsigned bits) {
     return PatBigInt{state.isUnk() ? bits * 2 : bits,
                      state == FourState::S1 ? FourState::SX : state,
                      state.isUnk()};
   }
   template <BigIntAPI T>
-  static constexpr PatBigInt fromSign(const T &lhs, uint bits) {
+  static constexpr PatBigInt fromSign(const T &lhs, unsigned bits) {
     return PatBigInt{lhs.getIs4S() ? 2u * bits : bits,
                      lhs.getExtendPatFromSignBit(), lhs.getIs4S()};
   }
@@ -848,7 +848,7 @@ public:
   template <typename T0>
   constexpr static uint32_t countBitsExact(const T0 &val, bool bit) {
     uint32_t cnt = 0;
-    for (uint i = 0; i < val.getExtNumWords(); i++) {
+    for (unsigned i = 0; i < val.getExtNumWords(); i++) {
       cnt += std::popcount(bit ? val.getWord(i) : ~val.getWord(i));
     }
     return cnt;
@@ -863,7 +863,7 @@ public:
     }
 
     uint32_t cnt = 0;
-    for (uint i = 0; i < val.getExtNumWords(); i++) {
+    for (unsigned i = 0; i < val.getExtNumWords(); i++) {
       cnt += std::popcount(
           n_equal_mask<2>(val.getWord4S(i), repeatBits<uint32_t>(bit.val, 2)));
     }
@@ -2228,7 +2228,7 @@ public:
       return isxdigit(c) || c == 'x' || c == 'X' || c == 'z' || c == 'Z';
     };
 
-    Optional<uint> numBits;
+    Optional<unsigned> numBits;
 
     if (*ptr != '\'') {
       // first parse simple dec literal. this is either the final value or the
@@ -2258,7 +2258,7 @@ public:
       isSigned = true;
     }
 
-    uint base;
+    unsigned base;
     switch (*ptr) {
     case 'h':
       base = 16;
@@ -2303,7 +2303,7 @@ public:
     }
     ptr++;
 
-    uint baseBits = clog2(base);
+    unsigned baseBits = clog2(base);
 
     BigIntBase acc = BigIntBase::fromU64Pruned(0);
 
@@ -2326,7 +2326,7 @@ public:
       if (c == 'z')
         digit = PatBigInt{2 * baseBits, FourState::SZ, 1};
 
-      uint hexVal;
+      unsigned hexVal;
       if (c >= 'a')
         hexVal = c - 'a' + 10;
       else if (c >= 'A')
@@ -2385,7 +2385,7 @@ public:
     if (ptr == end)
       return std::unexpected(ParseError::INVALID_FORMAT);
 
-    uint base;
+    unsigned base;
     switch (*ptr) {
     case 'h':
       base = 16;
@@ -2406,7 +2406,7 @@ public:
     if (++ptr == end)
       return std::unexpected(ParseError::INVALID_FORMAT);
 
-    auto xdigit = [](char c) -> Optional<uint> {
+    auto xdigit = [](char c) -> Optional<unsigned> {
       if (c >= '0' && c <= '9')
         return c - '0';
       if (c >= 'a' && c <= 'f')

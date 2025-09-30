@@ -282,13 +282,13 @@ public:
     trace = oldTrace;
   }
 
-  void setReg(uint i, BigInt b) {
+  void setReg(unsigned i, BigInt b) {
     auto it = module.block().begin();
     std::advance(it, i);
     regVals[it->as<RegisterIRef>().oref()] = b;
   }
 
-  BigInt &getReg(uint i) {
+  BigInt &getReg(unsigned i) {
     auto it = module.block().begin();
     std::advance(it, i);
     return regVals[it->as<RegisterIRef>().oref()];

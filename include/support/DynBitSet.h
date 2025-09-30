@@ -111,7 +111,7 @@ public:
     return end()[-1];
   }
 
-  void push_back(uint val) {
+  void push_back(unsigned val) {
     resize(size() + 1);
     back() = val;
   }

@@ -156,7 +156,7 @@ public:
           assert(defI.isOpc(AIG_INPUT));
           // def is an AIG input
           auto inputVal = defI.other(0)->as<HWValue>();
-          uint index = def - defI.def_begin();
+          unsigned index = def - defI.def_begin();
 
           // create reg with copy of the val
           names.insert(
@@ -204,7 +204,7 @@ public:
         SmallVec<WireRef, 8> uses;
 
         ModuleRef mod = nullref;
-        Optional<uint> constVal = nullopt;
+        Optional<unsigned> constVal = nullopt;
         for (auto [i, tok] : split(line).drop_front().enumerate()) {
           if (i == 0) {
             if (tok == "_const0_")

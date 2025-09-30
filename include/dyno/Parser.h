@@ -11,7 +11,7 @@ public:
   void registerOpcodes(DynoLexer &lexer, DialectID dialectID);
   void registerTypes(DynoLexer &lexer, TyID dialectID);
 
-  std::optional<SymbolT> resolve(uint ident) {
+  std::optional<SymbolT> resolve(unsigned ident) {
     auto &val = lut.find(ident);
     if (!val)
       return std::nullopt;

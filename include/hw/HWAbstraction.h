@@ -138,7 +138,7 @@ public:
     return HWInstrRef{instr};
   }
 
-  InstrBuilder buildInstrRaw(DialectOpcode opc, uint numOperands) {
+  InstrBuilder buildInstrRaw(DialectOpcode opc, unsigned numOperands) {
     auto instr = InstrRef{ctx.getInstrs().create(numOperands, opc)};
     insertInstr(instr);
     return InstrBuilder{instr};
@@ -297,7 +297,7 @@ public:
       return ConstantRef::fromFourState(equal);
     }
     auto rv =
-        buildInstr(OP_ICMP_EQ.indexAdd(uint(pred), OP_ICMP_SGE), true, lhs, rhs)
+        buildInstr(OP_ICMP_EQ.indexAdd(unsigned(pred), OP_ICMP_SGE), true, lhs, rhs)
             .defW();
     rv->numBits = 1;
     return rv;
@@ -306,7 +306,7 @@ public:
   template <IsAnyHWValue T> HWValue buildRedXor(T val) {
     SmallVec<HWValue, 32> bits;
     bits.reserve(*val.getNumBits());
-    for (uint i = 0; i < *val.getNumBits(); i++) {
+    for (unsigned i = 0; i < *val.getNumBits(); i++) {
       bits.emplace_back(buildSplice(val, 1, i));
     }
     return buildXor(bits);
@@ -631,7 +631,7 @@ public:
                          AddressGenTerm{range.addr, 1});
     }
 
-    uint numOperands = 0;
+    unsigned numOperands = 0;
     for (auto [value, range] : values) {
       if (auto asConst = range.getLen().dyn_as<ConstantRef>();
           asConst && asConst.valueEquals(0))
@@ -761,7 +761,7 @@ public:
     return rv;
   }
 
-  HWValue buildRepeat(HWValue value, uint count) {
+  HWValue buildRepeat(HWValue value, unsigned count) {
     if (value.is<ConstantRef>()) {
       return ctx.constBuild().val(value.as<ConstantRef>()).repeat(count).get();
     }
@@ -776,7 +776,7 @@ public:
     if (value.getNumBits()) {
       uint32_t out;
       if (__builtin_umul_overflow(*value.getNumBits(), count, &out))
-        report_fatal_error("repeat wire length does not fit in uint");
+        report_fatal_error("repeat wire length does not fit in unsigned");
       rv->numBits = out;
     }
 
@@ -952,7 +952,7 @@ public:
     return instr;
   }
 
-  IfInstrRef buildIfElse(HWValue cond, uint yieldPrealloc = 0) {
+  IfInstrRef buildIfElse(HWValue cond, unsigned yieldPrealloc = 0) {
     assert(cond.getNumBits() == 1);
     InstrRef instrRef =
         InstrRef{ctx.getInstrs().create(3 + yieldPrealloc, OP_IF)};
@@ -962,7 +962,7 @@ public:
     auto falseBl = ctx.createBlock();
     build.addRef(trueBl).addRef(falseBl);
 
-    for (uint i = 0; i < yieldPrealloc; i++)
+    for (unsigned i = 0; i < yieldPrealloc; i++)
       build.addRef(ctx.getWires().create());
 
     build.other().addRef(cond);
@@ -981,7 +981,7 @@ public:
     return IfInstrRef{instrRef};
   }
 
-  IfInstrRef buildIfElse(IfInstrRef old, uint yieldPrealloc = 0,
+  IfInstrRef buildIfElse(IfInstrRef old, unsigned yieldPrealloc = 0,
                          BlockRef falseBlock = nullref) {
     InstrRef instrRef =
         InstrRef{ctx.getInstrs().create(3 + yieldPrealloc, OP_IF)};
@@ -996,7 +996,7 @@ public:
     if (old.hasFalseBlock())
       old.operand(1).replace(FatDynObjRef<>{nullref});
 
-    for (uint i = 0; i < yieldPrealloc; i++) {
+    for (unsigned i = 0; i < yieldPrealloc; i++) {
       if (i >= old.getNumYieldValues())
         build.addRef(ctx.getWires().create());
       else {
@@ -1010,7 +1010,7 @@ public:
     return IfInstrRef{instrRef};
   }
 
-  SwitchInstrRef buildSwitch(HWValue cond, uint yieldPrealloc = 0) {
+  SwitchInstrRef buildSwitch(HWValue cond, unsigned yieldPrealloc = 0) {
     SwitchInstrRef instrRef =
         SwitchInstrRef{ctx.getInstrs().create(2 + yieldPrealloc, OP_SWITCH)};
     insertInstr(instrRef);
@@ -1061,11 +1061,11 @@ public:
         InstrBuilder build{newInstr};
 
         // copy over true/false blocks and existing defs
-        for (uint i = 0; i < instr.getNumDefs(); i++)
+        for (unsigned i = 0; i < instr.getNumDefs(); i++)
           build.addRef(instr.operand(i)->as<FatDynObjRef<>>());
 
         // new wire defs
-        for (uint i = 0; i < sizeof...(value) - asIf.getNumYieldValues(); i++)
+        for (unsigned i = 0; i < sizeof...(value) - asIf.getNumYieldValues(); i++)
           build.addRef(ctx.getWires().create());
         build.other();
 
@@ -1120,7 +1120,7 @@ public:
   auto buildYield(InstrRef old, ArrayRef<HWValue> addedYieldVals) {
     assert(!old || old.isOpc(OP_YIELD));
 
-    uint newYieldVals =
+    unsigned newYieldVals =
         addedYieldVals.size() + (old ? old.getNumOperands() : 0);
 
     auto instr = InstrRef{ctx.getInstrs().create(newYieldVals, OP_YIELD)};
@@ -1148,7 +1148,7 @@ public:
   auto buildUnyield(InstrRef old, ArrayRef<WireRef> addedYieldVals) {
     assert(!old || old.isOpc(OP_UNYIELD));
 
-    uint newYieldVals =
+    unsigned newYieldVals =
         addedYieldVals.size() + (old ? old.getNumOperands() : 0);
 
     auto instr = InstrRef{ctx.getInstrs().create(newYieldVals, OP_UNYIELD)};
@@ -1210,7 +1210,7 @@ public:
     build.addRef(ctx.createBlock());
     build.addRef(ctx.createBlock());
 
-    for (uint i = 0; i < sizeof...(inputs); i++)
+    for (unsigned i = 0; i < sizeof...(inputs); i++)
       build.addRef(ctx.getWires().create());
     build.other();
     ([&]() { build.addRef(inputs); }(), ...);
@@ -1225,7 +1225,7 @@ public:
     InstrBuilder build{instrRef};
     build.addRef(ctx.createBlock());
 
-    for (uint i = 0; i < sizeof...(inputs); i++)
+    for (unsigned i = 0; i < sizeof...(inputs); i++)
       build.addRef(ctx.getWires().create());
     build.other();
 
@@ -1266,7 +1266,7 @@ public:
   }
 
   auto buildCall(FunctionIRef func, ArrayRef<HWValueOrReg> args,
-                 uint numRetvals = 0) {
+                 unsigned numRetvals = 0) {
     auto callInstr = CallInstrRef{
         ctx.getInstrs().create(numRetvals + 1 + args.size(), OP_CALL)};
     // assert(args.size() == func.func()->params.size() && "param size
@@ -1274,7 +1274,7 @@ public:
     insertInstr(callInstr);
 
     InstrBuilder build{callInstr};
-    for (uint i = 0; i < numRetvals; i++)
+    for (unsigned i = 0; i < numRetvals; i++)
       build.addRef(ctx.getWires().create());
     build.other();
     build.addRef(func.func());
@@ -1285,7 +1285,7 @@ public:
   }
 
   // todo: full constant support
-  ConstantRef buildConst(uint bits, uint64_t value) {
+  ConstantRef buildConst(unsigned bits, uint64_t value) {
     return ConstantBuilder{ctx.getConstants()}.val(bits, value);
   }
 

@@ -44,7 +44,7 @@ class AggressiveDeadCodeEliminationPass {
 
       case *HW_INSTANCE: {
         ModuleRef mod = instr.other(0)->as<ModuleRef>();
-        uint idx = (use - instr.other_begin()) - 1;
+        unsigned idx = (use - instr.other_begin()) - 1;
         if (mod->ports[idx].portType == HW_INPUT_REGISTER_DEF)
           break;
         worklist.emplace_back(instr);
@@ -130,7 +130,7 @@ class AggressiveDeadCodeEliminationPass {
       visitHWValue(asIf.getCondValue()->as<HWValue>());
       InstrRef yieldInstrT = asIf.getInnerYieldTrue();
       InstrRef yieldInstrF = asIf.getInnerYieldFalse();
-      for (uint i = 0; i < asIf.getNumYieldValues(); i++) {
+      for (unsigned i = 0; i < asIf.getNumYieldValues(); i++) {
         // if (!wireMap[asIf.getYieldValue(i)->as<WireRef>()])
         //   continue;
         wireMap[asIf.getYieldValue(i)->as<WireRef>()] = 1;
@@ -152,7 +152,7 @@ class AggressiveDeadCodeEliminationPass {
       if (!instrMap[instr])
         visitHWValue(asSwitch.cond()->as<HWValue>());
 
-      for (uint i = 0; i < asSwitch.getNumYieldValues(); i++) {
+      for (unsigned i = 0; i < asSwitch.getNumYieldValues(); i++) {
         wireMap[asSwitch.getYieldValue(i)->as<WireRef>()] = 1;
         // if (!wireMap[asSwitch.getYieldValue(i)->as<WireRef>()])
         //   continue;
@@ -339,7 +339,7 @@ class AggressiveDeadCodeEliminationPass {
       if (asFF.hasClkEn()) {
         pushInstr(asFF.clkEn().iref());
       }
-      for (uint i = 0; i < asFF.numRsts(); i++) {
+      for (unsigned i = 0; i < asFF.numRsts(); i++) {
         pushInstr(asFF.rst(i).iref());
         visitHWValue(asFF.rstVal(i));
       }

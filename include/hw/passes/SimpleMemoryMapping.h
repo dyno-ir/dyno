@@ -102,7 +102,7 @@ class SimpleMemoryMappingPass {
   // bool walkWriteTree(SmallVecImpl<WritePort> &out, StoreIRef store) {
   //   struct Frame {
   //     WireRef wire;
-  //     uint idx;
+  //     unsigned idx;
   //   };
   //   if (!store.value().is<WireRef>())
   //     return false;

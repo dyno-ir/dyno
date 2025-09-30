@@ -62,7 +62,7 @@ class LinearExpressionAnalysis {
       }
     }
 
-    void resize(uint newLen, bool sign = false) {
+    void resize(unsigned newLen, bool sign = false) {
       BigInt::resizeOp4S(base, base, newLen, sign);
       for (auto [wire, fact] : terms)
         BigInt::resizeOp4S(fact, fact, newLen, sign);
@@ -142,7 +142,7 @@ public:
   auto getLinearExpression(WireRef wire) {
     stack.emplace_back(wire.getDef());
 
-    uint maxLevel = 0;
+    unsigned maxLevel = 0;
 
     while (!stack.empty()) {
       maxLevel = std::max(maxLevel, stack.size());

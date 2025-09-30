@@ -57,7 +57,7 @@ public:
     return lhs.op == rhs.op;
   }
 
-  AIGNodeTRef operator[](uint idx);
+  AIGNodeTRef operator[](unsigned idx);
 };
 
 class AIGNodeTRef : public ObjRef<AIGNode> {
@@ -89,7 +89,7 @@ public:
   static bool is_impl(FatAIGNodeRef);
 };
 
-inline AIGNodeTRef AIGNode::operator[](uint i) { return op[i]; }
+inline AIGNodeTRef AIGNode::operator[](unsigned i) { return op[i]; }
 
 class AIGNodeRef : public AIGNodeTRef, public ByValueRTTIUtilMixin<AIGNodeRef> {
   AIGNode *ptr;

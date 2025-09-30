@@ -124,7 +124,7 @@ struct Lexer {
   ArrayRef<char> src;
   size_t i = 0;
   size_t lastI = 0;
-  uint lineNumber = 1;
+  unsigned lineNumber = 1;
 
   SlabAllocator<dyno::BigInt> bigIntLiterals;
 
@@ -355,11 +355,11 @@ public:
   [[noreturn]] void printErrorOnPeekToken(const char *error) {
     fprintf(stderr, "%s:%u: %s\n", path.c_str(), lineNumber, error);
     auto line = extractEnclosingLine(std::string_view{src}, lastI);
-    uint pos;
+    unsigned pos;
     fprintf(stderr, "%s:%u: %n", path.c_str(), lineNumber, &pos);
     std::cerr << line << "\n";
     pos += &src[lastI] - line.begin();
-    for (uint i = 0; i < pos; i++)
+    for (unsigned i = 0; i < pos; i++)
       putc(' ', stderr);
     fprintf(stderr, "^\n");
     report_fatal_error("parser error");

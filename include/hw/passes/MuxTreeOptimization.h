@@ -79,21 +79,21 @@ private:
   std::pair<SmallBoolExprCNF, Optional<uint32_t>>
   getBestMUXExpr(MuxTree *tree) {
 
-    uint bestLitIdx = 0;
-    uint bestTotal = 0;
+    unsigned bestLitIdx = 0;
+    unsigned bestTotal = 0;
     double bestRatio = 0.0;
 
     std::vector<bool> binTreeCompat(tree->entries.size());
 
-    for (uint litIdx = 0; litIdx < tree->conditions.size(); litIdx++) {
+    for (unsigned litIdx = 0; litIdx < tree->conditions.size(); litIdx++) {
       SmallBoolExprCNF testExpr;
       testExpr.literals.emplace_back(
           BoolExprLiteral{uint16_t(litIdx), 0, true});
       SmallBoolExprCNF testExprInv =
           *testExpr.negated2(tree->conditions.size());
 
-      SmallVec<uint, 8> trueExprs;
-      SmallVec<uint, 8> falseExprs;
+      SmallVec<unsigned, 8> trueExprs;
+      SmallVec<unsigned, 8> falseExprs;
 
       for (auto [entryIdx, entry] : Range{tree->entries}.enumerate()) {
         SmallBoolExprCNF cond = entry.expr;
@@ -119,7 +119,7 @@ private:
       // if an entry ever appears grouped with others it is "binary tree
       // compatible" (information on it can be gained incrementally using
       // well-formed bin-tree splits).
-      auto markBinTreeCompat = [&](ArrayRef<uint> arr) {
+      auto markBinTreeCompat = [&](ArrayRef<unsigned> arr) {
         if (arr.size() <= 1)
           return;
         for (auto idx : arr)
@@ -128,13 +128,13 @@ private:
       markBinTreeCompat(trueExprs);
       markBinTreeCompat(falseExprs);
 
-      uint numTrue = trueExprs.size();
-      uint numFalse = falseExprs.size();
+      unsigned numTrue = trueExprs.size();
+      unsigned numFalse = falseExprs.size();
 
-      uint total = numTrue + numFalse;
-      uint totalUnadj = total;
+      unsigned total = numTrue + numFalse;
+      unsigned totalUnadj = total;
       if (total != tree->entries.size()) {
-        uint diff = tree->entries.size() - total;
+        unsigned diff = tree->entries.size() - total;
         numTrue += diff;
         numFalse += diff;
         total += 2 * diff;
@@ -313,12 +313,12 @@ private:
         }
       }
 
-      uint cntTrueLeft = 0;
+      unsigned cntTrueLeft = 0;
       for (auto entry : left->entries)
         if (entry.expr.isTrue())
           cntTrueLeft++;
       assert(cntTrueLeft <= 1);
-      uint cntTrueRight = 0;
+      unsigned cntTrueRight = 0;
       for (auto entry : right->entries)
         if (entry.expr.isTrue())
           cntTrueRight++;

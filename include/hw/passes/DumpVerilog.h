@@ -116,7 +116,7 @@ class DumpVerilogPass {
       case *HW_CONCAT: {
         std::print(os, "assign _w{}_ = {{",
                    wireToID(instr.def(0)->as<WireRef>()));
-        for (uint i = 0; i < instr.getNumOthers(); i++) {
+        for (unsigned i = 0; i < instr.getNumOthers(); i++) {
           if (i != 0)
             std::print(os, ", ");
           auto wire = instr.other(i)->as<WireRef>();

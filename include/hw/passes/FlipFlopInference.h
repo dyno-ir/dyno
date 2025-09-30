@@ -21,14 +21,14 @@ class FlipFlopInferencePass {
   HWInstrBuilderStack build;
   ConstantBuilder cbuild;
 
-  std::pair<ConstantRef, uint>
+  std::pair<ConstantRef, unsigned>
   findReset(StoreIRef store,
             ArrayRef<std::pair<RegisterRef, bool>> resetCandidates,
             MuxTree *muxTree) {
     if (!muxTree)
       return std::make_pair(nullref, 0);
 
-    SmallVec<std::pair<SmallBoolExprCNF, uint>, 2> resetExprs;
+    SmallVec<std::pair<SmallBoolExprCNF, unsigned>, 2> resetExprs;
     if (auto asConst = store.value().dyn_as<ConstantRef>())
       return std::pair(asConst, 0);
 
@@ -68,7 +68,7 @@ class FlipFlopInferencePass {
     return std::make_pair(nullref, 0);
   }
 
-  std::pair<ConstantRef, uint>
+  std::pair<ConstantRef, unsigned>
   findReset2(StoreIRef store,
              ArrayRef<std::pair<RegisterRef, bool>> resetCandidates) {
     KnownBitsAnalysis knownBits;
@@ -103,7 +103,7 @@ class FlipFlopInferencePass {
     return true;
   }
 
-  Optional<uint> findClockEnable(RegisterIRef q, StoreIRef store,
+  Optional<unsigned> findClockEnable(RegisterIRef q, StoreIRef store,
                                  MuxTree *muxTree) {
     if (!muxTree)
       return nullopt;
@@ -173,7 +173,7 @@ class FlipFlopInferencePass {
     HWValue dValue = storeI.value().as<HWValue>();
     ConstantRef resetValue;
 
-    auto get = [&](uint i) -> std::pair<RegisterRef, bool> {
+    auto get = [&](unsigned i) -> std::pair<RegisterRef, bool> {
       return {trigger.iref().other(i)->as<RegisterRef>(),
               trigger->getMode(i) == SensMode::POSEDGE};
     };
@@ -211,7 +211,7 @@ class FlipFlopInferencePass {
       } else {
         resetCandidates = {get(0), get(1)};
       }
-      uint resetIndex = 0;
+      unsigned resetIndex = 0;
       std::tie(resetValue, resetIndex) = findReset2(storeI, resetCandidates);
       if (!resetValue)
         report_fatal_error("reset sensitivity but no reset value found");

@@ -11,7 +11,7 @@ class TriggerDedupePass {
   static bool triggerDeepEqual(TriggerIRef lhs, TriggerIRef rhs) {
     if (lhs.getNumOthers() != rhs.getNumOthers())
       return false;
-    for (uint i = 0; i < lhs.getNumOthers(); i++)
+    for (unsigned i = 0; i < lhs.getNumOthers(); i++)
       if (lhs.other(i)->thin() != rhs.other(i)->thin())
         return false;
     if (lhs.oref()->modesRaw() != rhs.oref()->modesRaw())

@@ -10,9 +10,9 @@ public:
   using OpcodeInstrRef::OpcodeInstrRef;
 
 private:
-  constexpr static uint numBaseOperands = 4;
-  constexpr static uint numClkEnOperands = 2;
-  constexpr static uint numRstOperands = 3;
+  constexpr static unsigned numBaseOperands = 4;
+  constexpr static unsigned numClkEnOperands = 2;
+  constexpr static unsigned numRstOperands = 3;
 
 public:
   RegisterRef clk() { return operand(0)->as<RegisterRef>(); }
@@ -23,28 +23,28 @@ public:
   bool hasClkEn() const {
     return ((getNumOperands() - numBaseOperands) % numRstOperands != 0);
   }
-  uint numRsts() const {
+  unsigned numRsts() const {
     return ((getNumOperands() - numBaseOperands -
              (hasClkEn() ? numClkEnOperands : 0)) /
             numRstOperands);
   }
 
 private:
-  uint rstBase(uint i = 0) const {
+  unsigned rstBase(unsigned i = 0) const {
     return (hasClkEn() ? (numBaseOperands + numClkEnOperands)
                        : numBaseOperands) +
            i * numRstOperands;
   }
-  uint clkEnBase() const { return numBaseOperands; }
+  unsigned clkEnBase() const { return numBaseOperands; }
 
 public:
-  RegisterRef rst(uint i = 0) {
+  RegisterRef rst(unsigned i = 0) {
     return operand(rstBase(i) + 0)->as<RegisterRef>();
   }
-  uint32_t rstPolarity(uint i = 0) {
+  uint32_t rstPolarity(unsigned i = 0) {
     return operand(rstBase(i) + 1)->as<ConstantRef>().getExactVal();
   }
-  ConstantRef rstVal(uint i = 0) {
+  ConstantRef rstVal(unsigned i = 0) {
     return operand(rstBase(i) + 2)->as<ConstantRef>();
   }
 
@@ -79,7 +79,7 @@ public:
   };
   UseType classifyUse(OperandRef use) {
     assert(use.instr() == *this);
-    uint idx = use - *other_begin();
+    unsigned idx = use - *other_begin();
     if (idx == 0)
       return CLOCK;
     if (idx == 2)

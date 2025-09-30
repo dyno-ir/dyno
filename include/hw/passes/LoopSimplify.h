@@ -26,10 +26,10 @@ class LoopSimplifer {
   // inspect yields.
   struct YieldVal {
     HWValue init;
-    uint blockID;
+    unsigned blockID;
     struct Passthru {};
     struct Permute {
-      uint idx;
+      unsigned idx;
     };
     struct Increment {
       HWValue step;
@@ -40,7 +40,7 @@ class LoopSimplifer {
     struct Complex {};
     std::variant<Passthru, Permute, Increment, Invariant, Complex> variant;
 
-    template <typename T> void set(uint blockID, T t) {
+    template <typename T> void set(unsigned blockID, T t) {
       if (!std::get_if<Passthru>(&variant)) {
         variant = Complex{};
         return;
@@ -48,7 +48,7 @@ class LoopSimplifer {
       variant = t;
       this->blockID = blockID;
     }
-    template <> void set<Passthru>(uint, Passthru) {}
+    template <> void set<Passthru>(unsigned, Passthru) {}
   };
 
   static auto getYield(BlockRef block) {
@@ -66,7 +66,7 @@ class LoopSimplifer {
   };
 
   struct ForLoopCondition {
-    uint iterYieldIdx;
+    unsigned iterYieldIdx;
     HWValue bound;
     DialectOpcode comparison;
   };
@@ -85,12 +85,12 @@ class LoopSimplifer {
                          OP_ICMP_UGE))
       return std::nullopt;
 
-    uint yieldIdx;
+    unsigned yieldIdx;
     HWValue bound = nullref;
-    uint boundIdx = 0;
+    unsigned boundIdx = 0;
     WireRef iter = nullref;
 
-    for (uint i = 0; i < 2; i++) {
+    for (unsigned i = 0; i < 2; i++) {
       auto op = compInstr.other(i);
       if (auto asWire = op->dyn_as<WireRef>();
           asWire &&
@@ -172,7 +172,7 @@ public:
             continue;
           }
           if (defI.isOpc(OP_UNYIELD)) {
-            uint idx = asWire.getDef() - *defI.begin();
+            unsigned idx = asWire.getDef() - *defI.begin();
             if (idx == opIdx)
               yieldVals[opIdx].set(blockID, YieldVal::Passthru{});
             else
@@ -190,7 +190,7 @@ public:
               } else if (auto wire = cur->dyn_as<WireRef>()) {
                 // operand is wire which is just passed through -> iter
                 if (wire.getDefI().isOpc(OP_UNYIELD)) {
-                  uint idx = wire.getDef() - *wire.getDef().instr().begin();
+                  unsigned idx = wire.getDef() - *wire.getDef().instr().begin();
                   if (idx != opIdx)
                     goto complex;
                   operand = wire;
@@ -246,7 +246,7 @@ public:
     HWValue forLower = nullref;
     HWValue forUpper;
     HWValue forStep;
-    Optional<uint> forLoopIter = nullopt;
+    Optional<unsigned> forLoopIter = nullopt;
     bool isNewForLoop = false;
     bool isOldForLoop = false;
 
@@ -364,7 +364,7 @@ public:
       return (std::get_if<YieldVal::Passthru>(&val.variant));
     };
 
-    uint newNumYieldVals = 0;
+    unsigned newNumYieldVals = 0;
     for (auto [i, val] : Range{yieldVals}.enumerate()) {
       if (isSkipYieldVal(val) || i == forLoopIter) {
         change |= 1;
@@ -417,7 +417,7 @@ public:
             .replaceAllUsesWith(forIterWire);
       }
 
-      for (uint i = 0; i < yieldVals.size(); i++) {
+      for (unsigned i = 0; i < yieldVals.size(); i++) {
         auto yieldOp = yield.operand(i + hasCond);
         auto unyieldOp = unyield.operand(i + isOldForLoop);
         auto analysis = yieldVals[i];
@@ -493,8 +493,8 @@ public:
     }
 
     // not replaced -> gets deleted
-    uint replaceStart = destroyFirstBlock ? 1 : 0;
-    for (uint i = replaceStart; i < originalNumBlocks; i++) {
+    unsigned replaceStart = destroyFirstBlock ? 1 : 0;
+    for (unsigned i = replaceStart; i < originalNumBlocks; i++) {
       loop.def(i).replace(FatDynObjRef<>{nullref});
     }
 

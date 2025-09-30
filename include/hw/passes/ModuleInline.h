@@ -23,7 +23,7 @@ class ModuleInlinePass {
     ModuleIRef parentMod = instance.parentMod(ctx);
     auto modToInline = instance.operand(0)->as<ModuleRef>().iref();
 
-    uint portIndex = 0;
+    unsigned portIndex = 0;
     auto inlineHook = [&](DeepCopier *self, InstrRef src,
                           BlockRef_iterator<true> dstIt) {
       if (src.isOpc(HW_INPUT_REGISTER_DEF, HW_OUTPUT_REGISTER_DEF,

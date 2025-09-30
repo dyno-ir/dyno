@@ -49,7 +49,7 @@ class LoadCoalescePass {
       auto [loads, regions] = findLoadsAndRegions(reg, proc);
 
       bool lastActive = false;
-      uint activeCnt = 0;
+      unsigned activeCnt = 0;
       for (auto frag : regions.frags) {
         if (frag.active && !lastActive)
           activeCnt++;

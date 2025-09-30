@@ -166,7 +166,7 @@ class BitAliasAnalysis : public CacheInvalidation<BitAliasAnalysis> {
         change = true;
         return std::nullopt;
       }
-      for (uint i = 0; i < cnt - 1; i++)
+      for (unsigned i = 0; i < cnt - 1; i++)
         frame.acc.appendTop(retVal);
       change |= nested;
       return std::nullopt;
@@ -180,7 +180,7 @@ class BitAliasAnalysis : public CacheInvalidation<BitAliasAnalysis> {
       assert(outLen >= inLen);
       frame.acc = std::move(retVal);
       auto signBit = frame.acc.getRange(inLen - 1, 1);
-      for (uint i = 0; i < (outLen - inLen); i++)
+      for (unsigned i = 0; i < (outLen - inLen); i++)
         frame.acc.appendTop(signBit);
       change |= nested;
       change |= notRoot && !rootIsConcatOrInsert;
@@ -244,7 +244,7 @@ public:
     auto rootWire = root.as<WireRef>();
     stack.emplace_back(rootWire.getDef());
 
-    uint maxLevel = 0;
+    unsigned maxLevel = 0;
     retVal = BitAliasAcc{};
     change = false;
 

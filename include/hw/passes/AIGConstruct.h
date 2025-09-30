@@ -47,7 +47,7 @@ public:
                  wireToAIGNodeStorage.end().base()});
   }
 
-  AIGNodeTRef resolveBit(HWValue val, uint bit) {
+  AIGNodeTRef resolveBit(HWValue val, unsigned bit) {
     if (auto asWire = val.dyn_as<WireRef>()) {
       auto resolved = resolveWire(asWire);
       assert(asWire.getNumBits() == resolved.size());
@@ -62,7 +62,7 @@ public:
                   std::invocable<AIGNodeTRef, AIGNodeTRef> auto buildFunc) {
     uint32_t pos = wireToAIGNodeStorage.size();
     auto numBits = *lhs.getNumBits();
-    for (uint i = 0; i < numBits; i++) {
+    for (unsigned i = 0; i < numBits; i++) {
       AIGNodeTRef lhsNode = resolveBit(lhs, i);
       AIGNodeTRef rhsNode = resolveBit(rhs, i);
       auto node = buildFunc(lhsNode, rhsNode);
@@ -73,7 +73,7 @@ public:
   void buildNOT(WireRef out, HWValue val) {
     uint32_t pos = wireToAIGNodeStorage.size();
     auto numBits = *val.getNumBits();
-    for (uint i = 0; i < numBits; i++) {
+    for (unsigned i = 0; i < numBits; i++) {
       AIGNodeTRef node = resolveBit(val, i).inverted();
       wireToAIGNodeStorage.emplace_back(node);
     }
@@ -113,7 +113,7 @@ public:
     auto val = instr.in()->as<HWValue>();
     auto low = instr.getBase();
     auto len = instr.getLen();
-    for (uint j = 0; j < len; j++) {
+    for (unsigned j = 0; j < len; j++) {
       wireToAIGNodeStorage.emplace_back(resolveBit(val, low + j));
     }
 
@@ -123,9 +123,9 @@ public:
   }
   void buildConcat(InstrRef instr) {
     uint32_t pos = wireToAIGNodeStorage.size();
-    for (uint i = instr.getNumOthers(); i-- > 0;) {
+    for (unsigned i = instr.getNumOthers(); i-- > 0;) {
       auto val = instr.other(i)->as<HWValue>();
-      for (uint j = 0; j < *val.getNumBits(); j++) {
+      for (unsigned j = 0; j < *val.getNumBits(); j++) {
         wireToAIGNodeStorage.emplace_back(resolveBit(val, j));
       }
     }
@@ -137,7 +137,7 @@ public:
     assert(insert.isConstantOffs());
 
     uint32_t pos = wireToAIGNodeStorage.size();
-    for (uint i = 0; i < insert.getMemoryLen(); i++) {
+    for (unsigned i = 0; i < insert.getMemoryLen(); i++) {
       if (i >= insert.getBase() && i < insert.getBase() + insert.getLen()) {
         wireToAIGNodeStorage.emplace_back(
             resolveBit(insert.val()->as<HWValue>(), i - insert.getBase()));
@@ -156,8 +156,8 @@ public:
     auto val = instr.other(0)->as<HWValue>();
     assert(*instr.def(0)->as<WireRef>().getNumBits() % *val.getNumBits() == 0);
     auto count = *instr.def(0)->as<WireRef>().getNumBits() / *val.getNumBits();
-    for (uint i = 0; i < count; i++) {
-      for (uint j = 0; j < *val.getNumBits(); j++) {
+    for (unsigned i = 0; i < count; i++) {
+      for (unsigned j = 0; j < *val.getNumBits(); j++) {
         wireToAIGNodeStorage.emplace_back(resolveBit(val, j));
       }
     }
@@ -169,7 +169,7 @@ public:
   void buildNOP(WireRef out, HWValue in) {
     uint32_t pos = wireToAIGNodeStorage.size();
     auto val = in;
-    for (uint i = 0; i < *val.getNumBits(); i++) {
+    for (unsigned i = 0; i < *val.getNumBits(); i++) {
       wireToAIGNodeStorage.emplace_back(resolveBit(val, i));
     }
     uint32_t numBits = wireToAIGNodeStorage.size() - pos;
@@ -181,12 +181,12 @@ public:
     auto outNumBits = *out.getNumBits();
     wireToAIGNode[out] = ThinArrayRef<AIGNodeTRef>{
         (uint32_t)wireToAIGNodeStorage.size(), outNumBits};
-    for (uint i = 0; i < std::min(inNumBits, outNumBits); i++) {
+    for (unsigned i = 0; i < std::min(inNumBits, outNumBits); i++) {
       AIGNodeTRef node = resolveBit(in, i);
       wireToAIGNodeStorage.emplace_back(node);
     }
     AIGNodeTRef extBit = sign ? resolveBit(in, inNumBits - 1) : aig.getZero();
-    for (uint i = inNumBits; i < outNumBits; i++)
+    for (unsigned i = inNumBits; i < outNumBits; i++)
       wireToAIGNodeStorage.emplace_back(extBit);
   }
 
@@ -194,7 +194,7 @@ public:
     auto numBits = *wire.getNumBits();
     auto arr = ThinArrayRef<AIGNodeTRef>{(uint32_t)wireToAIGNodeStorage.size(),
                                          numBits};
-    for (uint i = 0; i < numBits; i++) {
+    for (unsigned i = 0; i < numBits; i++) {
       auto node = aig.createInput();
       wireToAIGNodeStorage.emplace_back(node.as<AIGNodeRef>());
     }
@@ -206,7 +206,7 @@ public:
     auto numBits = *wire.getNumBits();
     SmallVec<AIGNodeTRef, 4> arr;
     auto nodes = resolveWire(wire.as<WireRef>());
-    for (uint i = 0; i < numBits; i++) {
+    for (unsigned i = 0; i < numBits; i++) {
       auto node = aig.createOutput(nodes[i]);
       arr.emplace_back(node.as<AIGNodeRef>());
     }

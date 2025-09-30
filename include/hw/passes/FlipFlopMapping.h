@@ -144,10 +144,10 @@ class FlipFlopMappingPass {
     abstr.hasRegularOut() = 1;
 
     SmallVec<WireRef, 2> rstWires;
-    for (uint i = 0; i < instr.numRsts(); i++)
+    for (unsigned i = 0; i < instr.numRsts(); i++)
       rstWires.emplace_back(build.buildLoad(instr.rst(i)));
 
-    for (uint i = 0; i < bits; i++) {
+    for (unsigned i = 0; i < bits; i++) {
       wires.d = build.buildSplice(dWire, 1, i).as<WireRef>();
       wires.bitIdx = i;
       qWires.emplace_back(wires.q = ctx.getWires().create(1));
@@ -157,8 +157,8 @@ class FlipFlopMappingPass {
       abstr.hasSet() = 0;
       abstr.setPol() = 0;
 
-      uint nRst = instr.numRsts();
-      for (uint rstIdx = 0; rstIdx < nRst; rstIdx++) {
+      unsigned nRst = instr.numRsts();
+      for (unsigned rstIdx = 0; rstIdx < nRst; rstIdx++) {
         auto val = instr.rstVal(rstIdx);
         auto bitVal = val.getBit(i);
         if (bitVal.isUnk())
@@ -195,7 +195,7 @@ class FlipFlopMappingPass {
     HWValue set;
 
     RegisterRef qReg;
-    uint bitIdx;
+    unsigned bitIdx;
   };
 
   void buildMatchingStdCellFF(const StdCellFF &ff, FFWires wires) {
@@ -523,7 +523,7 @@ public:
   }
 
   void findFlipFlopStdCells() {
-    uint count = 0;
+    unsigned count = 0;
     for (auto obj : ctx.getModules()) {
       auto mod = obj.iref();
       if (!mod.isOpc(HW_STDCELL_DEF))
@@ -550,7 +550,7 @@ public:
     });
   }
 
-  void precomputeFixup(FixupType type, uint ffIdx) {
+  void precomputeFixup(FixupType type, unsigned ffIdx) {
     AbstractFF abstr = AbstractFF{(uint16_t)ffIdx};
 
     auto fixupIfNone = [&]() {
@@ -641,14 +641,14 @@ public:
   void precomputeFixups() {
     for (auto type = FixupType(0); type != FixupType::FAIL;
          type = FixupType(int(type) + 1)) {
-      for (uint i = 0; i < ffMap.size(); i++) {
+      for (unsigned i = 0; i < ffMap.size(); i++) {
         if (auto type = ffMap[i].dyn_as<FixupType>(); type == FixupType::FAIL)
           continue;
         precomputeFixup(type, i);
       }
     }
 
-    uint missing = 0;
+    unsigned missing = 0;
     for (auto entry : ffMap) {
       if (auto fixup = entry.dyn_as<FixupType>();
           fixup && *fixup == FixupType::FAIL)

@@ -134,7 +134,7 @@ template <std::invocable<std::string_view> FuncT> class LibertyExprParser {
         inQuotes = true;
         i += 2;
       }
-      uint start = i;
+      unsigned start = i;
       while (i != expr.size() && (isalnum(expr[i]) || expr[i] == '_'))
         i++;
       auto sub = expr.substr(start, i - start);
@@ -162,7 +162,7 @@ template <std::invocable<std::string_view> FuncT> class LibertyExprParser {
     return ((c == values) || ...);
   }
 
-  HWValue parseExpr(uint minPrec = 0) {
+  HWValue parseExpr(unsigned minPrec = 0) {
     auto lhs = parseTerminal();
     while (1) {
       if (i == expr.size())
@@ -179,7 +179,7 @@ template <std::invocable<std::string_view> FuncT> class LibertyExprParser {
         return build.buildXor(lhs, parseExpr(3));
       }
       case ' ': {
-        uint j = 0;
+        unsigned j = 0;
         while ((i + j < expr.size() - 1) && expr[i + j] == ' ')
           j++;
         // try to match a real operator, only treat space as AND if none found.

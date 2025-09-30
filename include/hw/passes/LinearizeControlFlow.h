@@ -152,11 +152,11 @@ private:
       copier.deepCopyInstrs(yieldInstr.block().begin(), insertIter, copyHook);
       insertIter = endIter.pred();
     }
-    uint numCaseBlocks = instr.block().size();
+    unsigned numCaseBlocks = instr.block().size();
     assert(yields.size() % numCaseBlocks == 0 &&
            "invalid number of yield values");
 
-    uint numYieldValues = instr.getNumYieldValues();
+    unsigned numYieldValues = instr.getNumYieldValues();
 
     build.setInsertPoint(endIter);
 
@@ -186,7 +186,7 @@ private:
       }
       build.setInsertPoint(endIter);
 
-      for (uint i = 0; i < instr.getNumYieldValues(); i++) {
+      for (unsigned i = 0; i < instr.getNumYieldValues(); i++) {
         HWValue iter =
             j == 0 ? yields[*defaultIdx * numYieldValues + i] : yields[i];
         HWValue newVal = yields[j * numYieldValues + i];
