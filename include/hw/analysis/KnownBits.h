@@ -44,6 +44,10 @@ class KnownBitsAnalysis : public CacheInvalidation<KnownBitsAnalysis> {
       return val == other.val;
     }
     bool operator==(const BigInt &other) const { return val == other; }
+
+    KnownBitsVal(BigInt &&val) : val(std::move(val)) {}
+    KnownBitsVal(const BigInt &val) : val(val) {}
+    KnownBitsVal() = default;
   };
 
   struct Frame {
@@ -272,6 +276,7 @@ public:
 
       default:
         retVal = KnownBitsVal{PatBigInt::undef(*wire.getNumBits())};
+        cache.insert(wire, retVal);
         stack.pop_back();
         break;
       }

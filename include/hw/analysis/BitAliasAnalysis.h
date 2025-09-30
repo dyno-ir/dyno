@@ -40,6 +40,9 @@ class BitAliasAnalysis : public CacheInvalidation<BitAliasAnalysis> {
   struct Frame {
     OperandRef ref;
     BitAliasAcc acc;
+
+    OperandRef initialRef;
+    Frame(OperandRef ref) : ref(ref), initialRef(ref) {}
   };
 
   std::optional<OperandRef> nextFunction(BitAliasAcc &&retVal, Frame &frame) {
@@ -72,9 +75,6 @@ class BitAliasAnalysis : public CacheInvalidation<BitAliasAnalysis> {
 
     case *HW_SPLICE: {
       auto asSplice = instr.as<SpliceIRef>();
-      if (asSplice.out()->as<WireRef>().getObjID() == 79 &&
-          asSplice.out()->as<WireRef>().getNumBits() == 64)
-        dbgs() << "here\n";
       if (asSplice.getNumTerms() != 0 && !asSplice.terms().all([](auto term) {
             return term.getIdx().template is<ConstantRef>();
           })) {
@@ -252,7 +252,7 @@ public:
       maxLevel = std::max(maxLevel, stack.size());
       auto &frame = stack.back();
 
-      if (auto asWire = frame.ref.instr().def(0)->dyn_as<WireRef>()) {
+      if (auto asWire = frame.initialRef->dyn_as<WireRef>()) {
         if (auto val = cache.find(asWire)) {
           retVal = *val;
           stack.pop_back();
@@ -270,10 +270,8 @@ public:
               (*next)->as<FatDynObjRef<InstrDefUse>>()->getDef());
       } else {
         retVal = std::move(stack.back().acc);
-        if (frame.ref.instr().getNumDefs() == 1)
-          if (auto asWire = frame.ref.instr().def(0)->dyn_as<WireRef>()) {
-            cache.insert(asWire, retVal);
-          }
+        if (auto asWire = frame.initialRef->dyn_as<WireRef>())
+          cache.insert(asWire, retVal);
         stack.pop_back();
       }
     }

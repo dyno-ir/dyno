@@ -16,8 +16,16 @@ class FindLongestPathPass {
   ObjMapVec<Instr, Path> map;
 
   InstrRef longestPathInstr = nullref;
-
   bool circularDepsIgnored = false;
+  double area = 0.0;
+
+  void reset() {
+    map.clear();
+    map.resize(ctx.getInstrs().numIDs());
+    longestPathInstr = nullref;
+    circularDepsIgnored = false;
+    area = 0;
+  }
 
   void runOnProcess(ProcessIRef proc) {
     for (auto instr : proc.block()) {
@@ -39,15 +47,28 @@ class FindLongestPathPass {
       }
 
       auto &entry = map[instr];
-      entry.length = maxLength + instr.isOpc(HW_STDCELL_INSTANCE);
       entry.useIdx = useIdx;
+      entry.length = maxLength;
 
-      if (!longestPathInstr || *entry.length >= *map[longestPathInstr].length)
+      if (instr.isOpc(HW_STDCELL_INSTANCE)) {
+        auto stdcell = instr.other(0)->as<ModuleRef>().iref();
+        auto info = stdcell.def(2)->as<StdCellInfoRef>();
+        if (info->area)
+          area += *info->area;
+
+        if (info->isFlipFlop)
+          entry.length = 0;
+        else
+          *entry.length += 1;
+      }
+
+      if (!longestPathInstr || *entry.length > *map[longestPathInstr].length)
         longestPathInstr = instr;
     }
   }
 
   void runOnModule(ModuleIRef mod) {
+    reset();
     for (auto proc : mod.procs()) {
       runOnProcess(proc);
     }
@@ -69,19 +90,18 @@ class FindLongestPathPass {
     }
     std::reverse(path.begin(), path.end());
 
-    DEBUG("FindLongestPath", {
-      dbgs() << "longest path:\n";
-      HWPrinter print{dbgs()};
-      for (auto instr : path)
-        print.printInstr(instr, ctx);
-      dbgs() << "\n\n";
-    });
+    // DEBUG("FindLongestPath", {
+    dbgs() << "longest path:\n";
+    HWPrinter print{dbgs()};
+    for (auto instr : path)
+      print.printInstr(instr, ctx);
+    //});
+    dbgs() << "area: " << area << "\n";
+    dbgs() << "\n\n";
   }
 
 public:
   void run() {
-    map.clear();
-    map.resize(ctx.getInstrs().numIDs());
     for (auto mod : ctx.activeModules()) {
       runOnModule(mod.iref());
     }

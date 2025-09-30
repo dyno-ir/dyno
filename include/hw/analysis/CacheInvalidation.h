@@ -1,5 +1,6 @@
 #pragma once
 
+#include "hw/HWPrinter.h"
 #include "hw/HWValue.h"
 #include "hw/Wire.h"
 namespace dyno {
@@ -19,7 +20,7 @@ public:
       WireRef wire = stack.pop_back_val();
       auto it = cache().raw().find(wire);
       if (it == cache().raw().end())
-        return;
+        continue;
       auto val = std::move(it.val());
       cache().raw().erase(it);
 
@@ -38,11 +39,24 @@ public:
     }
   }
   void replaceAt(WireRef oldRef, HWValue newRef) {
-    if (!newRef.is<WireRef>())
-      return;
+    //auto newV = self().get(newRef);
     auto it = cache().raw().find(oldRef);
     if (it == cache().raw().end())
       return;
+
+    // auto val = std::move(it.val());
+    // it.val() = std::move(newV);
+
+    // for (auto use : oldRef.uses()) {
+    //   auto instr = use.instr();
+    //   for (auto def : instr.defs())
+    //     if (def->is<HWValue>())
+    //       recomputeAt(def->as<HWValue>());
+    // }
+
+    // if (newRef.is<WireRef>())
+    //   cache().raw().insertOrAssign(newRef.as<WireRef>(), std::move(it.val()));
+
     cache().raw().erase(it);
   }
 };
