@@ -54,25 +54,6 @@ private:
     return b;
   }
 
-  void runInsert(BigInt &out, GenericBigIntRef base, GenericBigIntRef val,
-                 GenericBigIntRef addr, GenericBigIntRef len) {
-    assert(addr.getNumBits() == 32 && len.getNumBits() == 32);
-    auto bits = out.getNumBits();
-
-    BigInt low;
-    BigInt::rangeSelectOp4S(low, base, 0, len.getExactVal());
-
-    BigInt high;
-    BigInt::rangeSelectOp4S(low, base, addr.getExactVal() + len.getExactVal(),
-                            base.getNumBits() -
-                                (addr.getExactVal() + len.getExactVal()));
-    assert(len.getExactVal() == val.getNumBits());
-
-    BigInt::concatOp4S(out, val, low);
-    BigInt::concatOp4S(out, high, out);
-    assert(out.getNumBits() == bits);
-  }
-
   template <auto Func> void runNAry(InstrRef instr) {
     auto &val = wireVals[instr.def(0)->as<WireRef>()];
     val = getValue(instr.other(0)->as<HWValue>());
@@ -200,7 +181,7 @@ public:
       }
       auto addr = getValue(instr.other(2)->as<HWValue>());
       auto len = getValue(instr.other(3)->as<HWValue>());
-      runInsert(reg, GenericBigIntRef{reg}, val, addr, len);
+      BigInt::insertOp4S(reg, reg, val, addr.getExactVal());
       break;
     }
 

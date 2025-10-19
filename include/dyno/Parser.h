@@ -1,4 +1,16 @@
 #pragma once
+#include "dyno/DialectInfo.h"
+#include "dyno/IDImpl.h"
+#include "dyno/Instr.h"
+#include "dyno/Interface.h"
+#include "dyno/Obj.h"
+#include "hw/HWPrinter.h"
+#include "hw/passes/ParseLiberty.h"
+#include "support/ErrorRecovery.h"
+#include "support/Lexer.h"
+#include "support/TempBind.h"
+#include "support/Utility.h"
+#include "support/VectorLUT.h"
 
 namespace dyno {
 
@@ -23,7 +35,7 @@ class DynoLexer : public Lexer<false, false, false, true, true> {
 public:
   constexpr static std::array<const char *, 0> Keywords;
   constexpr static auto Operators =
-      std::to_array({".", "%", ":", ",", "[", "]", "?", "#"});
+      std::to_array({".", "%", ":", ",", "[", "]", "?", "#", "(", ")", "{", "}"});
   enum OperatorEnum {
     _op_start = Lexer::TOK_OPS_START - 1,
     op_dot,
@@ -33,7 +45,11 @@ public:
     op_abropen,
     op_abrclose,
     op_qmark,
-    op_hash
+    op_hash,
+    op_rbropen,
+    op_rbrclose,
+    op_cbropen,
+    op_cbrclose
   };
 
   VectorLUT<uint8_t> dialectLUT;
@@ -51,6 +67,7 @@ public:
   void registerDialects() {
     for (auto [dialectIdx, dialect] : Range{HWPrinter::dialectIs}.enumerate()) {
       auto id = DialectID{DialectID::num_t(dialectIdx)};
+      dialectLUT.insert(GetIdentIdx(dialect->name), dialectIdx);
       genericOpcResolver.registerOpcodes(*this, id);
       genericTypeResolver.registerTypes(*this, id);
       auto &specificOpc =
@@ -138,44 +155,72 @@ inline void SymbolResolver<T>::registerTypes(DynoLexer &lexer, TyID dialectID) {
   auto dialectIdx = dialectID.num;
   auto types = HWPrinter::typeInfoArrays[dialectIdx];
   for (auto [typeIdx, type] : Range{types}.enumerate()) {
+    TyID tyId{TyID::num_t(typeIdx | (type.isDefUse ? TY_DEF_USE_START : 0))};
+
     auto identIdx = lexer.GetIdentIdx(type.name);
     auto &entry = lut.find(identIdx);
     if (entry) {
       entry = DialectType{DialectID::invalid(), TyID::invalid() - 1};
     } else {
-      entry = DialectType{DialectID::num_t(dialectIdx), TyID::num_t(typeIdx)};
+      entry = DialectType{DialectID::num_t(dialectIdx), tyId};
     }
   }
 }
 
-class Parser {
+template <typename Derived> class Parser {
+protected:
   TempBindVal<DynoLexer> lexer;
   VectorLUT<FatDynObjRef<>> identMap;
+
+  using obj_parse_fn = FatDynObjRef<> (Parser::*)(DialectType type);
+  Interfaces<NUM_DIALECTS, obj_parse_fn> interfaces;
 
   struct ParseOperand {
     FatDynObjRef<> ref;
     bool isDef;
   };
 
+private:
+  auto &getInstrs() { return static_cast<Derived *>(this)->getInstrs(); }
+  auto &getConstants() { return static_cast<Derived *>(this)->getConstants(); }
+  auto &getCFG() { return static_cast<Derived *>(this)->getCFG(); }
+
+protected:
+  FatDynObjRef<> parseObject() {
+    auto type = lexer->popType();
+    auto fn = interfaces.template getVal<obj_parse_fn>(type.getDialectID());
+
+    auto ref = (this->*fn)(type);
+    if (!ref)
+      lexer->printErrorOnPeekToken("invalid object");
+    return ref;
+  }
+
   ParseOperand parseConstantOperand() {
-    assert(lexer->Pop().type == DynoLexer::op_hash);
-    auto litTok = lexer->peekEnsure(Token::NUMERIC_LITERAL);
-    auto ptr = litTok.numericLit.value.begin();
-    auto res = BigInt::parseDyno(ptr, litTok.numericLit.value.end());
-    if (!res || ptr != litTok.numericLit.value.end())
-      lexer->printErrorOnPeekToken("ill-formed numeric literal");
-    lexer->Pop();
-    return ParseOperand{ctx.getConstants().findOrInsert(*res), false};
+    lexer->popEnsure(DynoLexer::op_hash);
+    auto litTok = lexer->popEnsure(Token::BIG_INT_LITERAL);
+    return ParseOperand{getConstants().findOrInsert(*litTok.bigIntLit.value), false};
   }
 
   ParseOperand parseObjectOperand() {
-    auto ident = lexer->Pop();
-    assert(ident.type == Token::IDENTIFIER);
+    lexer->popEnsure(DynoLexer::op_percent);
+    auto ident = lexer->popEnsure(Token::IDENTIFIER);
     bool isDef = false;
+    FatDynObjRef<> obj = nullref;
+
+    auto ref = identMap.find(ident.ident.idx);
 
     if (lexer->popIf(DynoLexer::op_colon)) {
       isDef = !lexer->popIf(DynoLexer::op_qmark);
+      obj = parseObject();
+      identMap.insert(ident.ident.idx, FatDynObjRef{obj});
+    } else {
+      if (!ref)
+        lexer->printErrorOnPeekToken("undefined value");
+      obj = *ref;
     }
+
+    return ParseOperand{obj, isDef};
   }
 
   ParseOperand parseOperand() {
@@ -183,18 +228,78 @@ class Parser {
     if (tok.type == DynoLexer::op_hash)
       return parseConstantOperand();
 
-    if (tok.type == Token::IDENTIFIER)
+    if (tok.type == DynoLexer::op_percent)
       return parseObjectOperand();
 
     lexer->printErrorOnPeekToken(
         "invalid operand (expected constant or identifier)");
   }
 
-  void parseInstr(BlockRef insertBlock) {
+  void parseBlockContents(BlockRef block) {
+    lexer->popEnsure(DynoLexer::op_cbropen);
+    while (!lexer->popIf(DynoLexer::op_cbrclose)) {
+      auto instr = parseInstr();
+      block.end().insertPrev(instr);
+    }
+  }
+
+  InstrRef parseInstr() {
     auto opc = lexer->popOpcode();
 
+    SmallVec<FatDynObjRef<>, 16> operands;
+    uint numDefs = 0;
+
+    SmallVec<BlockRef, 4> defBlocks;
+
     while (lexer->peekIs(DynoLexer::op_hash, DynoLexer::op_percent)) {
+      auto op = parseOperand();
+      if (op.isDef) {
+        if (numDefs != operands.size())
+          lexer->printErrorOnPeekToken("invalid def operand position (all def "
+                                       "operands must be leading)");
+        numDefs++;
+
+        if (auto asBlock = op.ref.template dyn_as<BlockRef>())
+          defBlocks.emplace_back(asBlock);
+      }
+      operands.emplace_back(op.ref);
+
+      if (!lexer->popIf(DynoLexer::op_comma))
+        break;
     }
+
+    for (auto block : defBlocks)
+      parseBlockContents(block);
+
+    auto instr = getInstrs().create(operands.size(), opc);
+    auto ib = InstrBuilder{instr};
+
+    ib.addRefs(Range{operands.begin(), operands.begin() + numDefs});
+    ib.other();
+    ib.addRefs(Range{operands.begin() + numDefs, operands.end()});
+
+    return instr;
+  }
+
+public:
+  void parse(ArrayRef<char> src, std::string fileName) {
+    auto val = lexer.emplace(src, fileName);
+
+    while (!lexer->peekIs(Token::NONE)) {
+      parseInstr();
+    }
+  }
+
+  Parser() { interfaces.registerVal(DIALECT_CORE, &Parser::parseCore); }
+
+  FatDynObjRef<> parseCore(DialectType type) {
+    assert(type.dialect == DIALECT_CORE);
+    if (type == CORE_BLOCK) {
+      auto block = getCFG().blocks.create(getCFG());
+      return block;
+    }
+
+    return nullref;
   }
 };
 

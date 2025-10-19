@@ -14,8 +14,10 @@ struct DialectInfo {
 
 struct TyInfo {
   std::string_view name;
+  // for access when enumerating types
+  bool isDefUse;
 
-  constexpr TyInfo(std::string_view name) : name(name) {}
+  constexpr TyInfo(std::string_view name, bool isDefUse) : name(name), isDefUse(isDefUse) {}
 };
 
 struct OpcodeInfo {

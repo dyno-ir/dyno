@@ -136,13 +136,13 @@ public:
         return Token::makeNone();
       i += charPtr - &srcC[i];
 
-      if (res->type == dyno::BigInt::ParseVlogResult::SIMPLE)
+      if (res->type == dyno::BigInt::ParseResult::SIMPLE)
         return Token::makeIntLit(res->bigInt.getExactVal(), res->isSigned);
 
       auto *ptr = bigIntLiterals.allocate(std::move(res->bigInt));
       return Token::makeBigIntLit(ptr, res->isSigned,
                                   res->type ==
-                                      dyno::BigInt::ParseVlogResult::UNSIZED);
+                                      dyno::BigInt::ParseResult::UNSIZED);
     }
 
     // String Literal

@@ -2210,14 +2210,14 @@ public:
     return init;
   }
 
-  struct ParseVlogResult {
+  struct ParseResult {
     BigIntBase bigInt;
     bool isSigned;
     enum Type : uint8_t { SIMPLE, UNSIZED, SIZED };
     Type type;
   };
 
-  constexpr static std::expected<ParseVlogResult, ParseError>
+  constexpr static std::expected<ParseResult, ParseError>
   parseVlog(const char *&ptr) {
     // todo: optimize this.
     auto isxdigit = [](char c) {
@@ -2238,7 +2238,7 @@ public:
       if (*ptr != '\'') {
         // treat as unsigned 32 bit.
         BigIntBase::resizeOp(init, init, 32, 0);
-        return ParseVlogResult(init, false, ParseVlogResult::SIMPLE);
+        return ParseResult(init, false, ParseResult::SIMPLE);
       }
 
       if (init.numBits > 32)
@@ -2249,8 +2249,8 @@ public:
     ptr++;
 
     if (numBits == 0)
-      return ParseVlogResult{BigInt::fromU64(0, 0), false,
-                             ParseVlogResult::SIZED};
+      return ParseResult{BigInt::fromU64(0, 0), false,
+                             ParseResult::SIZED};
 
     bool isSigned = false;
     if (*ptr == 's') {
@@ -2278,26 +2278,26 @@ public:
       ptr++;
       if (isNumDigit(*ptr))
         return std::unexpected(ParseError::TOO_MANY_DIGITS_GIVEN);
-      return ParseVlogResult(BigInt::fromU64(0, 1), true,
-                             ParseVlogResult::UNSIZED);
+      return ParseResult(BigInt::fromU64(0, 1), true,
+                             ParseResult::UNSIZED);
     case '1':
       ptr++;
       if (isNumDigit(*ptr))
         return std::unexpected(ParseError::TOO_MANY_DIGITS_GIVEN);
-      return ParseVlogResult(BigInt::fromU64(1, 1), true,
-                             ParseVlogResult::UNSIZED);
+      return ParseResult(BigInt::fromU64(1, 1), true,
+                             ParseResult::UNSIZED);
     case 'x':
       ptr++;
       if (isNumDigit(*ptr))
         return std::unexpected(ParseError::TOO_MANY_DIGITS_GIVEN);
-      return ParseVlogResult(PatBigInt{2, FourState::SX, 1}, true,
-                             ParseVlogResult::UNSIZED);
+      return ParseResult(PatBigInt{2, FourState::SX, 1}, true,
+                             ParseResult::UNSIZED);
     case 'z':
       ptr++;
       if (isNumDigit(*ptr))
         return std::unexpected(ParseError::TOO_MANY_DIGITS_GIVEN);
-      return ParseVlogResult(PatBigInt{2, FourState::SZ, 1}, true,
-                             ParseVlogResult::UNSIZED);
+      return ParseResult(PatBigInt{2, FourState::SZ, 1}, true,
+                             ParseResult::UNSIZED);
     default:
       return std::unexpected(ParseError::UNKNOWN_BASE);
     }
@@ -2359,12 +2359,12 @@ public:
       if (acc.numBits < *numBits)
         BigIntBase::resizeOp4S(acc, acc, *numBits, isSigned);
     }
-    return ParseVlogResult(acc, isSigned,
-                           numBits ? ParseVlogResult::SIZED
-                                   : ParseVlogResult::UNSIZED);
+    return ParseResult(acc, isSigned,
+                           numBits ? ParseResult::SIZED
+                                   : ParseResult::UNSIZED);
   }
 
-  static constexpr std::expected<BigInt, ParseError>
+  static constexpr std::expected<ParseResult, ParseError>
   parseDyno(const char *&ptr, const char *end) {
     uint32_t len;
     auto [endPtr, ec] = std::from_chars(ptr, end, len);
@@ -2376,11 +2376,11 @@ public:
     ptr = endPtr;
 
     if (ptr == end || *ptr != '\'')
-      return std::unexpected(ParseError::INVALID_FORMAT);
+      return ParseResult{BigInt::fromU64(len, 32), false, ParseResult::SIMPLE};
     ++ptr;
 
     if (len == 0)
-      return BigInt::fromU64(0, 0);
+      return ParseResult{BigInt::fromU64(0, 0), false, ParseResult::SIZED};
 
     if (ptr == end)
       return std::unexpected(ParseError::INVALID_FORMAT);
@@ -2442,7 +2442,7 @@ public:
     BigInt::resizeOp4S(*num, *num, len);
 
     if (ptr == endPtr || *ptr != '?')
-      return *num;
+      return ParseResult{*num, false, ParseResult::SIZED};
     ++ptr;
 
     if (ptr == end)
@@ -2462,7 +2462,7 @@ public:
     BigInt::shlOp(*unkNum, *unkNum, 1);
     BigInt::orOp(*num, *num, *unkNum);
 
-    return *num;
+    return ParseResult{*num, false, ParseResult::SIZED};
   }
 
   template <typename T, std::invocable<BigInt &, const BigInt &,

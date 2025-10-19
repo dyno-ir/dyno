@@ -120,6 +120,17 @@ template <bool ParseNumberLiterals = true, bool ParseInlineCode = true,
           bool IgnoreBackslash = true, bool CPPStyleComments = true,
           bool LeadingPercentIdent = false>
 struct Lexer {
+
+  struct Config {
+    enum class NumericParseType {
+      RAW,
+      DYNO,
+      VERILOG,
+    };
+    NumericParseType numericParseType = NumericParseType::VERILOG;
+  };
+  Config config;
+
   const std::string path;
   ArrayRef<char> src;
   size_t i = 0;
@@ -254,26 +265,30 @@ public:
     }
 
     // Int Literal
-    if (ParseNumberLiterals) {
+    if (config.numericParseType != Config::NumericParseType::RAW) {
       if (isdigit(srcC[i]) || srcC[i] == '\'') {
         const char *charPtr = &srcC[i];
-        auto res = dyno::BigInt::parseVlog(charPtr);
+
+        auto res =
+            config.numericParseType == Lexer::Config::NumericParseType::VERILOG
+                ? dyno::BigInt::parseVlog(charPtr)
+                : dyno::BigInt::parseDyno(charPtr, src.end());
+
         if (!res.has_value())
           return Token::makeNone();
         i += charPtr - &srcC[i];
 
-        if (res->type == dyno::BigInt::ParseVlogResult::SIMPLE)
+        if (res->type == dyno::BigInt::ParseResult::SIMPLE)
           return Token::makeIntLit(res->bigInt.getExactVal(), res->isSigned);
 
         auto *ptr = bigIntLiterals.allocate(std::move(res->bigInt));
         return Token::makeBigIntLit(ptr, res->isSigned,
                                     res->type ==
-                                        dyno::BigInt::ParseVlogResult::UNSIZED);
+                                        dyno::BigInt::ParseResult::UNSIZED);
       }
-    } else if (isdigit(src[i]) || src[i] == '.') {
+    } else if (isdigit(src[i])) {
       size_t len = 0;
-      while (isalnum(src[i + len]) || src[i + len] == '.' ||
-             src[i + len] == '_' || src[i + len] == '+' || src[i + len] == '-')
+      while (isalnum(src[i + len]) || src[i + len] == '_')
         len++;
       i += len;
       return Token::makeNumericLit(std::string_view{&src[i - len], len});

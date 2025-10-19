@@ -9,11 +9,12 @@ inline constexpr nullopt_t nullopt{};
 
 // Simple optional without extra storage, uses DenseMapInfo empty for invalid
 // state.
-template <typename T, auto Invalid = DenseMapInfo<T>::getEmptyKey()>
+template <typename T, auto InvalidF = DenseMapInfo<T>::getEmptyKey>
 class Optional {
   T val;
 
 public:
+  static constexpr auto Invalid = InvalidF();
   constexpr Optional() : val(Invalid) {}
   constexpr Optional(const T &val) : val(val) { assert(val != Invalid); }
   constexpr Optional(T &&val) : val(std::move(val)) { assert(val != Invalid); }
@@ -47,6 +48,9 @@ public:
   }
 
   explicit operator bool() const { return val != Invalid; }
+
+  template <typename U = T>
+    requires(!std::is_same_v<U, bool>)
   explicit constexpr operator T() {
     assert(*this);
     return val;
