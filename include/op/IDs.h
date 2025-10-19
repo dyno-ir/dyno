@@ -13,19 +13,16 @@ using OpOpcode = SpecificDialectOpcode<DialectID{DIALECT_OP}>;
 
 // clang-format off
 #define TYPES(x) \
-  x(OP_FUNC, 0 | TY_DEF_USE_START)
+  x("func", OP_FUNC, 0 | TY_DEF_USE_START)
 // clang-format on
 
-#define ENUM_EXPAND(ident, idx) ident = idx,
-
+#define ENUM_EXPAND(name, ident, idx) ident = idx,
 enum class OpTyID : uint8_t { TYPES(ENUM_EXPAND) };
-
-#define CEXPR_EXPAND(ident, idx) constexpr OpType ident{uint8_t(OpTyID::ident)};
-
-TYPES(CEXPR_EXPAND)
-
-#undef TYPES
 #undef ENUM_EXPAND
+
+#define CEXPR_EXPAND(name, ident, idx)                                         \
+  constexpr OpType ident{uint8_t(OpTyID::ident)};
+TYPES(CEXPR_EXPAND)
 #undef CEXPR_EXPAND
 
 #define HEADER enum class OpOpcID : uint16_t {
@@ -39,7 +36,11 @@ TYPES(CEXPR_EXPAND)
 
 template <> struct DialectTraits<DIALECT_OP> {
   constexpr static DialectInfo info{"op"};
-  constexpr static TyInfo tyInfo[] = {{"func"}};
+  constexpr static TyInfo tyInfo[] = {
+#define TYINFO_EXPAND(name, ident, idx) {name, !!((idx) & TY_DEF_USE_START)},
+      TYPES(TYINFO_EXPAND)
+#undef TYINFO_EXPAND
+  };
   constexpr static OpcodeInfo opcInfo[] = {
 #define HEADER
 #define FOOTER
@@ -47,6 +48,8 @@ template <> struct DialectTraits<DIALECT_OP> {
 #include "OpInstrs.inc"
   };
 };
+
+#undef TYPES
 
 #define FOR_OP_COMPARE_OPS(FUNC)                                               \
   FUNC(OP_ICMP_EQ, BigInt::ICMP_EQ)                                            \

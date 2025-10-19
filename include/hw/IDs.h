@@ -16,26 +16,24 @@ using HWOpcode = SpecificDialectOpcode<DialectID{DIALECT_HW}>;
 
 // clang-format off
 #define TYPES(x) \
-  x(HW_WIRE,         0 | TY_DEF_USE_START) \
-  x(HW_REGISTER,     1 | TY_DEF_USE_START) \
-  x(HW_PROCESS,      2 | TY_DEF_USE_START) \
-  x(HW_MODULE,       3 | TY_DEF_USE_START) \
-  x(HW_SENS_MODES,   4) \
-  x(HW_TRIGGER,      5 | TY_DEF_USE_START) \
-  x(HW_STDCELL_INFO, 6)
+  x("wire",         HW_WIRE,         0 | TY_DEF_USE_START) \
+  x("register",     HW_REGISTER,     1 | TY_DEF_USE_START) \
+  x("process",      HW_PROCESS,      2 | TY_DEF_USE_START) \
+  x("module",       HW_MODULE,       3 | TY_DEF_USE_START) \
+  x("sens_modes",   HW_SENS_MODES,   4) \
+  x("trigger",      HW_TRIGGER,      5 | TY_DEF_USE_START) \
+  x("stdcell_info", HW_STDCELL_INFO, 6)
 // clang-format on
 
-#define ENUM_EXPAND(ident, idx) ident = idx,
+#define ENUM_EXPAND(name, ident, idx) ident = idx,
 
 enum class HWTyID : uint8_t { TYPES(ENUM_EXPAND) };
-
-#define CEXPR_EXPAND(ident, idx) constexpr HWType ident{uint8_t(HWTyID::ident)};
-
-TYPES(CEXPR_EXPAND)
-
-#undef TYPES
 #undef ENUM_EXPAND
+
+#define CEXPR_EXPAND(name, ident, idx) constexpr HWType ident{uint8_t(HWTyID::ident)};
+TYPES(CEXPR_EXPAND)
 #undef CEXPR_EXPAND
+
 
 #define HEADER enum class HWOpcID : uint16_t {
 #define ADD_OP(x) HW_##x,
@@ -47,10 +45,12 @@ TYPES(CEXPR_EXPAND)
 #include "HWInstrs.inc"
 
 template <> struct DialectTraits<DIALECT_HW> {
-  constexpr static DialectInfo info{"rtl"};
-  constexpr static TyInfo tyInfo[] = {{"wire"},   {"register"},   {"process"},
-                                      {"module"}, {"sens_modes"}, {"trigger"},
-                                      {"memory"}};
+  constexpr static DialectInfo info{"hw"};
+  constexpr static TyInfo tyInfo[] = {
+    #define TYINFO_EXPAND(name, ident, idx) {name, !!((idx) & TY_DEF_USE_START)},
+    TYPES(TYINFO_EXPAND)
+    #undef TYINFO_EXPAND
+  };
   constexpr static OpcodeInfo opcInfo[] = {
 #define HEADER
 #define FOOTER
@@ -58,6 +58,8 @@ template <> struct DialectTraits<DIALECT_HW> {
 #include "HWInstrs.inc"
   };
 };
+
+#undef TYPES
 
 // opcode, builder, constant builder, big int
 #define FOR_HW_COMM_OPS(FUNC)                                                  \

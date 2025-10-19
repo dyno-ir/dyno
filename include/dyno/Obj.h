@@ -261,19 +261,19 @@ public:
   using ByValueRTTIUtilMixin<FatDynObjRef<T>>::as;
   using ByValueRTTIUtilMixin<FatDynObjRef<T>>::dyn_as;
   using ByValueRTTIUtilMixin<FatDynObjRef<T>>::is;
-  FatDynObjRef() = default;
-  FatDynObjRef(nullref_t) : DynObjRef(nullref), ptr(nullptr) {}
-  FatDynObjRef(DynObjRef ref, T *ptr) : DynObjRef(ref), ptr(ptr) {}
+  constexpr FatDynObjRef() = default;
+  constexpr FatDynObjRef(nullref_t) : DynObjRef(nullref), ptr(nullptr) {}
+  constexpr FatDynObjRef(DynObjRef ref, T *ptr) : DynObjRef(ref), ptr(ptr) {}
   template <typename U = T, typename = std::enable_if_t<!std::is_void_v<U>>>
-  FatDynObjRef(DynObjRef ref, U &ptr) : DynObjRef(ref), ptr(&ptr) {}
+  constexpr FatDynObjRef(DynObjRef ref, U &ptr) : DynObjRef(ref), ptr(&ptr) {}
   template <typename U = T, typename = std::enable_if_t<!std::is_void_v<U>>>
-  FatDynObjRef(FatObjRef<U> ref)
+  constexpr FatDynObjRef(FatObjRef<U> ref)
       : DynObjRef(DynObjRef::ofObj<U>(ref.getObjID(), ref.getCustom())),
         ptr(reinterpret_cast<T *>(ref.getPtr())) {}
 
   template <typename V, typename U = T,
             typename = std::enable_if_t<std::is_void_v<U>>>
-  FatDynObjRef(FatDynObjRef<V> ref) : DynObjRef(ref), ptr(ref.getPtr()) {}
+  constexpr FatDynObjRef(FatDynObjRef<V> ref) : DynObjRef(ref), ptr(ref.getPtr()) {}
 
   template <typename U> static bool is_impl(ObjRef<U>) { return true; }
 
@@ -432,5 +432,21 @@ template <dyno::IsFatObjRef T> struct DenseMapInfo<T> {
   }
   static bool isEqual(const T &lhs, const T &rhs) {
     return lhs.rawNoPtr() == rhs.rawNoPtr();
+  }
+};
+
+template <dyno::IsFatDynObjRef T> struct DenseMapInfo<T> {
+  // we don't want to use nullref here, otherwise we can't store nullref in map.
+  static constexpr T getEmptyKey() {
+    return T{DenseMapInfo<dyno::DynObjRef>::getEmptyKey(), nullptr};
+  }
+  static constexpr T getTombstoneKey() {
+    return T{DenseMapInfo<dyno::DynObjRef>::getTombstoneKey(), nullptr};
+  }
+  static unsigned getHashValue(const T &k) {
+    return DenseMapInfo<dyno::DynObjRef>::getHashValue(k);
+  }
+  static bool isEqual(const T &lhs, const T &rhs) {
+    return DenseMapInfo<dyno::DynObjRef>::isEqual(lhs, rhs);
   }
 };

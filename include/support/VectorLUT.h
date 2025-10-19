@@ -18,7 +18,7 @@ private:
 public:
   void ensure(size_t idx) {
     if (idx < base) {
-      std::vector<T> newVec;
+      std::vector<dyno::Optional<T>> newVec;
       newVec.reserve(data.size() + (base - idx));
       newVec.resize(base - idx);
       newVec.insert_range(newVec.end(), data);
