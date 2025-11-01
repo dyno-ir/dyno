@@ -20,7 +20,7 @@ public:
   auto &getConstants() { return ctx.getConstants(); }
   auto &getCFG() { return ctx.getCFG(); }
 
-  FatDynObjRef<> parseHW(DialectType type) {
+  FatDynObjRef<> parseHW(DialectType type, ArrayRef<char> name) {
     switch (*type) {
     case *HW_MODULE: {
       lexer->popEnsure(DynoLexer::op_rbropen);
@@ -32,7 +32,19 @@ public:
       lexer->popEnsure(DynoLexer::op_rbropen);
       auto bits = lexer->popEnsure(Token::INT_LITERAL);
       lexer->popEnsure(DynoLexer::op_rbrclose);
-      return ctx.getRegs().create(bits.intLit.value);
+      auto reg = ctx.getRegs().create(bits.intLit.value);
+      if (!name.empty())
+        ctx.regNameInfo.addName(reg, std::string_view{name});
+      return reg;
+    }
+    case *HW_WIRE: {
+      lexer->popEnsure(DynoLexer::op_rbropen);
+      auto bits = lexer->popEnsure(Token::INT_LITERAL);
+      lexer->popEnsure(DynoLexer::op_rbrclose);
+      return ctx.getWires().create(bits.intLit.value);
+    }
+    case *HW_PROCESS: {
+      return ctx.getProcs().create();
     }
     }
 

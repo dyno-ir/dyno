@@ -494,7 +494,7 @@ public:
 };
 
 template <typename K, typename size_type = uint32_t> struct DenseSetBucket {
-#define SIMD_DENSE_MAP 1
+#define SIMD_DENSE_MAP 0
 #if defined(__clang__) && SIMD_DENSE_MAP
 #ifdef __AVX512F__
   static constexpr size_type simdWidth = 64;

@@ -172,7 +172,7 @@ protected:
   TempBindVal<DynoLexer> lexer;
   VectorLUT<FatDynObjRef<>> identMap;
 
-  using obj_parse_fn = FatDynObjRef<> (Parser::*)(DialectType type);
+  using obj_parse_fn = FatDynObjRef<> (Parser::*)(DialectType type, ArrayRef<char> name);
   Interfaces<NUM_DIALECTS, obj_parse_fn> interfaces;
 
   struct ParseOperand {
@@ -186,11 +186,11 @@ private:
   auto &getCFG() { return static_cast<Derived *>(this)->getCFG(); }
 
 protected:
-  FatDynObjRef<> parseObject() {
+  FatDynObjRef<> parseObject(ArrayRef<char> name) {
     auto type = lexer->popType();
     auto fn = interfaces.template getVal<obj_parse_fn>(type.getDialectID());
 
-    auto ref = (this->*fn)(type);
+    auto ref = (this->*fn)(type, std::string_view{name});
     if (!ref)
       lexer->printErrorOnPeekToken("invalid object");
     return ref;
@@ -209,10 +209,11 @@ protected:
     FatDynObjRef<> obj = nullref;
 
     auto ref = identMap.find(ident.ident.idx);
+    auto identStr = lexer->GetIdent(ident.ident.idx);
 
     if (lexer->popIf(DynoLexer::op_colon)) {
       isDef = !lexer->popIf(DynoLexer::op_qmark);
-      obj = parseObject();
+      obj = parseObject(ArrayRef{identStr});
       identMap.insert(ident.ident.idx, FatDynObjRef{obj});
     } else {
       if (!ref)
@@ -292,7 +293,7 @@ public:
 
   Parser() { interfaces.registerVal(DIALECT_CORE, &Parser::parseCore); }
 
-  FatDynObjRef<> parseCore(DialectType type) {
+  FatDynObjRef<> parseCore(DialectType type, ArrayRef<char> name) {
     assert(type.dialect == DIALECT_CORE);
     if (type == CORE_BLOCK) {
       auto block = getCFG().blocks.create(getCFG());
