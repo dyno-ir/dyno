@@ -1,5 +1,6 @@
 #pragma once
 #include "hw/HWPrinter.h"
+#include "hw/LoadStore.h"
 #include "hw/Register.h"
 #include "op/IDs.h"
 #include "support/Debug.h"
@@ -64,6 +65,23 @@ private:
         Func);
   }
 
+  uint32_t evalAddress(OperandRef op) {
+    if (op == op.instr().end())
+      return 0;
+    auto base = op->as<ConstantRef>();
+    uint32_t addr = base.getExactVal();
+
+    while ((op + 1) != op.instr().end()) {
+      auto term = AddressGenTermOperand{op + 1};
+      auto idx = getValue(term.getIdx()).getExactVal();
+      assert((!term.getMax() || idx < *term.getMax()) &&
+             "address out of bounds");
+      addr += term.getFact() * idx;
+    }
+
+    return addr;
+  }
+
 public:
   void runInstr(InstrRef instr) {
     switch (*instr.getDialectOpcode()) {
@@ -109,35 +127,20 @@ public:
     }
 
     case *HW_SPLICE: {
-      bool first = true;
-      auto &val = wireVals[instr.def(0)->as<WireRef>()];
-      for (int i = instr.getNumOthers() - 3; i >= 0; i -= 3) {
-        auto len = getValue(instr.other(i + 2)->as<HWValue>());
-        auto addr = getValue(instr.other(i + 1)->as<HWValue>());
-        auto raw = getValue(instr.other(i)->as<HWValue>());
-        assert(addr.getNumBits() == 32 && len.getNumBits() == 32);
-
-        if (first)
-          BigInt::rangeSelectOp4S(val, raw, addr.getExactVal(),
-                                  len.getExactVal());
-        else {
-          BigInt tmp;
-          BigInt::rangeSelectOp4S(tmp, raw, addr.getExactVal(),
-                                  len.getExactVal());
-          BigInt::concatOp4S(val, tmp, val);
-        }
-        first = false;
-      }
-      break;
+      auto splice = instr.as<SpliceIRef>();
+      auto outW = splice.out()->as<WireRef>();
+      auto &out = wireVals[outW];
+      auto in = getValue(splice.in()->as<HWValue>());
+      BigInt::rangeSelectOp4S(out, in, evalAddress(splice.base()),
+                              *outW.getNumBits());
     }
 
     case *HW_INSERT: {
-      auto &out = wireVals[instr.def(0)->as<WireRef>()];
-      auto base = getValue(instr.other(0)->as<HWValue>());
-      auto val = getValue(instr.other(1)->as<HWValue>());
-      auto addr = getValue(instr.other(2)->as<HWValue>());
-      auto len = getValue(instr.other(3)->as<HWValue>());
-      runInsert(out, base, val, addr, len);
+      auto insert = instr.as<InsertIRef>();
+      auto &out = wireVals[insert.out()->as<WireRef>()];
+      auto base = getValue(insert.val()->as<HWValue>());
+      auto in = getValue(insert.in()->as<HWValue>());
+      BigInt::insertOp4S(out, base, in, evalAddress(insert.base()));
       break;
     }
 
@@ -173,29 +176,26 @@ public:
     }
 
     case *HW_STORE: {
-      auto val = getValue(instr.other(0)->as<HWValue>());
-      auto &reg = regVals[instr.other(1)->as<RegisterRef>()];
-      if (instr.getNumOperands() == 2) {
+      auto store = instr.as<StoreIRef>();
+      auto val = getValue(store.value());
+      auto &reg = regVals[store.reg()];
+      if (store.isFullReg()) {
         reg = val;
         break;
       }
-      auto addr = getValue(instr.other(2)->as<HWValue>());
-      auto len = getValue(instr.other(3)->as<HWValue>());
-      BigInt::insertOp4S(reg, reg, val, addr.getExactVal());
+      BigInt::insertOp4S(reg, reg, val, evalAddress(store.base()));
       break;
     }
 
     case *HW_LOAD: {
-      auto &val = wireVals[instr.def(0)->as<WireRef>()];
-      auto &reg = regVals[instr.other(0)->as<RegisterRef>()];
-      if (instr.getNumOperands() == 2) {
+      auto load = instr.as<LoadIRef>();
+      auto &val = wireVals[load.value()];
+      auto &reg = regVals[load.reg()];
+      if (load.isFullReg()) {
         val = reg;
         break;
       }
-      auto addr = getValue(instr.other(1)->as<HWValue>());
-      auto len = getValue(instr.other(2)->as<HWValue>());
-      assert(addr.getNumBits() == 32 && len.getNumBits() == 32);
-      BigInt::rangeSelectOp4S(val, reg, addr.getExactVal(), len.getExactVal());
+      BigInt::rangeSelectOp4S(val, reg, evalAddress(load.base()), load.getLen());
       break;
     }
 
