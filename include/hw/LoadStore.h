@@ -27,6 +27,10 @@ public:
     return val;
   }
 
+  OperandRef getUnderlyingOperand() const {
+    return base;
+  }
+
   AddressGenTermOperand(OperandRef base) : base(base) {}
 };
 
