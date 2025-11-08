@@ -80,9 +80,7 @@ template <> struct DialectTraits<DIALECT_HW> {
   FUNC(HW_UPOW, buildUPow, upow, BigInt::upowOp4S)                             \
   FUNC(HW_SPOW, buildSPow, spow, BigInt::spowOp4S)
 
-#define FOR_HW_N_OPS(FUNC) \
-  FOR_HW_COMM_OPS(FUNC)
-
+#define FOR_HW_N_OPS(FUNC) FOR_HW_COMM_OPS(FUNC)
 
 #define FOR_HW_SIMPLE_OPS(FUNC) FOR_HW_COMM_OPS(FUNC) FOR_HW_BIN_OPS(FUNC)
 

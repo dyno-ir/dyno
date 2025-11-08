@@ -57,7 +57,8 @@ public:
 
         // at start of proc put qReg value into reg as default (stateful) value.
         build.setInsertPoint(proc.block().begin());
-        build.buildStore(reg, build.buildLoad(qReg), false, nullref, accessAddr);
+        build.buildStore(reg, build.buildLoad(qReg), false, nullref,
+                         accessAddr);
 
         // at end of proc, store defer reg value into qreg
         build.setInsertPoint(proc.block().end());

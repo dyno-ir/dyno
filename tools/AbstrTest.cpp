@@ -39,7 +39,8 @@ int main() {
   ifelse = build.buildYield(build.buildConst(32, 1337)).second;
 
   build.setInsertPoint(proc2.block().end());
-  build.buildStore(mod.mod()->ports[1].reg, ifelse.getYieldValue()->as<HWValue>());
+  build.buildStore(mod.mod()->ports[1].reg,
+                   ifelse.getYieldValue()->as<HWValue>());
 
   // auto endIt = ifelse.getFalseBlock().end();
   //--endIt;
@@ -62,11 +63,12 @@ int main() {
   build.setInsertPoint(func.getBlock().begin());
   auto param = build.buildFuncParam();
   auto ret = build.buildFuncReturn(param, build.buildConst(64, 1UL << 40));
-  auto ret2 = build.buildFuncReturn(param, ConstantBuilder{ctx.getConstants()}
-                                   .add(ret.operand(1)->as<ConstantRef>())
-                                   .add(1)
-                                   .bitAND(-2)
-                                   .get());
+  auto ret2 =
+      build.buildFuncReturn(param, ConstantBuilder{ctx.getConstants()}
+                                       .add(ret.operand(1)->as<ConstantRef>())
+                                       .add(1)
+                                       .bitAND(-2)
+                                       .get());
 
   assert(ret.operand(1)->ptr() == ret2.operand(1)->ptr());
 

@@ -14,7 +14,7 @@ public:
   FatRefUnion() = default;
   FatRefUnion(DynObjRef ref, void *ptr) : FatDynObjRef(ref, ptr) {}
 
-  template <typename T> static bool is_impl(const T& ref) {
+  template <typename T> static bool is_impl(const T &ref) {
     return (Types::is_impl(ref) || ...);
   }
 
@@ -36,7 +36,6 @@ public:
     *static_cast<FatDynObjRef<> *>(this) = val;
     return *this;
   }
-
 };
 
 }; // namespace dyno

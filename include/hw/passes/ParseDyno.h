@@ -3,6 +3,7 @@
 #include "dyno/IDImpl.h"
 #include "dyno/Obj.h"
 #include "dyno/Opcode.h"
+#include "dyno/Parser.h"
 #include "hw/HWContext.h"
 #include "hw/HWPrinter.h"
 #include "support/ArrayRef.h"
@@ -11,7 +12,6 @@
 #include "support/MMap.h"
 #include "support/TempBind.h"
 #include "support/VectorLUT.h"
-#include "dyno/Parser.h"
 
 namespace dyno {
 

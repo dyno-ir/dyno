@@ -75,8 +75,7 @@ template <typename T> constexpr T ceil_to_pow2(T x) {
   return T(1) << (std::bit_width(x - 1));
 }
 
-template <typename T>
-static constexpr T repeatBits(T x, unsigned xBits) {
+template <typename T> static constexpr T repeatBits(T x, unsigned xBits) {
   unsigned fact = xBits;
   assert(!(x & bit_mask_zeros<unsigned>(xBits)));
   while (fact != bit_mask_sz<T>) {

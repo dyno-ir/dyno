@@ -19,7 +19,8 @@ struct SimpleDebugInfo {
   }
 
   void addToInstr(HWContext &ctx, InstrRef instr) {
-    ctx.sourceLocInfo.addSrcLoc(instr, name, beginLine, beginCol, endLine, endCol);
+    ctx.sourceLocInfo.addSrcLoc(instr, name, beginLine, beginCol, endLine,
+                                endCol);
   }
 
   bool isStartEntry() { return isNewEntry; }

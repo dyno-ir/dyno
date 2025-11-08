@@ -27,7 +27,7 @@ public:
 
   CustomInstrRef(FatObjRef<Instr> ref) : Derived(ref) {}
   CustomInstrRef(FatDynObjRef<> ref) : Derived(ref) {}
-  //CustomInstrRef(Derived ref) : Derived(ref) {}
+  // CustomInstrRef(Derived ref) : Derived(ref) {}
 };
 
 }; // namespace dyno

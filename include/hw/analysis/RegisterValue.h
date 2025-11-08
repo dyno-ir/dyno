@@ -621,7 +621,7 @@ inline auto regValueFindCommonSeams(ArrayRef<RegisterValue *> regVals) {
         allEqual &= addr == dstAddr;
     }
 
-    //if (allEqual)
+    // if (allEqual)
     diffs.emplace_back(overlapEnd);
     curAddr = overlapEnd;
 

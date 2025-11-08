@@ -93,16 +93,16 @@ public:
   template <typename T> auto is() const {
     return ::is<T, Derived>(*static_cast<const Derived *>(this));
   }
-  template <typename T> const T& as() const {
+  template <typename T> const T &as() const {
     return ::as<T, Derived>(*static_cast<const Derived *>(this));
   }
-  template <typename T> const T* dyn_as() const {
+  template <typename T> const T *dyn_as() const {
     return ::dyn_as<T, Derived>(*static_cast<const Derived *>(this));
   }
-  template <typename T> T& as() {
+  template <typename T> T &as() {
     return ::as<T, Derived>(*static_cast<Derived *>(this));
   }
-  template <typename T> T* dyn_as() {
+  template <typename T> T *dyn_as() {
     return ::dyn_as<T, Derived>(*static_cast<Derived *>(this));
   }
 };

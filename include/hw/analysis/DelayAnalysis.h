@@ -52,7 +52,7 @@ class DelayAnalysis {
 
     unsigned reductionDelay =
         (unsigned)std::ceil(std::log2(operands / 2) /
-                        std::log2(operands / compressInputs)) *
+                            std::log2(operands / compressInputs)) *
         compressDelay;
     unsigned carryDelay = std::log2(bits);
     return reductionDelay + carryDelay;

@@ -104,7 +104,7 @@ class FlipFlopInferencePass {
   }
 
   Optional<unsigned> findClockEnable(RegisterIRef q, StoreIRef store,
-                                 MuxTree *muxTree) {
+                                     MuxTree *muxTree) {
     if (!muxTree)
       return nullopt;
     if (isQLoad(q, store.value().as<HWValue>()))

@@ -2,7 +2,4 @@
 
 #include <dyno/Obj.h>
 
-namespace dyno {
-
-
-}
+namespace dyno {}

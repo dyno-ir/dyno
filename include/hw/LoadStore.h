@@ -54,7 +54,9 @@ template <typename Derived> class AddressGenMixin {
   const Derived &self() const { return *static_cast<const Derived *>(this); }
   static constexpr unsigned TermSize = 3;
 
-  unsigned getTermsBaseIndex() const { return self().addressGenBaseIndex() + 1; }
+  unsigned getTermsBaseIndex() const {
+    return self().addressGenBaseIndex() + 1;
+  }
 
 public:
   auto terms() {

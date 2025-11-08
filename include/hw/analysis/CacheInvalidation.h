@@ -39,7 +39,7 @@ public:
     }
   }
   void replaceAt(WireRef oldRef, HWValue newRef) {
-    //auto newV = self().get(newRef);
+    // auto newV = self().get(newRef);
     auto it = cache().raw().find(oldRef);
     if (it == cache().raw().end())
       return;
@@ -55,7 +55,8 @@ public:
     // }
 
     // if (newRef.is<WireRef>())
-    //   cache().raw().insertOrAssign(newRef.as<WireRef>(), std::move(it.val()));
+    //   cache().raw().insertOrAssign(newRef.as<WireRef>(),
+    //   std::move(it.val()));
 
     cache().raw().erase(it);
   }

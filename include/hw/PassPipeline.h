@@ -167,13 +167,13 @@ public:
     runPass(linearizeControlFlow);
     processLinearize.config.retainInnerDeps = 0;
     processLinearize.config.retainIODeps = 0;
-    //runPass(ssaConstr);
-    //runPass(loadCoalesce);
-    //runPass(instCombine);
-    //runPass(cse, true);
-    //orderInstrs.config.assertNoCircularDeps = true;
-    //orderInstrs.config.moveStoresBeforeLoads = false;
-    //runPass(orderInstrs);
+    // runPass(ssaConstr);
+    // runPass(loadCoalesce);
+    // runPass(instCombine);
+    // runPass(cse, true);
+    // orderInstrs.config.assertNoCircularDeps = true;
+    // orderInstrs.config.moveStoresBeforeLoads = false;
+    // runPass(orderInstrs);
 
     runPass(processLinearize);
     ssaConstr.config.mode = SSAConstructPass::Config::IMMEDIATE;
@@ -339,7 +339,7 @@ public:
     runPass(instCombine);
     runPass(agressiveDCE);
 
-    //dumpDyno("a.dyno");
+    // dumpDyno("a.dyno");
     runPass(aigConstr);
     // dumpDyno("b.dyno");
     runPass(agressiveDCE);

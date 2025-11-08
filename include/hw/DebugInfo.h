@@ -138,9 +138,7 @@ public:
         [&](size_t, uint32_t idx) { return strDedupe.get(idx); });
   }
 
-  auto clearNames(RefT ref) {
-    return valueMap.get_ensure(ref).clear();
-  }
+  auto clearNames(RefT ref) { return valueMap.get_ensure(ref).clear(); }
 };
 
 }; // namespace dyno

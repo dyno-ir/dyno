@@ -493,8 +493,8 @@ struct SmallBoolExprCNF {
   }
 
   // assuming other is simplified.
-  std::optional<bool> simplifyWith(SmallBoolExprCNF &other, unsigned numLiterals,
-                                   bool checkSAT = true) {
+  std::optional<bool> simplifyWith(SmallBoolExprCNF &other,
+                                   unsigned numLiterals, bool checkSAT = true) {
     this->addAsGlobalAND(other);
     auto res = this->simplify(numLiterals);
     if (res.has_value())
@@ -1187,8 +1187,7 @@ public:
   std::optional<MuxTree> analyzeMuxTree(InstrRef root,
                                         bool matchMultiUse = false,
                                         bool exploreConds = true) {
-    return analyzeMuxTree(
-        root, [](InstrRef) {}, matchMultiUse, exploreConds);
+    return analyzeMuxTree(root, [](InstrRef) {}, matchMultiUse, exploreConds);
   }
 
   std::optional<MuxTree>

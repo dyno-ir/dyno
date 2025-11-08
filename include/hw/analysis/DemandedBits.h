@@ -128,7 +128,8 @@ struct DemandedBitsAnalysis {
   };
 
   static FatDynObjRef<> demandedBitsNextFunc(FatDynObjRef<InstrDefUse> ref,
-                                             unsigned idx, DemandedBitsAcc &acc) {
+                                             unsigned idx,
+                                             DemandedBitsAcc &acc) {
     auto asWire = ref.as<WireRef>();
     if (idx == asWire.getNumUses())
       return nullref;

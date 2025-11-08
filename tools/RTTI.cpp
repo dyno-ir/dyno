@@ -30,8 +30,7 @@ struct DerivedB : Base
 
 int main() {
   HWContext ctx;
-  FatObjRef<Instr> instr =
-      ctx.getInstrs().create(0, OP_ADD);
+  FatObjRef<Instr> instr = ctx.getInstrs().create(0, OP_ADD);
   DynObjRef instrDyn = instr;
 
   ObjRef<Instr>::is_impl(instrDyn);

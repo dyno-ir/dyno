@@ -798,8 +798,6 @@ struct CodeGen {
 
     ops[startIdx].scanForward.bodyLen = ops.size() - condIdx;
 
-
-
     return nextObj ? nextIdx : idx;
   }
 
@@ -1007,7 +1005,8 @@ struct CodeGen {
         auto *nextIdx =
             i == instr->operands.size() - 1 ? nullptr : instr->operands[i + 1];
         opIdx = checkPack(opIdx, endIdx, pack, nextIdx);
-        // todo: with resulting pack size, min operands and actual num operands check if match still possible
+        // todo: with resulting pack size, min operands and actual num operands
+        // check if match still possible
         if (nextIdx) {
           low++;
         }

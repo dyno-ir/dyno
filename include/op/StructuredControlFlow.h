@@ -33,7 +33,9 @@ public:
   IfInstrRef(const InstrRef &ref) : InstrRef(ref) {}
 
   bool hasFalseBlock() { return getNumDefs() >= 2; }
-  unsigned getNumYieldValues() { return getNumDefs() < 2 ? 0 : getNumDefs() - 2; }
+  unsigned getNumYieldValues() {
+    return getNumDefs() < 2 ? 0 : getNumDefs() - 2;
+  }
 
   auto yieldValues() { return Range{this->def_begin() + 2, this->def_end()}; }
 
