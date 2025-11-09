@@ -544,7 +544,7 @@ public:
         entry = ptr;
       }
     }
-    DEBUG("FlipFlopMapping", {
+    DYNO_DBG("FlipFlopMapping", {
       std::print(dbgs(), "found {} out of {} flip flop types as std cells\n",
                  count, ffMap.size());
     });
@@ -654,7 +654,7 @@ public:
           fixup && *fixup == FixupType::FAIL)
         missing++;
     }
-    DEBUG("FlipFlopMapping", {
+    DYNO_DBG("FlipFlopMapping", {
       std::print(dbgs(), "covered {} out of {} flip flop types with fixups\n",
                  ffMap.size() - missing, ffMap.size());
     });

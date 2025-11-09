@@ -73,7 +73,7 @@ public:
       bool buf = checkIfModuleIsBuf(mod.iref());
       isBuffer[mod] = buf;
       if (buf) {
-        DEBUG("RemoveBuffersPass", {
+        DYNO_DBG("RemoveBuffersPass", {
           dbgs() << "identified buffer: ";
           dumpInstr(mod.iref(), ctx);
         });

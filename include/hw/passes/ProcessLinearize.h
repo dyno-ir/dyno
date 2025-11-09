@@ -256,7 +256,7 @@ public:
           }
           loopIDCnt++;
 
-          DEBUG("ProcessLinearize", {
+          DYNO_DBG("ProcessLinearize", {
             size_t length = stack.end() - it.base();
             dbgs() << "Found process loop of length " << length << ":\n";
             size_t i = 0;
@@ -342,7 +342,7 @@ public:
         }
       }
 
-      DEBUG(
+      DYNO_DBG(
           "ProcessLinearize", std::cerr << "ordered:\n"; {
             for (auto proc : ordered) {
               dumpInstr(proc);

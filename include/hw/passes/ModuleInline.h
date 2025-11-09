@@ -62,7 +62,7 @@ class ModuleInlinePass {
     for (auto use : ref.mod()->defUse.uses()) {
       deleteRec(HWInstrRef{use.instr()}.parentMod(ctx));
     }
-    DEBUG("ModuleInline", {
+    DYNO_DBG("ModuleInline", {
       dbgs() << "deleting module: \"";
       dbgs() << ref.mod()->name;
       dbgs() << "\"\n";

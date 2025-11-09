@@ -4,6 +4,7 @@
 !/lib
 !/test
 !/tools
+/tools/dyno-sv/slang
 
 !.gitignore
 !.gitmodules

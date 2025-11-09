@@ -49,7 +49,7 @@ class FunctionInlinePass {
 
       auto funcInstr = callInstr.func().iref();
 
-      DEBUG("FunctionInline", dbgs() << "\n\n\ninlining\n";
+      DYNO_DBG("FunctionInline", dbgs() << "\n\n\ninlining\n";
             dumpInstr(callInstr);)
 
       SmallVec<RegisterRef, 2> returnRegs{callInstr.getNumRetvals()};

@@ -133,7 +133,7 @@ private:
     BlockRef otherBl = HWInstrRef{other}.parentBlock(ctx);
     BlockRef instrBl = HWInstrRef{instr}.parentBlock(ctx);
     if (otherBl == instrBl) {
-      DEBUG("CSE", {
+      DYNO_DBG("CSE", {
         dbgs() << "merging in same block:\n";
         dumpInstr(instr, ctx);
         dumpInstr(other, ctx);
@@ -143,7 +143,7 @@ private:
 
     auto block = controlFlowAnalysis.findSharedParentBlock(instrBl, otherBl);
 
-    DEBUG("CSE", {
+    DYNO_DBG("CSE", {
       dbgs() << "merging in different blocks:\n";
       dumpInstr(instr, ctx);
       dumpInstr(other, ctx);

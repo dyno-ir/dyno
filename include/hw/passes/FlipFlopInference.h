@@ -180,7 +180,7 @@ class FlipFlopInferencePass {
 
     auto muxTree = getMuxTree(storeI);
     if (!muxTree) {
-      DEBUG("FlipFlopInference", {
+      DYNO_DBG("FlipFlopInference", {
         dbgs() << "could not get mux tree, skipping enable inference for: ";
         dumpInstr(reg, ctx);
         dbgs() << "store value:\n";

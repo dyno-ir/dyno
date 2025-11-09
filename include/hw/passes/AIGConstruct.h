@@ -36,7 +36,7 @@ public:
   }
   ArrayRef<AIGNodeTRef> resolveWire(WireRef wire) {
     if (wireToAIGNode[wire].size() == 0) {
-      DEBUG("AIGBuilder", {
+      DYNO_DBG("AIGBuilder", {
         dbgs() << "undefined wire, def instr:\n";
         dumpInstr(wire.getDefI());
       })

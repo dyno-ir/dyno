@@ -250,7 +250,7 @@ class SimpleMemoryMappingPass {
     if (!findReadPorts(readPorts, reg))
       return;
 
-    DEBUG("SimpleMemoryMappingPass", {
+    DYNO_DBG("SimpleMemoryMappingPass", {
       dbgs() << "for memory ";
       dumpInstr(reg, ctx);
 

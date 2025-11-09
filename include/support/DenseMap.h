@@ -87,7 +87,7 @@ public:
     size_type offset = 1;
     while (true) {
 
-#ifdef _DEBUG_
+#if DYNO_ENABLE_DEBUG
       if (assertNotExist)
         if (auto entryIndex = getBuckets()[bucketIndex].find(k);
             entryIndex != Bucket::entriesPerBucket) {

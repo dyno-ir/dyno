@@ -1432,7 +1432,7 @@ public:
   }
 
   void printMuxTree(HWContext &ctx, MuxTree *tree) {
-    DEBUG("MuxTreeAnalysis", {
+    DYNO_DBG("MuxTreeAnalysis", {
       dbgs() << "mux tree at: ";
       if (tree->root)
         dumpInstr(tree->root, ctx);

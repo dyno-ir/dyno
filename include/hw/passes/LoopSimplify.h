@@ -218,7 +218,7 @@ public:
       }
     }
 
-    DEBUG("LoopSimplify", {
+    DYNO_DBG("LoopSimplify", {
       dumpInstr(loop, ctx);
       dbgs() << "yield analysis results:\n";
       for (auto [i, val] : Range{yieldVals}.enumerate()) {

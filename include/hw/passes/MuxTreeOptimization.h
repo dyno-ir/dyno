@@ -42,7 +42,7 @@ public:
 
 private:
   void printMuxTree(MuxTree *tree) {
-    DEBUG("MuxTreeOptimization", {
+    DYNO_DBG("MuxTreeOptimization", {
       dbgs() << "mux tree at: ";
       if (tree->root)
         dumpInstr(tree->root, ctx);
@@ -258,7 +258,7 @@ private:
     auto [selExpr, peelOffIdx] = getBestMUXExpr(tree);
 
     auto selExprNeg = selExpr.negated2(tree->conditions.size());
-    DEBUG("MuxTreeOptimization", {
+    DYNO_DBG("MuxTreeOptimization", {
       dbgs() << "splitting tree on: ";
       selExpr.dump();
       if (selExprNeg) {
@@ -325,7 +325,7 @@ private:
       assert(cntTrueRight <= 1);
     }
 
-    DEBUG("MuxTreeOptimization", {
+    DYNO_DBG("MuxTreeOptimization", {
       dbgs() << "left subtree\n";
       printMuxTree(left);
 
@@ -375,7 +375,7 @@ private:
       switch (*instr.getDialectOpcode()) {
       case *HW_MUX:
         visitedMap[instr] = 1;
-        DEBUG("MuxTreeOpt", {
+        DYNO_DBG("MuxTreeOpt", {
           dbgs() << "inspecting mux tree at: ";
           dumpInstr(instr, ctx);
         })
@@ -383,7 +383,7 @@ private:
             instr, [&](InstrRef ref) { visitedMap[ref] = 1; }, false,
             config.exploreConditions);
         if (!muxtreeOpt) {
-          DEBUG("MuxTreeOpt", {
+          DYNO_DBG("MuxTreeOpt", {
             dbgs() << "failed to simplify MUX tree at: ";
             dumpInstr(instr, ctx);
           })

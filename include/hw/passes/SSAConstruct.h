@@ -425,7 +425,7 @@ public:
   }
 
   void dumpState() {
-    DEBUG("SSAConstruct", {
+    DYNO_DBG("SSAConstruct", {
       dbgs() << "state at depth " << depth << "\n";
       for (auto [obj, state] : regMap) {
         if (!state.has(depth))

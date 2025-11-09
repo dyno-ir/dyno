@@ -237,7 +237,7 @@ private:
     if (matchingPrefixes.size() == 0)
       return false;
 
-    DEBUG("FuzzyCSE", {
+    DYNO_DBG("FuzzyCSE", {
       dbgs() << "matched instrs:\n";
       HWPrinter print{dbgs()};
       print.printInstr(lhsAbstr.ref, ctx);
@@ -292,7 +292,7 @@ private:
     auto newRHS =
         rebuildInstr(rhsAbstr, matchingPrefixes, rhsCovered, rhsIdxs, defW);
 
-    DEBUG("FuzzyCSE", {
+    DYNO_DBG("FuzzyCSE", {
       dbgs() << "replaced with:\n";
       HWPrinter print{dbgs()};
       dbgs() << "shared: ";

@@ -30,7 +30,7 @@ private:
     auto wire = value.as<WireRef>();
     BigInt &val = wireVals[wire];
     if (val.getNumBits() == 0) {
-      DEBUG("HWInterpreter", {
+      DYNO_DBG("HWInterpreter", {
         std::print(dbgs(), "undefined value, def instr:\n");
         dumpInstr(wire.getDefI());
       });

@@ -1438,7 +1438,7 @@ private:
 
     anyMatchHook();
 
-    DEBUG("instcombine", {
+    DYNO_DBG("instcombine", {
       HWPrinter print{dbgs()};
       dbgs() << "initial instructions:\n";
 

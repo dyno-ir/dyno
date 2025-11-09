@@ -107,7 +107,7 @@ struct RegisterValue : public RegisterFrags<RegisterValueFragment> {
   uint32_t getLen() const {
     uint32_t lenFast =
         frags.empty() ? 0 : frags.back().dstAddr + frags.back().len;
-#if defined(_DEBUG_) && 0
+#if DYNO_ENABLE_DEBUG && 0
     uint32_t len = 0;
     for (auto frag : frags)
       len += frag.len;

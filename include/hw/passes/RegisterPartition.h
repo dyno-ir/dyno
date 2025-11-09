@@ -92,7 +92,7 @@ class RegisterPartitionPass {
         getStoreRegions(part, instr.as<StoreIRef>());
     }
 
-    DEBUG("RegisterPartition", {
+    DYNO_DBG("RegisterPartition", {
       dumpInstr(reg, ctx);
       dbgs() << "found partitions:\n";
       for (auto [back, frag] : Range{part.frags}.mark_back()) {
