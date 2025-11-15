@@ -61,45 +61,6 @@ private:
   }
 
 public:
-  class iterator {
-  public:
-    using iterator_category = std::forward_iterator_tag;
-    using value_type = T::value_type;
-    using pointer = T::pointer;
-    using reference = T::reference;
-    using difference_type = T::difference_type;
-
-    iterator() = default;
-    iterator(T it, T itEnd) : it(it), itEnd(itEnd) {}
-
-    reference operator*() { return **it; }
-
-    iterator &operator++() {
-      do {
-        ++it;
-      } while (it != itEnd && *it == nullptr);
-      return *this;
-    }
-
-    iterator operator++(int) {
-      iterator tmp(*this);
-      ++(*this);
-      return tmp;
-    }
-
-    friend bool operator==(const iterator &a, const iterator &b) {
-      return a.it == b.it;
-    }
-
-    friend bool operator!=(const iterator &a, const iterator &b) {
-      return a.it != b.it;
-    }
-
-  private:
-    Traits::vec_type::iterator it;
-    Traits::vec_type::iterator itEnd;
-  };
-
   ObjPool() {}
 
   ~ObjPool() {

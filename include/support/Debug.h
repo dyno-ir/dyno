@@ -16,7 +16,7 @@
 #define _DYNO_DBG_2(category, x)                                               \
   do {                                                                         \
     if (dyno::debugType) {                                                     \
-      dbgs() << "====" << category << "====\n";                                \
+      dyno::dbgs() << "====" << category << "====\n";                          \
       do {                                                                     \
         x;                                                                     \
       } while (0);                                                             \

@@ -1,49 +1,63 @@
 #pragma once
 
 #include "aig/AIG.h"
+#include "support/Debug.h"
+#include <format>
+#include <functional>
 #include <ostream>
+
 namespace dyno {
 
-class AIGPrinter {
-  AIGObjRef aigObj;
+class AIGDotPrinter {
+  std::ostream &os;
 
-public:
-  void dumpGraphviz(std::ostream &os) {
-    AIG &aig = aigObj->aig;
+  std::string formatName(AIGNodeTRef node) {
+    if (!node)
+      return "null";
+    if (node.isSpecial())
+      return std::format("fat{}", node.idx().get() - AIGObjID::FAT_ID_START);
+    return std::format("{}", node.idx().get());
+  }
 
-    SmallVec<AIGNodeRef, 4> inputs;
-    SmallVec<AIGNodeRef, 4> outputs;
-
-    for (auto use : aigObj->defUse.uses()) {
-      auto instr = use.instr();
-      if (instr.isOpc(AIG_INPUT)) {
-        for (auto def : instr.defs())
-          inputs.emplace_back(def->as<FatAIGNodeRef>().as<AIGNodeRef>());
-      }
-      if (instr.isOpc(AIG_OUTPUT)) {
-        for (auto def : instr.defs().drop_front())
-          outputs.emplace_back(def->as<FatAIGNodeRef>().as<AIGNodeRef>());
-      }
-    }
-
-    std::print(os, "digraph aig {{");
-
-    for (auto [idx, node] : Range{aig.store.thin}.enumerate()) {
-      for (auto &op : node->op)
-        std::print(os, "{} -> {}{}\n", (unsigned)op.idx(), idx,
-                   op.invert() ? "[style=dotted]" : "");
-    }
-
-    for (auto [idx, out] : Range{outputs}.enumerate()) {
-      std::print(os, "{} -> output_{}{}\n", (unsigned)out->op[0].idx(), idx,
-                 out->op[0].invert() ? "[style=dotted]" : "");
-    }
-
-    std::print(os, "}}");
+  void dumpEdge(AIGNodeTRef a, AIGNodeTRef b) {
+    std::print(os, "{} -> {}{}\n", formatName(a), formatName(b),
+               a.invert() ? "[style=dotted]" : "");
   }
 
 public:
-  explicit AIGPrinter(AIGObjRef aig) : aigObj(aig) {}
+  void print(
+      AIG &aig,
+      std::function<void(std::ostream &os, AIGNodeTRef)> labelFunc = nullptr) {
+    os << "digraph aig {\n";
+    os << "rankdir=LR\n";
+    os << "node [shape=box]\n";
+    for (auto node : aig.gates()) {
+      os << formatName(node);
+      if (labelFunc) {
+        os << " [label=\"";
+        labelFunc(os, node);
+        os << "\"]";
+      }
+      os << "\n";
+    }
+    os << "node [shape=doublecircle]\n";
+    // for (auto node : aig.outputs) {
+    //   dumpEdge(node.as<AIGNodeRef>()[0], node.as<AIGNodeTRef>());
+    //   os << formatName(node.as<AIGNodeTRef>()) << " [label=\""; os <<
+    //   "\"]\n";
+    // }
+    for (auto node : aig.gates()) {
+      for (auto op : node)
+        dumpEdge(op, node);
+    }
+    for (auto node : aig.outputs) {
+      dumpEdge(node.as<AIGNodeRef>()[0], node.as<AIGNodeTRef>());
+    }
+    os << "}\n";
+  }
+
+public:
+  explicit AIGDotPrinter(std::ostream &os) : os(os) {}
 };
 
 }; // namespace dyno

@@ -1,6 +1,5 @@
-
-
 #pragma once
+
 #include "dyno/Obj.h"
 #include "dyno/Opcode.h"
 #include "dyno/Type.h"

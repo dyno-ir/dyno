@@ -12,7 +12,9 @@ class DedupeMap {
 public:
   Container container;
 
-  Container::size_type getCanonicalIndex(const T &t) {
+  uint32_t getCanonicalIndex(const T &t) { return canonicalize(t).first; }
+
+  std::pair<uint32_t, bool> canonicalize(const T &t) {
     auto hash = HashFunc(t);
     // we can't use empty/tombstone, so just remap to zero. This should
     // basically never fire so should be fine, otherwise we can go to 31 bit
@@ -25,13 +27,14 @@ public:
     auto it = map.find(hash);
     for (; it != map.end(); it = map.find_next(it)) {
       if (container[it.val()] == t) [[likely]]
-        return it.val();
+        return {it.val(), false};
     }
     auto rv = container.size();
     container.emplace_back(t);
     map.insert(hash, rv);
-    return rv;
+    return {rv, true};
   }
+
   const T &getCanonical(const T &t) { return container[getCanonicalIndex(t)]; }
   uint32_t size() { return map.size(); }
 };

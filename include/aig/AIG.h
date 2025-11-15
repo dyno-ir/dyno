@@ -8,9 +8,12 @@
 #include "hw/HWValue.h"
 #include "hw/Wire.h"
 #include "support/ArrayRef.h"
+#include "support/Debug.h"
 #include "support/DedupeMap.h"
 #include "support/RTTI.h"
 #include "support/Utility.h"
+#include <algorithm>
+#include <cassert>
 
 namespace dyno {
 
@@ -19,26 +22,29 @@ class FatAIGNodeRef;
 
 class AIGObjID : public ObjID {
 public:
+  // FIXME: 30 too smol with custom field removed
   constexpr static num_t FAT_ID_SPACE = 1u << 24;
   constexpr static num_t FAT_ID_START = (1u << 30) - FAT_ID_SPACE;
   using ObjID::ObjID;
   using InvertField = BitField<ObjID::num_t, 1, 0>;
-  using CustomField = BitField<ObjID::num_t, 1, 1>;
-  using IdxField = BitField<ObjID::num_t, 30, 2>;
-  using IdxFieldC = BitField<const ObjID::num_t, 30, 2>;
+  using InvertFieldC = BitField<const ObjID::num_t, 1, 0>;
+  // using CustomField = BitField<ObjID::num_t, 1, 1>;
+  using IdxField = BitField<ObjID::num_t, 31, 1>;
+  using IdxFieldC = BitField<const ObjID::num_t, 31, 1>;
 
-  auto invert() { return InvertField{num}; }
-  auto custom() { return CustomField{num}; }
-  auto idx() { return IdxField{num}; }
-  auto idx() const { return IdxFieldC{num}; }
-  bool isSpecial() const { return idx() >= FAT_ID_START; }
+  constexpr auto invert() { return InvertField{num}; }
+  // auto custom() { return CustomField{num}; }
+  constexpr auto idx() { return IdxField{num}; }
+  constexpr auto idx() const { return IdxFieldC{num}; }
+  constexpr bool isSpecial() const { return idx() >= FAT_ID_START; }
 
-  AIGObjID(uint32_t idx, bool invert = false, bool custom = false) {
+  constexpr AIGObjID(uint32_t idx, bool invert = false) {
+    num = 0; // Prevent benign uninitialized read for constexpr
     this->idx() = idx;
     this->invert() = invert;
-    this->custom() = custom;
+    // this->custom() = custom;
   }
-  AIGObjID(ObjID obj) : ObjID(obj) {}
+  constexpr AIGObjID(ObjID obj) : ObjID(obj) {}
 };
 
 class AIGNode {
@@ -46,7 +52,6 @@ public:
   std::array<AIGObjID, 2> op;
 
   AIGNode(AIGObjID lhs, AIGObjID rhs) : op{lhs, rhs} {}
-  AIGNode() = default;
 
   static constexpr uint32_t hash(AIGNode node) {
     // todo specialized hashing
@@ -62,10 +67,15 @@ public:
 
 class AIGNodeTRef : public ObjRef<AIGNode> {
 public:
+  static consteval AIGNodeTRef zero() { return AIGNodeTRef{0}; }
+  static consteval AIGNodeTRef one() { return AIGNodeTRef{0, true}; }
+  static constexpr AIGNodeTRef from(bool v) { return AIGNodeTRef{0, v}; }
+
   using ObjRef<AIGNode>::ObjRef;
   auto invert() { return AIGObjID::InvertField{obj.num}; }
-  auto custom() { return AIGObjID::CustomField{obj.num}; }
   auto idx() { return AIGObjID::IdxField{obj.num}; }
+  auto invert() const { return AIGObjID::InvertFieldC{obj.num}; }
+  auto idx() const { return AIGObjID::IdxFieldC{obj.num}; }
   bool isSpecial() const { return AIGObjID{obj}.isSpecial(); };
   AIGObjID getObjID() const { return AIGObjID{obj}; }
 
@@ -80,13 +90,32 @@ public:
     return rv;
   }
 
+  unsigned getOffsetIdx() const {
+    if (isSpecial())
+      return idx() - AIGObjID::FAT_ID_START;
+    return idx();
+  }
+
+  bool isZero() { return idx() == 0 && !invert(); }
+  bool isOne() { return idx() == 0 && invert(); }
+
+  // AIGNodeTRef() = delete;
   AIGNodeTRef(ObjID id) : ObjRef<AIGNode>(id) {}
-  AIGNodeTRef(uint32_t idx, bool invert = false, bool custom = false)
-      : ObjRef<AIGNode>(AIGObjID{idx, invert, custom}) {}
+  constexpr AIGNodeTRef(uint32_t idx, bool invert = false)
+      : ObjRef<AIGNode>(AIGObjID{idx, invert}) {}
   AIGNodeTRef(ObjRef<AIGNode> ref) : ObjRef<AIGNode>(ref) {}
   AIGNodeTRef(nullref_t) : ObjRef<AIGNode>(ObjID::invalid()) {}
 
   static bool is_impl(FatAIGNodeRef);
+
+  friend std::ostream &operator<<(std::ostream &os, const AIGNodeTRef &ref) {
+    if (ref.invert())
+      os << "!";
+    if (ref.isSpecial())
+      os << "&";
+    os << ref.getOffsetIdx();
+    return os;
+  }
 };
 
 inline AIGNodeTRef AIGNode::operator[](unsigned i) { return op[i]; }
@@ -115,6 +144,18 @@ public:
     return rv;
   }
 
+  auto operands() { return Range{ptr->op}.cast<AIGNodeTRef>(); }
+  auto begin() { return operands().begin(); }
+  auto end() { return operands().end(); }
+
+  AIGNodeTRef operator[](unsigned i) { return ptr->op[i]; }
+
+  void replaceOperands(AIGNodeTRef a, AIGNodeTRef b) {
+    if (a.getObjID() > b.getObjID())
+      std::swap(a, b);
+    ptr->op = {a.getObjID(), b.getObjID()};
+  }
+
   explicit operator FatAIGNodeRef() const;
   static bool is_impl(FatAIGNodeRef);
   static bool is_impl(AIGNodeTRef) { return true; }
@@ -123,7 +164,7 @@ public:
 class FatAIGNode {
 public:
   InstrDefUse defUse;
-  AIGNode node;
+  AIGNode node{ObjID::invalid(), ObjID::invalid()};
 
   FatAIGNode(ObjRef<FatAIGNode>) {};
   FatAIGNode(DynObjRef, AIGObjID lhs, AIGObjID rhs) : node(lhs, rhs) {}
@@ -166,6 +207,11 @@ public:
       dyno_unreachable("invalid");
     return aigObj;
   }
+
+  AIGNodeTRef getSingleOperand() {
+    assert(getPtr()->node[0] == getPtr()->node[1]);
+    return getPtr()->node[0];
+  }
 };
 inline bool AIGNodeRef::is_impl(FatAIGNodeRef) { return true; }
 inline bool AIGNodeTRef::is_impl(FatAIGNodeRef) { return true; }
@@ -188,22 +234,37 @@ template <> struct ObjTraits<AIGNode> {
 };
 
 class ThinAIGNodeStore {
+  friend class AIG;
   DedupeMap<AIGNode, std::vector<AIGNode>, AIGNode::hash> dedupeMap;
+  std::vector<unsigned> useCounts;
 
 public:
   AIGNodeRef resolve(AIGNodeTRef ref) {
     return AIGNodeRef{ref, &dedupeMap.container[ref.idx()]};
   }
-  template <typename... Args> AIGNodeRef create(Args... args) {
-    uint32_t index = dedupeMap.getCanonicalIndex(AIGNode{args...});
+  AIGNodeRef create(AIGNodeTRef a, AIGNodeTRef b) {
+    assert(a.getObjID() <= b.getObjID() && "AIG gate l <= r violation");
+    auto [index, isNew] =
+        dedupeMap.canonicalize(AIGNode{a.getObjID(), b.getObjID()});
     auto thin = AIGNodeTRef{index};
-    return resolve(thin);
+    AIGNodeRef ref = resolve(thin);
+    assert((ref[0].isSpecial() || ref[0].idx() < ref.idx()) &&
+           (ref[1].isSpecial() || ref[1].idx() < ref.idx()) &&
+           "AIG topo order violation");
+    if (isNew) {
+      useCounts.push_back(0);
+      if (!a.isSpecial())
+        ++useCounts[a.idx()];
+      if (!b.isSpecial())
+        ++useCounts[b.idx()];
+    }
+    return ref;
   }
 
   auto objs() {
     return Range{dedupeMap.container}.transform(
         [](uint32_t idx, AIGNode &node) {
-          auto ref = AIGNodeTRef{idx, false, false};
+          auto ref = AIGNodeTRef{idx, false};
           if (ref.isSpecial())
             dyno_unreachable("ids oob");
           return AIGNodeRef{ref, &node};
@@ -238,18 +299,17 @@ public:
   }
 
   static FatAIGNodeRef transformOut(FatObjRef<FatAIGNode> ref,
-                                    bool invert = false, bool custom = false) {
-    AIGObjID id{ref.getObjID() + AIGObjID::FAT_ID_START, invert, custom};
+                                    bool invert = false) {
+    AIGObjID id{ref.getObjID() + AIGObjID::FAT_ID_START, invert};
     return FatAIGNodeRef{FatObjRef<FatAIGNode>{id, ref.getPtr()}};
   }
 
-  template <typename... Args> FatAIGNodeRef create(Args... args) {
+  template <typename... Args> FatAIGNodeRef create(Args &&...args) {
     return transformOut(store.create(std::forward<Args>(args)...));
   }
 
   FatAIGNodeRef resolve(AIGNodeTRef ref) {
-    return transformOut(store.resolve(transformIn(ref)), ref.invert(),
-                        ref.custom());
+    return transformOut(store.resolve(transformIn(ref)), ref.invert());
   }
 
   ObjID::num_t numIDs() { return store.numIDs(); }
@@ -266,10 +326,10 @@ public:
     }
     return thin.resolve(ref);
   }
-  template <typename... Args> AIGNodeRef create(Args... args) {
+  template <typename... Args> AIGNodeRef create(Args &&...args) {
     return thin.create(std::forward<Args>(args)...);
   }
-  template <typename... Args> FatAIGNodeRef createSpecial(Args... args) {
+  template <typename... Args> FatAIGNodeRef createSpecial(Args &&...args) {
     return fat.create(std::forward<Args>(args)...);
   }
 };
@@ -280,10 +340,61 @@ public:
   std::vector<FatAIGNodeRef> inputs;
   std::vector<FatAIGNodeRef> outputs;
 
+  static AIGNodeTRef simplify(AIGNodeTRef lhs, AIGNodeTRef rhs) {
+    assert(lhs.getObjID() <= rhs.getObjID());
+    if (lhs == rhs)
+      return lhs;
+    if (lhs == rhs.inverted())
+      return AIGNodeTRef::zero();
+    assert(!rhs.isZero());
+    if (lhs.isZero())
+      return lhs;
+    assert(!rhs.isOne());
+    if (lhs.isOne())
+      return rhs;
+    return nullref;
+  }
+
+  static void simplifyMulti(SmallVecImpl<AIGNodeTRef> &multi) {
+    std::sort(multi.begin(), multi.end(),
+              [](auto l, auto r) { return l.getObjID() < r.getObjID(); });
+    if (multi.size() < 3)
+      return;
+    unsigned iOut = 0;
+    for (unsigned i = 1; i < multi.size(); ++i) {
+      auto simple = simplify(multi[iOut], multi[i]);
+      // TODO: early return for 0 and 1
+      if (simple) {
+        multi[iOut] = simple;
+      } else {
+        multi[++iOut] = multi[i];
+      }
+    }
+    multi.downsize(iOut + 1);
+  }
+
+  AIG cloneInputs() {
+    AIG cloned;
+    for (auto &input : inputs) {
+      auto in = cloned.createInput();
+      assert(in.getObjID().idx() == input.getObjID().idx());
+    }
+    return cloned;
+  }
+
   AIGNodeRef createNode(AIGNodeTRef lhs, AIGNodeTRef rhs) {
     if (lhs.getObjID() > rhs.getObjID())
       std::swap(lhs, rhs);
-    return store.create(lhs.getObjID(), rhs.getObjID());
+    AIGNodeTRef simple = simplify(lhs, rhs);
+    if (simple) {
+      DYNO_DBG(dbgs() << "[Node] " << lhs << ", " << rhs << " -> simplified to "
+                      << simple << "\n");
+      return store.resolve(simple);
+    }
+    AIGNodeRef node = store.create(lhs.getObjID(), rhs.getObjID());
+    DYNO_DBG(dbgs() << "[Node] " << lhs << ", " << rhs << " -> " << node
+                    << "\n");
+    return node;
   }
 
   AIGNodeRef createAND(AIGNodeTRef lhs, AIGNodeTRef rhs) {
@@ -326,13 +437,61 @@ public:
   }
 
   auto gates() { return store.thin.objs().drop_front(); }
+  unsigned numGateIDs() { return store.thin.numIDs(); }
 
-  AIGNodeRef getZero() { return store.resolve(AIGNodeTRef{0, false, false}); }
+  unsigned getUseCount(AIGNodeTRef ref) {
+    assert(!ref.isSpecial());
+    return store.thin.useCounts[ref.idx()];
+  }
+
+  AIGNodeRef getZero() { return store.resolve(AIGNodeTRef{0, false}); }
   AIGNodeRef getOne() { return getZero().inverted(); }
 
+  AIGNodeRef operator[](AIGNodeTRef ref) { return store.resolve(ref); }
+
   AIG() {
-    auto constZeroNode = store.create();
+    auto constZeroNode = store.create(ObjID::invalid(), ObjID::invalid());
     assert(constZeroNode.idx() == 0);
+  }
+};
+
+class AIGNodeBuilder {
+  AIG &aig;
+  AIGNodeTRef lhs;
+
+  AIGNodeBuilder builder(AIGNodeTRef ref) const {
+    return AIGNodeBuilder{aig, ref};
+  }
+
+public:
+  AIGNodeBuilder(AIG &aig, AIGNodeTRef lhs) : aig(aig), lhs(lhs) {}
+  operator AIGNodeTRef() { return lhs; }
+  AIGNodeTRef get() { return lhs; }
+
+  AIGNodeBuilder operator&(AIGNodeTRef rhs) const {
+    return builder(aig.createAND(lhs, rhs));
+  }
+  AIGNodeBuilder operator|(AIGNodeTRef rhs) const {
+    return builder(aig.createOR(lhs, rhs));
+  }
+  AIGNodeBuilder operator^(AIGNodeTRef rhs) const {
+    return builder(aig.createXOR(lhs, rhs));
+  }
+  AIGNodeBuilder operator&(bool v) const {
+    return *this & AIGNodeTRef::from(v);
+  }
+  AIGNodeBuilder operator|(bool v) const {
+    return *this | AIGNodeTRef::from(v);
+  }
+  AIGNodeBuilder operator^(bool v) const {
+    return *this ^ AIGNodeTRef::from(v);
+  }
+  AIGNodeBuilder operator~() const { return builder(aig.createNOT(lhs)); }
+  AIGNodeBuilder mux(AIGNodeTRef trueV, AIGNodeTRef falseV) const {
+    return builder(aig.createMUX(lhs, trueV, falseV));
+  }
+  AIGNodeBuilder output() const {
+    return builder(aig.createOutput(lhs).as<AIGNodeTRef>());
   }
 };
 

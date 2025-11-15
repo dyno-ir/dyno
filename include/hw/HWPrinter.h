@@ -6,6 +6,7 @@
 #include "dyno/InstrPrinter.h"
 #include "dyno/Obj.h"
 #include "dyno/Opcode.h"
+#include "dynomite/IDs.h"
 #include "hw/DebugInfo.h"
 #include "hw/HWAbstraction.h"
 #include "hw/HWContext.h"

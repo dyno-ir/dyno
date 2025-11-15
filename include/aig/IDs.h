@@ -1,14 +1,12 @@
-
-
 #pragma once
+
+#include "dyno/DialectInfo.h"
 #include "dyno/Obj.h"
 #include "dyno/Opcode.h"
 #include "dyno/Type.h"
 #include <cstdint>
-#include <dyno/DialectInfo.h>
 
 namespace dyno {
-enum AIGDialectID : uint8_t { DIALECT_AIG = DIALECT_CUSTOM_1 };
 using AIGType = SpecificDialectType<DialectID{DIALECT_AIG}>;
 using AIGOpcode = SpecificDialectOpcode<DialectID{DIALECT_AIG}>;
 

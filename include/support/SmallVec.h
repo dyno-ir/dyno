@@ -31,6 +31,8 @@ public:
       : SmallVecImpl<T>(std::launder(reinterpret_cast<T *>(storage.storage)), N,
                         std::move(o)) {}
 
+  template <typename It> SmallVec(Range<It> range);
+
   SmallVec &operator=(SmallVec &&o) {
     // recover from moved-from state.
     if (this->arr == nullptr) [[unlikely]] {
@@ -217,6 +219,9 @@ public:
     return *obj;
   }
 
+  void push_back(const T &val) { emplace_back(val); }
+  void push_back(T &&val) { emplace_back(std::move(val)); }
+
   void clear() {
     destroyElts();
     sz = 0;
@@ -374,4 +379,10 @@ inline SmallVec<T, N>::SmallVec(std::initializer_list<T> list) : SmallVec() {
   this->reserve(list.size());
   for (auto &elem : list)
     this->emplace_back(elem);
+}
+
+template <typename T, unsigned N>
+template <typename It>
+inline SmallVec<T, N>::SmallVec(Range<It> range) : SmallVec() {
+  this->template push_back_range<It>(range);
 }

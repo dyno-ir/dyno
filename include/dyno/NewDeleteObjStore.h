@@ -52,9 +52,9 @@ public:
   using value_type = T;
   NewDeleteObjStore() {}
   NewDeleteObjStore(const NewDeleteObjStore &) = delete;
-  NewDeleteObjStore(NewDeleteObjStore &&) = delete;
+  NewDeleteObjStore(NewDeleteObjStore &&) = default;
   NewDeleteObjStore &operator=(const NewDeleteObjStore &) = delete;
-  NewDeleteObjStore &operator=(NewDeleteObjStore &&) = delete;
+  NewDeleteObjStore &operator=(NewDeleteObjStore &&) = default;
   ~NewDeleteObjStore() {
     for (auto *ptr : map.elements) {
       if (!ptr)

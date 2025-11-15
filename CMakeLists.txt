@@ -9,7 +9,7 @@ if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
   set(CMAKE_C_STANDARD 11)
   include(CTest)
 
-  add_compile_options(-Wall -Wextra -Wno-unused-variable -Wno-unused-parameter -Wno-unused-function -fno-rtti)
+  add_compile_options(-Wall -Wextra -Wno-unused-variable -Wno-unused-parameter -Wno-unused-function -fno-rtti -Wno-invalid-offsetof)
 
   add_compile_definitions($<$<CONFIG:Debug>:DYNO_ENABLE_DEBUG=1>)
   add_compile_options($<$<CONFIG:Debug>:-fsanitize=address>)
