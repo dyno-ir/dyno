@@ -17,7 +17,7 @@ We currently only test with `clang` + `libc++`, errors might occur with other to
 Dyno-SV is a Dyno-IR based SystemVerilog synthesis tool.
 
 ## Example Usage
-Note: Currently `yoysys-abc` must be installed and available in `$PATH`.
+Note: Currently `yosys-abc` must be installed and available in `$PATH`.
 ```
 dyno-sv --liberty=sky130_fd_sc_hd.lib MyDesign.v -o=MyGateLevelNetlist.v
 ```
