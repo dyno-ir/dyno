@@ -1,0 +1,12 @@
+
+
+MODULE_DEF %my_module:module("Test"), %body:block {
+  INPUT_REGISTER_DEF %in_a:register(32)
+  OUTPUT_REGISTER_DEF %out_a:register(32)
+
+  COMB_PROCESS_DEF %my_proc:process, %my_block:block {
+    LOAD %val:wire(32), %in_a
+    ADD %incr:wire(32), %val, #32'b1
+    STORE %incr, %out_a
+  }
+}

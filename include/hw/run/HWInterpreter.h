@@ -1,4 +1,6 @@
+
 #pragma once
+#include "FST.h"
 #include "hw/HWPrinter.h"
 #include "hw/LoadStore.h"
 #include "hw/Register.h"
@@ -22,9 +24,27 @@ class HWInterpreter {
 public:
   ObjMapVec<Wire, BigInt> wireVals;
   ObjMapVec<Register, BigInt> regVals;
+  SmallVec<ProcessIRef, 16> evalStack;
+  std::optional<FSTWriter<Register, Wire>> fstWriter;
+
   bool trace = false;
 
 private:
+  void onValueChange(RegisterIRef reg) {
+    if (fstWriter)
+      fstWriter->updateValue(reg.oref(), regVals[reg.oref()]);
+    scheduleDependentForEval(reg);
+  }
+  void scheduleDependentForEval(RegisterIRef reg) {
+    for (auto use : reg.oref().uses()) {
+      if (!use.instr().isOpc(HW_LOAD))
+        continue;
+      auto load = use.instr().as<LoadIRef>();
+      auto proc = load.parentProc(ctx);
+      evalStack.emplace_back(proc);
+    }
+  }
+
   GenericBigIntRef getValue(HWValue value) {
     if (auto asConst = value.dyn_as<ConstantRef>())
       return GenericBigIntRef{asConst};
@@ -179,11 +199,15 @@ public:
       auto store = instr.as<StoreIRef>();
       auto val = getValue(store.value());
       auto &reg = regVals[store.reg()];
-      if (store.isFullReg()) {
+
+      auto oldCopy = reg;
+      if (store.isFullReg())
         reg = val;
-        break;
-      }
-      BigInt::insertOp4S(reg, reg, val, evalAddress(store.base()));
+      else
+        BigInt::insertOp4S(reg, reg, val, evalAddress(store.base()));
+
+      if (oldCopy != reg)
+        onValueChange(store.reg().iref());
       break;
     }
 
@@ -195,7 +219,8 @@ public:
         val = reg;
         break;
       }
-      BigInt::rangeSelectOp4S(val, reg, evalAddress(load.base()), load.getLen());
+      BigInt::rangeSelectOp4S(val, reg, evalAddress(load.base()),
+                              load.getLen());
       break;
     }
 
@@ -236,26 +261,41 @@ public:
   }
 
   void eval() {
-    // todo: proper ordering, event loop
+    while (!evalStack.empty()) {
+      evalProc(evalStack.pop_back_val());
+    }
+    dumpRegs();
+  }
+
+  void initialEval() {
+    for (auto proc : module.procs())
+      evalStack.emplace_back(proc);
+    eval();
+  }
+
+  void setup() {
     wireVals.resize(ctx.getWires().numIDs());
     regVals.resize(ctx.getRegs().numIDs());
-    for (auto proc : module.procs()) {
-      evalProc(proc);
+
+    for (auto reg : ctx.getRegs()) {
+      if (reg.getNumBits())
+        regVals[reg] = BigInt::fromU64(0, *reg.getNumBits());
     }
   }
+
+  void dumpRegs() {
+    HWPrinter print{os};
+    auto tok = print.bindCtx(ctx);
+    for (auto reg : module.ports()) {
+      print.printRefOrUse(reg.oref());
+      os << ": " << regVals[reg.oref()] << "\n";
+    }
+  };
 
   void evalPrint() {
     auto oldTrace = trace;
     trace = true;
     std::print(os, "Evaluating module with:\n");
-    HWPrinter print{os};
-
-    auto dumpRegs = [&]() {
-      for (auto reg : module.ports()) {
-        print.printRefOrUse(reg.oref());
-        os << ": " << regVals[reg.oref()] << "\n";
-      }
-    };
     dumpRegs();
     eval();
     std::print(os, "Finished eval. Results:\n");
@@ -263,10 +303,19 @@ public:
     trace = oldTrace;
   }
 
-  void setReg(unsigned i, BigInt b) {
+  void setReg(uint i, BigInt b) {
     auto it = module.block().begin();
     std::advance(it, i);
-    regVals[it->as<RegisterIRef>().oref()] = b;
+    auto reg = it->as<RegisterIRef>();
+    setReg(reg, b);
+  }
+
+  void setReg(RegisterIRef reg, BigInt b) {
+    auto &slot = regVals[reg.oref()];
+    if (slot == b)
+      return;
+    slot = b;
+    onValueChange(reg);
   }
 
   BigInt &getReg(unsigned i) {
@@ -280,6 +329,36 @@ public:
     for (auto reg : ctx.getRegs()) {
       regVals[reg] = PatBigInt::undef(*reg.getNumBits());
     }
+  }
+
+  void fstInitHierarchy() {
+    for (auto [ref, val] : regVals) {
+      if (!ref)
+        continue;
+      auto reg = ctx.getRegs().resolve(ref);
+      auto names = ctx.regNameInfo.getNames(reg);
+      auto name = names.empty() ? "reg" + std::to_string(reg.getObjID())
+                                : (*names.begin());
+      name += "[31:0]";
+      dbgs() << "name: " << name << "\n";
+      fstWriter->createVar(reg, RegWireFSTWriter::VarType::INTEGER,
+                           RegWireFSTWriter::VarDir::INPUT, *reg.getNumBits(),
+                           name.c_str());
+    }
+
+    fstWriter->endDefinitions();
+
+    for (auto [ref, val] : regVals) {
+      if (!ref)
+        continue;
+      auto reg = ctx.getRegs().resolve(ref);
+      fstWriter->updateValue(reg, BigInt::fromU64(0, *reg.getNumBits()));
+    }
+  }
+
+  void forwardTime(uint64_t incr) {
+    if (fstWriter)
+      fstWriter->stepForward(incr);
   }
 
 public:
