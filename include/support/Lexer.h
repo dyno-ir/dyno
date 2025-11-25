@@ -116,7 +116,7 @@ public:
 };
 
 // todo config struct
-template <bool ParseNumberLiterals = true, bool ParseInlineCode = true,
+template <bool ParseInlineCode = true,
           bool IgnoreBackslash = true, bool CPPStyleComments = true,
           bool LeadingPercentIdent = false>
 struct Lexer {
@@ -286,9 +286,9 @@ public:
                                     res->type ==
                                         dyno::BigInt::ParseResult::UNSIZED);
       }
-    } else if (isdigit(src[i])) {
+    } else if (isdigit(src[i]) || src[i] == '.') {
       size_t len = 0;
-      while (isalnum(src[i + len]) || src[i + len] == '_')
+      while (isalnum(src[i + len]) || src[i + len] == '_' || src[i + len] == '.' || src[i + len] == '+' || src[i + len] == '-')
         len++;
       i += len;
       return Token::makeNumericLit(std::string_view{&src[i - len], len});

@@ -31,7 +31,7 @@ public:
   }
 };
 
-class DynoLexer : public Lexer<false, false, false, true, true> {
+class DynoLexer : public Lexer<false, false, true, true> {
 public:
   constexpr static std::array<const char *, 0> Keywords;
   constexpr static auto Operators =

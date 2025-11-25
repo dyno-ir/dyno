@@ -142,10 +142,10 @@ public:
       // todo: what about multiple and collisions?
       return *range.begin();
     }
-    // case HW_WIRE.type: {
-    //  // todo properly (or just not)
-    //  return ref.getObjID() + 10000;
-    // }
+      // case HW_WIRE.type: {
+      //  // todo properly (or just not)
+      //  return ref.getObjID() + 10000;
+      // }
     }
     return std::nullopt;
   }
@@ -213,9 +213,13 @@ public:
     return true;
   }
 
+  [[nodiscard]] auto bindCtx(HWContext &ctx) {
+    return std::pair(sourceLocInfo.bind(&ctx.sourceLocInfo),
+                          regNames.bind(&ctx.regNameInfo));
+  }
+
   void printCtx(HWContext &ctx) {
-    auto locTok = sourceLocInfo.bind(&ctx.sourceLocInfo);
-    auto regTok = regNames.bind(&ctx.regNameInfo);
+    auto tok = bindCtx(ctx);
     for (auto mod : ctx.getModules()) {
       if (mod.iref().isOpc(HW_STDCELL_DEF))
         continue;
@@ -225,8 +229,7 @@ public:
 
   using Printer::printInstr;
   void printInstr(InstrRef instr, HWContext &ctx) {
-    auto locTok = sourceLocInfo.bind(&ctx.sourceLocInfo);
-    auto regTok = regNames.bind(&ctx.regNameInfo);
+    auto tok = bindCtx(ctx);
     printInstr(instr);
   }
 

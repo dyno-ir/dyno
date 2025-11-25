@@ -4,6 +4,7 @@
 #include "support/Bits.h"
 #include "support/Debug.h"
 #include "support/DenseMultimap.h"
+#include "support/DynBitSet.h"
 #include "support/Optional.h"
 #include "support/SmallVec.h"
 #include "support/Utility.h"
@@ -126,6 +127,7 @@ struct FourState {
 
   constexpr FourState operator!() { return isUnk() ? SX : !val; }
   constexpr FourState operator~() { return !*this; }
+  constexpr FourState() {}
 };
 
 template <typename Derived> class BigIntMixin {
@@ -192,6 +194,22 @@ public:
     return (getWord(i / WordBits) >> (i % WordBits)) &
            bit_mask_ones<uint32_t>(BigIntExtendBits);
   }
+  constexpr void setBit(uint32_t i, FourState val) {
+    assert(i <= getNumBits());
+    if (val.isUnk() && !self().getIs4S())
+      self().conv2To4State();
+    if (self().getIs4S())
+      i *= 2;
+    uint32_t wordIdx = i / WordBits;
+    if (wordIdx >= self().getWords().size())
+      self().expandUntil(wordIdx + 1);
+    size_t len = self().getIs4S() ? 2 : 1;
+    DynBitField{self().getWords()[wordIdx], i % 32, len} =
+        val;
+    self().normalize();
+    self().conv4To2StateIfPossible();
+  }
+
   constexpr uint8_t getSignBit() const {
     return getBit(self().getNumBits() - 1);
   }
@@ -2032,8 +2050,33 @@ public:
       if (truncBits != 0)
         BigIntBase::resizeOp(out, out, truncBits);
     }
-
     return out;
+  }
+  constexpr static std::optional<BigIntBase>
+  parseBin(ArrayRef<const char> digits) {
+    BigIntBase bigInt = BigIntBase::ofLen(digits.size());
+
+    for (auto [i, digit] : Range{digits}.enumerate()) {
+      FourState val;
+      switch (digit) {
+      case '0':
+        val = FourState::S0;
+        break;
+      case '1':
+        val = FourState::S1;
+        break;
+      case 'x':
+        val = FourState::SX;
+        break;
+      case 'z':
+        val = FourState::SZ;
+        break;
+      default:
+        return std::nullopt;
+      }
+      bigInt.setBit(digits.size() - i - 1, val);
+    }
+    return bigInt;
   }
 
   template <typename T>
@@ -2128,20 +2171,22 @@ public:
   }
 
   template <typename T>
-  static void stream_bin(std::ostream &os, const T &self) {
+  static void stream_bin(std::ostream &os, const T &self, bool separators = true) {
     for (ssize_t i = self.getRawNumBits() - 1; i >= 0; i--) {
       os << (self.getBit(i) ? '1' : '0');
-      if (i != 0 && (i % 8) == 0)
+      if (separators && i != 0 && (i % 8) == 0)
         os << "_";
     }
   }
 
   template <typename T>
-  static void stream_bin_4s_vlog(std::ostream &os, const T &self) {
+  static void stream_bin_4s_vlog(std::ostream &os, const T &self, bool separators = true) {
+    if (!self.getIs4S())
+      return stream_bin(os, self, separators);
     std::array<char, 4> bitToStr = {'0', '1', 'z', 'x'};
     for (ssize_t i = (self.getRawNumBits() / 2) - 1; i >= 0; i--) {
       os << bitToStr[self.getBit(i)];
-      if (i != 0 && (i % 8) == 0)
+      if (separators && i != 0 && (i % 8) == 0)
         os << "_";
     }
   }
@@ -2249,8 +2294,7 @@ public:
     ptr++;
 
     if (numBits == 0)
-      return ParseResult{BigInt::fromU64(0, 0), false,
-                             ParseResult::SIZED};
+      return ParseResult{BigInt::fromU64(0, 0), false, ParseResult::SIZED};
 
     bool isSigned = false;
     if (*ptr == 's') {
@@ -2278,26 +2322,24 @@ public:
       ptr++;
       if (isNumDigit(*ptr))
         return std::unexpected(ParseError::TOO_MANY_DIGITS_GIVEN);
-      return ParseResult(BigInt::fromU64(0, 1), true,
-                             ParseResult::UNSIZED);
+      return ParseResult(BigInt::fromU64(0, 1), true, ParseResult::UNSIZED);
     case '1':
       ptr++;
       if (isNumDigit(*ptr))
         return std::unexpected(ParseError::TOO_MANY_DIGITS_GIVEN);
-      return ParseResult(BigInt::fromU64(1, 1), true,
-                             ParseResult::UNSIZED);
+      return ParseResult(BigInt::fromU64(1, 1), true, ParseResult::UNSIZED);
     case 'x':
       ptr++;
       if (isNumDigit(*ptr))
         return std::unexpected(ParseError::TOO_MANY_DIGITS_GIVEN);
       return ParseResult(PatBigInt{2, FourState::SX, 1}, true,
-                             ParseResult::UNSIZED);
+                         ParseResult::UNSIZED);
     case 'z':
       ptr++;
       if (isNumDigit(*ptr))
         return std::unexpected(ParseError::TOO_MANY_DIGITS_GIVEN);
       return ParseResult(PatBigInt{2, FourState::SZ, 1}, true,
-                             ParseResult::UNSIZED);
+                         ParseResult::UNSIZED);
     default:
       return std::unexpected(ParseError::UNKNOWN_BASE);
     }
@@ -2360,8 +2402,7 @@ public:
         BigIntBase::resizeOp4S(acc, acc, *numBits, isSigned);
     }
     return ParseResult(acc, isSigned,
-                           numBits ? ParseResult::SIZED
-                                   : ParseResult::UNSIZED);
+                       numBits ? ParseResult::SIZED : ParseResult::UNSIZED);
   }
 
   static constexpr std::expected<ParseResult, ParseError>

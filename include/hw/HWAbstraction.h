@@ -857,8 +857,9 @@ public:
     return regRef;
   }
 
-  RegisterRef buildPort(ModuleIRef module, HWOpcode opcode) {
-    auto regRef = RegisterRef{ctx.getRegs().create()};
+  RegisterRef buildPort(ModuleIRef module, HWOpcode opcode,
+                        Optional<uint32_t> bitSize = nullopt) {
+    auto regRef = RegisterRef{ctx.getRegs().create(bitSize)};
     auto regInstr = InstrRef{ctx.getInstrs().create(1, opcode)};
     InstrBuilder{regInstr}.addRef(regRef);
     insertInstr(regInstr);

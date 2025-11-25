@@ -330,7 +330,7 @@ class ABCPass {
       BLIF_Printer print{ctx, blifFile};
       print.print(aigRef);
     }
-    system(("yosys-abc -q \"read_blif aig.blif; read_lib -w " + config.path +
+    system(("yosys-abc -q \"read_blif aig.blif; read_lib -X sky130_fd_sc_hd__lpflow_inputiso1p_1 -X sky130_fd_sc_hd__lpflow_isobufsrc_1 -X sky130_fd_sc_hd__clkinv_1 -w " + config.path +
             "; strash; &get -n; &fraig -x; "
             "&put; scorr; dc2; dretime; strash; &get -n; &dch -f; &nf; &put;"
             "print_stats; write_blif "

@@ -143,6 +143,15 @@ public:
       return false;
     return ref.as<InstrRef>().isOpc(HW_MODULE_DEF, HW_STDCELL_DEF);
   }
+
+  // todo: signature caching should be more explicit
+  void rebuildSignature() {
+    mod()->ports.clear();
+    for (auto port : ports()) {
+      mod()->ports.emplace_back(port.as<RegisterIRef>().oref(),
+                                port.getDialectOpcode());
+    }
+  }
 };
 
 inline ModuleIRef ModuleRef::iref() {
