@@ -1,6 +1,25 @@
 #pragma once
 
 #include <memory>
+
+template <typename T> struct RAIIToken {
+  RAIIToken(const RAIIToken &) = delete;
+  RAIIToken &operator=(const RAIIToken &) = delete;
+  RAIIToken(RAIIToken &&other) { this->RAIIToken::operator=(std::move(other)); }
+  RAIIToken &operator=(RAIIToken &&other) {
+    this->parent = other.parent;
+    other.parent = nullptr;
+    return *this;
+  };
+  RAIIToken(T &parent) : parent(&parent) {}
+
+  T *parent;
+  ~RAIIToken() {
+    if (parent)
+      parent->unbind();
+  }
+};
+
 template <typename T> class TempBind {
   T &assigned;
 
@@ -11,15 +30,11 @@ public:
 
 template <typename T> class TempBindPtr {
   T *val = nullptr;
-  struct Token {
-    TempBindPtr &parent;
-    ~Token() { parent.unbind(); }
-  };
 
 public:
-  [[nodiscard]] Token bind(T *toVal) {
+  [[nodiscard]] RAIIToken<TempBindPtr> bind(T *toVal) {
     val = toVal;
-    return Token{*this};
+    return RAIIToken<TempBindPtr>{*this};
   }
   void unbind() { val = nullptr; }
   T *operator->() { return val; }
@@ -32,15 +47,12 @@ template <typename T> class TempBindVal {
   union {
     T val;
   };
-  struct Token {
-    TempBindVal &parent;
-    ~Token() { parent.unbind(); }
-  };
 
 public:
-  template <typename... Args> [[nodiscard]] Token emplace(Args... args) {
+  template <typename... Args>
+  [[nodiscard]] RAIIToken<TempBindVal> emplace(Args... args) {
     std::construct_at(&val, std::forward<Args>(args)...);
-    return Token{*this};
+    return RAIIToken<TempBindVal>{*this};
   }
   void unbind() { std::destroy_at(&val); }
   T *operator->() { return &val; }
@@ -48,6 +60,6 @@ public:
   const T *operator->() const { return &val; }
   const T &operator*() const { return val; }
 
-  TempBindVal() {};
-  ~TempBindVal() {};
+  TempBindVal(){};
+  ~TempBindVal(){};
 };

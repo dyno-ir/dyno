@@ -1,5 +1,6 @@
 #pragma once
 
+#include "dyno/ObjMap.h"
 #include <array>
 #include <dyno/Obj.h>
 
@@ -120,6 +121,45 @@ public:
     return reinterpret_cast<Traits::DispatchT *>(
         &interfaces[numDialects * Traits::ID]);
   }
+};
+
+// Essentially a separate ObjMapVec<Type, Value> for each passed type.
+// Combines sizeof...(Types) ObjMapVecs, statically. For each operation, selects
+// the correct one for passed type with zero overhead.
+template <typename Value, typename... Types> class StaticGenericObjVecMap {
+  static constexpr size_t numTypes = sizeof...(Types);
+  template <typename T> static constexpr size_t type_index() {
+    return type_index_impl<T, Types...>(
+        std::make_index_sequence<sizeof...(Types)>{});
+  }
+  template <typename T, typename... Ts, size_t... Is>
+  static constexpr size_t type_index_impl(std::index_sequence<Is...>) {
+    size_t result = 0;
+    bool found = ((std::is_same_v<T, Ts> ? (result = Is, true) : false) || ...);
+    assert(found);
+    return result;
+  }
+
+public:
+  template <typename K> auto &map() { return std::get<type_index<K>()>(maps); }
+  std::tuple<ObjMapVec<Types, Value>...> maps;
+
+  template <typename K> void ensure(ObjRef<K> ref) {
+    return map<K>().ensure(ref);
+  }
+  template <typename K> bool inRange(ObjRef<K> ref) {
+    return map<K>().inRange(ref);
+  }
+  template <typename K> void reserve(size_t sz) { return map<K>().reserve(sz); }
+  template <typename K> void resize(size_t sz) { return map<K>().resize(sz); }
+  template <typename K> void clear() { return map<K>().clear(); }
+  template <typename K> size_t size() { return map<K>().size(); }
+  template <typename K> auto &operator[](ObjRef<K> ref) { return map<K>()[ref]; }
+  template <typename K> auto &get_ensure(ObjRef<K> ref) {
+    return map<K>().get_ensure(ref);
+  }
+  template <typename K> auto begin() { return map<K>().begin(); }
+  template <typename K> auto end() { return map<K>().end(); }
 };
 
 // load from 64k lookup table of dialect + type

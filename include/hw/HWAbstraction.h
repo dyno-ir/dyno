@@ -296,9 +296,9 @@ public:
                                     rhs.template as<ConstantRef>(), pred);
       return ConstantRef::fromFourState(equal);
     }
-    auto rv =
-        buildInstr(OP_ICMP_EQ.indexAdd(unsigned(pred), OP_ICMP_SGE), true, lhs, rhs)
-            .defW();
+    auto rv = buildInstr(OP_ICMP_EQ.indexAdd(unsigned(pred), OP_ICMP_SGE), true,
+                         lhs, rhs)
+                  .defW();
     rv->numBits = 1;
     return rv;
   }
@@ -857,8 +857,9 @@ public:
     return regRef;
   }
 
-  RegisterRef buildPort(ModuleIRef module, HWOpcode opcode) {
-    auto regRef = RegisterRef{ctx.getRegs().create()};
+  RegisterRef buildPort(ModuleIRef module, HWOpcode opcode,
+                        Optional<uint32_t> bitSize = nullopt) {
+    auto regRef = RegisterRef{ctx.getRegs().create(bitSize)};
     auto regInstr = InstrRef{ctx.getInstrs().create(1, opcode)};
     InstrBuilder{regInstr}.addRef(regRef);
     insertInstr(regInstr);
@@ -1065,7 +1066,8 @@ public:
           build.addRef(instr.operand(i)->as<FatDynObjRef<>>());
 
         // new wire defs
-        for (unsigned i = 0; i < sizeof...(value) - asIf.getNumYieldValues(); i++)
+        for (unsigned i = 0; i < sizeof...(value) - asIf.getNumYieldValues();
+             i++)
           build.addRef(ctx.getWires().create());
         build.other();
 

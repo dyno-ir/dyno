@@ -1,3 +1,6 @@
 [submodule "tools/dyno-sv/slang"]
 	path = tools/dyno-sv/slang
 	url = https://github.com/dyno-ir/slang.git
+[submodule "tools/dyno-sim/libfst"]
+	path = tools/dyno-sim/libfst
+	url = https://github.com/gtkwave/libfst
