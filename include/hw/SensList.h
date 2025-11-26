@@ -146,6 +146,7 @@ public:
   TriggerIRef(InstrRef ref) : InstrRef(ref) {}
 
   TriggerRef oref() { return def(0)->as<TriggerRef>(); }
+  auto regs() { return this->others().deref().as<RegisterRef>(); };
 
   static bool is_impl(FatObjRef<Instr> ref) {
     return InstrRef{ref}.isOpc(HW_TRIGGER_DEF);

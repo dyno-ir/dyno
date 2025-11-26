@@ -114,7 +114,7 @@ public:
       if (asTrigger->size() != 0) {
         str << "(";
         for (size_t i = 0; i < asTrigger->size(); i++) {
-          auto arr = std::array<const char *, 4>{"pos", "neg", "any", "iff"};
+          auto arr = std::array<const char *, 5>{"pos", "neg", "any", "iff", "iffn"};
           str << arr[size_t(asTrigger->getMode(i))];
           if (i != asTrigger->size() - 1)
             str << ", ";

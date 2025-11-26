@@ -1,0 +1,14 @@
+MODULE_DEF %Counter:module("Counter"), %0:block {
+  INPUT_REGISTER_DEF %clk:register(1)
+  INPUT_REGISTER_DEF %rst:register(1)
+  INPUT_REGISTER_DEF %en:register(1)
+  OUTPUT_REGISTER_DEF %cnt:register(8)
+  TRIGGER_DEF %1:trigger(pos), %clk
+  COMB_PROCESS_DEF %2:process, %3:block {
+    LOAD %4:wire(8), %cnt
+    LOAD %5:wire(1), %en
+    ADD %6:wire(8), %4, #8'd1
+    MUX %7:wire(8), %5, %6, %4
+    STORE_DEFER %7, %cnt, %1
+  }
+}

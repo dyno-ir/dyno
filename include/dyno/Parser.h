@@ -35,11 +35,10 @@ class DynoLexer : public Lexer<false, false, true, true> {
 public:
   constexpr static std::array<const char *, 0> Keywords;
   constexpr static auto Operators =
-      std::to_array({".", "%", ":", ",", "[", "]", "?", "#", "(", ")", "{", "}"});
+      std::to_array({".", ":", ",", "[", "]", "?", "#", "(", ")", "{", "}"});
   enum OperatorEnum {
     _op_start = Lexer::TOK_OPS_START - 1,
     op_dot,
-    op_percent,
     op_colon,
     op_comma,
     op_abropen,
@@ -203,13 +202,16 @@ protected:
   }
 
   ParseOperand parseObjectOperand() {
-    lexer->popEnsure(DynoLexer::op_percent);
     auto ident = lexer->popEnsure(Token::IDENTIFIER);
+
     bool isDef = false;
     FatDynObjRef<> obj = nullref;
 
     auto ref = identMap.find(ident.ident.idx);
     auto identStr = lexer->GetIdent(ident.ident.idx);
+    if (identStr[0] != '%')
+      report_fatal_error("identifiers need to start with %");
+    identStr = identStr.substr(1);
 
     if (lexer->popIf(DynoLexer::op_colon)) {
       isDef = !lexer->popIf(DynoLexer::op_qmark);
@@ -229,7 +231,7 @@ protected:
     if (tok.type == DynoLexer::op_hash)
       return parseConstantOperand();
 
-    if (tok.type == DynoLexer::op_percent)
+    if (tok.type == Token::IDENTIFIER)
       return parseObjectOperand();
 
     lexer->printErrorOnPeekToken(
@@ -252,7 +254,7 @@ protected:
 
     SmallVec<BlockRef, 4> defBlocks;
 
-    while (lexer->peekIs(DynoLexer::op_hash, DynoLexer::op_percent)) {
+    while (lexer->peekIs(DynoLexer::op_hash, Token::IDENTIFIER)) {
       auto op = parseOperand();
       if (op.isDef) {
         if (numDefs != operands.size())

@@ -1,17 +1,19 @@
 
 #pragma once
 #include "FST.h"
+#include "dyno/ObjMap.h"
 #include "hw/HWPrinter.h"
 #include "hw/LoadStore.h"
 #include "hw/Register.h"
+#include "hw/SensList.h"
 #include "op/IDs.h"
 #include "support/Debug.h"
-#include "support/ErrorRecovery.h"
 
 #include "dyno/Constant.h"
 #include "hw/HWContext.h"
 #include "hw/IDs.h"
 #include "hw/Module.h"
+#include "support/ErrorRecovery.h"
 #include "support/Utility.h"
 namespace dyno {
 
@@ -25,15 +27,49 @@ public:
   ObjMapVec<Wire, BigInt> wireVals;
   ObjMapVec<Register, BigInt> regVals;
   SmallVec<ProcessIRef, 16> evalStack;
+  struct DeferredStore {
+    StoreIRef store;
+    uint32_t addr;
+    BigInt value;
+  };
   std::optional<FSTWriter<Register, Wire>> fstWriter;
+
+  // register to operand in TriggerIRef
+  ObjMapVec<Register, SmallVec<OperandRef, 1>> triggers;
+  ObjMapVec<Trigger, SmallVec<DeferredStore, 16>> deferredStores;
+  SmallDenseSet<TriggerRef, 4> firedTriggers;
 
   bool trace = false;
 
 private:
+  void queueTriggers(RegisterIRef reg) {
+    for (auto use : triggers[reg.oref()]) {
+      auto instr = use.instr().as<TriggerIRef>();
+      auto idx = use - instr.other_begin();
+      switch (instr.oref()->getMode(idx)) {
+      case SensMode::POSEDGE:
+        if (regVals[reg.oref()].valueEquals(1))
+          firedTriggers.insert(instr.oref());
+        break;
+      case SensMode::NEGEDGE:
+        if (regVals[reg.oref()].valueEquals(0))
+          firedTriggers.insert(instr.oref());
+        break;
+      case SensMode::ANYEDGE:
+        firedTriggers.insert(instr.oref());
+        break;
+      default:
+      case SensMode::IFF:
+      case SensMode::IFFN:
+        report_fatal_error("not yet implemented");
+      }
+    }
+  }
   void onValueChange(RegisterIRef reg) {
     if (fstWriter)
       fstWriter->updateValue(reg.oref(), regVals[reg.oref()]);
     scheduleDependentForEval(reg);
+    queueTriggers(reg);
   }
   void scheduleDependentForEval(RegisterIRef reg) {
     for (auto use : reg.oref().uses()) {
@@ -100,6 +136,14 @@ private:
     }
 
     return addr;
+  }
+
+  void runStore(RegisterIRef reg, GenericBigIntRef val, uint32_t addr) {
+    auto &regVal = regVals[reg.oref()];
+    auto oldCopy = regVal;
+    BigInt::insertOp4S(regVal, regVal, val, addr);
+    if (oldCopy != regVal)
+      onValueChange(reg);
   }
 
 public:
@@ -195,19 +239,19 @@ public:
       break;
     }
 
+    case *HW_STORE_DEFER: {
+      auto store = instr.as<StoreIRef>();
+      auto addr = evalAddress(store.base());
+
+      deferredStores[store.trigger().oref()].emplace_back(
+          store, addr, getValue(store.value()));
+      break;
+    }
+
     case *HW_STORE: {
       auto store = instr.as<StoreIRef>();
       auto val = getValue(store.value());
-      auto &reg = regVals[store.reg()];
-
-      auto oldCopy = reg;
-      if (store.isFullReg())
-        reg = val;
-      else
-        BigInt::insertOp4S(reg, reg, val, evalAddress(store.base()));
-
-      if (oldCopy != reg)
-        onValueChange(store.reg().iref());
+      runStore(store.reg().iref(), val, evalAddress(store.base()));
       break;
     }
 
@@ -261,10 +305,20 @@ public:
   }
 
   void eval() {
+    // active
     while (!evalStack.empty()) {
       evalProc(evalStack.pop_back_val());
     }
-    dumpRegs();
+
+    // deferred stores
+    for (auto trigger : firedTriggers) {
+      for (auto deferred : deferredStores[trigger]) {
+        runStore(deferred.store.reg().iref(), GenericBigIntRef{deferred.value},
+                 deferred.addr);
+      }
+      deferredStores[trigger].clear();
+    }
+    firedTriggers.clear();
   }
 
   void initialEval() {
@@ -276,10 +330,18 @@ public:
   void setup() {
     wireVals.resize(ctx.getWires().numIDs());
     regVals.resize(ctx.getRegs().numIDs());
+    triggers.resize(ctx.getRegs().numIDs());
+    deferredStores.resize(ctx.getRegs().numIDs());
 
     for (auto reg : ctx.getRegs()) {
       if (reg.getNumBits())
         regVals[reg] = BigInt::fromU64(0, *reg.getNumBits());
+    }
+
+    for (auto trigger : ctx.getTriggers()) {
+      auto iref = trigger.iref();
+      for (auto use : iref.others())
+        triggers[use->as<RegisterRef>()].emplace_back(use);
     }
   }
 
@@ -339,8 +401,6 @@ public:
       auto names = ctx.regNameInfo.getNames(reg);
       auto name = names.empty() ? "reg" + std::to_string(reg.getObjID())
                                 : (*names.begin());
-      name += "[31:0]";
-      dbgs() << "name: " << name << "\n";
       fstWriter->createVar(reg, RegWireFSTWriter::VarType::INTEGER,
                            RegWireFSTWriter::VarDir::INPUT, *reg.getNumBits(),
                            name.c_str());
