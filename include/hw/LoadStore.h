@@ -27,9 +27,7 @@ public:
     return val;
   }
 
-  OperandRef getUnderlyingOperand() const {
-    return base;
-  }
+  OperandRef getUnderlyingOperand() const { return base; }
 
   AddressGenTermOperand(OperandRef base) : base(base) {}
 };
@@ -58,7 +56,9 @@ template <typename Derived> class AddressGenMixin {
   const Derived &self() const { return *static_cast<const Derived *>(this); }
   static constexpr unsigned TermSize = 3;
 
-  unsigned getTermsBaseIndex() const { return self().addressGenBaseIndex() + 1; }
+  unsigned getTermsBaseIndex() const {
+    return self().addressGenBaseIndex() + 1;
+  }
 
 public:
   auto terms() {
@@ -89,7 +89,9 @@ public:
     return self().other(getTermsBaseIndex() + TermSize * i + 2);
   }
 
-  OperandRef base() { return self().other(self().addressGenBaseIndex()); }
+  OperandRef base() {
+    return *(self().other_begin() + self().addressGenBaseIndex());
+  }
   uint32_t getBase() {
     return hasBase() ? base()->template as<ConstantRef>().getExactVal() : 0;
   }

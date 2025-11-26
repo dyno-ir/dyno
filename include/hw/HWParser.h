@@ -4,6 +4,7 @@
 #include "dyno/Parser.h"
 #include "hw/HWContext.h"
 #include "hw/IDs.h"
+#include "hw/SensList.h"
 #include "support/ErrorRecovery.h"
 
 namespace dyno {
@@ -45,6 +46,30 @@ public:
     }
     case *HW_PROCESS: {
       return ctx.getProcs().create();
+    }
+    case *HW_TRIGGER: {
+      lexer->popEnsure(DynoLexer::op_rbropen);
+      auto trigger = ctx.getTriggers().create();
+      while (lexer->peekIs(Token::IDENTIFIER)) {
+        auto ident =
+            lexer->GetIdent(lexer->popEnsure(Token::IDENTIFIER).ident.idx);
+        if (ident == "pos")
+          trigger->addMode(SensMode::POSEDGE);
+        else if (ident == "neg")
+          trigger->addMode(SensMode::NEGEDGE);
+        else if (ident == "any")
+          trigger->addMode(SensMode::ANYEDGE);
+        else if (ident == "iff")
+          trigger->addMode(SensMode::IFF);
+        else if (ident == "iffn")
+          trigger->addMode(SensMode::IFFN);
+        else
+          abort();
+        if (!lexer->popIf(DynoLexer::op_comma))
+          break;
+      }
+      lexer->popEnsure(DynoLexer::op_rbrclose);
+      return trigger;
     }
     }
 
