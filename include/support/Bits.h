@@ -208,7 +208,7 @@ public:
 
   constexpr void flip() { num ^= mask_ones; }
 
-  constexpr unsigned count() { return std::popcount(num & mask_ones); }
+  constexpr unsigned count() const { return std::popcount(num & mask_ones); }
 
   template <unsigned SubN, unsigned SubPos> auto subField() {
     return SubField<SubN, SubPos>(num);
@@ -218,12 +218,12 @@ public:
     return SubField<T::size, T::pos>(num);
   }
 
-  num_t getNumClr() { return getClr(num); }
-  num_t getNumSet() { return getSet(num); }
-  num_t getNumSet(num_t v) { return getSet(num, v); }
+  num_t getRawClr() { return getClr(num); }
+  num_t getRawSet() { return getSet(num); }
+  num_t getRawSet(num_t v) { return getSet(num, v); }
 };
 
-template <std::integral NumT, unsigned N, unsigned Pos>
+template <std::unsigned_integral NumT, unsigned N, unsigned Pos>
 class BitField<const NumT, N, Pos> {
   const NumT &num;
 
@@ -245,9 +245,8 @@ public:
   constexpr operator num_t() const { return get(); }
 
   constexpr num_t get() const { return (num & mask_ones) >> pos; }
-  constexpr void flip() { num ^= mask_ones; }
 
-  constexpr unsigned count() { return std::popcount(num & mask_ones); }
+  constexpr unsigned count() const { return std::popcount(num & mask_ones); }
 };
 
 template <std::integral NumT> class DynBitField {
@@ -302,4 +301,21 @@ public:
     assert(offs + len <= pos + n);
     return DynBitField{num, size_type(pos + offs), len};
   }
+};
+
+template <typename Field, typename Get, typename Set> class GetSetField {
+  Field field;
+
+public:
+  using V = std::invoke_result_t<Get, Field &>;
+
+  GetSetField(Field &field) : field(field) {}
+
+  GetSetField &operator=(const V &newVal) { return *this; }
+
+  void set(const V &newVal) { Set(field, newVal); }
+
+  V get() { return Get(field); }
+
+  operator V() { return get(); }
 };

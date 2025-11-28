@@ -49,30 +49,11 @@ public:
   constexpr uint64_t raw64lo() { return num; }
 
   constexpr SATLit negated() const { return {getVarID(), !isNegated()}; }
+  constexpr SATLit nonNegated() const { return {getVarID(), false}; }
 
   constexpr SATLit operator-() const { return negated(); }
 };
 static_assert(sizeof(SATLit) == 4);
-
-class SATClause : public TrailingObjArr<SATClause, SATLit> {
-  friend class TrailingObjArr;
-  friend class SATClauseRef;
-  unsigned redundant : 1;
-  unsigned lbd;
-  unsigned numLiterals;
-
-public:
-  using iterator = SATLit *;
-
-  SATClause(DynObjRef, unsigned numLiterals) : numLiterals(numLiterals) {}
-
-protected:
-  iterator begin() { return trailing(); }
-  iterator end() { return trailing() + numLiterals; }
-
-  size_t getNumTrailing() { return numLiterals; }
-  size_t getNumLiterals() { return numLiterals; }
-};
 
 template <typename Derived> class SATClauseMixin {
 private:
@@ -86,6 +67,27 @@ public:
     return *(self().begin() + n);
   }
   SATLit &operator[](unsigned i) { return lit(i); }
+};
+
+class SATClause : public TrailingObjArr<SATClause, SATLit>,
+                  public SATClauseMixin<SATClause> {
+  friend class TrailingObjArr;
+  friend class SATClauseRef;
+  unsigned redundant : 1;
+  unsigned lbd;
+  unsigned numLiterals;
+
+public:
+  using iterator = SATLit *;
+
+  SATClause(DynObjRef, unsigned numLiterals) : numLiterals(numLiterals) {}
+
+  iterator begin() { return trailing(); }
+  iterator end() { return trailing() + numLiterals; }
+  size_t getNumLiterals() { return numLiterals; }
+
+protected:
+  size_t getNumTrailing() { return numLiterals; }
 };
 
 class SATBinClause : public SATClauseMixin<SATBinClause> {
@@ -133,20 +135,28 @@ public:
   iterator end() { return (*this)->end(); }
 };
 
-class SATBinClauseOrRef {
-  PtrBitField<SATClause, 1> ptr;
-
-  SATBinClauseOrRef(SATBinClause binClause) : ptr(binClause.raw() << 1) {}
-
-  SATBinClauseOrRef(SATClauseRef ref) : ptr(ref.getPtr(), 1) {}
-
-  bool isBinClause() { return !ptr.field(); }
-
-  SATBinClause getBinClause() {
-    assert(isBinClause());
-    return SATBinClause::fromRaw(ptr.num);
-  }
-};
+// class SATBinClauseOrPtr {
+//   PtrBitField<SATClause, 1> ptr;
+//
+// public:
+//   SATBinClauseOrPtr(SATBinClause binClause) : ptr(binClause.raw() << 1 | 1) {}
+//
+//   SATBinClauseOrPtr(SATClauseRef ref) : ptr(ref.getPtr(), 0) {}
+//
+//   bool isBin() { return ptr.field(); }
+//
+//   SATBinClause asBin() {
+//     assert(isBin());
+//     return SATBinClause::fromRaw(ptr.num >> 1);
+//   }
+//
+//   SATClause *asPtr() {
+//     assert(!isBin());
+//     return ptr.getPtr();
+//   }
+//   SATClause *operator->() { return asPtr(); }
+//   SATClause &operator*() { return *asPtr(); }
+// };
 
 // class SATClauseTRef : public ObjRef<SATClause>, SATClauseMixin<SATClauseRef>
 // {
@@ -168,10 +178,17 @@ class SATClauseBuilder {
   SATClauseBuilder() {}
 };
 
+class SATWatches {
+public:
+  SATWatches() {}
+};
+
 class SATSolver {
 public:
   SATClauseStore clauses;
   SATVarStore vars;
+  std::vector<uint32_t> watches;
+  std::vector<SATLit> trail;
 
   SATLit addVar() { return SATLit{vars.create(), false}; }
 
@@ -180,7 +197,12 @@ public:
     std::copy_n(lits.begin(), lits.size(), ref.begin());
   }
 
-  void solve() {}
+  size_t getNumLiterals() { return 2 * vars.getNumIDs(); }
+
+  void solve() {
+    watches.clear();
+    watches.resize(getNumLiterals());
+  }
 
   bool assign() {}
   bool analyze() {}

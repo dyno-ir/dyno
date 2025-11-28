@@ -63,6 +63,9 @@ public:
   const DynBitField<const word_t> operator[](size_t i) const {
     return at_unchecked(i);
   }
+
+  auto raw() const { return ArrayRef{storage}; }
+  auto raw() { return MutArrayRef{storage}; }
 };
 
 template <typename Container, size_t SymbolBits,
@@ -140,13 +143,6 @@ public:
         return false;
 
     return true;
-  }
-
-  ArrayRef<typename Container::value_type> raw() const {
-    return ArrayRef{storage};
-  }
-  MutArrayRef<typename Container::value_type> raw() {
-    return MutArrayRef{storage};
   }
 
   class iterator {
@@ -345,20 +341,6 @@ public:
     ensureWords(o.storage.size());
     for (size_t i = 0; i < storage.size(); ++i) {
       storage[i] &= o.getWordDyn(i);
-    }
-    return *this;
-  }
-  UnsizedBitSet &nand(const UnsizedBitSet &o) {
-    ensureWords(o.storage.size());
-    for (size_t i = 0; i < storage.size(); ++i) {
-      storage[i] &= o.getWordDyn(i);
-    }
-    return *this;
-  }
-  UnsizedBitSet &nor(const UnsizedBitSet &o) {
-    ensureWords(o.storage.size());
-    for (size_t i = 0; i < storage.size(); ++i) {
-      storage[i] |= o.getWordDyn(i);
     }
     return *this;
   }

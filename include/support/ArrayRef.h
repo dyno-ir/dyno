@@ -139,8 +139,9 @@ public:
     return MutArrayRef{nullptr, size_t(0)};
   }
 
+  // FIXME: Check for data and size instead of iterator arith
   template <typename U>
-  constexpr MutArrayRef(U &u) : MutArrayRef(u.begin(), u.end()) {}
+  constexpr MutArrayRef(U &u) : MutArrayRef(&*u.begin(), &*u.end()) {}
 };
 
 template <typename U> MutArrayRef(U &u) -> MutArrayRef<typename U::value_type>;

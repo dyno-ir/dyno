@@ -1,6 +1,9 @@
 #include "aig/passes/AIGBalance.h"
+#include "aig/passes/AIGSim.h"
+#include "aig/AIGCut.h"
 #include <aig/AIG.h>
 #include <aig/AIGPrinter.h>
+#include <cassert>
 #include <dynomite/SAT.h>
 #include <fstream>
 
@@ -17,20 +20,26 @@ int main() {
   //   auto i1 = AIGNodeTRef{aig.createInput()};
   //   x = aig.createAND(i1, x);
   // }
-  SmallVec<AIGNodeBuilder, 8> ins;
-  for (unsigned i = 0; i < 10; ++i) {
-    ins.emplace_back(aig, aig.createInput().as<AIGNodeTRef>());
+  {
+    SmallVec<AIGNodeBuilder, 8> ins;
+    for (unsigned i = 0; i < 10; ++i) {
+      ins.emplace_back(aig, aig.createInput().as<AIGNodeTRef>());
+    }
+    ((~(ins[0] & ins[1]) & ins[2] & ins[3] & ins[4]) & (ins[2] & ins[3]))
+        .output();
+    ((~(ins[0] & ins[1]) & ins[2] & ins[3] & ins[4]) | (ins[2] & ins[3]))
+        .output();
   }
-
-  //((~(ins[0] & ins[1]) & ins[2] & ins[3] & ins[4]) & (ins[2] &
-  //ins[3])).output();
-  (~((ins[0] & ins[1]) & ins[2] & ins[3] & ins[4]) & (ins[3] & ins[5] & ins[6]))
-      .output();
+  // ((~(ins[0] & ins[1]) & ins[2] & ins[3] & ins[4]) & (ins[2] &
+  // ins[3])).output();
+  // (~((ins[0] & ins[1]) & ins[2] & ins[3] & ins[4]) & (ins[3] & ins[5] &
+  // ins[6])) .output();
   // ((ins[0] & ins[1]) & ~ins[0] & ins[1] & ins[4]).output();
   //(~(ins[0] & ins[1]) & ins[1] & ins[4] & ins[4] & ins[4]).output();
   // aigPrinter.print(aig);
 
   AIG newAIG = AIGBalance(aig).run();
+  assert(AIGSim::lec(aig, newAIG));
   // auto height = AIGBalance(aig).calcHeightMap(aig);
 
   // aigPrinter.print(aig, [&](auto &os, auto ref) {

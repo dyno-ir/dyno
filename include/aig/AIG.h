@@ -5,9 +5,6 @@
 #include "dyno/Instr.h"
 #include "dyno/NewDeleteObjStore.h"
 #include "dyno/Obj.h"
-#include "hw/HWValue.h"
-#include "hw/Wire.h"
-#include "support/ArrayRef.h"
 #include "support/Debug.h"
 #include "support/DedupeMap.h"
 #include "support/RTTI.h"
@@ -79,6 +76,12 @@ public:
   bool isSpecial() const { return AIGObjID{obj}.isSpecial(); };
   AIGObjID getObjID() const { return AIGObjID{obj}; }
 
+  bool isTerminator() {
+    assert(bool(*this));
+    return idx() == 0 || isSpecial();
+  }
+  bool isGate() { return !isTerminator(); }
+
   AIGNodeTRef inverted() const {
     AIGNodeTRef rv = *this;
     rv.invert() = !rv.invert();
@@ -96,8 +99,8 @@ public:
     return idx();
   }
 
-  bool isZero() { return idx() == 0 && !invert(); }
-  bool isOne() { return idx() == 0 && invert(); }
+  bool isZero() const { return idx() == 0 && !invert(); }
+  bool isOne() const { return idx() == 0 && invert(); }
 
   // AIGNodeTRef() = delete;
   AIGNodeTRef(ObjID id) : ObjRef<AIGNode>(id) {}
@@ -144,17 +147,25 @@ public:
     return rv;
   }
 
-  auto operands() { return Range{ptr->op}.cast<AIGNodeTRef>(); }
+  bool isOutput() { return isSpecial() && operand(0) != nullref; }
+
+  bool isInput() { return isSpecial() && operand(0) == nullref; }
+
+  auto operands() {
+    assert(isGate());
+    return Range{ptr->op}.cast<AIGNodeTRef>();
+  }
   auto begin() { return operands().begin(); }
   auto end() { return operands().end(); }
 
+  AIGNodeTRef operand(unsigned i) { return ptr->op[i]; }
   AIGNodeTRef operator[](unsigned i) { return ptr->op[i]; }
 
-  void replaceOperands(AIGNodeTRef a, AIGNodeTRef b) {
-    if (a.getObjID() > b.getObjID())
-      std::swap(a, b);
-    ptr->op = {a.getObjID(), b.getObjID()};
-  }
+  // void replaceOperands(AIGNodeTRef a, AIGNodeTRef b) {
+  //   if (a.getObjID() > b.getObjID())
+  //     std::swap(a, b);
+  //   ptr->op = {a.getObjID(), b.getObjID()};
+  // }
 
   explicit operator FatAIGNodeRef() const;
   static bool is_impl(FatAIGNodeRef);
@@ -438,6 +449,7 @@ public:
 
   auto gates() { return store.thin.objs().drop_front(); }
   unsigned numGateIDs() { return store.thin.numIDs(); }
+  unsigned numSpecialIDs() { return store.fat.numIDs(); }
 
   unsigned getUseCount(AIGNodeTRef ref) {
     assert(!ref.isSpecial());
@@ -492,6 +504,65 @@ public:
   }
   AIGNodeBuilder output() const {
     return builder(aig.createOutput(lhs).as<AIGNodeTRef>());
+  }
+};
+
+// TODO: consider extending ObjMap with ObjTrait overrides, but this behaves
+// sufficiently different, so prob better to just keep separate impls
+// FIMXE: should really canon special-ids to map into normal space
+template <typename Container> class AIGNodeMap {
+public:
+  using V = Container::value_type;
+  Container gates;
+  Container special;
+
+  AIGNodeMap() = default;
+
+  AIGNodeMap(AIG &aig)
+      : gates(aig.numGateIDs()), special(aig.numSpecialIDs()) {}
+
+  AIGNodeMap(AIG &aig, V defaultVal)
+      : gates(aig.numGateIDs(), defaultVal),
+        special(aig.numSpecialIDs(), defaultVal) {}
+
+  void reset(AIG &aig) {
+    gates.resize(aig.numGateIDs());
+    special.resize(aig.numSpecialIDs());
+  }
+
+  void reset(AIG &aig, V defaultVal) {
+    gates.clear();
+    gates.resize(aig.numGateIDs(), defaultVal);
+    special.clear();
+    special.resize(aig.numGateIDs(), defaultVal);
+  }
+
+  V &operator[](AIGNodeTRef node) {
+    if (node.isSpecial()) [[unlikely]]
+      return special[node.getOffsetIdx()];
+    return gates[node.idx()];
+  }
+};
+
+template <typename T> using AIGNodeVecMap = AIGNodeMap<std::vector<T>>;
+
+class AIGNodeRemap {
+  AIGNodeVecMap<uint32_t> idMap;
+
+public:
+  AIGNodeRemap() = default;
+  AIGNodeRemap(AIG &aig) : idMap(aig, AIGObjID::invalid()) {}
+
+  void reset(AIG &aig) { idMap.reset(aig, AIGObjID::invalid()); }
+
+  AIGNodeTRef operator[](AIGNodeTRef node) {
+    return AIGNodeTRef(idMap[node], node.invert());
+  }
+
+  bool contains(AIGNodeTRef node) { return idMap[node]; }
+
+  void insert(AIGNodeTRef oldNode, AIGNodeTRef newNode) {
+    idMap[oldNode] = newNode.idx();
   }
 };
 

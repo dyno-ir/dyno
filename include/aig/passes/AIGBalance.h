@@ -77,25 +77,19 @@ public:
   }
 
   SmallVec<AIGNodeTRef, 8> findMulti(AIGNodeTRef root) {
+    assert(root.isGate());
     SmallVec<AIGNodeTRef, 8> dfs;
-    if (root.isSpecial()) {
-      dfs.push_back(aig[root].as<FatAIGNodeRef>().getSingleOperand());
-    } else {
-      dfs.push_back_range(aig[root].operands());
-    }
     SmallVec<AIGNodeTRef, 8> multi;
+    auto handleNode = [&](AIGNodeTRef node) {
+      if (node.invert() || node.isTerminator() || aig.getUseCount(node) > 2)
+        multi.push_back(node);
+      else
+        dfs.push_back(node);
+    };
+    aig[root].operands().for_each(handleNode);
     while (!dfs.empty()) {
       auto node = dfs.pop_back_val();
-      assert(node);
-      multi.push_back(node);
-      if (node.invert() || node.isSpecial())
-        continue;
-      if (aig.getUseCount(node) > 2)
-        continue;
-      multi.pop_back();
-      for (auto op : aig[node]) {
-        dfs.push_back(op);
-      }
+      aig[node].operands().for_each(handleNode);
     }
     return multi;
   }
@@ -106,22 +100,30 @@ public:
     return AIGNodeTRef(newIDs[old.idx()], old.invert());
   }
 
+  void updateNew(AIGNodeTRef old, AIGNodeTRef node) {
+    assert(!old.isSpecial());
+    newIDs[old.idx()] = node.idx();
+  }
+
   AIGNodeTRef createNew(AIGNodeTRef old, AIGNodeTRef lhs, AIGNodeTRef rhs) {
     AIGNodeTRef node = newAig.createAND(lhs, rhs);
     if (!old.isSpecial()) {
-      newIDs[old.idx()] = node.idx();
+      updateNew(old, node);
       updateHeight(newAig[node]);
     }
     return node;
   }
 
-  AIGNodeTRef rebalanceMulti(AIGNodeTRef root,
-                             SmallVecImpl<AIGNodeTRef> &multi) {
+  void rebalanceMulti(AIGNodeTRef root, SmallVecImpl<AIGNodeTRef> &multi) {
     assert(!multi.empty());
-    if (multi.size() == 1)
-      return toNew(multi[0]);
-    if (multi.size() == 2)
-      return createNew(root, toNew(multi[0]), toNew(multi[1]));
+    if (multi.size() == 1) {
+      updateNew(root, multi[0]);
+      return;
+    }
+    if (multi.size() == 2) {
+      createNew(root, toNew(multi[0]), toNew(multi[1]));
+      return;
+    }
     for (auto &nodeRef : multi) {
       nodeRef = toNew(nodeRef);
     }
@@ -129,35 +131,30 @@ public:
       return getHeight(l) > getHeight(r);
     };
     std::make_heap(multi.begin(), multi.end(), comp);
-    // std::sort(multi.begin(), multi.end(), [this](auto l, auto r) {
-    //   return getHeight(l) < getHeight(r);
-    // });
     while (true) {
       std::pop_heap(multi.begin(), multi.end(), comp);
       auto lhs = multi.pop_back_val();
       if (multi.empty())
-        return lhs;
+        return;
       std::pop_heap(multi.begin(), multi.end(), comp);
       auto rhs = multi.pop_back_val();
       auto node = createNew(root, lhs, rhs);
       multi.push_back(node);
       std::push_heap(multi.begin(), multi.end(), comp);
     }
-    dyno_unreachable("rebalance bug");
   }
 
-  AIGNodeTRef balanceImpl(AIGNodeTRef root) {
+  void balanceImpl(AIGNodeTRef root) {
+    if (root.isTerminator() || newIDs[root.idx()] != uint32_t(-1))
+      return;
     auto multi = findMulti(root);
     DYNO_DBG("AIG Multigate", dumpRefs(multi));
     AIG::simplifyMulti(multi);
-    DYNO_DBG(dbgs() << "simplifed to: "; dumpRefs(multi));
+    DYNO_DBG(dbgs() << "simplified to: "; dumpRefs(multi));
     for (auto &node : multi) {
-      if (node.isSpecial())
-        continue;
       balanceImpl(node);
     }
-    auto newOut = rebalanceMulti(root, multi);
-    return newOut;
+    rebalanceMulti(root, multi);
   }
 
   template <typename U> void dumpRefs(const U &range) {
@@ -174,11 +171,9 @@ public:
     newIDs.clear();
     newIDs.resize(aig.numGateIDs(), -1);
     newIDs[0] = 0;
-    for (auto node : aig.gates()) {
-      updateHeight(node);
-    }
     for (auto out : aig.outputs) {
-      newAig.createOutput(balanceImpl(out.as<AIGNodeTRef>()));
+      balanceImpl(out.getSingleOperand());
+      newAig.createOutput(toNew(out.getSingleOperand()));
     }
     return std::move(newAig);
   }

@@ -22,7 +22,7 @@ public:
   }
 
   void setPtr(T *ptr) { set(ptr, field()); }
-  T *getPtr() { return reinterpret_cast<T *>(field().getNumClr()); }
+  T *getPtr() { return reinterpret_cast<T *>(field().getRawClr()); }
 
   T &operator*() { return *getPtr(); }
   T *operator->() { return getPtr(); }
