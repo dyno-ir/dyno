@@ -13,6 +13,7 @@
 #include "hw/run/HWInterpreter.h"
 #include "ieee1800/sv_vpi_user.h"
 #include "ieee1800/vpi_user.h"
+#include "support/SmallVec.h"
 #include "vpi/Iterator.h"
 #include "vpi/Range.h"
 #include <cstring>
@@ -69,6 +70,7 @@ class Callback {
 public:
   PLI_INT32 (*func)(struct t_cb_data *);
   char *user_data;
+  uint64_t time;
   uint reason;
   uint idx;
 };
@@ -84,6 +86,10 @@ public:
   SmallVecImpl<Callback *> &get(uint reason) {
     ensure(reason);
     return callbacks[reason];
+  }
+  void deleteAll(uint reason) {
+    while (!callbacks[reason].empty())
+      remove(callbacks[reason].back());
   }
 
   Callback *insert(Callback c) {
@@ -109,7 +115,7 @@ public:
   InstrRef topInstance;
   Callbacks callbacks;
   NewDeleteObjStore<Iterator> iterators;
-  uint64_t time;
+  uint64_t time = 0;
   bool finishFlag = false;
 
   FatDynObjRef<> fromName(std::string_view name) {
@@ -191,7 +197,6 @@ int main(int argc, char **argv) {
   interpreter.fstWriter.emplace("trace.fst");
   interpreter.setup();
   interpreter.fstInitHierarchy();
-  interpreter.initialEval();
 
   handler = new VPIHandler;
   handler->ctx = &ctx;
@@ -200,7 +205,7 @@ int main(int argc, char **argv) {
   handler->topInstance = topInstance;
   load_vpi_module(argv[2]);
 
-  auto &cbs = handler->callbacks.get(cbStartOfSimulation);
+  SmallVec<Callback *, 4> cbs = handler->callbacks.get(cbStartOfSimulation);
   for (auto *cb : cbs) {
     t_cb_data data = {};
     data.reason = cbStartOfSimulation;
@@ -209,27 +214,25 @@ int main(int argc, char **argv) {
   }
 
   while (!handler->finishFlag) {
-    interpreter.eval();
+    interpreter.evalActive();
 
-    auto &cbs = handler->callbacks.get(cbReadWriteSynch);
-    bool any = !cbs.empty();
+    SmallVec<Callback *, 4> cbs = handler->callbacks.get(cbReadWriteSynch);
     for (auto *cb : cbs) {
       t_cb_data data = {};
       data.reason = cbReadWriteSynch;
       data.user_data = cb->user_data;
       cb->func(&data);
     }
-    if (any)
-      continue;
+    interpreter.evalNBA();
 
-    auto &cbs2 = handler->callbacks.get(cbAfterDelay);
+    SmallVec<Callback *, 4> cbs2 = handler->callbacks.get(cbAfterDelay);
     for (auto *cb : cbs2) {
       t_cb_data data = {};
       data.reason = cbAfterDelay;
       data.user_data = cb->user_data;
       cb->func(&data);
-      handler->time++; // fixme: correct increment
-      interpreter.forwardTime(1);
+      interpreter.forwardTime(cb->time);
+      handler->time += cb->time;
     }
   }
 }
@@ -533,7 +536,10 @@ vpiHandle vpi_put_value(vpiHandle object, p_vpi_value value_p,
   }
   case vpiBinStrVal: {
     std::string_view view{value_p->value.str};
-    handler->interpreter->setReg(reg, *BigInt::parseBin(ArrayRef{view}));
+    auto val = BigInt::parseBin(ArrayRef{view});
+    if (!val)
+      abort();
+    handler->interpreter->setReg(reg, *val);
     break;
   }
   case vpiIntVal: {
@@ -551,12 +557,23 @@ vpiHandle vpi_register_cb(p_cb_data cb_data_p) {
   switch (cb_data_p->reason) {
   case cbStartOfSimulation:
   case cbEndOfSimulation:
-  case cbAfterDelay:
   case cbReadWriteSynch: {
-    return (vpiHandle)handler->callbacks.insert(Callback{
-        cb_data_p->cb_rtn, cb_data_p->user_data, uint(cb_data_p->reason), 0});
+
+    return (vpiHandle)handler->callbacks.insert(
+        Callback{cb_data_p->cb_rtn, cb_data_p->user_data, ~0UL,
+                 uint(cb_data_p->reason), 0});
+  }
+  case cbAfterDelay: {
+    if (cb_data_p->time->type != vpiSimTime)
+      abort();
+    uint64_t t = (uint64_t(cb_data_p->time->high) << 32) | cb_data_p->time->low;
+    // t += handler->time;
+    return (vpiHandle)handler->callbacks.insert(
+        Callback{cb_data_p->cb_rtn, cb_data_p->user_data, t,
+                 uint(cb_data_p->reason), 0});
   }
   default:
+    abort();
     return NULL;
   }
 }
