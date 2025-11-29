@@ -274,7 +274,15 @@ public:
       auto trueV = getValue(instr.other(1)->as<HWValue>());
       auto falseV = getValue(instr.other(2)->as<HWValue>());
       assert(sel.getNumBits() == 1);
-      val = !sel.valueEquals(0) ? trueV : falseV;
+
+      if (sel.allBitsUndef()) {
+        BigInt mask; // mask of unequal bits
+        BigInt::bitsExactEqual4S(mask, trueV, falseV);
+        mask |= PatBigInt::undef(mask.getNumBits());
+        // xor in to set unequal bits x
+        BigInt::xorOp4S(val, trueV, mask);
+      } else
+        val = !sel.valueEquals(0) ? trueV : falseV;
       break;
     }
 
@@ -304,12 +312,14 @@ public:
     }
   }
 
-  void eval() {
+  void evalActive() {
     // active
     while (!evalStack.empty()) {
       evalProc(evalStack.pop_back_val());
     }
+  }
 
+  void evalNBA() {
     // deferred stores
     for (auto trigger : firedTriggers) {
       for (auto deferred : deferredStores[trigger]) {
@@ -319,6 +329,11 @@ public:
       deferredStores[trigger].clear();
     }
     firedTriggers.clear();
+  }
+
+  void eval() {
+    evalActive();
+    evalNBA();
   }
 
   void initialEval() {
@@ -335,7 +350,8 @@ public:
 
     for (auto reg : ctx.getRegs()) {
       if (reg.getNumBits())
-        regVals[reg] = BigInt::fromU64(0, *reg.getNumBits());
+        regVals[reg] =
+            PatBigInt::fromFourState(FourState::SX, *reg.getNumBits());
     }
 
     for (auto trigger : ctx.getTriggers()) {
@@ -352,6 +368,7 @@ public:
       print.printRefOrUse(reg.oref());
       os << ": " << regVals[reg.oref()] << "\n";
     }
+    os << "\n";
   };
 
   void evalPrint() {
@@ -412,7 +429,7 @@ public:
       if (!ref)
         continue;
       auto reg = ctx.getRegs().resolve(ref);
-      fstWriter->updateValue(reg, BigInt::fromU64(0, *reg.getNumBits()));
+      fstWriter->updateValue(reg, regVals[reg]);
     }
   }
 

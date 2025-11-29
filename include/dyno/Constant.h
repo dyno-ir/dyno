@@ -1995,6 +1995,9 @@ public:
     } else
       insertOp(out, lhs, rhs, custom ? 2 * addr : addr);
 
+    if (!rhs.getIs4S())
+      out.conv4To2StateIfPossible();
+
     // out.toStream(dbgs(), 2);
     // dbgs() << "\n";
   }
@@ -2065,9 +2068,11 @@ public:
       case '1':
         val = FourState::S1;
         break;
+      case 'X':
       case 'x':
         val = FourState::SX;
         break;
+      case 'Z':
       case 'z':
         val = FourState::SZ;
         break;
