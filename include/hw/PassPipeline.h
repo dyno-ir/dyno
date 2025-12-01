@@ -49,7 +49,7 @@ class PassPipeline {
   ModuleInlinePass moduleInline{ctx};
   LoopSimplifyPass loopSimplify{ctx};
   LinearizeControlFlowPass linearizeControlFlow{ctx, instCombine};
-  AggressiveDeadCodeEliminationPass agressiveDCE{ctx};
+  AggressiveDeadCodeEliminationPass aggressiveDCE{ctx};
   LowerOpsPass lowerOps{ctx};
   AIGConstructPass aigConstr{ctx};
   ABCPass abc{ctx};
@@ -83,9 +83,9 @@ public:
       HWPrinter{std::cerr}.printCtx(ctx);
     }
     if (dumpAfterAll)
-      dumpDyno(std::string("dumps/_") + std::to_string(idx++) +
-               __PRETTY_FUNCTION__);
-    // dumpDyno();
+      //   dumpDyno(std::string("dumps/_") + std::to_string(idx++) +
+      //            __PRETTY_FUNCTION__);
+      dumpDyno();
     if (checkAfterAll && !skipCheck)
       checkPass.run();
   }
@@ -112,6 +112,8 @@ public:
     runPass(seqToComb);
     ssaConstr.config.mode = SSAConstructPass::Config::IMMEDIATE;
     runPass(ssaConstr);
+    processLinearize.config.retainInnerDeps = false;
+    processLinearize.config.retainIODeps = false;
     runPass(processLinearize);
     runPass(ssaConstr);
     ssaConstr.config.mode = SSAConstructPass::Config::DEFERRED;
@@ -122,13 +124,13 @@ public:
     runPass(instCombine);
 
     runPass(loopSimplify);
-    runPass(agressiveDCE);
+    runPass(aggressiveDCE);
     runPass(cse, true);
     orderInstrs.config.assertNoCircularDeps = true;
     orderInstrs.config.moveStoresBeforeLoads = false;
     runPass(orderInstrs);
     runPass(instCombine);
-    runPass(agressiveDCE);
+    runPass(aggressiveDCE);
 
     runPass(instCombine);
   }
@@ -144,11 +146,11 @@ public:
     printAfterAll = false;
     debugType = 0;
     runPass(parseLiberty);
-    runPass(agressiveDCE);
+    runPass(aggressiveDCE);
     runPass(cse, true);
     runPass(orderInstrs);
     runPass(instCombine);
-    runPass(agressiveDCE);
+    runPass(aggressiveDCE);
     std::tie(printAfterAll, debugType) = old;
 
     // todo properly
@@ -165,8 +167,6 @@ public:
     checkPass.config.noLoops = true;
     // dumpDyno("a.dyno");
     runPass(linearizeControlFlow);
-    processLinearize.config.retainInnerDeps = 0;
-    processLinearize.config.retainIODeps = 0;
     // runPass(ssaConstr);
     // runPass(loadCoalesce);
     // runPass(instCombine);
@@ -175,7 +175,10 @@ public:
     // orderInstrs.config.moveStoresBeforeLoads = false;
     // runPass(orderInstrs);
 
+    processLinearize.config.retainInnerDeps = 0;
+    processLinearize.config.retainIODeps = 0;
     runPass(processLinearize);
+
     ssaConstr.config.mode = SSAConstructPass::Config::IMMEDIATE;
     runPass(ssaConstr);
     runPass(loadCoalesce);
@@ -186,7 +189,7 @@ public:
     orderInstrs.config.moveStoresBeforeLoads = false;
     runPass(orderInstrs);
     runPass(instCombine);
-    runPass(agressiveDCE);
+    runPass(aggressiveDCE);
 
     // lower subtract and ordering compares for CSE/share
     lowerOps.config = LowerOpsPass::Config{
@@ -221,11 +224,20 @@ public:
     ssaConstr.config.mode = SSAConstructPass::Config::IMMEDIATE;
     runPass(ssaConstr);
     runPass(instCombine);
-    runPass(agressiveDCE);
+    runPass(aggressiveDCE);
 
     processLinearize.config.retainInnerDeps = 0;
     processLinearize.config.retainIODeps = 0;
     runPass(processLinearize);
+    orderInstrs.config.moveStoresBeforeLoads = true;
+    runPass(orderInstrs);
+    runPass(ssaConstr);
+    runPass(loadCoalesce);
+    runPass(instCombine);
+    runPass(cse);
+    runPass(aggressiveDCE);
+
+
     linearizeControlFlow.config.flattenLoops = 1;
     linearizeControlFlow.config.flattenMultiway = 1;
     runPass(linearizeControlFlow);
@@ -233,7 +245,7 @@ public:
     runPass(ssaConstr);
     runPass(loadCoalesce);
     runPass(instCombine);
-    runPass(agressiveDCE);
+    runPass(aggressiveDCE);
 
     runPass(instCombine);
     runPass(cse, true);
@@ -245,8 +257,10 @@ public:
     runPass(instCombine);
     runPass(cse);
     runPass(instCombine);
+    runPass(aggressiveDCE);
 
-    runPass(muxTreeOpt);
+    //muxTreeOpt.config.exploreConditions = true;
+    //runPass(muxTreeOpt);
     runPass(cse);
     runPass(instCombine);
 
@@ -285,7 +299,7 @@ public:
     runPass(instCombine);
     runPass(ssaConstr);
     runPass(instCombine);
-    runPass(agressiveDCE);
+    runPass(aggressiveDCE);
 
     // sink MUXs again for ff inference
     instCombine.config.liftMUX = false;
@@ -301,7 +315,7 @@ public:
     // dumpDyno("pre_mux_opt.dyno");
     muxTreeOpt.config.dontCareMUXsOnly = true;
     muxTreeOpt.config.exploreConditions = false;
-    runPass(muxTreeOpt);
+    //runPass(muxTreeOpt);
     runPass(instCombine);
     // dumpDyno("postmux_opt.dyno");
 
@@ -318,7 +332,7 @@ public:
     runPass(orderInstrs);
     runPass(ssaConstr);
     runPass(instCombine);
-    runPass(agressiveDCE);
+    runPass(aggressiveDCE);
 
     // lower the rest
     lowerOps.config = LowerOpsPass::Config{
@@ -337,24 +351,24 @@ public:
     runPass(lowerOps);
     instCombine.config.fuseCommutative = false;
     runPass(instCombine);
-    runPass(agressiveDCE);
+    runPass(aggressiveDCE);
 
     // dumpDyno("a.dyno");
     runPass(aigConstr);
     // dumpDyno("b.dyno");
-    runPass(agressiveDCE);
+    runPass(aggressiveDCE);
     runPass(abc);
-    runPass(agressiveDCE);
+    runPass(aggressiveDCE);
     runPass(removeBufs);
 
     runPass(cse);
     runPass(instCombine);
-    runPass(agressiveDCE);
+    runPass(aggressiveDCE);
 
     runPass(constMap);
     runPass(cse);
     runPass(instCombine);
-    runPass(agressiveDCE);
+    runPass(aggressiveDCE);
 
     orderInstrs.config.assertNoCircularDeps = false;
     runPass(orderInstrs);

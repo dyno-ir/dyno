@@ -27,6 +27,8 @@ public:
     return val;
   }
 
+  OperandRef getUnderlyingOperand() const { return base; }
+
   AddressGenTermOperand(OperandRef base) : base(base) {}
 };
 
@@ -87,7 +89,9 @@ public:
     return self().other(getTermsBaseIndex() + TermSize * i + 2);
   }
 
-  OperandRef base() { return self().other(self().addressGenBaseIndex()); }
+  OperandRef base() {
+    return *(self().other_begin() + self().addressGenBaseIndex());
+  }
   uint32_t getBase() {
     return hasBase() ? base()->template as<ConstantRef>().getExactVal() : 0;
   }

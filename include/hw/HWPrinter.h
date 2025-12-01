@@ -114,7 +114,7 @@ public:
       if (asTrigger->size() != 0) {
         str << "(";
         for (size_t i = 0; i < asTrigger->size(); i++) {
-          auto arr = std::array<const char *, 4>{"pos", "neg", "any", "iff"};
+          auto arr = std::array<const char *, 5>{"pos", "neg", "any", "iff", "iffn"};
           str << arr[size_t(asTrigger->getMode(i))];
           if (i != asTrigger->size() - 1)
             str << ", ";
@@ -143,8 +143,8 @@ public:
       return *range.begin();
     }
       // case HW_WIRE.type: {
-      //   // todo properly (or just not)
-      //   return ref.getObjID() + 10000;
+      //  // todo properly (or just not)
+      //  return ref.getObjID() + 10000;
       // }
     }
     return std::nullopt;
@@ -213,9 +213,13 @@ public:
     return true;
   }
 
+  [[nodiscard]] auto bindCtx(HWContext &ctx) {
+    return std::pair(sourceLocInfo.bind(&ctx.sourceLocInfo),
+                          regNames.bind(&ctx.regNameInfo));
+  }
+
   void printCtx(HWContext &ctx) {
-    auto locTok = sourceLocInfo.bind(&ctx.sourceLocInfo);
-    auto regTok = regNames.bind(&ctx.regNameInfo);
+    auto tok = bindCtx(ctx);
     for (auto mod : ctx.getModules()) {
       if (mod.iref().isOpc(HW_STDCELL_DEF))
         continue;
@@ -225,8 +229,7 @@ public:
 
   using Printer::printInstr;
   void printInstr(InstrRef instr, HWContext &ctx) {
-    auto locTok = sourceLocInfo.bind(&ctx.sourceLocInfo);
-    auto regTok = regNames.bind(&ctx.regNameInfo);
+    auto tok = bindCtx(ctx);
     printInstr(instr);
   }
 

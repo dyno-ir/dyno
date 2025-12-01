@@ -138,8 +138,19 @@ public:
     return proc->as<ProcessIRef>();
   }
 
-  static bool is_impl(FatObjRef<Instr> ref) {
-    return InstrRef{ref}.isOpc(HW_MODULE_DEF, HW_STDCELL_DEF);
+  static bool is_impl(FatDynObjRef<> ref) {
+    if (!ref.is<InstrRef>())
+      return false;
+    return ref.as<InstrRef>().isOpc(HW_MODULE_DEF, HW_STDCELL_DEF);
+  }
+
+  // todo: signature caching should be more explicit
+  void rebuildSignature() {
+    mod()->ports.clear();
+    for (auto port : ports()) {
+      mod()->ports.emplace_back(port.as<RegisterIRef>().oref(),
+                                port.getDialectOpcode());
+    }
   }
 };
 

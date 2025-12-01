@@ -1,14 +1,25 @@
+
 #pragma once
+#include "FST.h"
+#include "dyno/Instr.h"
+#include "dyno/ObjMap.h"
+#include "hw/HWInstr.h"
 #include "hw/HWPrinter.h"
+#include "hw/HWValue.h"
+#include "hw/LoadStore.h"
+#include "hw/Process.h"
 #include "hw/Register.h"
+#include "hw/SensList.h"
+#include "hw/Wire.h"
 #include "op/IDs.h"
+#include "op/StructuredControlFlow.h"
 #include "support/Debug.h"
-#include "support/ErrorRecovery.h"
 
 #include "dyno/Constant.h"
 #include "hw/HWContext.h"
 #include "hw/IDs.h"
 #include "hw/Module.h"
+#include "support/ErrorRecovery.h"
 #include "support/Utility.h"
 namespace dyno {
 
@@ -21,9 +32,62 @@ class HWInterpreter {
 public:
   ObjMapVec<Wire, BigInt> wireVals;
   ObjMapVec<Register, BigInt> regVals;
+  SmallVec<ProcessIRef, 16> evalStack;
+  struct DeferredStore {
+    StoreIRef store;
+    uint32_t addr;
+    BigInt value;
+  };
+  std::optional<FSTWriter<Register, Wire>> fstWriter;
+
+  // register to operand in TriggerIRef
+  ObjMapVec<Register, SmallVec<OperandRef, 1>> triggers;
+  ObjMapVec<Trigger, SmallVec<DeferredStore, 16>> deferredStores;
+  SmallDenseSet<TriggerRef, 4> firedTriggers;
+  std::optional<Range<InstrRef::iterator>> loopYieldVals;
+
   bool trace = false;
 
 private:
+  void queueTriggers(RegisterIRef reg) {
+    for (auto use : triggers[reg.oref()]) {
+      auto instr = use.instr().as<TriggerIRef>();
+      auto idx = use - instr.other_begin();
+      switch (instr.oref()->getMode(idx)) {
+      case SensMode::POSEDGE:
+        if (regVals[reg.oref()].valueEquals(1))
+          firedTriggers.insert(instr.oref());
+        break;
+      case SensMode::NEGEDGE:
+        if (regVals[reg.oref()].valueEquals(0))
+          firedTriggers.insert(instr.oref());
+        break;
+      case SensMode::ANYEDGE:
+        firedTriggers.insert(instr.oref());
+        break;
+      default:
+      case SensMode::IFF:
+      case SensMode::IFFN:
+        report_fatal_error("not yet implemented");
+      }
+    }
+  }
+  void onValueChange(RegisterIRef reg) {
+    if (fstWriter)
+      fstWriter->updateValue(reg.oref(), regVals[reg.oref()]);
+    scheduleDependentForEval(reg);
+    queueTriggers(reg);
+  }
+  void scheduleDependentForEval(RegisterIRef reg) {
+    for (auto use : reg.oref().uses()) {
+      if (!use.instr().isOpc(HW_LOAD))
+        continue;
+      auto load = use.instr().as<LoadIRef>();
+      auto proc = load.parentProc(ctx);
+      evalStack.emplace_back(proc);
+    }
+  }
+
   GenericBigIntRef getValue(HWValue value) {
     if (auto asConst = value.dyn_as<ConstantRef>())
       return GenericBigIntRef{asConst};
@@ -32,7 +96,7 @@ private:
     if (val.getNumBits() == 0) {
       DYNO_DBG("HWInterpreter", {
         std::print(dbgs(), "undefined value, def instr:\n");
-        dumpInstr(wire.getDefI());
+        dumpInstr(wire.getDefI(), ctx);
       });
       dyno_unreachable("undefined value");
     }
@@ -54,25 +118,6 @@ private:
     return b;
   }
 
-  void runInsert(BigInt &out, GenericBigIntRef base, GenericBigIntRef val,
-                 GenericBigIntRef addr, GenericBigIntRef len) {
-    assert(addr.getNumBits() == 32 && len.getNumBits() == 32);
-    auto bits = out.getNumBits();
-
-    BigInt low;
-    BigInt::rangeSelectOp4S(low, base, 0, len.getExactVal());
-
-    BigInt high;
-    BigInt::rangeSelectOp4S(low, base, addr.getExactVal() + len.getExactVal(),
-                            base.getNumBits() -
-                                (addr.getExactVal() + len.getExactVal()));
-    assert(len.getExactVal() == val.getNumBits());
-
-    BigInt::concatOp4S(out, val, low);
-    BigInt::concatOp4S(out, high, out);
-    assert(out.getNumBits() == bits);
-  }
-
   template <auto Func> void runNAry(InstrRef instr) {
     auto &val = wireVals[instr.def(0)->as<WireRef>()];
     val = getValue(instr.other(0)->as<HWValue>());
@@ -81,6 +126,31 @@ private:
           return getValue(ref->as<HWValue>());
         }),
         Func);
+  }
+
+  uint32_t evalAddress(OperandRef op) {
+    if (op == op.instr().end())
+      return 0;
+    auto base = op->as<ConstantRef>();
+    uint32_t addr = base.getExactVal();
+
+    while ((op + 1) != op.instr().end()) {
+      auto term = AddressGenTermOperand{op + 1};
+      auto idx = getValue(term.getIdx()).getExactVal();
+      assert((!term.getMax() || idx < *term.getMax()) &&
+             "address out of bounds");
+      addr += term.getFact() * idx;
+    }
+
+    return addr;
+  }
+
+  void runStore(RegisterIRef reg, GenericBigIntRef val, uint32_t addr) {
+    auto &regVal = regVals[reg.oref()];
+    auto oldCopy = regVal;
+    BigInt::insertOp4S(regVal, regVal, val, addr);
+    if (oldCopy != regVal)
+      onValueChange(reg);
   }
 
 public:
@@ -102,6 +172,16 @@ public:
     break;                                                                     \
   }
       FOR_HW_N_OPS(LAMBDA)
+#undef LAMBDA
+
+#define LAMBDA(opc, pred)                                                      \
+  case *opc: {                                                                 \
+    wireVals[instr.def(0)->as<WireRef>()] = ConstantRef::fromFourState(        \
+        BigInt::icmpOp4S(getValue(instr.other(0)->as<HWValue>()),              \
+                         getValue(instr.other(1)->as<HWValue>()), pred));      \
+    break;                                                                     \
+  }
+      FOR_OP_ALL_COMPARE_OPS(LAMBDA)
 #undef LAMBDA
 
     case *HW_CONCAT: {
@@ -128,35 +208,20 @@ public:
     }
 
     case *HW_SPLICE: {
-      bool first = true;
-      auto &val = wireVals[instr.def(0)->as<WireRef>()];
-      for (int i = instr.getNumOthers() - 3; i >= 0; i -= 3) {
-        auto len = getValue(instr.other(i + 2)->as<HWValue>());
-        auto addr = getValue(instr.other(i + 1)->as<HWValue>());
-        auto raw = getValue(instr.other(i)->as<HWValue>());
-        assert(addr.getNumBits() == 32 && len.getNumBits() == 32);
-
-        if (first)
-          BigInt::rangeSelectOp4S(val, raw, addr.getExactVal(),
-                                  len.getExactVal());
-        else {
-          BigInt tmp;
-          BigInt::rangeSelectOp4S(tmp, raw, addr.getExactVal(),
-                                  len.getExactVal());
-          BigInt::concatOp4S(val, tmp, val);
-        }
-        first = false;
-      }
-      break;
+      auto splice = instr.as<SpliceIRef>();
+      auto outW = splice.out()->as<WireRef>();
+      auto &out = wireVals[outW];
+      auto in = getValue(splice.in()->as<HWValue>());
+      BigInt::rangeSelectOp4S(out, in, evalAddress(splice.base()),
+                              *outW.getNumBits());
     }
 
     case *HW_INSERT: {
-      auto &out = wireVals[instr.def(0)->as<WireRef>()];
-      auto base = getValue(instr.other(0)->as<HWValue>());
-      auto val = getValue(instr.other(1)->as<HWValue>());
-      auto addr = getValue(instr.other(2)->as<HWValue>());
-      auto len = getValue(instr.other(3)->as<HWValue>());
-      runInsert(out, base, val, addr, len);
+      auto insert = instr.as<InsertIRef>();
+      auto &out = wireVals[insert.out()->as<WireRef>()];
+      auto base = getValue(insert.val()->as<HWValue>());
+      auto in = getValue(insert.in()->as<HWValue>());
+      BigInt::insertOp4S(out, base, in, evalAddress(insert.base()));
       break;
     }
 
@@ -191,30 +256,40 @@ public:
       break;
     }
 
-    case *HW_STORE: {
-      auto val = getValue(instr.other(0)->as<HWValue>());
-      auto &reg = regVals[instr.other(1)->as<RegisterRef>()];
-      if (instr.getNumOperands() == 2) {
-        reg = val;
-        break;
+    case *HW_STORE_DEFER: {
+      auto store = instr.as<StoreIRef>();
+      auto addr = evalAddress(store.base());
+
+      TriggerIRef trig = store.trigger();
+      if (!trig) {
+        auto proc = store.parentProc(ctx).as<ProcessIRef>();
+        if (proc.getNumOthers() < 1 || !proc.other(0)->is<TriggerRef>())
+          abort();
+        trig = proc.other(0)->as<TriggerRef>().iref();
       }
-      auto addr = getValue(instr.other(2)->as<HWValue>());
-      auto len = getValue(instr.other(3)->as<HWValue>());
-      runInsert(reg, GenericBigIntRef{reg}, val, addr, len);
+
+      deferredStores[trig.oref()].emplace_back(store, addr,
+                                               getValue(store.value()));
+      break;
+    }
+
+    case *HW_STORE: {
+      auto store = instr.as<StoreIRef>();
+      auto val = getValue(store.value());
+      runStore(store.reg().iref(), val, evalAddress(store.base()));
       break;
     }
 
     case *HW_LOAD: {
-      auto &val = wireVals[instr.def(0)->as<WireRef>()];
-      auto &reg = regVals[instr.other(0)->as<RegisterRef>()];
-      if (instr.getNumOperands() == 2) {
+      auto load = instr.as<LoadIRef>();
+      auto &val = wireVals[load.value()];
+      auto &reg = regVals[load.reg()];
+      if (load.isFullReg()) {
         val = reg;
         break;
       }
-      auto addr = getValue(instr.other(1)->as<HWValue>());
-      auto len = getValue(instr.other(2)->as<HWValue>());
-      assert(addr.getNumBits() == 32 && len.getNumBits() == 32);
-      BigInt::rangeSelectOp4S(val, reg, addr.getExactVal(), len.getExactVal());
+      BigInt::rangeSelectOp4S(val, reg, evalAddress(load.base()),
+                              load.getLen());
       break;
     }
 
@@ -224,13 +299,21 @@ public:
       auto trueV = getValue(instr.other(1)->as<HWValue>());
       auto falseV = getValue(instr.other(2)->as<HWValue>());
       assert(sel.getNumBits() == 1);
-      val = !sel.valueEquals(0) ? trueV : falseV;
+
+      if (sel.allBitsUndef()) {
+        BigInt mask; // mask of unequal bits
+        BigInt::bitsExactEqual4S(mask, trueV, falseV);
+        mask |= PatBigInt::undef(mask.getNumBits());
+        // xor in to set unequal bits x
+        BigInt::xorOp4S(val, trueV, mask);
+      } else
+        val = !sel.valueEquals(0) ? trueV : falseV;
       break;
     }
 
     case *OP_ASSERT: {
       auto val = getValue(instr.other(0)->as<HWValue>());
-      if (val.valueEquals(0)) {
+      if (!val.valueEquals(1)) {
         std::print(errs, "Assertion Failed at: ");
         for (auto loc : ctx.sourceLocInfo.getSourceLocs(instr))
           std::print(errs, "{}:{}.{}-{}.{}\n", loc.fileName, loc.beginLine,
@@ -239,42 +322,216 @@ public:
       }
       break;
     }
+
+    case *OP_IF: {
+      auto ifInstr = instr.as<IfInstrRef>();
+      auto cond = getValue(ifInstr.getCondValue()->as<HWValue>());
+      InstrRef yieldI = nullref;
+      if (cond.valueEquals(1)) {
+        evalBlock(ifInstr.getTrueBlock());
+        yieldI = ifInstr.getInnerYieldTrue();
+      } else if (ifInstr.hasFalseBlock()) {
+        evalBlock(ifInstr.getFalseBlock());
+        yieldI = ifInstr.getInnerYieldFalse();
+      }
+
+      if (yieldI) {
+        auto range = ifInstr.yieldValues().deref().as<WireRef>().zip(
+            yieldI.others().deref().as<HWValue>());
+        for (auto [dst, src] : range)
+          wireVals[dst] = getValue(src);
+      }
+      break;
+    }
+
+    case *OP_SWITCH: {
+      auto switchInstr = instr.as<SwitchInstrRef>();
+      auto cond = getValue(switchInstr.cond()->as<HWValue>());
+      CaseInstrRef caseInstr = nullref;
+      CaseInstrRef defaultInstr = nullref;
+
+      for (auto caseI : Range{switchInstr.block()}.as<CaseInstrRef>()) {
+        if (caseI.isDefault()) {
+          defaultInstr = caseI;
+          continue;
+        }
+        for (auto val : caseI.labels().deref().as<HWValue>())
+          // todo: casex, casez
+          if (getValue(val) == cond) {
+            caseInstr = caseI;
+          }
+      }
+      if (!caseInstr)
+        caseInstr = defaultInstr;
+      if (!caseInstr)
+        break;
+
+      evalBlock(caseInstr.block());
+
+      InstrRef yieldI = caseInstr.getYield();
+      if (yieldI) {
+        auto range = switchInstr.yieldValues().deref().as<WireRef>().zip(
+            yieldI.others().deref().as<HWValue>());
+        for (auto [dst, src] : range)
+          wireVals[dst] = getValue(src);
+      }
+      break;
+    }
+
+    case *OP_WHILE: {
+      auto whileInstr = instr.as<WhileInstrRef>();
+      loopYieldVals = whileInstr.inputValues();
+
+      while (true) {
+        evalBlock(whileInstr.getCondBlock());
+        auto condV = getValue((*loopYieldVals->begin())->as<HWValue>());
+        // drop the yielded condition
+        loopYieldVals = loopYieldVals->drop_front();
+        if (!condV.valueEquals(1))
+          break;
+
+        evalBlock(whileInstr.getBodyBlock());
+      }
+
+      auto range = whileInstr.yieldValues().deref().as<WireRef>().zip(
+          loopYieldVals->deref().as<HWValue>());
+
+      for (auto [dst, src] : range)
+        wireVals[dst] = getValue(src);
+
+      break;
+    }
+
+    case *OP_FOR: {
+      auto forInstr = instr.as<ForInstrRef>();
+      loopYieldVals = forInstr.inputValues();
+
+      for (BigInt it = forInstr.getLower()->as<ConstantRef>();
+           it != forInstr.getUpper()->as<ConstantRef>();
+           it += forInstr.getStep()->as<ConstantRef>()) {
+        // handle iterator unyield value manually
+        wireVals[forInstr.getUnyield().def(0)->as<WireRef>()] = it;
+        evalBlock(forInstr.getBlock());
+      }
+
+      auto range = forInstr.yieldValues().deref().as<WireRef>().zip(
+          loopYieldVals->deref().as<HWValue>());
+
+      for (auto [dst, src] : range)
+        wireVals[dst] = getValue(src);
+
+      break;
+    }
+
+    case *OP_YIELD: {
+      auto parentI = HWInstrRef{instr}.parentBlock(ctx).defI();
+      if (parentI.isOpc(OP_WHILE, OP_DO_WHILE, OP_FOR))
+        loopYieldVals = instr.others();
+
+      break;
+    }
+
+    case *OP_UNYIELD: {
+      auto parentI = HWInstrRef{instr}.parentBlock(ctx).defI();
+      auto defs = instr.defs();
+      if (parentI.isOpc(OP_FOR))
+        defs = defs.drop_front();
+      auto range =
+          defs.deref().as<WireRef>().zip(loopYieldVals->deref().as<HWValue>());
+      for (auto [dst, src] : range)
+        wireVals[dst] = getValue(src);
+      break;
+    }
+
+    default: {
+      dumpInstr(instr);
+      report_fatal_error("unsupported opcode");
+    }
     }
   }
 
-  void evalProc(ProcessIRef proc) {
+  void evalBlock(BlockRef block) {
     HWPrinter print{dbgs()};
-    for (auto instr : proc.block()) {
+    auto tok = print.bindCtx(ctx);
+    for (auto instr : block) {
       runInstr(instr);
-      if (trace)
-        if (instr.getNumDefs() == 1 && instr.def(0)->is<WireRef>()) {
-          dbgs() << wireVals[instr.def(0)->as<WireRef>()] << " <- ";
-          print.printInstr(instr);
+      if (trace) {
+        for (auto [back, def] : instr.defs().mark_back()) {
+          if (!def->is<WireRef>())
+            continue;
+          dbgs() << wireVals[def->as<WireRef>()];
+          dbgs() << (back ? " <- " : ", ");
         }
+        print.printInstr(instr);
+      }
     }
+  }
+
+  void evalProc(ProcessIRef proc) { evalBlock(proc.block()); }
+
+  void evalActive() {
+    // active
+    while (!evalStack.empty()) {
+      evalProc(evalStack.pop_back_val());
+    }
+  }
+
+  void evalNBA() {
+    // deferred stores
+    for (auto trigger : firedTriggers) {
+      for (auto deferred : deferredStores[trigger]) {
+        runStore(deferred.store.reg().iref(), GenericBigIntRef{deferred.value},
+                 deferred.addr);
+      }
+      deferredStores[trigger].clear();
+    }
+    firedTriggers.clear();
   }
 
   void eval() {
-    // todo: proper ordering, event loop
+    evalActive();
+    evalNBA();
+  }
+
+  void initialEval() {
+    for (auto proc : module.procs())
+      evalStack.emplace_back(proc);
+    eval();
+  }
+
+  void setup() {
     wireVals.resize(ctx.getWires().numIDs());
     regVals.resize(ctx.getRegs().numIDs());
-    for (auto proc : module.procs()) {
-      evalProc(proc);
+    triggers.resize(ctx.getRegs().numIDs());
+    deferredStores.resize(ctx.getRegs().numIDs());
+
+    for (auto reg : ctx.getRegs()) {
+      if (reg.getNumBits())
+        regVals[reg] =
+            PatBigInt::fromFourState(FourState::SX, *reg.getNumBits());
+    }
+
+    for (auto trigger : ctx.getTriggers()) {
+      auto iref = trigger.iref();
+      for (auto use : iref.others())
+        triggers[use->as<RegisterRef>()].emplace_back(use);
     }
   }
+
+  void dumpRegs() {
+    HWPrinter print{os};
+    auto tok = print.bindCtx(ctx);
+    for (auto reg : module.ports()) {
+      print.printRefOrUse(reg.oref());
+      os << ": " << regVals[reg.oref()] << "\n";
+    }
+    os << "\n";
+  };
 
   void evalPrint() {
     auto oldTrace = trace;
     trace = true;
     std::print(os, "Evaluating module with:\n");
-    HWPrinter print{os};
-
-    auto dumpRegs = [&]() {
-      for (auto reg : module.ports()) {
-        print.printRefOrUse(reg.oref());
-        os << ": " << regVals[reg.oref()] << "\n";
-      }
-    };
     dumpRegs();
     eval();
     std::print(os, "Finished eval. Results:\n");
@@ -282,10 +539,19 @@ public:
     trace = oldTrace;
   }
 
-  void setReg(unsigned i, BigInt b) {
+  void setReg(uint i, BigInt b) {
     auto it = module.block().begin();
     std::advance(it, i);
-    regVals[it->as<RegisterIRef>().oref()] = b;
+    auto reg = it->as<RegisterIRef>();
+    setReg(reg, b);
+  }
+
+  void setReg(RegisterIRef reg, BigInt b) {
+    auto &slot = regVals[reg.oref()];
+    if (slot == b)
+      return;
+    slot = b;
+    onValueChange(reg);
   }
 
   BigInt &getReg(unsigned i) {
@@ -299,6 +565,34 @@ public:
     for (auto reg : ctx.getRegs()) {
       regVals[reg] = PatBigInt::undef(*reg.getNumBits());
     }
+  }
+
+  void fstInitHierarchy() {
+    for (auto [ref, val] : regVals) {
+      if (!ref)
+        continue;
+      auto reg = ctx.getRegs().resolve(ref);
+      auto names = ctx.regNameInfo.getNames(reg);
+      auto name = names.empty() ? "reg" + std::to_string(reg.getObjID())
+                                : (*names.begin());
+      fstWriter->createVar(reg, RegWireFSTWriter::VarType::INTEGER,
+                           RegWireFSTWriter::VarDir::INPUT, *reg.getNumBits(),
+                           name.c_str());
+    }
+
+    fstWriter->endDefinitions();
+
+    for (auto [ref, val] : regVals) {
+      if (!ref)
+        continue;
+      auto reg = ctx.getRegs().resolve(ref);
+      fstWriter->updateValue(reg, regVals[reg]);
+    }
+  }
+
+  void forwardTime(uint64_t incr) {
+    if (fstWriter)
+      fstWriter->stepForward(incr);
   }
 
 public:

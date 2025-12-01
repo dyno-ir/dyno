@@ -637,12 +637,15 @@ public:
           auto proc = build.buildProcess();
           build.pushInsertPoint(proc.block().end());
 
+          bool isOutput = false;
+
           // output args are wrapped in an empty RHS assignment
           if (auto *asAssign =
                   expr->as_if<slang::ast::AssignmentExpression>()) {
             assert(asAssign->right().kind ==
                    slang::ast::ExpressionKind::EmptyArgument);
             val = handle_expr(asAssign->left());
+            isOutput = true;
           } else
             val = handle_expr(*conn->getExpression());
 
@@ -650,7 +653,8 @@ public:
 
           if (auto *asLV = val->dyn_as<RegLValue>(); asLV && asLV->fullReg()) {
             portRegs.emplace_back(asLV->lvReg);
-          } else {
+          }
+          else {
             build.pushInsertPoint(regsBackIt.succ());
             portRegs.emplace_back(build.buildRegister());
             regsBackIt = build.insert.pred();
@@ -663,7 +667,11 @@ public:
               print.error(expr->sourceRange);
 
             build.pushInsertPoint(proc.block().end());
-            build.buildStore(portRegs.back(), val->proGetValue(build));
+            if (isOutput)
+              val->as<LValue>().storeVal(build, build.buildLoad(portRegs.back()));
+            else
+              build.buildStore(portRegs.back(), val->proGetValue(build));
+
             build.popInsertPoint();
           }
         }

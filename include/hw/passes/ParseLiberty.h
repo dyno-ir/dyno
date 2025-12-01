@@ -14,7 +14,7 @@
 
 namespace dyno {
 
-class LibertyLexer : public Lexer<false, false, true> {
+class LibertyLexer : public Lexer<false, true> {
 public:
   // #define FOR_KEYWORDS(x) x(library) x(define)
   // #define FUNC(x) #x,
@@ -37,7 +37,9 @@ public:
   };
 
   LibertyLexer(ArrayRef<char> src, std::string &&srcPath)
-      : Lexer(src, std::move(srcPath), Operators, Keywords) {}
+      : Lexer(src, std::move(srcPath), Operators, Keywords) {
+    config.numericParseType = Lexer::Config::NumericParseType::RAW;
+  }
 };
 
 class LibertyParser {
