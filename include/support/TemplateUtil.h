@@ -1,11 +1,16 @@
 #pragma once
 #include <cstdint>
+#include <type_traits>
 #include <utility>
 
 template <typename First, typename... Rest>
 constexpr auto getFirst(First &&first, Rest &&...) {
   return std::forward<First>(first);
 }
+
+template <typename First, typename... Rest> struct get_first {
+  using t = First;
+};
 
 template <std::size_t Bytes> struct uint_of_size;
 

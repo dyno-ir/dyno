@@ -14,6 +14,7 @@
 #include "ieee1800/sv_vpi_user.h"
 #include "ieee1800/vpi_user.h"
 #include "support/SmallVec.h"
+#include "support/Tokenizer.h"
 #include "vpi/Iterator.h"
 #include "vpi/Range.h"
 #include <cstring>
@@ -45,26 +46,6 @@ struct Args {
   char **argv;
 };
 Args args;
-
-class Tokenizer {
-  std::string_view s, delims;
-  size_t pos = 0;
-
-public:
-  Tokenizer(std::string_view str, std::string_view d = " ")
-      : s(str), delims(d) {}
-  std::optional<std::string_view> next() {
-    pos = s.find_first_not_of(delims, pos);
-    if (pos == std::string_view::npos)
-      return std::nullopt;
-    size_t end = s.find_first_of(delims, pos);
-    if (end == std::string_view::npos)
-      end = s.size();
-    auto token = s.substr(pos, end - pos);
-    pos = end;
-    return token;
-  }
-};
 
 class Callback {
 public:
@@ -119,9 +100,8 @@ public:
   bool finishFlag = false;
 
   FatDynObjRef<> fromName(std::string_view name) {
-    Tokenizer tok{name, "."};
     FatDynObjRef ref = nullref;
-    while (auto t = tok.next()) {
+    for (auto t : Tokenizer{name, "."}) {
       if (!ref) {
         if (t != "top")
           return nullref;
@@ -197,6 +177,7 @@ int main(int argc, char **argv) {
   interpreter.fstWriter.emplace("trace.fst");
   interpreter.setup();
   interpreter.fstInitHierarchy();
+  interpreter.trace = true;
 
   handler = new VPIHandler;
   handler->ctx = &ctx;

@@ -16,6 +16,7 @@ public:
   explicit HWParser(HWContext &ctx) : ctx(ctx) {
     interfaces.registerVal(
         DIALECT_HW, static_cast<Parser::obj_parse_fn>(&HWParser::parseHW));
+    this->sourceLocInfo = &ctx.sourceLocInfo;
   }
   auto &getInstrs() { return ctx.getInstrs(); }
   auto &getConstants() { return ctx.getConstants(); }

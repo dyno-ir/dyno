@@ -1,12 +1,18 @@
 
 #pragma once
 #include "FST.h"
+#include "dyno/Instr.h"
 #include "dyno/ObjMap.h"
+#include "hw/HWInstr.h"
 #include "hw/HWPrinter.h"
+#include "hw/HWValue.h"
 #include "hw/LoadStore.h"
+#include "hw/Process.h"
 #include "hw/Register.h"
 #include "hw/SensList.h"
+#include "hw/Wire.h"
 #include "op/IDs.h"
+#include "op/StructuredControlFlow.h"
 #include "support/Debug.h"
 
 #include "dyno/Constant.h"
@@ -38,6 +44,7 @@ public:
   ObjMapVec<Register, SmallVec<OperandRef, 1>> triggers;
   ObjMapVec<Trigger, SmallVec<DeferredStore, 16>> deferredStores;
   SmallDenseSet<TriggerRef, 4> firedTriggers;
+  std::optional<Range<InstrRef::iterator>> loopYieldVals;
 
   bool trace = false;
 
@@ -89,7 +96,7 @@ private:
     if (val.getNumBits() == 0) {
       DYNO_DBG("HWInterpreter", {
         std::print(dbgs(), "undefined value, def instr:\n");
-        dumpInstr(wire.getDefI());
+        dumpInstr(wire.getDefI(), ctx);
       });
       dyno_unreachable("undefined value");
     }
@@ -165,6 +172,16 @@ public:
     break;                                                                     \
   }
       FOR_HW_N_OPS(LAMBDA)
+#undef LAMBDA
+
+#define LAMBDA(opc, pred)                                                      \
+  case *opc: {                                                                 \
+    wireVals[instr.def(0)->as<WireRef>()] = ConstantRef::fromFourState(        \
+        BigInt::icmpOp4S(getValue(instr.other(0)->as<HWValue>()),              \
+                         getValue(instr.other(1)->as<HWValue>()), pred));      \
+    break;                                                                     \
+  }
+      FOR_OP_ALL_COMPARE_OPS(LAMBDA)
 #undef LAMBDA
 
     case *HW_CONCAT: {
@@ -243,8 +260,16 @@ public:
       auto store = instr.as<StoreIRef>();
       auto addr = evalAddress(store.base());
 
-      deferredStores[store.trigger().oref()].emplace_back(
-          store, addr, getValue(store.value()));
+      TriggerIRef trig = store.trigger();
+      if (!trig) {
+        auto proc = store.parentProc(ctx).as<ProcessIRef>();
+        if (proc.getNumOthers() < 1 || !proc.other(0)->is<TriggerRef>())
+          abort();
+        trig = proc.other(0)->as<TriggerRef>().iref();
+      }
+
+      deferredStores[trig.oref()].emplace_back(store, addr,
+                                               getValue(store.value()));
       break;
     }
 
@@ -288,7 +313,7 @@ public:
 
     case *OP_ASSERT: {
       auto val = getValue(instr.other(0)->as<HWValue>());
-      if (val.valueEquals(0)) {
+      if (!val.valueEquals(1)) {
         std::print(errs, "Assertion Failed at: ");
         for (auto loc : ctx.sourceLocInfo.getSourceLocs(instr))
           std::print(errs, "{}:{}.{}-{}.{}\n", loc.fileName, loc.beginLine,
@@ -297,20 +322,152 @@ public:
       }
       break;
     }
+
+    case *OP_IF: {
+      auto ifInstr = instr.as<IfInstrRef>();
+      auto cond = getValue(ifInstr.getCondValue()->as<HWValue>());
+      InstrRef yieldI = nullref;
+      if (cond.valueEquals(1)) {
+        evalBlock(ifInstr.getTrueBlock());
+        yieldI = ifInstr.getInnerYieldTrue();
+      } else if (ifInstr.hasFalseBlock()) {
+        evalBlock(ifInstr.getFalseBlock());
+        yieldI = ifInstr.getInnerYieldFalse();
+      }
+
+      if (yieldI) {
+        auto range = ifInstr.yieldValues().deref().as<WireRef>().zip(
+            yieldI.others().deref().as<HWValue>());
+        for (auto [dst, src] : range)
+          wireVals[dst] = getValue(src);
+      }
+      break;
+    }
+
+    case *OP_SWITCH: {
+      auto switchInstr = instr.as<SwitchInstrRef>();
+      auto cond = getValue(switchInstr.cond()->as<HWValue>());
+      CaseInstrRef caseInstr = nullref;
+      CaseInstrRef defaultInstr = nullref;
+
+      for (auto caseI : Range{switchInstr.block()}.as<CaseInstrRef>()) {
+        if (caseI.isDefault()) {
+          defaultInstr = caseI;
+          continue;
+        }
+        for (auto val : caseI.labels().deref().as<HWValue>())
+          // todo: casex, casez
+          if (getValue(val) == cond) {
+            caseInstr = caseI;
+          }
+      }
+      if (!caseInstr)
+        caseInstr = defaultInstr;
+      if (!caseInstr)
+        break;
+
+      evalBlock(caseInstr.block());
+
+      InstrRef yieldI = caseInstr.getYield();
+      if (yieldI) {
+        auto range = switchInstr.yieldValues().deref().as<WireRef>().zip(
+            yieldI.others().deref().as<HWValue>());
+        for (auto [dst, src] : range)
+          wireVals[dst] = getValue(src);
+      }
+      break;
+    }
+
+    case *OP_WHILE: {
+      auto whileInstr = instr.as<WhileInstrRef>();
+      loopYieldVals = whileInstr.inputValues();
+
+      while (true) {
+        evalBlock(whileInstr.getCondBlock());
+        auto condV = getValue((*loopYieldVals->begin())->as<HWValue>());
+        // drop the yielded condition
+        loopYieldVals = loopYieldVals->drop_front();
+        if (!condV.valueEquals(1))
+          break;
+
+        evalBlock(whileInstr.getBodyBlock());
+      }
+
+      auto range = whileInstr.yieldValues().deref().as<WireRef>().zip(
+          loopYieldVals->deref().as<HWValue>());
+
+      for (auto [dst, src] : range)
+        wireVals[dst] = getValue(src);
+
+      break;
+    }
+
+    case *OP_FOR: {
+      auto forInstr = instr.as<ForInstrRef>();
+      loopYieldVals = forInstr.inputValues();
+
+      for (BigInt it = forInstr.getLower()->as<ConstantRef>();
+           it != forInstr.getUpper()->as<ConstantRef>();
+           it += forInstr.getStep()->as<ConstantRef>()) {
+        // handle iterator unyield value manually
+        wireVals[forInstr.getUnyield().def(0)->as<WireRef>()] = it;
+        evalBlock(forInstr.getBlock());
+      }
+
+      auto range = forInstr.yieldValues().deref().as<WireRef>().zip(
+          loopYieldVals->deref().as<HWValue>());
+
+      for (auto [dst, src] : range)
+        wireVals[dst] = getValue(src);
+
+      break;
+    }
+
+    case *OP_YIELD: {
+      auto parentI = HWInstrRef{instr}.parentBlock(ctx).defI();
+      if (parentI.isOpc(OP_WHILE, OP_DO_WHILE, OP_FOR))
+        loopYieldVals = instr.others();
+
+      break;
+    }
+
+    case *OP_UNYIELD: {
+      auto parentI = HWInstrRef{instr}.parentBlock(ctx).defI();
+      auto defs = instr.defs();
+      if (parentI.isOpc(OP_FOR))
+        defs = defs.drop_front();
+      auto range =
+          defs.deref().as<WireRef>().zip(loopYieldVals->deref().as<HWValue>());
+      for (auto [dst, src] : range)
+        wireVals[dst] = getValue(src);
+      break;
+    }
+
+    default: {
+      dumpInstr(instr);
+      report_fatal_error("unsupported opcode");
+    }
     }
   }
 
-  void evalProc(ProcessIRef proc) {
+  void evalBlock(BlockRef block) {
     HWPrinter print{dbgs()};
-    for (auto instr : proc.block()) {
+    auto tok = print.bindCtx(ctx);
+    for (auto instr : block) {
       runInstr(instr);
-      if (trace)
-        if (instr.getNumDefs() == 1 && instr.def(0)->is<WireRef>()) {
-          dbgs() << wireVals[instr.def(0)->as<WireRef>()] << " <- ";
-          print.printInstr(instr);
+      if (trace) {
+        for (auto [back, def] : instr.defs().mark_back()) {
+          if (!def->is<WireRef>())
+            continue;
+          dbgs() << wireVals[def->as<WireRef>()];
+          dbgs() << (back ? " <- " : ", ");
         }
+        print.printInstr(instr);
+      }
     }
   }
+
+  void evalProc(ProcessIRef proc) { evalBlock(proc.block()); }
 
   void evalActive() {
     // active

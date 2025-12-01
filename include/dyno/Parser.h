@@ -4,13 +4,18 @@
 #include "dyno/Instr.h"
 #include "dyno/Interface.h"
 #include "dyno/Obj.h"
+#include "hw/DebugInfo.h"
 #include "hw/HWPrinter.h"
 #include "hw/passes/ParseLiberty.h"
 #include "support/ErrorRecovery.h"
 #include "support/Lexer.h"
+#include "support/SmallVec.h"
 #include "support/TempBind.h"
+#include "support/Tokenizer.h"
 #include "support/Utility.h"
 #include "support/VectorLUT.h"
+#include <charconv>
+#include <string>
 
 namespace dyno {
 
@@ -171,8 +176,10 @@ protected:
   TempBindVal<DynoLexer> lexer;
   VectorLUT<FatDynObjRef<>> identMap;
 
-  using obj_parse_fn = FatDynObjRef<> (Parser::*)(DialectType type, ArrayRef<char> name);
+  using obj_parse_fn = FatDynObjRef<> (Parser::*)(DialectType type,
+                                                  ArrayRef<char> name);
   Interfaces<NUM_DIALECTS, obj_parse_fn> interfaces;
+  SourceLocInfo<Instr> *sourceLocInfo = nullptr;
 
   struct ParseOperand {
     FatDynObjRef<> ref;
@@ -198,7 +205,8 @@ protected:
   ParseOperand parseConstantOperand() {
     lexer->popEnsure(DynoLexer::op_hash);
     auto litTok = lexer->popEnsure(Token::BIG_INT_LITERAL);
-    return ParseOperand{getConstants().findOrInsert(*litTok.bigIntLit.value), false};
+    return ParseOperand{getConstants().findOrInsert(*litTok.bigIntLit.value),
+                        false};
   }
 
   ParseOperand parseObjectOperand() {
@@ -246,6 +254,58 @@ protected:
     }
   }
 
+  void parseSourceLoc(InstrRef instr) {
+    Token tok = lexer->popEnsure(Token::STRING_LITERAL);
+    if (!sourceLocInfo)
+      return;
+    auto pos = tok.strLit.value.find_first_of(':');
+    auto file = tok.strLit.value.substr(0, pos);
+    auto lines = tok.strLit.value.substr(pos);
+    auto linesSplit = Tokenizer{lines, ".-:"};
+    SmallVec<uint32_t, 4> lineNums;
+    lineNums.push_back_range(
+        Range{linesSplit}.transform([](size_t, std::string_view view) {
+          uint32_t val;
+          auto res = std::from_chars(view.begin(), view.end(), val);
+          if (res.ec != std::errc())
+            report_fatal_error("expected line number");
+          return val;
+        }));
+    uint32_t startLine, startCol, endLine, endCol;
+
+    // ignore actual syntax, just assume
+    // 1: line
+    // 2: line + col
+    // 3: line, start col, end col
+    // 4: all
+    auto sz = lineNums.size();
+    lineNums.resize(4);
+    switch (sz) {
+    case 1:
+      lineNums[2] = lineNums[0];
+      lineNums[1] = 0;
+      lineNums[2] = 0;
+      break;
+    case 2:
+      lineNums[2] = lineNums[0];
+      lineNums[3] = lineNums[1];
+      break;
+    case 3:
+      // make end col num
+      lineNums[3] = lineNums[2];
+      // all on one line
+      lineNums[2] = lineNums[0];
+      break;
+    case 4:
+      break;
+    default:
+      report_fatal_error("invalid line numbers");
+    }
+
+    sourceLocInfo->addSrcLoc(instr, file, lineNums[0], lineNums[1], lineNums[2],
+                          lineNums[3]);
+  }
+
   InstrRef parseInstr() {
     auto opc = lexer->popOpcode();
 
@@ -280,6 +340,15 @@ protected:
     ib.addRefs(Range{operands.begin(), operands.begin() + numDefs});
     ib.other();
     ib.addRefs(Range{operands.begin() + numDefs, operands.end()});
+
+    if (lexer->popIf(DynoLexer::op_abropen)) {
+      while (lexer->peekIs(Token::STRING_LITERAL)) {
+        parseSourceLoc(instr);
+        if (!lexer->popIf(DynoLexer::op_comma))
+          break;
+      }
+      lexer->popEnsure(DynoLexer::op_abrclose);
+    }
 
     return instr;
   }
