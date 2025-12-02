@@ -30,65 +30,6 @@
 
 namespace dyno {
 
-template <typename T, size_t NumInline> class CexprVec {
-  using value_type = T;
-  using size_type = uint32_t;
-  using iterator = T *;
-  using const_iterator = const T *;
-  using param_type = T &;
-
-  std::array<T, NumInline> arr = {};
-  uint32_t sz;
-
-public:
-  constexpr iterator begin() { return arr.begin(); }
-  constexpr iterator end() { return arr.begin() + sz; }
-  constexpr const_iterator begin() const { return arr.begin(); }
-  constexpr const_iterator end() const { return arr.begin() + sz; }
-
-  constexpr T &back() {
-    assert(!empty());
-    return *(end() - 1);
-  }
-  constexpr const T &back() const {
-    assert(!empty());
-    return *(end() - 1);
-  }
-  constexpr T &front() {
-    assert(!empty());
-    return *(begin());
-  }
-  constexpr const T &front() const {
-    assert(!empty());
-    return *(begin());
-  }
-
-  constexpr void pop_back() {
-    assert(!empty());
-    sz--;
-  }
-
-  constexpr T &operator[](size_type i) {
-    assert(i < sz);
-    return arr[i];
-  }
-  constexpr const T &operator[](size_type i) const {
-    assert(i < sz);
-    return arr[i];
-  }
-
-  constexpr void reserve(size_type) {}
-  constexpr void resize(size_type newSize) {
-    assert(newSize <= NumInline);
-    sz = newSize;
-  }
-  constexpr size_t size() const { return sz; }
-  constexpr bool empty() const { return size() == 0; }
-
-  constexpr CexprVec() = default;
-  constexpr CexprVec(size_type sz) : sz(sz) {}
-};
-
 class ConstantRef;
 template <typename T> class ConstantBuilderBase;
 

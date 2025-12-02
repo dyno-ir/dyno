@@ -1,6 +1,6 @@
+#include "aig/AIGCut.h"
 #include "aig/passes/AIGBalance.h"
 #include "aig/passes/AIGSim.h"
-#include "aig/AIGCut.h"
 #include <aig/AIG.h>
 #include <aig/AIGPrinter.h>
 #include <cassert>
@@ -10,7 +10,6 @@
 using namespace dyno;
 
 int main() {
-
   std::ofstream os{"dump-aig.dot"};
   AIGDotPrinter aigPrinter(os);
   AIG aig;
@@ -46,6 +45,9 @@ int main() {
   //     // os << "h: " << height[ref];
   // });
   aigPrinter.print(newAIG);
+
+  AIGCutGenerator aigCuts(newAIG);
+  aigCuts.run();
 
   // SATSolver s;
   // auto a = s.addVar();

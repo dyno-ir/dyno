@@ -16,6 +16,11 @@ template <typename T> constexpr T bit_mask(unsigned pos = 0) {
   return T(1) << pos;
 }
 
+template <typename T>
+constexpr T bit_mask_wrap(unsigned pos = 0, unsigned wrapSz = bit_mask_sz<T>) {
+  return bit_mask<T>(pos % wrapSz);
+}
+
 template <typename T> constexpr T bit_mask_msb(unsigned pos = 0) {
   assert(pos < bit_mask_sz<T>);
   return T(1) << (bit_mask_sz<T> - 1 - pos);

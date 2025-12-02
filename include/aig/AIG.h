@@ -104,12 +104,16 @@ public:
 
   // AIGNodeTRef() = delete;
   AIGNodeTRef(ObjID id) : ObjRef<AIGNode>(id) {}
-  constexpr AIGNodeTRef(uint32_t idx, bool invert = false)
+  explicit constexpr AIGNodeTRef(uint32_t idx, bool invert = false)
       : ObjRef<AIGNode>(AIGObjID{idx, invert}) {}
   AIGNodeTRef(ObjRef<AIGNode> ref) : ObjRef<AIGNode>(ref) {}
   AIGNodeTRef(nullref_t) : ObjRef<AIGNode>(ObjID::invalid()) {}
 
   static bool is_impl(FatAIGNodeRef);
+
+  friend bool operator<(const AIGNodeTRef &lhs, const AIGNodeTRef &rhs) {
+    return lhs.getObjID() < rhs.getObjID();
+  }
 
   friend std::ostream &operator<<(std::ostream &os, const AIGNodeTRef &ref) {
     if (ref.invert())
@@ -200,7 +204,7 @@ public:
   explicit operator AIGNodeRef() const {
     return AIGNodeRef{obj, &(*this)->node};
   }
-  explicit operator AIGNodeTRef() const { return AIGNodeTRef{obj}; }
+  operator AIGNodeTRef() const { return AIGNodeTRef{obj}; }
 
   FatAIGNodeRef inverted() const {
     FatAIGNodeRef rv = *this;
@@ -398,13 +402,13 @@ public:
       std::swap(lhs, rhs);
     AIGNodeTRef simple = simplify(lhs, rhs);
     if (simple) {
-      DYNO_DBG(dbgs() << "[Node] " << lhs << ", " << rhs << " -> simplified to "
-                      << simple << "\n");
+      DYNO_DBGV(dbgs() << "[AIG Node] " << lhs << ", " << rhs
+                       << " -> simplified to " << simple << "\n");
       return store.resolve(simple);
     }
     AIGNodeRef node = store.create(lhs.getObjID(), rhs.getObjID());
-    DYNO_DBG(dbgs() << "[Node] " << lhs << ", " << rhs << " -> " << node
-                    << "\n");
+    DYNO_DBGV(dbgs() << "[AIG Node] " << lhs << ", " << rhs << " -> " << node
+                     << "\n");
     return node;
   }
 
@@ -512,7 +516,9 @@ public:
 // FIMXE: should really canon special-ids to map into normal space
 template <typename Container> class AIGNodeMap {
 public:
-  using V = Container::value_type;
+  using value_type = typename Container::value_type;
+  using reference = typename Container::reference;
+  using V = typename Container::value_type;
   Container gates;
   Container special;
 
@@ -534,10 +540,10 @@ public:
     gates.clear();
     gates.resize(aig.numGateIDs(), defaultVal);
     special.clear();
-    special.resize(aig.numGateIDs(), defaultVal);
+    special.resize(aig.numSpecialIDs(), defaultVal);
   }
 
-  V &operator[](AIGNodeTRef node) {
+  reference operator[](AIGNodeTRef node) {
     if (node.isSpecial()) [[unlikely]]
       return special[node.getOffsetIdx()];
     return gates[node.idx()];
@@ -549,17 +555,30 @@ template <typename T> using AIGNodeVecMap = AIGNodeMap<std::vector<T>>;
 class AIGNodeRemap {
   AIGNodeVecMap<uint32_t> idMap;
 
-public:
-  AIGNodeRemap() = default;
-  AIGNodeRemap(AIG &aig) : idMap(aig, AIGObjID::invalid()) {}
+private:
+  void init() { idMap.gates[0] = 0; }
 
-  void reset(AIG &aig) { idMap.reset(aig, AIGObjID::invalid()); }
+public:
+  AIGNodeRemap() { idMap.gates.resize(1, 0); }
+  AIGNodeRemap(AIG &aig) : idMap(aig, AIGObjID::invalid()) { init(); }
+
+  void reset(AIG &aig) {
+    idMap.reset(aig, AIGObjID::invalid());
+    init();
+  }
+
+  void setupInputMap(AIG &oldAig, AIG &newAig) {
+    assert(oldAig.inputs.size() == newAig.inputs.size());
+    for (auto [oldIn, newIn] : Range{oldAig.inputs}.zip(newAig.inputs)) {
+      insert(oldIn.as<AIGNodeTRef>(), newIn.as<AIGNodeTRef>());
+    }
+  }
 
   AIGNodeTRef operator[](AIGNodeTRef node) {
     return AIGNodeTRef(idMap[node], node.invert());
   }
 
-  bool contains(AIGNodeTRef node) { return idMap[node]; }
+  bool contains(AIGNodeTRef node) { return idMap[node] != AIGObjID::invalid(); }
 
   void insert(AIGNodeTRef oldNode, AIGNodeTRef newNode) {
     idMap[oldNode] = newNode.idx();

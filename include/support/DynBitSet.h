@@ -18,7 +18,10 @@ public:
 protected:
   Container storage;
   using container_t = Container;
-  using word_t = Container::value_type;
+  using word_t = typename Container::value_type;
+  using value_type = word_t;
+  using reference = DynBitField<word_t>;
+
   static constexpr size_t WordBits = bit_mask_sz<word_t>;
   static constexpr size_t WordSymbs = WordBits / SymbolBits;
 
@@ -237,6 +240,8 @@ protected:
 public:
   using Base::ensureWords;
   using Base::resizeWords;
+  using typename Base::reference;
+  using typename Base::value_type;
   UnsizedBitSet(const UnsizedBitSet &) = default;
   UnsizedBitSet(UnsizedBitSet &&) = default;
   UnsizedBitSet &operator=(const UnsizedBitSet &) = default;
