@@ -975,7 +975,7 @@ template <typename Frag, size_t NumInline = 4> struct GenericPartitions {
     }
     frags.downsize(outIdx);
 
-    unsigned cur = 0;
+    unsigned cur [[maybe_unused]] = 0;
     for (auto frag : frags) {
       assert(frag.dstAddr == cur);
       cur = frag.dstAddr + frag.len;

@@ -10,9 +10,10 @@
 #include "hw/Wire.h"
 #include "hw/analysis/RegisterValue.h"
 #include "op/IDs.h"
+
 namespace dyno {
 class LinearExpressionAnalysis {
-  HWContext &ctx;
+  HWContext &ctx [[maybe_unused]];
 
   class LinearExpr {
   public:

@@ -8,7 +8,6 @@
 
 class Tokenizer {
   std::string_view s, delims;
-  size_t pos = 0;
 
 public:
   Tokenizer(std::string_view str, std::string_view d = " ")

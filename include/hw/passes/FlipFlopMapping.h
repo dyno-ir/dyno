@@ -523,7 +523,7 @@ public:
   }
 
   void findFlipFlopStdCells() {
-    unsigned count = 0;
+    unsigned count [[maybe_unused]] = 0;
     for (auto obj : ctx.getModules()) {
       auto mod = obj.iref();
       if (!mod.isOpc(HW_STDCELL_DEF))
@@ -648,7 +648,7 @@ public:
       }
     }
 
-    unsigned missing = 0;
+    unsigned missing [[maybe_unused]] = 0;
     for (auto entry : ffMap) {
       if (auto fixup = entry.dyn_as<FixupType>();
           fixup && *fixup == FixupType::FAIL)

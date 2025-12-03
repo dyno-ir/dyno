@@ -1,6 +1,3 @@
-
-#include "dyno/DialectInfo.h"
-#include "dyno/Instr.h"
 #include "include/Lexer.h"
 #include "include/Token.h"
 #include "support/Optional.h"
@@ -940,7 +937,7 @@ struct CodeGen {
           stack.emplace_back(anyorder->objects);
           continue;
         }
-        if (auto macro = op->dyn_as<MatchMacro>()) {
+        if (op->is<MatchMacro>()) {
           // macro can return anywhere from 0 to infinity objects.
           max = dyno::nullopt;
         }
@@ -1208,7 +1205,7 @@ struct CodeGen {
                          .createConstant = {replReg, constant->bigInt}});
         }
       } else
-        assert(0);
+        dyno_unreachable("Illegal rule");
 
       ops.emplace_back(BytecodeOp{.opcode = BytecodeOp::REPLACE_ALL_USES,
                                   .replAllUses = {origReg, replReg}});
@@ -1646,7 +1643,7 @@ struct CPPBackend {
           case CodeGen::RegType::LIST_ITER:
             return "*r" + std::to_string(i) + "";
           default:
-            assert(0);
+            dyno_unreachable("Invalid RegType");
           }
         };
         std::print(os, "if ({} != {}) ", getObjRef(op.checkEqual.lhsReg),

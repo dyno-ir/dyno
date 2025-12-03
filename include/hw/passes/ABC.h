@@ -6,7 +6,6 @@
 #include "hw/HWContext.h"
 #include "hw/HWInstr.h"
 #include "hw/IDs.h"
-#include "hw/LoadStore.h"
 #include "hw/Process.h"
 #include "support/ErrorRecovery.h"
 #include "support/Utility.h"
@@ -15,7 +14,7 @@
 namespace dyno {
 
 class BLIF_Printer {
-  HWContext &ctx;
+  HWContext &ctx [[maybe_unused]];
   std::ostream &os;
 
   std::string getName(AIGObjID idLit) const {
@@ -264,7 +263,7 @@ public:
 };
 
 class AIGERPrinter {
-  HWContext &ctx;
+  HWContext &ctx [[maybe_unused]];
   std::ostream &os;
 
   struct AIGERMeta {

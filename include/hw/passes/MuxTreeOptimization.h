@@ -313,12 +313,12 @@ private:
         }
       }
 
-      unsigned cntTrueLeft = 0;
+      unsigned cntTrueLeft [[maybe_unused]] = 0;
       for (auto entry : left->entries)
         if (entry.expr.isTrue())
           cntTrueLeft++;
       assert(cntTrueLeft <= 1);
-      unsigned cntTrueRight = 0;
+      unsigned cntTrueRight [[maybe_unused]] = 0;
       for (auto entry : right->entries)
         if (entry.expr.isTrue())
           cntTrueRight++;

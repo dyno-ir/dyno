@@ -6,20 +6,17 @@
 #include "hw/HWAbstraction.h"
 #include "hw/HWContext.h"
 #include "hw/HWInstr.h"
-#include "hw/HWPrinter.h"
 #include "hw/HWValue.h"
 #include "hw/IDs.h"
 #include "hw/LoadStore.h"
-#include "hw/analysis/BitAlignmentAnalysis.h"
 #include "hw/analysis/DelayAnalysis.h"
 #include "op/IDs.h"
 #include "support/Bits.h"
-#include "support/Debug.h"
 #include "support/ErrorRecovery.h"
 #include "support/Utility.h"
 #include <cstdint>
 #include <iterator>
-#include <numeric>
+
 namespace dyno {
 
 class LowerOpsPass {

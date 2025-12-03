@@ -139,7 +139,8 @@ public:
 //   PtrBitField<SATClause, 1> ptr;
 //
 // public:
-//   SATBinClauseOrPtr(SATBinClause binClause) : ptr(binClause.raw() << 1 | 1) {}
+//   SATBinClauseOrPtr(SATBinClause binClause) : ptr(binClause.raw() << 1 | 1)
+//   {}
 //
 //   SATBinClauseOrPtr(SATClauseRef ref) : ptr(ref.getPtr(), 0) {}
 //
@@ -204,8 +205,8 @@ public:
     watches.resize(getNumLiterals());
   }
 
-  bool assign() {}
-  bool analyze() {}
+  bool assign() { return false; }
+  bool analyze() { return false; }
 };
 
 inline void dumpClause(SATClauseRef c) {

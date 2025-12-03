@@ -2,7 +2,6 @@
 
 #include "aig/AIG.h"
 #include "aig/IDs.h"
-#include "dyno/IDImpl.h"
 #include "dyno/Instr.h"
 #include "dyno/NewDeleteObjStore.h"
 #include "dyno/Obj.h"
@@ -16,16 +15,13 @@
 #include "hw/Process.h"
 #include "op/IDs.h"
 #include "support/ArrayRef.h"
-#include "support/Bits.h"
 #include "support/Debug.h"
 #include "support/Utility.h"
-#include <array>
-#include <limits>
 
 namespace dyno {
 
 class AIGBuilder {
-  HWContext &ctx;
+  HWContext &ctx [[maybe_unused]];
   ObjMapVec<Wire, ThinArrayRef<AIGNodeTRef>> wireToAIGNode;
   std::vector<AIGNodeTRef> wireToAIGNodeStorage;
 

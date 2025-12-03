@@ -12,7 +12,7 @@ public:
       : next(std::move(func)) {}
 };
 
-template <> struct dyno::ObjTraits<Iterator> {
+template <> struct ObjTraits<Iterator> {
   static constexpr DialectType ty{VPI_ITERATOR};
   using FatRefT = FatObjRef<Iterator>;
 };

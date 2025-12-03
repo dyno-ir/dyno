@@ -304,7 +304,7 @@ PLI_BYTE8 *vpi_get_str(PLI_INT32 property, vpiHandle object) {
   case vpiType: {
     static const char name[] = "logic";
     data.clear();
-    data.append_range(Range{name, name + sizeof(name)});
+    data.insert(data.end(), name, name + sizeof(name));
     return data.data();
   }
   case vpiFullName: {
@@ -313,8 +313,8 @@ PLI_BYTE8 *vpi_get_str(PLI_INT32 property, vpiHandle object) {
     case *HW_MODULE: {
       auto mod = handler->ctx->getModules().resolve(ref.as<ObjRef<Module>>());
       data.clear();
-      data.append_range(
-          Range{mod->name.c_str(), mod->name.c_str() + mod->name.size() + 1});
+      data.insert(data.end(), mod->name.c_str(),
+                  mod->name.c_str() + mod->name.size() + 1);
       return data.data();
     }
     case *CORE_INSTR: {
@@ -324,7 +324,7 @@ PLI_BYTE8 *vpi_get_str(PLI_INT32 property, vpiHandle object) {
         // todo: once instances are specific
         static const char name[] = "top";
         data.clear();
-        data.append_range(Range{name, name + sizeof(name)});
+        data.insert(data.end(), name, name + sizeof(name));
         return data.data();
       }
       default:
@@ -378,7 +378,7 @@ void vpi_get_value(vpiHandle expr, p_vpi_value value_p) {
     std::stringstream str;
     auto val = getValue(handler->ctx->resolveObj(fromHandle(expr)));
     BigInt::stream_bin_4s_vlog(str, val, false);
-    buffer.append_range(Range{str.view()});
+    buffer.insert(buffer.end(), str.view().begin(), str.view().end());
     buffer.push_back(0);
     value_p->value.str = buffer.data();
     return;

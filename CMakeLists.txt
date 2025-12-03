@@ -16,5 +16,7 @@ if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
   add_link_options($<$<CONFIG:Debug>:-fsanitize=address>)
 endif()
 
+find_package(PkgConfig REQUIRED)
+
 add_subdirectory(lib)
 add_subdirectory(tools)

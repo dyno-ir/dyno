@@ -422,12 +422,12 @@ public:
         auto unyieldOp = unyield.operand(i + isOldForLoop);
         auto analysis = yieldVals[i];
 
-        if (auto *passthru =
+        if (auto *passthru [[maybe_unused]] =
                 std::get_if<YieldVal::Passthru>(&analysis.variant)) {
           unyieldOp->as<WireRef>().replaceAllUsesWith(analysis.init);
           continue;
         }
-        if (auto *invariant =
+        if (auto *invariant [[maybe_unused]] =
                 std::get_if<YieldVal::Invariant>(&analysis.variant)) {
           // there's some initial iteration shenanigans here, fixme
           // unyieldOp->as<WireRef>().replaceAllUsesWith(invariant->value);
@@ -467,7 +467,8 @@ public:
         def->as<WireRef>().replaceAllUsesWith(forUpper);
         continue;
       }
-      if (auto *passthru = std::get_if<YieldVal::Passthru>(&val.variant)) {
+      if (auto *passthru [[maybe_unused]] =
+              std::get_if<YieldVal::Passthru>(&val.variant)) {
         def->as<WireRef>().replaceAllUsesWith(loop.other(i)->fat());
       } else {
         // if (auto *invariant = std::get_if<YieldVal::Invariant>(&val.variant))

@@ -2867,7 +2867,7 @@ public:
     uint32_t hash = constantHash(ConstantRef{ref});
     auto it = map.find(hash);
     assert(it != map.end());
-    size_t cnt = 0;
+    size_t cnt [[maybe_unused]] = 0;
     for (; it != map.end();) {
       auto next = map.find_next(it);
       auto cand = store.resolve(it.val());
