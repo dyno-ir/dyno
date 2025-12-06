@@ -243,8 +243,16 @@ public:
           frame.idx++;
           stack.emplace_back(asInsert.val()->as<HWValue>(), 0);
         } else {
+
+          if (asInsert.getBase() < asInsert.getMemoryLen()) {
+            int64_t oobLen = int64_t(asInsert.getBase() + asInsert.getLen()) -
+                             asInsert.getMemoryLen();
+            BigInt::resizeOp4S(retVal.val, retVal.val,
+                               asInsert.getLen() - oobLen);
           BigInt::insertOp4S(frame.acc.val, frame.acc.val, retVal.val,
                              asInsert.getBase());
+          }
+
           retVal = std::move(frame.acc);
           cache.insert(wire, retVal);
           stack.pop_back();

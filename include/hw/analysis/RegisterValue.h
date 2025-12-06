@@ -453,6 +453,18 @@ struct RegisterValue : public RegisterFrags<RegisterValueFragment> {
 
   void overwriteNoMaterialize(RegisterValue &src, uint32_t srcAddr,
                               uint32_t dstAddr, uint32_t len) {
+
+    int64_t oobDst = int64_t(dstAddr + len) - this->getLen();
+    int64_t oobSrc = int64_t(srcAddr + len) - src.getLen();
+    int64_t oob = std::max(oobDst, oobSrc);
+    if (oob > 0) {
+      int64_t newLen = len - oob;
+      if (newLen < 0)
+        return;
+      len = newLen;
+    }
+
+
     auto it = getInsertIt(dstAddr);
     overwriteNoMaterialize(src, it, srcAddr, dstAddr, len);
   }
