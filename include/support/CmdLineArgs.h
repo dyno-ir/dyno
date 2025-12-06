@@ -39,8 +39,8 @@ class CmdLineArgBase {
   std::optional<char> shortName;
   ArrayRef<char> longName;
   ArrayRef<char> description;
-
   uint32_t flags;
+  uint32_t parseCount = 0;
   auto mandatory() { return BitField<uint32_t, 1, 0>{flags}; }
   auto positional() { return BitField<uint32_t, 1, 1>{flags}; }
   auto hidden() { return BitField<uint32_t, 1, 2>{flags}; }
@@ -75,7 +75,6 @@ public:
   static void parse(CmdLineArgBase *, const char *);
 };
 
-// Parse specializations
 struct CmdLineHelpObj {
   CmdLineArgHandler *parent;
 };
@@ -89,6 +88,7 @@ private:
   std::array<CmdLineArgBase *, 256> shortArgMap = {};
   std::unordered_map<std::string_view, CmdLineArgBase *> longArgMap;
   SmallVec<CmdLineArgBase *, 4> positionalArgs;
+  SmallVec<CmdLineArgBase *, 4> mandatoryArgs;
   SmallVec<CmdLineArgBase *, 128> allArgs;
 
   // registered as -h, --help, "parsing" this arg just prints help.
@@ -122,6 +122,8 @@ public:
     allArgs.emplace_back(&c);
     if (c.positional())
       positionalArgs.emplace_back(&c);
+    if (c.mandatory())
+      mandatoryArgs.emplace_back(&c);
   }
 
   void printHelpExit(bool isError = true) {
@@ -149,10 +151,10 @@ public:
         std::print(buf, "-{}", *arg.shortName);
         if (arg.flags & CmdLineArgFlags::VALUE_REQUIRED)
           std::print(buf, "=<value>");
-        if (!arg.longName.empty())
+        if (arg.longName.size() > 1)
           std::print(buf, ", ");
       }
-      if (!arg.longName.empty()) {
+      if (arg.longName.size() > 1) {
         std::print(buf, "--{}", arg.longName.data());
         if (arg.flags & CmdLineArgFlags::VALUE_REQUIRED)
           std::print(buf, "=<value>");
@@ -173,7 +175,7 @@ public:
     exit(isError ? -1 : 0);
   }
 
-  void parseLong(char **it, bool &argsEnd) {
+  void parseLong(char **&it, bool &argsEnd) {
     const char *end = *it + 2;
     while (isalnum(*end) || *end == '-' || *end == '_')
       ++end;
@@ -190,7 +192,7 @@ public:
       report_fatal_error("unknown argument: --{}", nm);
     auto &c = *mapIt->second;
 
-    const char *arg;
+    const char *arg = nullptr;
 
     if (*end != 0) {
       // --flag=ARG
@@ -210,10 +212,11 @@ public:
       } else if (c.valueRequired())
         report_fatal_error("flag --{} requires an argument", c.longName.data());
     }
+    c.parseCount++;
     c.parse(&c, arg);
   }
 
-  void parseShort(char **it) {
+  void parseShort(char **&it) {
     // short
 
     CmdLineArgBase *c;
@@ -234,8 +237,10 @@ public:
         break;
       }
       // optionless flags (all but last)
-      if (offset != 1)
+      if (offset != 1) {
+        c->parseCount++;
         c->parse(c, nullptr);
+      }
       offset++;
       c = mapIt;
       // value required -> no additional options
@@ -262,10 +267,14 @@ public:
     }
     if (c->noValue() && arg)
       report_fatal_error("flag -{} does not take an argument", *c->shortName);
+    c->parseCount++;
     c->parse(c, arg);
   }
 
-  void parsePositional(CmdLineArgBase &c, char *arg) { c.parse(&c, arg); }
+  void parsePositional(CmdLineArgBase &c, char *arg) {
+    c.parseCount++;
+    c.parse(&c, arg);
+  }
 
   void parse(int argc, char **argv) {
     if (argc < 1)
@@ -291,13 +300,15 @@ public:
       }
     }
 
-    if (positionalIdx != positionalArgs.size())
-      printHelpExit();
+    for (auto &arg : mandatoryArgs)
+      if (arg->parseCount == 0)
+        printHelpExit();
   }
 
   CmdLineArgHandler() { registerArg(helpArg); }
 };
 
+// Parse specializations
 template <>
 inline void CmdLineArg<CmdLineHelpObj>::parse(CmdLineArgBase *self,
                                               const char *ptr) {
