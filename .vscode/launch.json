@@ -26,6 +26,16 @@
       "args": [
         "${workspaceFolder}/sv/counter.sv"
       ],
+    },
+    {
+      "type": "lldb",
+      "request": "launch",
+      "name": "dyno-opt",
+      "program": "${workspaceFolder}/build/tools/dyno-opt/dyno-opt",
+      "args": [
+        "${workspaceFolder}/tools/dyno-sim/dyno-ir/counter.dyno",
+        "--help",
+      ],
     }
   ]
 }

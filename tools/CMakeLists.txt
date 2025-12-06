@@ -12,5 +12,6 @@ target_link_libraries(biginttest PRIVATE hw)
 
 add_subdirectory(dyno-sv)
 add_subdirectory(dyno-sim)
+add_subdirectory(dyno-opt)
 add_subdirectory(arrpat)
 add_subdirectory(dynomite)
