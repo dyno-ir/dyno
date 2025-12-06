@@ -234,7 +234,8 @@ public:
     runPass(ssaConstr);
     runPass(loadCoalesce);
     runPass(instCombine);
-    runPass(cse);
+    runPass(cse, true);
+    runPass(orderInstrs);
     runPass(aggressiveDCE);
 
 

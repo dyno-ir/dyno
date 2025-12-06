@@ -116,7 +116,6 @@ public:
 
   auto caseBlocks() {
     auto bl = block();
-    assert(getNumYieldValues() != 0 && "no yield values");
     return Range{bl.begin(), bl.end()}.transform([](size_t, InstrRef instr) {
       return instr.as<CaseInstrRef>().block();
     });

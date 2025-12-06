@@ -5,6 +5,7 @@
 #include "dyno/HierBlockIterator.h"
 #include "dyno/IDs.h"
 #include "dyno/Instr.h"
+#include "dyno/Obj.h"
 #include "dyno/Opcode.h"
 #include "hw/FlipFlop.h"
 #include "hw/HWAbstraction.h"
@@ -474,7 +475,8 @@ private:
         return nullref;
       if (frag.srcAddr == 0) {
         if (instr && instr.isOpc(OP_TRUNC) &&
-            instr.other(0)->as<HWValue>() == frag.ref)
+            instr.other(0)->as<HWValue>() == frag.ref &&
+            instr.def(0)->as<HWValue>().getNumBits() == frag.len)
           return nullref;
         return build.buildTrunc(frag.len, fragRef);
       } else {
@@ -1100,15 +1102,22 @@ private:
                                   instr.getNumOperands() - cnt);
     for (auto def : instr.defs()) {
       int idx = def - instr.getYieldValue(0);
+      auto ref = def->fat();
       if (idx >= 0 && (unsigned)idx < instr.getNumYieldValues()) {
-        if (unused(idx))
+        if (unused(idx)) {
+          // replace with nullref already, we don't want this double defined
+          // in case replaceUses is called.
+          def.replace(FatDynObjRef{nullref});
           continue;
+        }
         if (equal[idx]) {
-          replaceUses(def->template as<WireRef>(), yieldValues[idx]);
+          def.replace(FatDynObjRef{nullref});
+          replaceUses(ref.template as<WireRef>(), yieldValues[idx]);
           continue;
         }
       }
-      ib.addRef(def->fat());
+      def.replace(FatDynObjRef{nullref});
+      ib.addRef(ref);
     }
     ib.other();
     ib.addRefs(instr.others().transform(
