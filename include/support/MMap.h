@@ -11,8 +11,8 @@ class MMap {
   MutArrayRef<char> arr = MutArrayRef<char>::emptyRef();
 
 public:
-  MMap(const std::string &path) {
-    int fd = open(path.c_str(), O_RDONLY);
+  MMap(const char *path) {
+    int fd = open(path, O_RDONLY);
     if (fd < 0)
       return;
     struct stat st;
@@ -34,6 +34,7 @@ public:
     if (arr.size() != 0)
       munmap(static_cast<void *>(arr.data()), arr.size());
   }
+  MMap(const std::string &path) : MMap(path.c_str()) {}
 
   size_t size() const { return arr.size(); }
   const char *data() const { return arr.data(); }
