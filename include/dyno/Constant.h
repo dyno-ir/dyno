@@ -145,8 +145,7 @@ public:
     if (wordIdx >= self().getWords().size())
       self().expandUntil(wordIdx + 1);
     size_t len = self().getIs4S() ? 2 : 1;
-    DynBitField{self().getWords()[wordIdx], i % 32, len} =
-        val;
+    DynBitField{self().getWords()[wordIdx], i % 32, len} = val;
     self().normalize();
     self().conv4To2StateIfPossible();
   }
@@ -911,6 +910,12 @@ public:
                     std::min(lhs.getNumWords(), out.getNumWords()),
                     out.getWords().begin());
     };
+
+    if (newSize == 0) {
+      // zero bit zero
+      out = BigInt::fromU64(0, 0);
+      return;
+    }
 
     if (newSize == lhs.getRawNumBits()) {
       if constexpr (std::is_same_v<T, BigIntBase>)
@@ -1950,13 +1955,21 @@ public:
     out.setCustom(custom);
   }
 
+  void shrinkLenToCLog2() {
+    auto truncBits = getNumBits() - BigIntBase::leadingZeros4SExact(*this);
+    BigIntBase::resizeOp(*this, *this, truncBits);
+  }
+
   // String Ops
   constexpr static std::optional<BigIntBase>
   parseHex(ArrayRef<const char> digits) {
-    BigIntBase out = BigIntBase::ofLen(digits.size() * 4);
-    size_t i = digits.size() - 1;
-    for (const char digit : digits) {
+    auto separators = std::count(digits.begin(), digits.end(), '_');
+    BigIntBase out = BigIntBase::ofLen((digits.size() - separators) * 4);
 
+    size_t i = digits.size() - separators - 1;
+    for (const char digit : digits) {
+      if (digit == '_')
+        continue;
       unsigned val;
       if (digit >= '0' && digit <= '9')
         val = digit - '0';
@@ -1979,6 +1992,8 @@ public:
     BigIntBase base = BigIntBase::fromU64Pruned(10);
 
     for (const char digit : digits) {
+      if (digit == '_')
+        continue;
 
       uint64_t val;
       if (digit >= '0' && digit <= '9')
@@ -1991,16 +2006,17 @@ public:
       BigIntBase::addOp(out, out, BigIntBase::fromU64Pruned(val));
       // truncate off unused bits
       auto truncBits = out.numBits - BigIntBase::leadingZeros(out);
-      if (truncBits != 0)
-        BigIntBase::resizeOp(out, out, truncBits);
+      BigIntBase::resizeOp(out, out, truncBits);
     }
     return out;
   }
   constexpr static std::optional<BigIntBase>
   parseBin(ArrayRef<const char> digits) {
-    BigIntBase bigInt = BigIntBase::ofLen(digits.size());
+    auto separators = std::count(digits.begin(), digits.end(), '_');
+    BigIntBase bigInt = BigIntBase::ofLen(digits.size() - separators);
 
-    for (auto [i, digit] : Range{digits}.enumerate()) {
+    size_t i = 0;
+    for (auto digit : digits) {
       FourState val;
       switch (digit) {
       case '0':
@@ -2017,10 +2033,13 @@ public:
       case 'z':
         val = FourState::SZ;
         break;
+      case '_':
+        continue;
       default:
         return std::nullopt;
       }
-      bigInt.setBit(digits.size() - i - 1, val);
+      bigInt.setBit(digits.size() - separators - i - 1, val);
+      i++;
     }
     return bigInt;
   }
@@ -2117,7 +2136,8 @@ public:
   }
 
   template <typename T>
-  static void stream_bin(std::ostream &os, const T &self, bool separators = true) {
+  static void stream_bin(std::ostream &os, const T &self,
+                         bool separators = true) {
     for (ssize_t i = self.getRawNumBits() - 1; i >= 0; i--) {
       os << (self.getBit(i) ? '1' : '0');
       if (separators && i != 0 && (i % 8) == 0)
@@ -2126,7 +2146,8 @@ public:
   }
 
   template <typename T>
-  static void stream_bin_4s_vlog(std::ostream &os, const T &self, bool separators = true) {
+  static void stream_bin_4s_vlog(std::ostream &os, const T &self,
+                                 bool separators = true) {
     if (!self.getIs4S())
       return stream_bin(os, self, separators);
     std::array<char, 4> bitToStr = {'0', '1', 'z', 'x'};
@@ -2195,8 +2216,7 @@ public:
       // truncate off unused bits
 
       auto truncBits = init.numBits - BigIntBase::leadingZeros(init);
-      if (truncBits != 0)
-        BigIntBase::resizeOp(init, init, truncBits);
+      BigIntBase::resizeOp(init, init, truncBits);
     }
     return init;
   }
@@ -2297,6 +2317,10 @@ public:
 
     while (true) {
       int c = *ptr;
+      if (c == '_') {
+        ptr++;
+        continue;
+      }
       if (!isNumDigit(c))
         break;
       ptr++;
@@ -2402,10 +2426,26 @@ public:
         return c - 'a' + 10;
       return nullopt;
     };
+    auto unkdigit = [](char c) -> bool {
+      if (c == 'X' || c == 'x' || c == 'Z' || c == 'z')
+        return true;
+      return false;
+    };
 
     auto parsePack = [&]() -> std::pair<const char *, std::optional<BigInt>> {
       auto *digitsEnd = ptr;
       while (digitsEnd != end) {
+        if (unkdigit(*digitsEnd)) {
+          if (base == 2) {
+            ++digitsEnd;
+            continue;
+          }
+          break;
+        }
+        if (*digitsEnd == '_') {
+          ++digitsEnd;
+          continue;
+        }
         auto digit = xdigit(*digitsEnd);
         if (!digit || *digit >= base)
           break;
@@ -2416,6 +2456,8 @@ public:
         return std::pair(digitsEnd, parseHex(ArrayRef{ptr, digitsEnd}));
       if (base == 10)
         return std::pair(digitsEnd, parseDec(ArrayRef{ptr, digitsEnd}));
+      if (base == 2)
+        return std::pair(digitsEnd, parseBin(ArrayRef{ptr, digitsEnd}));
       dyno_unreachable("unsupported");
     };
 
@@ -2423,6 +2465,8 @@ public:
     if (!num)
       return std::unexpected(ParseError::INVALID_FORMAT);
     ptr = packEndPtr;
+
+    num->shrinkLenToCLog2();
 
     if ((*num).getNumBits() > len)
       return std::unexpected(ParseError::TOO_MANY_DIGITS_GIVEN);
@@ -2432,6 +2476,9 @@ public:
       return ParseResult{*num, false, ParseResult::SIZED};
     ++ptr;
 
+    if (num->getIs4S())
+      return std::unexpected(ParseError::INVALID_FORMAT);
+
     if (ptr == end)
       return std::unexpected(ParseError::INVALID_FORMAT);
 
@@ -2439,6 +2486,8 @@ public:
     if (!num)
       return std::unexpected(ParseError::INVALID_FORMAT);
     ptr = unkEndPtr;
+
+    unkNum->shrinkLenToCLog2();
 
     if ((*unkNum).getNumBits() > len)
       return std::unexpected(ParseError::TOO_MANY_DIGITS_GIVEN);
@@ -2667,7 +2716,9 @@ void BigIntMixin<Derived>::toStream(std::ostream &os, int base,
     BigInt val{self()};
     BigInt unk{self()};
     val.conv4To2State();
+    val.normalize();
     unk.conv4To2StateHi();
+    unk.normalize();
     val.toStream(os, base, true);
     os << "?";
     unk.toStream(os, base, true);
@@ -2843,6 +2894,11 @@ public:
   }
 
   ConstantRef findOrInsert(const BigInt &bigInt) {
+    if (bigInt.getNumWords() == 1 &&
+        bigInt.getRawNumBits() < (1ULL << ConstantRef::NBits::size))
+      return ConstantRef{bigInt.getRawNumBits(), bigInt.getWords()[0],
+                         bigInt.getExtend(), bigInt.getIs4S()};
+
     uint32_t hash = constantHash(bigInt);
     auto it = map.find(hash);
 
@@ -3129,14 +3185,7 @@ public:
     return *this;
   }
 
-  ConstantRef get() {
-    if (cur.getNumWords() == 1 &&
-        cur.getRawNumBits() < (1ULL << ConstantRef::NBits::size))
-      return ConstantRef{cur.getRawNumBits(), cur.getWords()[0],
-                         cur.getExtend(), cur.getIs4S()};
-
-    return store.findOrInsert(cur);
-  }
+  ConstantRef get() { return store.findOrInsert(cur); }
 
   BigInt getBigInt() { return cur; }
 
