@@ -1,11 +1,9 @@
 #pragma once
 
 #include "aig/AIG.h"
-#include "dyno/ObjMap.h"
 #include "support/Debug.h"
 #include <algorithm>
 #include <cassert>
-#include <queue>
 
 namespace dyno {
 

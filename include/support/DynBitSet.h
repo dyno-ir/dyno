@@ -254,6 +254,8 @@ public:
   void clear(size_t i) { storage[wordIdx(i)] &= ~symbMask(i); }
   bool get(size_t i) const { return storage[wordIdx(i)] & symbMask(i); }
 
+  void clear() { storage.clear(); }
+
   void modifyRange(size_t i, size_t len, word_t value) {
     if (len == 0) [[unlikely]]
       return;

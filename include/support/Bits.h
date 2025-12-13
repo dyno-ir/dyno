@@ -6,6 +6,7 @@
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <type_traits>
 
 template <std::unsigned_integral T>
@@ -82,7 +83,7 @@ template <typename T> constexpr T ceil_to_pow2(T x) {
 
 template <typename T> static constexpr T repeatBits(T x, unsigned xBits) {
   unsigned fact = xBits;
-  assert(!(x & bit_mask_zeros<unsigned>(xBits)));
+  assert(!(x & bit_mask_zeros<T>(xBits)));
   while (fact != bit_mask_sz<T>) {
     x |= (x << fact);
     fact <<= 1;

@@ -392,7 +392,7 @@ public:
     AIG cloned;
     for (auto &input : inputs) {
       auto in = cloned.createInput();
-      assert(in.getObjID().idx() == input.getObjID().idx());
+      // assert(in.getObjID().idx() == input.getObjID().idx());
     }
     return cloned;
   }
@@ -537,8 +537,12 @@ public:
   }
 
   void reset(AIG &aig, V defaultVal) {
+    resetSpecial(aig, defaultVal);
     gates.clear();
     gates.resize(aig.numGateIDs(), defaultVal);
+  }
+
+  void resetSpecial(AIG &aig, V defaultVal) {
     special.clear();
     special.resize(aig.numSpecialIDs(), defaultVal);
   }

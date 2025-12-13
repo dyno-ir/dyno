@@ -18,6 +18,7 @@ public:
 
   bloom_t bloom = 0;
   StaticVec<AIGNodeTRef, MaxCut, uint8_t> leaves;
+  uint32_t numNodes = 0;
 
   AIGCut() {}
 
@@ -42,6 +43,8 @@ public:
   }
 
   bool containsFast(const AIGCut &other) const {
+    if (leaves.size() < other.leaves.size())
+      return false;
     if (!containsBloom(other))
       return false;
     return contains(other);
@@ -139,7 +142,9 @@ class AIGCutGenerator {
           DYNO_DBGV(dbgs() << " -> Deduped!\n");
           continue;
         }
-        DYNO_DBGV(dbgs() << " -> " << Range{newCut.leaves} << "\n");
+        newCut.numNodes = 1 + lhsCut.numNodes + rhsCut.numNodes;
+        DYNO_DBGV(dbgs() << " -> " << Range{newCut.leaves} << "("
+                         << newCut.numNodes << ")\n");
         nodeCuts.push_back(std::move(newCut));
       }
     }

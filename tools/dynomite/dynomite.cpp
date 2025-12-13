@@ -38,7 +38,7 @@ int main() {
   // aigPrinter.print(aig);
 
   AIG newAIG = AIGBalance(aig).run();
-  assert(AIGSim::lec(aig, newAIG));
+  assert(AIGSim<uint64_t>::lec(aig, newAIG));
   // auto height = AIGBalance(aig).calcHeightMap(aig);
 
   // aigPrinter.print(aig, [&](auto &os, auto ref) {
