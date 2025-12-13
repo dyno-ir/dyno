@@ -494,7 +494,7 @@ public:
 };
 
 template <typename K, typename size_type = uint32_t> struct DenseSetBucket {
-#define SIMD_DENSE_MAP 0
+#define SIMD_DENSE_MAP 1
 #if defined(__clang__) && SIMD_DENSE_MAP
 #ifdef __AVX512F__
   static constexpr size_type simdWidth = 64;
@@ -519,8 +519,6 @@ template <typename K, typename size_type = uint32_t> struct DenseSetBucket {
   size_type findVec(size_type cur = ~0, Args... k) {
     using key_unsigned = uint_of_size<sizeof(K)>::type;
     typedef key_unsigned key_vec __attribute__((ext_vector_type(vector_len)));
-    typedef bool bool_vec __attribute__((ext_vector_type(vector_len)));
-    using mask_unsigned = uint_of_size<sizeof(bool_vec)>::type;
     using key_vec_ptr = key_vec *;
     key_vec_ptr keys_arr = reinterpret_cast<key_vec_ptr>(keys.data());
 
@@ -529,6 +527,9 @@ template <typename K, typename size_type = uint32_t> struct DenseSetBucket {
     cur++;
 
     for (size_t i = cur / vector_len; i < entriesPerBucket / vector_len; i++) {
+#if __has_feature(ext_vector_type_boolean)
+      typedef bool bool_vec __attribute__((ext_vector_type(vector_len)));
+      using mask_unsigned = uint_of_size<sizeof(bool_vec)>::type;
       bool_vec mask =
           (__builtin_convertvector(
                (keys_arr[i] == ((key_vec)std::bit_cast<key_unsigned>(k))),
@@ -537,6 +538,22 @@ template <typename K, typename size_type = uint32_t> struct DenseSetBucket {
       if constexpr (Inverse)
         mask = ~mask;
       mask_unsigned uns = std::bit_cast<mask_unsigned>(mask);
+#else
+      using mask_unsigned = uint64_t;
+      auto mask =
+          ((keys_arr[i] == ((key_vec)std::bit_cast<key_unsigned>(k))) | ...);
+
+      if constexpr (Inverse)
+        mask = ~mask;
+
+      // or-reduce pow2 mask for pmovmsk type functionality
+      key_vec pow2s;
+      for (uint j = 0; j < vector_len; j++)
+        pow2s[j] = 1 << j;
+
+      mask &= pow2s;
+      mask_unsigned uns = __builtin_reduce_or(mask);
+#endif
       uns &= bit_mask_zeros<mask_unsigned>(cur % vector_len);
       if (uns != 0) [[likely]]
         return __builtin_ctzl(uns);
