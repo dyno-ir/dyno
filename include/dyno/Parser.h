@@ -87,6 +87,7 @@ public:
   DynoLexer(ArrayRef<char> src, std::string &&fileName)
       : Lexer(src, std::move(fileName), Operators, Keywords) {
     registerDialects();
+    this->config.numericParseType = Lexer::Config::NumericParseType::DYNO;
   }
 
   std::optional<DialectID> tryPopDialect() {
@@ -175,6 +176,7 @@ template <typename Derived> class Parser {
 protected:
   TempBindVal<DynoLexer> lexer;
   VectorLUT<FatDynObjRef<>> identMap;
+  VectorLUT<uint8_t> forwardDef;
 
   using obj_parse_fn = FatDynObjRef<> (Parser::*)(DialectType type,
                                                   ArrayRef<char> name);
@@ -224,7 +226,14 @@ protected:
     if (lexer->popIf(DynoLexer::op_colon)) {
       isDef = !lexer->popIf(DynoLexer::op_qmark);
       obj = parseObject(ArrayRef{identStr});
-      identMap.insert(ident.ident.idx, FatDynObjRef{obj});
+      auto isFwdDef = forwardDef.find(ident.ident.idx);
+      if (!(isFwdDef.has() && *isFwdDef))
+        identMap.insertOrAssign(ident.ident.idx, FatDynObjRef{obj});
+      else {
+        // todo: delete object or don't parse at all
+        obj = *ref;
+      }
+      forwardDef.insertOrAssign(ident.ident.idx, !isDef);
     } else {
       if (!ref)
         lexer->printErrorOnPeekToken("undefined value");
@@ -303,7 +312,7 @@ protected:
     }
 
     sourceLocInfo->addSrcLoc(instr, file, lineNums[0], lineNums[1], lineNums[2],
-                          lineNums[3]);
+                             lineNums[3]);
   }
 
   InstrRef parseInstr() {
