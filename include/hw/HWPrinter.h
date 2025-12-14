@@ -135,17 +135,16 @@ public:
       return ref.as<ModuleRef>()->name.c_str();
     case HW_REGISTER.type: {
       if (!regNames)
-        return std::nullopt;
+        return IntroducedName{ref.getObjID(), {'r', '\0'}};
       auto range = regNames->getNames(ref.as<RegisterRef>());
       if (range.begin() == range.end())
-        return std::nullopt;
+        return IntroducedName{ref.getObjID(), {'r', '\0'}};
       // todo: what about multiple and collisions?
       return *range.begin();
     }
-      // case HW_WIRE.type: {
-      //  // todo properly (or just not)
-      //  return ref.getObjID() + 10000;
-      // }
+      case HW_WIRE.type: {
+       return IntroducedName{ref.getObjID(), {'w', '\0'}};
+      }
     }
     return std::nullopt;
   }

@@ -10,6 +10,7 @@
 #include "support/RTTI.h"
 #include "support/TempBind.h"
 #include "support/Utility.h"
+#include <array>
 #include <dyno/Instr.h>
 #include <dyno/Interface.h>
 #include <initializer_list>
@@ -48,7 +49,8 @@ public:
     std::string str() const {
       switch (type) {
       case NUMERIC:
-        return std::to_string(this->storage.numeric);
+        return std::format("{}{}", this->storage.numeric.prefix.data(),
+                           this->storage.numeric.num);
       case STRING:
         return this->storage.string;
       }
@@ -57,14 +59,19 @@ public:
 
     IntroducedName() = default;
 
+    IntroducedName(uint32_t numeric, std::array<char, 4> prefix)
+        : type(NUMERIC), storage{.numeric = {{prefix}, numeric}} {}
     IntroducedName(uint32_t numeric)
-        : type(NUMERIC), storage{.numeric = numeric} {}
+        : type(NUMERIC), storage{.numeric = {{'\0', '\0', '\0', '\0'}, numeric}} {}
     IntroducedName(const char *string)
         : type(STRING), storage{.string = string} {}
 
   protected:
     union {
-      uint32_t numeric;
+      struct {
+        std::array<char, 4> prefix;
+        uint32_t num;
+      } numeric;
       const char *string;
     } storage;
   };

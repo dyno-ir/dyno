@@ -42,7 +42,10 @@ class DumpVerilogPass {
     std::string str() const {
       switch (type) {
       case NUMERIC:
-        return "_r" + std::to_string(this->storage.numeric) + "_";
+        return "_r" +
+               std::format("{}{}", this->storage.numeric.prefix.data(),
+                           this->storage.numeric.num) +
+               "_";
       case STRING:
         return this->storage.string;
       }
