@@ -10,7 +10,7 @@ class Tokenizer {
   std::string_view s, delims;
 
 public:
-  Tokenizer(std::string_view str, std::string_view d = " ")
+  constexpr Tokenizer(std::string_view str, std::string_view d = " ")
       : s(str), delims(d) {}
 
   class iterator {
@@ -19,7 +19,7 @@ public:
     size_t len;
 
   public:
-    iterator &operator++() {
+    constexpr iterator &operator++() {
       pos += len;
       pos = parent->s.find_first_not_of(parent->delims, pos);
       if (pos == std::string_view::npos) {
@@ -33,26 +33,26 @@ public:
       return *this;
     }
 
-    iterator operator++(int) {
+    constexpr iterator operator++(int) {
       auto copy{*this};
       ++(*this);
       return copy;
     }
 
-    std::string_view operator*() { return parent->s.substr(pos, len); }
+    constexpr std::string_view operator*() { return parent->s.substr(pos, len); }
 
-    bool operator==(const iterator &other) const {
+    constexpr bool operator==(const iterator &other) const {
       auto rv = other.parent == this->parent && other.pos == this->pos;
       assert(!rv || this->len == other.len);
       return rv;
     }
 
-    iterator(Tokenizer *parent, size_t pos) : parent(parent), pos(pos), len(0) {
+    constexpr iterator(Tokenizer *parent, size_t pos) : parent(parent), pos(pos), len(0) {
       // first increment does not advance as len == 0, just primes.
       ++(*this);
     }
   };
 
-  iterator begin() { return iterator{this, 0}; }
-  iterator end() { return iterator{this, s.length()}; }
+  constexpr iterator begin() { return iterator{this, 0}; }
+  constexpr iterator end() { return iterator{this, s.length()}; }
 };

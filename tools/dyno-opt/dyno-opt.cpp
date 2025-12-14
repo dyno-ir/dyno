@@ -1,7 +1,9 @@
 #include "hw/HWContext.h"
 #include "hw/HWParser.h"
+#include "hw/HWPrinter.h"
 #include "hw/PassPipeline.h"
 #include "support/CmdLineArgs.h"
+#include "support/Debug.h"
 #include "support/ErrorRecovery.h"
 #include "support/MMap.h"
 #include <string>
@@ -21,6 +23,10 @@ CmdLineArg<bool> argOptPipeline{std::nullopt, "opt", "Run opt pipeline.", 0,
                                 false};
 CmdLineArg<bool> argLowerPipeline{std::nullopt, "lower",
                                   "Run lowering pipeline.", 0, false};
+CmdLineArg<uint32_t> argRunStart{std::nullopt, "start-from",
+                                 "Integer, only run passes with ID >= this.", 0,
+                                 0};
+
 CmdLineArg<bool> argDumpAfterAll{std::nullopt, "dump-after-all",
                                  "Dump IR into ./dumps after every pass.", 0,
                                  false};
@@ -44,6 +50,7 @@ int main(int argc, char **argv) {
   cmdLineArgHandler.registerArg(argLibertyFile);
   cmdLineArgHandler.registerArg(argOptPipeline);
   cmdLineArgHandler.registerArg(argLowerPipeline);
+  cmdLineArgHandler.registerArg(argRunStart);
   cmdLineArgHandler.registerArg(argDumpAfterAll);
   cmdLineArgHandler.registerArg(argPrintAfterAll);
   cmdLineArgHandler.registerArg(argCheckAfterAll);
@@ -62,11 +69,12 @@ int main(int argc, char **argv) {
   pipeline.printAfterAll = *argPrintAfterAll;
   pipeline.checkAfterAll = *argCheckAfterAll;
   pipeline.setLibertyPath(std::string(*argLibertyFile));
+  pipeline.startIdx = *argRunStart;
 
-  if (*argLowerPipeline)
-    pipeline.runLoweringPipeline();
   if (*argOptPipeline)
     pipeline.runOptPipeline();
+  if (*argLowerPipeline)
+    pipeline.runLoweringPipeline();
 
   pipeline.dumpDyno(std::string(*argOutFile));
 }

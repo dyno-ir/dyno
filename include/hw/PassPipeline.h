@@ -75,19 +75,23 @@ public:
   bool checkAfterAll = true;
   bool dumpAfterAll = false;
   int idx = 0;
+  int32_t startIdx = 0;
 
   template <typename T> void runPass(T &pass, bool skipCheck = false) {
+    if (idx >= startIdx) {
     pass.run();
     if (printAfterAll) {
       std::print(std::cerr, "\n\nIR after {}:\n", __PRETTY_FUNCTION__);
       HWPrinter{std::cerr}.printCtx(ctx);
     }
     if (dumpAfterAll)
-      //   dumpDyno(std::string("dumps/_") + std::to_string(idx++) +
-      //            __PRETTY_FUNCTION__);
-      dumpDyno();
+        dumpDyno(std::string("dumps/_") + std::to_string(idx) +
+                 __PRETTY_FUNCTION__);
+      // dumpDyno();
     if (checkAfterAll && !skipCheck)
       checkPass.run();
+    }
+    idx++;
   }
 
   void setLibertyPath(const std::string &path) {
@@ -245,6 +249,7 @@ public:
     ssaConstr.config.mode = SSAConstructPass::Config::IMMEDIATE;
     runPass(ssaConstr);
     runPass(loadCoalesce);
+    runPass(cse);
     runPass(instCombine);
     runPass(aggressiveDCE);
 

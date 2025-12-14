@@ -32,6 +32,14 @@ public:
     hasError = true;
   }
 
+  template <typename... Ts> void error(DynObjRef ref, Ts... ts) {
+    dumpObj(ctx.resolveObj(ref));
+    dbgs() << "\nerror: ";
+    ((dbgs() << ts), ...);
+    dbgs() << "\n";
+    hasError = true;
+  }
+
   template <typename... Ts> void error(BlockRef block, Ts... ts) {
     dumpObj(block);
     dbgs() << ": {\n";
@@ -145,7 +153,7 @@ public:
         HWPrinter print{str};
         print.printCtx(ctx);
       }
-      exit(-1);
+      abort();
     }
   }
 };

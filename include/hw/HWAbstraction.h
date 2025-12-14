@@ -1294,6 +1294,11 @@ public:
   HWValue buildMux(HWValue sel, HWValue trueV, HWValue falseV) {
     assert(sel.getNumBits() == 1);
     assert(trueV.getNumBits() == falseV.getNumBits());
+    if (trueV == falseV)
+      return trueV;
+    if (auto constSel = sel.dyn_as<ConstantRef>())
+      return constSel.valueEquals(0) ? falseV : trueV;
+
     auto rv = buildInstr(HW_MUX, true, sel, trueV, falseV).defW();
     rv->numBits = trueV.getNumBits();
     return rv;

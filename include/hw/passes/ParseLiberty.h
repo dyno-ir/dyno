@@ -2,14 +2,10 @@
 #include "hw/HWAbstraction.h"
 #include "hw/HWContext.h"
 #include "hw/IDs.h"
-#include "hw/SensList.h"
 #include "support/ErrorRecovery.h"
 #include "support/Lexer.h"
 #include "support/MMap.h"
 #include "support/SlabAllocator.h"
-#include "support/Utility.h"
-#include <fstream>
-#include <iterator>
 #include <variant>
 
 namespace dyno {

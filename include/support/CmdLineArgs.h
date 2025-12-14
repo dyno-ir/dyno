@@ -360,7 +360,7 @@ inline void CmdLineArg<bool>::parse(CmdLineArgBase *self, const char *ptr) {
     std::string_view str{ptr};                                                 \
     auto [end, ec] = std::from_chars(str.begin(), str.end(),                   \
                                      static_cast<CmdLineArg *>(self)->value);  \
-    if (ec != std::errc{} || ptr != str.end())                                 \
+    if (ec != std::errc{} || end != str.end())                                 \
       report_fatal_error("expected number (" #TYPE "): {}", str);              \
   }                                                                            \
   template <>                                                                  \
@@ -369,7 +369,7 @@ inline void CmdLineArg<bool>::parse(CmdLineArgBase *self, const char *ptr) {
     std::string_view str{ptr};                                                 \
     TYPE val;                                                                  \
     auto [end, ec] = std::from_chars(str.begin(), str.end(), val);             \
-    if (ec != std::errc{} || ptr != str.end())                                 \
+    if (ec != std::errc{} || end != str.end())                                 \
       report_fatal_error("expected number (" #TYPE "): {}", str);              \
     static_cast<CmdLineArg *>(self)->value.emplace_back(val);                  \
   }

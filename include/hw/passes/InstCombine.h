@@ -318,9 +318,12 @@ private:
       lastI = i;
     };
 
+    constexpr bool allowEmptyRegions = true;
+
     for (auto [i, op] : Range{instr.others()}.enumerate()) {
       if (auto wire = op->dyn_as<WireRef>();
-          wire && wire.getDefI().isOpc(HW_MUX)) {
+          wire && wire.getDefI().isOpc(HW_MUX) &&
+          wire.getDefI().def(0)->as<WireRef>().hasSingleUse()) {
         auto mux = wire.getDefI();
         auto sel = mux.other(0)->as<HWValue>();
         if (sel != lastSel)
@@ -330,13 +333,12 @@ private:
           lastSel = sel;
         }
         active = true;
-        continue;
-      }
-      commit(i);
+      } else
+        commit(i);
     }
     commit(instr.getNumOthers());
 
-    if (ranges.empty())
+    if (ranges.empty() || (!allowEmptyRegions && ranges.size() != 1))
       return false;
 
     HWInstrBuilder build{ctx, instr};
