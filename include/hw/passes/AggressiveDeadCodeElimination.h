@@ -428,7 +428,7 @@ class AggressiveDeadCodeEliminationPass {
 
       if (ctx.getCFG().contains(instr))
         ctx.getCFG()[instr].erase();
-      instr->destroyOperands();
+      instr.destroyOperands();
       ctx.getInstrs().destroy(instr);
     }
 

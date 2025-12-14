@@ -5,12 +5,13 @@
 #include "dyno/Opcode.h"
 #include "dyno/Type.h"
 #include "support/Bits.h"
+#include "support/DenseMap.h"
+#include "support/DenseMapInfo.h"
 #include "support/RTTI.h"
 #include "support/SmallVec.h"
 #include "support/Utility.h"
 #include <cassert>
 #include <compare>
-#include <concepts>
 #include <cstdint>
 #include <dyno/Interface.h>
 #include <dyno/Obj.h>
@@ -126,17 +127,6 @@ public:
   Instr &operator=(Instr &&) = delete;
 
   ~Instr() = default;
-  // hack before we can do this properly
-  void destroyOperands() {
-    for (auto &op : *this) {
-      op.destroy();
-    }
-  }
-  void destroyOthers() {
-    for (auto &op : Range{other_begin(), other_end()}) {
-      op.destroy();
-    }
-  }
 
 private:
   iterator begin() { return trailing(); }
@@ -159,7 +149,12 @@ static_assert(TrailingObj<Instr>);
 
 class OperandRef {
   friend class InstrBuilder;
+  friend class InstrDefUse;
   FatObjRef<Instr> instrRef;
+
+  // should only be called on OperandRefs in InstrDefUse's SmallVec.
+  void setLinkIdx(uint32_t idx);
+  uint32_t getLinkIdx();
 
 public:
   using iterator_category = std::random_access_iterator_tag;
@@ -246,6 +241,8 @@ public:
     return replace(newRef.template as<FatDynObjRef<>>());
   }
   template <typename T> void replace(FatDynObjRef<T> newRef);
+
+  void destroy();
 
 private:
   void addToDefUse() const;
@@ -384,6 +381,17 @@ public:
   void clearCustomStorage() {
     InlineStorageRef<uint64_t>{this->customStorage()}.emplace(0);
   }
+  // hack before we can do this properly
+  void destroyOperands() {
+    for (auto op : *this) {
+      op.destroy();
+    }
+  }
+  void destroyOthers() {
+    for (auto op : Range{other_begin(), other_end()}) {
+      op.destroy();
+    }
+  }
 };
 
 class InstrDefUse {
@@ -391,7 +399,7 @@ class InstrDefUse {
   friend class OperandRef;
 
   using insert_hook_t = bool (*)(InstrDefUse *, OperandRef);
-  using erase_hook_t = bool (*)(InstrDefUse *, DynObjRef);
+  using erase_hook_t = bool (*)(InstrDefUse *, uint32_t);
 
   uint16_t numDefs = 0;
   SmallVec<OperandRef, 4> refs;
@@ -488,7 +496,7 @@ public:
     } else {
       refs[to] = std::move(refs[from]);
     }
-    refs[to]->ref.setCustom(to);
+    refs[to].setLinkIdx(to);
   }
 
   void manual_insert(unsigned idx, OperandRef opRef) {
@@ -498,11 +506,11 @@ public:
     } else {
       refs[idx] = opRef;
     }
-    refs[idx]->ref.setCustom(idx);
+    refs[idx].setLinkIdx(idx);
   }
 
   void manual_pop_back() {
-    refs.back()->ref.setCustom(0);
+    refs.back().setLinkIdx(0);
     refs.pop_back();
   }
 
@@ -522,14 +530,14 @@ private:
       pos = numDefs++;
       auto it = refs.begin() + pos;
       if (it != refs.end()) {
-        (*it)->ref.setCustom(refs.size());
+        (*it).setLinkIdx(refs.size());
       }
       refs.insert_unordered(it, opRef);
     } else {
       pos = refs.size();
       refs.emplace_back(opRef);
     }
-    opRef->ref.setCustom(pos);
+    opRef.setLinkIdx(pos);
   }
 
   void insertUse(OperandRef opRef) {
@@ -542,16 +550,16 @@ private:
     }
     unsigned pos = refs.size();
     refs.emplace_back(opRef);
-    opRef->ref.setCustom(pos);
+    opRef.setLinkIdx(pos);
   }
 
-  void erase(DynObjRef ref) {
-    unsigned pos = ref.getCustom();
+  void erase(OperandRef ref) {
+    unsigned pos = ref.getLinkIdx();
     assert(pos < refs.size());
     assert(refs.size() > 0);
     if (eraseHook) [[unlikely]] {
       bool isDef = refs[pos].isDef();
-      if (eraseHook(this, ref)) {
+      if (eraseHook(this, pos)) {
         if (isDef)
           numDefs--;
         return;
@@ -560,16 +568,16 @@ private:
     if (refs[pos].isDef()) {
       if (numDefs > 1 && pos != numDefs - 1U) {
         refs[pos] = std::move(refs[numDefs - 1]);
-        refs[pos]->ref.setCustom(pos);
+        refs[pos].setLinkIdx(pos);
         pos = numDefs - 1;
       }
       --numDefs;
     }
     auto it = refs.begin() + pos;
     if (it == refs.end() - 1) {
-      refs.back()->ref.setCustom(0);
+      refs.back().setLinkIdx(0);
     } else {
-      refs.back()->ref.setCustom(pos);
+      refs.back().setLinkIdx(pos);
     }
     refs.erase_unordered(it);
   }
@@ -771,7 +779,9 @@ inline void GenericOperand::setLinkedPos(uint16_t pos) {
 template <typename T> void OperandRef::replace(FatDynObjRef<T> newRef) {
   auto &op = (**this);
   if (Operand::isDefUseOperand(op.ref)) {
-    op.customFat<InstrDefUse>()->erase(op.ref);
+    assert(this->isDef() ==
+           op.ref.getCustom() < op.customFat<InstrDefUse>()->getNumDefs());
+    op.customFat<InstrDefUse>()->erase(*this);
   }
   op.ref = newRef;
   InlineStorageRef<T *>{op.custom}.emplace(newRef.getPtr());
@@ -784,13 +794,63 @@ inline void OperandRef::addToDefUse() const {
   (*this)->customFat<InstrDefUse>()->insert(*this);
 }
 
-inline void Operand::destroy() {
-  if (isDefUseOperand(ref)) {
-    customFat<InstrDefUse>()->erase(ref);
+inline void OperandRef::destroy() {
+  if (Operand::isDefUseOperand((**this).ref)) {
+    (*this)->customFat<InstrDefUse>()->erase(*this);
   }
+}
 
-  // maybe delete/decrement refcnt of constant operands here?
-  // if (ref.getTyID() == CORE_CONSTANT) {}
+struct UniqueOperand {
+  Instr *instr;
+  uint32_t idx;
+};
+
+} // namespace dyno
+
+template <> struct DenseMapInfo<dyno::UniqueOperand> {
+  static constexpr dyno::UniqueOperand getEmptyKey() { return {nullptr, 0}; }
+  static constexpr dyno::UniqueOperand getTombstoneKey() { return {nullptr, 1}; }
+  static unsigned getHashValue(const dyno::UniqueOperand &k) {
+    auto ptrHash = hash_u64(uintptr_t(k.instr));
+    return hash_combine(hash_combine(uint32_t(ptrHash), hash_u32(k.idx)),
+                        ptrHash >> 32);
+  }
+  static bool isEqual(const dyno::UniqueOperand &lhs, const dyno::UniqueOperand &rhs) {
+    return lhs.instr == rhs.instr && lhs.idx == rhs.idx;
+  }
+};
+
+namespace dyno {
+
+inline DenseMap<UniqueOperand, uint32_t> linkIdxSpillMap;
+
+// to be called on instr def use side OperandRefs.
+inline void OperandRef::setLinkIdx(uint32_t idx) {
+  constexpr auto maxV =
+      std::numeric_limits<decltype((*this)->ref.getCustom())>::max();
+  if (idx < maxV) [[likely]] {
+    (*this)->ref.setCustom(idx);
+  } else {
+    (*this)->ref.setCustom(maxV);
+
+    // not cleared to avoid slowing down fast path.
+    linkIdxSpillMap.insertOrAssign(UniqueOperand(instr().getPtr(), getNum()),
+                                   idx);
+  }
+}
+
+// to be called on (temporary) instr side OperandRefs
+inline uint32_t OperandRef::getLinkIdx() {
+  constexpr auto maxV =
+      std::numeric_limits<decltype((*this)->ref.getCustom())>::max();
+  auto custom = (*this)->ref.getCustom();
+  if (custom < maxV) [[likely]] {
+    return custom;
+  } else {
+    auto it = linkIdxSpillMap.find(UniqueOperand(instr().getPtr(), getNum()));
+    assert(it != linkIdxSpillMap.end() && "operand spill bug");
+    return it.val();
+  }
 }
 
 } // namespace dyno

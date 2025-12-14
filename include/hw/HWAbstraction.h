@@ -1075,7 +1075,7 @@ public:
         build.addRef(instr.operand(instr.getNumDefs())->as<FatDynObjRef<>>());
 
         HWInstrRef{instr}.iter(ctx).replace(newInstr);
-        instr->destroyOperands();
+        instr.destroyOperands();
         ctx.getInstrs().destroy(instr);
         instr = newInstr;
         asIf = newInstr;
@@ -1353,7 +1353,7 @@ public:
 
     if (ctx.getCFG().contains(instr))
       ctx.getCFG()[instr].erase();
-    instr->destroyOthers();
+    instr.destroyOthers();
     ctx.getInstrs().destroy(instr);
   }
   void destroyBlock(BlockRef block) {
