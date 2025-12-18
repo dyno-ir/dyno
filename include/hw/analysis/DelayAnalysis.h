@@ -6,12 +6,10 @@
 #include "dyno/Opcode.h"
 #include "hw/HWValue.h"
 #include "hw/IDs.h"
-#include "hw/LoadStore.h"
 #include "hw/Wire.h"
-#include "hw/analysis/DelayAnalysis.h"
 #include "op/IDs.h"
-#include "support/DenseMap.h"
-#include <concepts>
+#include <cmath>
+
 namespace dyno {
 
 class DelayAnalysis {

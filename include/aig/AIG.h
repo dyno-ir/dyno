@@ -373,9 +373,9 @@ public:
 };
 
 class AIG {
+public:
   AIGNodeStore store;
 
-public:
   std::vector<FatAIGNodeRef> inputs;
   std::vector<FatAIGNodeRef> outputs;
 

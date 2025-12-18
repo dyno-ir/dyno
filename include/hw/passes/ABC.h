@@ -277,14 +277,14 @@ public:
     // all logic we want to export is in thin AIG nodes.
     // fat AIG nodes are used to interact with the rest of the IR
     // (inputs and outputs).
-    uint32_t thinIDs = aig.store.thin.numIDs();
-    uint32_t fatIDs = aig.store.fat.numIDs();
+    uint32_t thinIDs = aig.numGateIDs();
+    uint32_t fatIDs = aig.numSpecialIDs();
 
     uint32_t numInputs = aig.inputs.size();
     uint32_t numOutputs = aig.outputs.size();
 
     std::print(os, "aag {} {} {} {} {}\n", (thinIDs + fatIDs - 2), numInputs, 0,
-               numOutputs, aig.store.thin.size());
+               numOutputs, thinIDs);
 
     AIGERMeta meta;
     meta.fatIDShift = AIGObjID::FAT_ID_START - thinIDs;

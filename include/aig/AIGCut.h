@@ -1,6 +1,7 @@
 #pragma once
 
 #include "aig/AIG.h"
+#include "aig/passes/AIGSim.h"
 #include "support/Bits.h"
 #include "support/Debug.h"
 #include <cassert>
@@ -15,6 +16,7 @@ class AIGCut {
 public:
   static constexpr unsigned MaxCut = 6;
   using bloom_t = uint64_t;
+  using truth_t = uint64_t;
 
   bloom_t bloom = 0;
   StaticVec<AIGNodeTRef, MaxCut, uint8_t> leaves;
@@ -97,10 +99,17 @@ public:
 };
 
 class AIGCutGenerator {
+public:
+  struct Config {
+    unsigned numMaxLeaves = 4;
+    unsigned numMaxCuts = 7;
+    bool computeTruth = true;
+  };
+
+private:
   AIG &aig;
+  Config config;
   AIGNodeVecMap<SmallVec<AIGCut, 8>> cuts;
-  unsigned numMaxLeaves = 4;
-  unsigned numMaxCuts = 7;
 
   bool mergeCut(AIGCut &out, const AIGCut &a, const AIGCut &b) {
     auto aI = a.leaves.begin(), aEnd = a.leaves.end();
@@ -119,7 +128,7 @@ class AIGCutGenerator {
         out.leaves.push_back(bL);
         ++bI;
       }
-      if (out.leaves.size() >= numMaxLeaves)
+      if (out.leaves.size() >= config.numMaxLeaves)
         return false;
     }
     bool aHasRemain = aI != aEnd;
@@ -129,7 +138,7 @@ class AIGCutGenerator {
     assert(aHasRemain != bHasRemain);
     auto remainI = aHasRemain ? aI : bI;
     auto remainEnd = aHasRemain ? aEnd : bEnd;
-    if (unsigned(remainEnd - remainI) + out.leaves.size() > numMaxLeaves)
+    if (unsigned(remainEnd - remainI) + out.leaves.size() > config.numMaxLeaves)
       return false;
     for (; remainI != remainEnd; ++remainI) {
       out.leaves.push_back(*remainI);
@@ -138,8 +147,8 @@ class AIGCutGenerator {
   }
 
   bool mergeCutFast(AIGCut &out, const AIGCut &a, const AIGCut &b) {
-    if (a.leaves.size() + b.leaves.size() > numMaxLeaves &&
-        a.countBloomUnion(b) > numMaxLeaves)
+    if (a.leaves.size() + b.leaves.size() > config.numMaxLeaves &&
+        a.countBloomUnion(b) > config.numMaxLeaves)
       return false;
     return mergeCut(out, a, b);
   }
@@ -174,7 +183,7 @@ class AIGCutGenerator {
       ++it;
     }
     // Too many cuts :(
-    if (itInsert == itEnd && nodeCuts.size() > numMaxCuts) {
+    if (itInsert == itEnd && nodeCuts.size() > config.numMaxCuts) {
       // Evict max cost cut
       itInsert = nodeCuts.begin();
       assert(!nodeCuts.begin()->empty());
@@ -221,6 +230,8 @@ class AIGCutGenerator {
           continue;
         auto &insertedCut = nodeCuts[r];
         insertedTrivialCut |= insertedCut.isTrivial();
+        if (config.computeTruth) {
+        }
       }
     }
 
@@ -233,12 +244,14 @@ public:
   AIGCutGenerator(AIG &aig) : aig(aig) {}
 
   void run() {
-    assert(numMaxLeaves <= AIGCut::MaxCut);
+    assert(config.numMaxLeaves <= AIGCut::MaxCut);
 
     cuts.reset(aig);
-    cuts[AIGNodeTRef::zero()].emplace_back();
+    auto &cut = cuts[AIGNodeTRef::zero()].emplace_back();
+    cut.truth = 0;
     for (auto &in : aig.inputs) {
       cuts[in].emplace_back(in);
+      cut.truth = bit_increment_plane<AIGCut::truth_t>(0);
     }
     for (auto node : aig.gates()) {
       computeCuts(node);

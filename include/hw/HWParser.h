@@ -5,7 +5,6 @@
 #include "hw/HWContext.h"
 #include "hw/IDs.h"
 #include "hw/SensList.h"
-#include "support/ErrorRecovery.h"
 
 namespace dyno {
 
@@ -35,7 +34,7 @@ public:
       auto bits = lexer->popEnsure(Token::INT_LITERAL);
       lexer->popEnsure(DynoLexer::op_rbrclose);
       auto reg = ctx.getRegs().create(bits.intLit.value);
-      if (!name.empty() && !isnumber(name[0]))
+      if (!name.empty() && !std::isdigit(name[0]))
         ctx.regNameInfo.addName(reg, std::string_view{name});
       return reg;
     }
