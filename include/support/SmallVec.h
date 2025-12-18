@@ -498,6 +498,16 @@ public:
     ++sz;
   }
 
+  bool erase_unordered(iterator it) {
+    if (it != &back()) {
+      *it = std::move(back());
+      pop_back();
+      return true;
+    }
+    pop_back();
+    return false;
+  }
+
   constexpr T &operator[](size_type i) {
     assert(i < sz);
     return arr[i];
@@ -514,6 +524,8 @@ public:
   }
   constexpr size_t size() const { return sz; }
   constexpr bool empty() const { return size() == 0; }
+
+  constexpr void clear() { sz = 0; }
 
   constexpr StaticVec() = default;
   constexpr StaticVec(size_type sz) : sz(sz) {}

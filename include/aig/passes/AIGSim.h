@@ -47,7 +47,8 @@ public:
       runGate(node);
     }
     for (auto &node : aig.outputs) {
-      setState(node.as<AIGNodeTRef>(), getState(node.getSingleOperand()));
+      setState(node.template as<AIGNodeTRef>(),
+               getState(node.getSingleOperand()));
     }
   }
 

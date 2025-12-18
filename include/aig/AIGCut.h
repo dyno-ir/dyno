@@ -13,25 +13,52 @@ class AIGCut {
   friend class AIGCutGenerator;
 
 public:
-  static constexpr unsigned MaxCut = 8;
+  static constexpr unsigned MaxCut = 6;
   using bloom_t = uint64_t;
 
   bloom_t bloom = 0;
   StaticVec<AIGNodeTRef, MaxCut, uint8_t> leaves;
-  uint32_t numNodes = 0;
+  int32_t cost = 0;
+  uint64_t truth;
 
   AIGCut() {}
 
   AIGCut(AIGNodeTRef node) {
     leaves.push_back(node);
-    finalize();
+    updateBloom();
   }
+
+  void clear() {
+    leaves.clear();
+    bloom = 0;
+  }
+
+  bool empty() const { return leaves.empty(); }
+
+  bool isTrivial() const { return leaves.size() == 1; }
 
   void updateBloom() {
     bloom = 0;
     for (auto node : leaves) {
       bloom |= bit_mask_wrap<bloom_t>(node.idx());
     }
+  }
+
+  void updateCost(AIG &aig) {
+    // a_sz < b_sz
+    // a_fanout/a_sz > b_fanout/b_sz
+    // a_fanout - a_sz > b_fanout - b_sz
+    // a_sz - a_fanout < b_sz - b_fanout
+    cost = leaves.size();
+    for (auto node : leaves) {
+      cost -= aig.getUseCount(node);
+    }
+  }
+
+  friend bool operator<(const AIGCut &a, const AIGCut &b) {
+    if (a.cost == b.cost)
+      return a.leaves.size() < b.leaves.size();
+    return a.cost < b.cost;
   }
 
   bool containsBloom(const AIGCut &other) const {
@@ -71,8 +98,9 @@ public:
 
 class AIGCutGenerator {
   AIG &aig;
-  AIGNodeVecMap<SmallVec<AIGCut, 10>> cuts;
+  AIGNodeVecMap<SmallVec<AIGCut, 8>> cuts;
   unsigned numMaxLeaves = 4;
+  unsigned numMaxCuts = 7;
 
   bool mergeCut(AIGCut &out, const AIGCut &a, const AIGCut &b) {
     auto aI = a.leaves.begin(), aEnd = a.leaves.end();
@@ -110,17 +138,65 @@ class AIGCutGenerator {
   }
 
   bool mergeCutFast(AIGCut &out, const AIGCut &a, const AIGCut &b) {
-    if (a.countBloomUnion(b) > numMaxLeaves)
+    if (a.leaves.size() + b.leaves.size() > numMaxLeaves &&
+        a.countBloomUnion(b) > numMaxLeaves)
       return false;
     return mergeCut(out, a, b);
   }
 
-  bool dedupeCut(AIGNodeTRef node, const AIGCut &newCut) {
-    for (auto &cut : cuts[node]) {
-      if (cut.containsFast(newCut))
-        return true;
+  int insertCut(AIGNodeTRef node, const AIGCut &newCut) {
+    DYNO_DBGV(dbgs() << Range{newCut.leaves});
+    auto &nodeCuts = cuts[node];
+    // Discard newCut if dominated by existing cut
+    for (auto &cut : nodeCuts) {
+      assert(!cut.empty());
+      if (newCut.containsFast(cut)) {
+        DYNO_DBGV(dbgs() << ", dominated by " << Range{cut.leaves} << '\n');
+        return -1;
+      }
     }
-    return false;
+    // Discard existing cuts dominated by newCut
+    auto itEnd = nodeCuts.end();
+    auto itInsert = nodeCuts.end();
+    for (auto it = nodeCuts.begin(); it != itEnd;) {
+      auto &cut = *it;
+      if (cut.containsFast(newCut)) {
+        DYNO_DBGV(dbgs() << ", dominates " << Range{cut.leaves} << '('
+                         << it - nodeCuts.begin() << ')');
+        if (itInsert == itEnd) {
+          itInsert = it;
+        } else {
+          nodeCuts.erase_unordered(it);
+          itEnd = nodeCuts.end();
+          continue;
+        }
+      }
+      ++it;
+    }
+    // Too many cuts :(
+    if (itInsert == itEnd && nodeCuts.size() > numMaxCuts) {
+      // Evict max cost cut
+      itInsert = nodeCuts.begin();
+      assert(!nodeCuts.begin()->empty());
+      for (auto it = nodeCuts.begin() + 1; it != itEnd; ++it) {
+        auto &cut = *it;
+        auto &maxCostCut = *itInsert;
+        assert(!cut.empty());
+        if (maxCostCut < cut)
+          itInsert = it;
+      }
+      if (!(newCut < *itInsert))
+        return -1;
+    }
+    DYNO_DBGV(dbgs() << ", inserted at " << (itInsert - nodeCuts.begin())
+                     << ", cost: " << newCut.cost << '\n');
+    if (itInsert == itEnd) {
+      nodeCuts.emplace_back(newCut);
+      return nodeCuts.size() - 1;
+    } else {
+      *itInsert = newCut;
+      return itInsert - nodeCuts.begin();
+    }
   }
 
   void computeCuts(AIGNodeTRef node) {
@@ -128,27 +204,29 @@ class AIGCutGenerator {
     auto &nodeCuts = cuts[node];
     auto &lhsCuts = cuts[aig[node].operand(0)];
     auto &rhsCuts = cuts[aig[node].operand(1)];
+    bool insertedTrivialCut = false;
     for (auto &lhsCut : lhsCuts) {
       for (auto &rhsCut : rhsCuts) {
         AIGCut newCut;
         DYNO_DBGV(dbgs() << "[Cut] " << Range{lhsCut.leaves} << " "
-                         << Range{rhsCut.leaves});
+                         << Range{rhsCut.leaves} << " -> ");
         if (!mergeCutFast(newCut, lhsCut, rhsCut)) {
-          DYNO_DBGV(dbgs() << " -> Too Large!\n");
+          DYNO_DBGV(dbgs() << "Too Large!\n");
           continue;
         }
         newCut.finalize();
-        if (dedupeCut(node, newCut)) {
-          DYNO_DBGV(dbgs() << " -> Deduped!\n");
+        newCut.updateCost(aig);
+        int r = insertCut(node, newCut);
+        if (r == -1)
           continue;
-        }
-        newCut.numNodes = 1 + lhsCut.numNodes + rhsCut.numNodes;
-        DYNO_DBGV(dbgs() << " -> " << Range{newCut.leaves} << "("
-                         << newCut.numNodes << ")\n");
-        nodeCuts.push_back(std::move(newCut));
+        auto &insertedCut = nodeCuts[r];
+        insertedTrivialCut |= insertedCut.isTrivial();
       }
     }
-    nodeCuts.emplace_back(node);
+
+    if (!insertedTrivialCut) {
+      nodeCuts.emplace_back(node);
+    }
   }
 
 public:

@@ -24,10 +24,11 @@ int main() {
     for (unsigned i = 0; i < 10; ++i) {
       ins.emplace_back(aig, aig.createInput().as<AIGNodeTRef>());
     }
-    ((~(ins[0] & ins[1]) & ins[2] & ins[3] & ins[4]) & (ins[2] & ins[3]))
-        .output();
-    ((~(ins[0] & ins[1]) & ins[2] & ins[3] & ins[4]) | (ins[2] & ins[3]))
-        .output();
+    // ((~(ins[0] & ins[1]) & ins[2] & ins[3] & ins[4]) & (ins[2] & ins[3]))
+    //     .output();
+    // ((~(ins[0] & ins[1]) & ins[2] & ins[3] & ins[4]) | (ins[2] & ins[3]))
+    //     .output();
+    ((~ins[0] & ins[1]) & ~(ins[0] & ins[1])).output();
   }
   // ((~(ins[0] & ins[1]) & ins[2] & ins[3] & ins[4]) & (ins[2] &
   // ins[3])).output();

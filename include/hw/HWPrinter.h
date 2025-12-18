@@ -168,7 +168,7 @@ public:
           if (node.invert())
             str << "!";
           if (node.isSpecial())
-            printRefOrUse(asAIG.store.fat.resolve(node).nonInverted());
+            printRefOrUse(asAIG[node.nonInverted()].as<FatAIGNodeRef>());
           else
             str << "$" << node.idx();
         };

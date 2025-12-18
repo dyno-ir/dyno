@@ -16,6 +16,7 @@ namespace dyno {
 
 class AIGNodeTRef;
 class FatAIGNodeRef;
+class AIG;
 
 class AIGObjID : public ObjID {
 public:
@@ -250,14 +251,15 @@ template <> struct ObjTraits<AIGNode> {
 
 class ThinAIGNodeStore {
   friend class AIG;
+  friend class AIGNodeStore;
   DedupeMap<AIGNode, std::vector<AIGNode>, AIGNode::hash> dedupeMap;
-  std::vector<unsigned> useCounts;
 
 public:
   AIGNodeRef resolve(AIGNodeTRef ref) {
     return AIGNodeRef{ref, &dedupeMap.container[ref.idx()]};
   }
-  AIGNodeRef create(AIGNodeTRef a, AIGNodeTRef b) {
+
+  std::pair<AIGNodeRef, bool> create(AIGNodeTRef a, AIGNodeTRef b) {
     assert(a.getObjID() <= b.getObjID() && "AIG gate l <= r violation");
     auto [index, isNew] =
         dedupeMap.canonicalize(AIGNode{a.getObjID(), b.getObjID()});
@@ -266,14 +268,7 @@ public:
     assert((ref[0].isSpecial() || ref[0].idx() < ref.idx()) &&
            (ref[1].isSpecial() || ref[1].idx() < ref.idx()) &&
            "AIG topo order violation");
-    if (isNew) {
-      useCounts.push_back(0);
-      if (!a.isSpecial())
-        ++useCounts[a.idx()];
-      if (!b.isSpecial())
-        ++useCounts[b.idx()];
-    }
-    return ref;
+    return {ref, isNew};
   }
 
   auto objs() {
@@ -331,27 +326,56 @@ public:
 };
 
 class AIGNodeStore {
-public:
+  friend class AIG;
   ThinAIGNodeStore thin;
   FatAIGNodeStore<NewDeleteObjStore<FatAIGNode>> fat;
+  std::vector<unsigned> useCountGates;
+  std::vector<unsigned> useCountIns;
 
+public:
   AIGNodeRef resolve(AIGNodeTRef ref) {
     if (ref.isSpecial()) [[unlikely]] {
       return fat.resolve(ref).as<AIGNodeRef>();
     }
     return thin.resolve(ref);
   }
-  template <typename... Args> AIGNodeRef create(Args &&...args) {
-    return thin.create(std::forward<Args>(args)...);
+
+  AIGNodeRef create(AIGNodeTRef a, AIGNodeTRef b) {
+    assert(a && b);
+    auto [ref, isNew] = thin.create(a, b);
+    if (isNew) {
+      useCountGates.push_back(0);
+      assert(useCountGates.size() == thin.numIDs());
+      if (a.isSpecial()) [[unlikely]]
+        ++useCountIns[a.getOffsetIdx()];
+      else
+        ++useCountGates[a.idx()];
+      if (b.isSpecial()) [[unlikely]]
+        ++useCountIns[b.getOffsetIdx()];
+      else
+        ++useCountGates[b.idx()];
+    }
+    return ref;
   }
+
   template <typename... Args> FatAIGNodeRef createSpecial(Args &&...args) {
-    return fat.create(std::forward<Args>(args)...);
+    auto ref = fat.create(std::forward<Args>(args)...);
+    useCountIns.push_back(0);
+    assert(useCountIns.size() == fat.numIDs());
+    return ref;
+  }
+
+  unsigned getUseCount(AIGNodeTRef ref) {
+    if (ref.isSpecial()) [[unlikely]]
+      return useCountIns[ref.getOffsetIdx()];
+    return useCountGates[ref.idx()];
   }
 };
 
 class AIG {
-public:
   AIGNodeStore store;
+
+public:
   std::vector<FatAIGNodeRef> inputs;
   std::vector<FatAIGNodeRef> outputs;
 
@@ -398,6 +422,7 @@ public:
   }
 
   AIGNodeRef createNode(AIGNodeTRef lhs, AIGNodeTRef rhs) {
+    assert(lhs && rhs && "AIG gate with invalid refs");
     if (lhs.getObjID() > rhs.getObjID())
       std::swap(lhs, rhs);
     AIGNodeTRef simple = simplify(lhs, rhs);
@@ -455,10 +480,7 @@ public:
   unsigned numGateIDs() { return store.thin.numIDs(); }
   unsigned numSpecialIDs() { return store.fat.numIDs(); }
 
-  unsigned getUseCount(AIGNodeTRef ref) {
-    assert(!ref.isSpecial());
-    return store.thin.useCounts[ref.idx()];
-  }
+  unsigned getUseCount(AIGNodeTRef ref) { return store.getUseCount(ref); }
 
   AIGNodeRef getZero() { return store.resolve(AIGNodeTRef{0, false}); }
   AIGNodeRef getOne() { return getZero().inverted(); }
@@ -466,8 +488,9 @@ public:
   AIGNodeRef operator[](AIGNodeTRef ref) { return store.resolve(ref); }
 
   AIG() {
-    auto constZeroNode = store.create(ObjID::invalid(), ObjID::invalid());
-    assert(constZeroNode.idx() == 0);
+    auto [zeroNode, _] = store.thin.create(ObjID::invalid(), ObjID::invalid());
+    store.useCountGates.push_back(0);
+    assert(zeroNode.idx() == 0);
   }
 };
 
