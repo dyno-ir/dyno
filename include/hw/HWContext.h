@@ -1,23 +1,78 @@
 #pragma once
 #include "aig/AIG.h"
 #include "dyno/Constant.h"
+#include "dyno/Context.h"
+#include "dyno/DialectInfo.h"
 #include "dyno/IDs.h"
 #include "dyno/NewDeleteObjStore.h"
 #include "hw/DebugInfo.h"
 #include "hw/IDs.h"
 #include "hw/Module.h"
+#include "hw/Process.h"
 #include "hw/SensList.h"
 #include "hw/StdCellInfo.h"
 #include "hw/Wire.h"
-
+#include "op/MapObj.h"
+#include "dyno/FixedFlatObjStore.h"
 namespace dyno {
+
+class HWDialectContext {
+public:
+  template <typename T> struct StoreType {
+    using t = NewDeleteObjStore<T>;
+  };
+  template <typename T> using StoreType_t = StoreType<T>::t;
+
+  static constexpr DialectID dialect{DIALECT_HW};
+
+  StoreType_t<Module> modules;
+  StoreType_t<Register> registers;
+  StoreType_t<Wire> wires;
+  StoreType_t<Process> procs;
+  StoreType_t<Trigger> triggers;
+  StoreType_t<StdCellInfo> stdCellInfos;
+  FixedFlatObjStore<Wire> wires2;
+
+  ValueNameInfo<Register> regNameInfo;
+
+  template <typename T> T &get();
+
+  template <> StoreType_t<Module> &get<StoreType_t<Module>>() {
+    return modules;
+  }
+  template <> StoreType_t<Register> &get<StoreType_t<Register>>() {
+    return registers;
+  }
+  template <> StoreType_t<Wire> &get<StoreType_t<Wire>>() { return wires; }
+  template <> StoreType_t<Process> &get<StoreType_t<Process>>() {
+    return procs;
+  }
+  template <> StoreType_t<Trigger> &get<StoreType_t<Trigger>>() {
+    return triggers;
+  }
+  template <> StoreType_t<StdCellInfo> &get<StoreType_t<StdCellInfo>>() {
+    return stdCellInfos;
+  }
+
+  template <typename T> StoreType_t<T> &getStore() {
+    return get<StoreType_t<T>>();
+  }
+
+  auto activeModules() {
+    return Range{modules}.filter([](ModuleRef ref) { return !ref->ignore; });
+  }
+};
+
+template <> struct DialectContext<DialectID{DIALECT_HW}> {
+  using t = HWDialectContext;
+};
 
 class HWContext {
 
   ConstantStore constants;
   NewDeleteObjStore<Module> modules;
   NewDeleteObjStore<Register> regs;
-  NewDeleteObjStore<Wire> wires;
+  FixedFlatObjStore<Wire> wires;
   NewDeleteObjStore<Function> funcs;
   NewDeleteObjStore<Process> procs;
   NewDeleteObjStore<Trigger> triggers;
@@ -25,6 +80,7 @@ class HWContext {
   NewDeleteObjStore<Instr> instrs;
   NewDeleteObjStore<AIGObj> aigObjs;
   NewDeleteObjStore<StdCellInfo> stdCellInfos;
+  NewDeleteObjStore<MapObj> mapObjs;
 
 public:
   auto &getConstants() { return constants; }
@@ -38,6 +94,7 @@ public:
   auto &getTriggers() { return triggers; }
   auto &getAIGs() { return aigObjs; }
   auto &getStdCellInfos() { return stdCellInfos; }
+  auto &getMaps() { return mapObjs; }
   SourceLocInfo<Instr> sourceLocInfo;
   ValueNameInfo<Register> regNameInfo;
 

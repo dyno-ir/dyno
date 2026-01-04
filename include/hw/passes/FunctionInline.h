@@ -3,8 +3,10 @@
 #include "dyno/CustomInstr.h"
 #include "dyno/Instr.h"
 #include "dyno/Obj.h"
+#include "dyno/Pass.h"
 #include "hw/DeepCopy.h"
 #include "hw/HWAbstraction.h"
+#include "hw/HWContext.h"
 #include "hw/HWInstr.h"
 #include "hw/HWValue.h"
 #include "hw/IDs.h"
@@ -19,12 +21,12 @@ namespace dyno {
 
 using TaggedCallRef = CustomInstrRef<CallInstrRef, uint64_t>;
 
-class FunctionInlinePass {
+class FunctionInlinePass : public Pass<FunctionInlinePass> {
   HWContext &ctx;
   DeepCopier copier;
 
+private:
   void runOnModule(ModuleIRef mod) {
-
     SmallVec<CallInstrRef, 8> worklist;
     for (FunctionIRef instr : mod.funcs()) {
       for (auto call : instr.func().uses()) {
@@ -150,6 +152,7 @@ public:
       runOnModule(mod.iref());
     }
   }
+  auto make(HWContext &ctx) { return FunctionInlinePass(ctx); }
   explicit FunctionInlinePass(HWContext &ctx) : ctx(ctx), copier(ctx) {}
 };
 }; // namespace dyno

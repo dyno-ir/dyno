@@ -1,21 +1,20 @@
 #pragma once
 #include "dyno/HierBlockIterator.h"
 #include "dyno/Obj.h"
+#include "dyno/Pass.h"
 #include "hw/HWContext.h"
 #include "hw/HWInstr.h"
-#include "hw/HWPrinter.h"
 #include "hw/Register.h"
 #include "hw/analysis/SCFTraversal.h"
 #include "op/IDs.h"
 #include "op/StructuredControlFlow.h"
-#include "support/Debug.h"
 #include "support/DynBitSet.h"
 
 namespace dyno {
 
 // fixme: still needs mode to respect existing partial order. currently does not
 // respect order of side effect instrs.
-class OrderInstrsPass {
+class OrderInstrsPass : public Pass<OrderInstrsPass> {
   HWContext &ctx;
   ObjMap<Instr, DynSymbSet<std::vector<uint64_t>, 2>> map;
   enum { PRE_MARK = 0, MARK = 1 };
@@ -206,6 +205,7 @@ public:
       runOnModule(mod.iref());
     }
   }
+  auto make(HWContext &ctx) { return OrderInstrsPass(ctx); }
   explicit OrderInstrsPass(HWContext &ctx) : ctx(ctx) {}
 };
 

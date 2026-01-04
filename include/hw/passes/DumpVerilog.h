@@ -1,7 +1,7 @@
 #pragma once
 
-#include "dyno/Constant.h"
 #include "dyno/ObjMap.h"
+#include "dyno/Pass.h"
 #include "hw/HWContext.h"
 #include "hw/HWPrinter.h"
 #include "hw/IDs.h"
@@ -27,7 +27,7 @@ private:
   void_stream_buffer os_buffer_{};
 };
 
-class DumpVerilogPass {
+class DumpVerilogPass : public Pass<DumpVerilogPass> {
   HWContext &ctx;
   std::ostream &os;
 
@@ -282,7 +282,7 @@ public:
       : ctx(ctx), os(os), print(voidStr) {}
   void run() {
     print.reset();
-    auto tok = print.regNames.bind(&ctx.regNameInfo);
+    auto tok = print.regNames().bind(&ctx.regNameInfo);
     for (auto mod : ctx.activeModules())
       dumpModule(mod.iref());
   }

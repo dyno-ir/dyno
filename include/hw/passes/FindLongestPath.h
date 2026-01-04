@@ -1,12 +1,13 @@
 #pragma once
 
+#include "dyno/Pass.h"
 #include "hw/HWContext.h"
 #include "hw/HWPrinter.h"
 #include "hw/IDs.h"
 #include "support/Debug.h"
 namespace dyno {
 
-class FindLongestPathPass {
+class FindLongestPathPass : public Pass<FindLongestPathPass> {
   HWContext &ctx;
 
   struct Path {
@@ -107,6 +108,7 @@ public:
     }
   }
 
+  auto make(HWContext &ctx) { return FindLongestPathPass(ctx); }
   explicit FindLongestPathPass(HWContext &ctx) : ctx(ctx) {}
 };
 

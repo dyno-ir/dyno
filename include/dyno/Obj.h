@@ -273,7 +273,8 @@ public:
 
   template <typename V, typename U = T,
             typename = std::enable_if_t<std::is_void_v<U>>>
-  constexpr FatDynObjRef(FatDynObjRef<V> ref) : DynObjRef(ref), ptr(ref.getPtr()) {}
+  constexpr FatDynObjRef(FatDynObjRef<V> ref)
+      : DynObjRef(ref), ptr(ref.getPtr()) {}
 
   template <typename U> static bool is_impl(ObjRef<U>) { return true; }
 
@@ -328,6 +329,12 @@ template <typename T>
 concept TrailingObj = requires(T x) {
   T::getAllocSize(size_t{0});
   x.getAllocSize();
+};
+
+template <typename T>
+concept UninitObj = requires(T *x) {
+  bool(T::isInitialized(x));
+  T::setUninitialized(x);
 };
 
 template <typename Derived, typename T> class TrailingObjArr {

@@ -1,10 +1,11 @@
 #pragma once
 
+#include "dyno/Pass.h"
 #include "hw/HWAbstraction.h"
 #include "hw/HWContext.h"
 namespace dyno {
 
-class RemoveInitProcsPass {
+class RemoveInitProcsPass : public Pass<RemoveInitProcsPass> {
   HWContext &ctx;
 
   void runOnModule(ModuleIRef mod) {
@@ -20,6 +21,7 @@ class RemoveInitProcsPass {
   }
 
 public:
+  auto make(HWContext &ctx) { return RemoveInitProcsPass(ctx); }
   explicit RemoveInitProcsPass(HWContext &ctx) : ctx(ctx) {}
   void run() {
     for (auto mod : ctx.activeModules()) {

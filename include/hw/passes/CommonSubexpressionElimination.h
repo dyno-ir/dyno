@@ -1,11 +1,10 @@
 #pragma once
 
-#include "dyno/Constant.h"
 #include "dyno/DestroyMap.h"
 #include "dyno/HierBlockIterator.h"
-#include "dyno/IDs.h"
 #include "dyno/Instr.h"
 #include "dyno/Obj.h"
+#include "dyno/Pass.h"
 #include "hw/HWAbstraction.h"
 #include "hw/HWContext.h"
 #include "hw/HWInstr.h"
@@ -18,7 +17,6 @@
 #include "support/Bits.h"
 #include "support/Debug.h"
 #include "support/DenseMultimap.h"
-#include "support/Utility.h"
 namespace dyno {
 
 class CSEDedupeMap {
@@ -87,7 +85,8 @@ public:
   CSEDedupeMap(HWContext &ctx) : ctx(ctx) {}
 };
 
-class CommonSubexpressionEliminationPass {
+class CommonSubexpressionEliminationPass
+    : public Pass<CommonSubexpressionEliminationPass> {
   HWContext &ctx;
   CSEDedupeMap map;
   DestroyMap<Instr> instrDestroy;
@@ -205,6 +204,9 @@ public:
   }
   explicit CommonSubexpressionEliminationPass(HWContext &ctx)
       : ctx(ctx), map(ctx), controlFlowAnalysis(ctx) {}
+  static auto make(HWContext &ctx) {
+    return CommonSubexpressionEliminationPass{ctx};
+  }
 };
 
 }; // namespace dyno

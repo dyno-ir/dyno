@@ -46,8 +46,8 @@ public:
   constexpr ArrayRef(const_iterator begin, size_t size)
       : ptr(begin), sz(size) {}
 
-  constexpr const_reference back() { return ptr[sz - 1]; }
-  constexpr const_reference front() { return ptr[0]; }
+  constexpr const_reference back() const { return ptr[sz - 1]; }
+  constexpr const_reference front() const { return ptr[0]; }
 
   constexpr ArrayRef drop_front() const {
     assert(sz >= 1);
@@ -66,6 +66,8 @@ public:
 
   template <typename U, size_t N>
   constexpr ArrayRef(const U (&c_arr)[N]) : ArrayRef(c_arr, c_arr + N) {}
+
+  constexpr ArrayRef() : ArrayRef(ArrayRef::emptyRef()) {}
 };
 
 template <typename U, size_t N>

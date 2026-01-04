@@ -60,7 +60,7 @@ class PassPipeline {
   FlipFlopMappingPass ffMap{ctx};
   RemoveBuffersPass removeBufs{ctx};
   OrderInstrsPass orderInstrs{ctx};
-  ConstantMapping constMap{ctx};
+  ConstantMappingPass constMap{ctx};
   FindLongestPathPass longestPath{ctx};
   CheckPass checkPass{ctx};
   RegisterPartitionPass regPartition{ctx};
@@ -79,17 +79,23 @@ public:
 
   template <typename T> void runPass(T &pass, bool skipCheck = false) {
     if (idx >= startIdx) {
-    pass.run();
-    if (printAfterAll) {
-      std::print(std::cerr, "\n\nIR after {}:\n", __PRETTY_FUNCTION__);
-      HWPrinter{std::cerr}.printCtx(ctx);
-    }
-    if (dumpAfterAll)
+      pass.run();
+      std::string_view name;
+      if constexpr (requires { T::passName; })
+        name = T::passName;
+      else
+        name = __PRETTY_FUNCTION__;
+      if (printAfterAll) {
+
+        std::print(std::cerr, "\n\nIR after {}:\n", name);
+        HWPrinter{std::cerr}.printCtx(ctx);
+      }
+      if (dumpAfterAll)
         dumpDyno(std::string("dumps/_") + std::to_string(idx) +
-                 __PRETTY_FUNCTION__);
+                 std::string(name));
       // dumpDyno();
-    if (checkAfterAll && !skipCheck)
-      checkPass.run();
+      if (checkAfterAll && !skipCheck)
+        checkPass.run();
     }
     idx++;
   }
@@ -242,7 +248,6 @@ public:
     runPass(orderInstrs);
     runPass(aggressiveDCE);
 
-
     linearizeControlFlow.config.flattenLoops = 1;
     linearizeControlFlow.config.flattenMultiway = 1;
     runPass(linearizeControlFlow);
@@ -265,8 +270,8 @@ public:
     runPass(instCombine);
     runPass(aggressiveDCE);
 
-    //muxTreeOpt.config.exploreConditions = true;
-    //runPass(muxTreeOpt);
+    // muxTreeOpt.config.exploreConditions = true;
+    // runPass(muxTreeOpt);
     runPass(cse);
     runPass(instCombine);
 
@@ -321,7 +326,7 @@ public:
     // dumpDyno("pre_mux_opt.dyno");
     muxTreeOpt.config.dontCareMUXsOnly = true;
     muxTreeOpt.config.exploreConditions = false;
-    //runPass(muxTreeOpt);
+    // runPass(muxTreeOpt);
     runPass(instCombine);
     // dumpDyno("postmux_opt.dyno");
 

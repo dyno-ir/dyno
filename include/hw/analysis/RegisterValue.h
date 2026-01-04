@@ -464,7 +464,6 @@ struct RegisterValue : public RegisterFrags<RegisterValueFragment> {
       len = newLen;
     }
 
-
     auto it = getInsertIt(dstAddr);
     overwriteNoMaterialize(src, it, srcAddr, dstAddr, len);
   }
@@ -871,7 +870,7 @@ template <typename Frag, size_t NumInline = 4> struct GenericPartitions {
   }
 
   template <typename... Args>
-  void writeSingle(uint32_t dstAddr, uint32_t len, Args... args) {
+  void writeSingle(uint32_t dstAddr, uint32_t len, Args &&...args) {
     auto it = getInsertIt(dstAddr);
     assert(it != frags.end() && dstAddr >= it->dstAddr);
 

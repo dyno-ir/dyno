@@ -1,6 +1,7 @@
 #pragma once
 
 #include "dyno/Constant.h"
+#include "dyno/Pass.h"
 #include "hw/AutoDebugInfo.h"
 #include "hw/DeepCopy.h"
 #include "hw/HWAbstraction.h"
@@ -18,7 +19,7 @@
 #include "support/ErrorRecovery.h"
 namespace dyno {
 
-class LinearizeControlFlowPass {
+class LinearizeControlFlowPass : public Pass<LinearizeControlFlowPass> {
   HWContext &ctx;
   DeepCopier copier;
   HWInstrBuilder build;
@@ -276,10 +277,10 @@ private:
       case *OP_WHILE:
       case *OP_DO_WHILE: {
         // run instcombine in and around the loop
-        instCombine.run(HWInstrRef{instr}.parentBlock(ctx));
-        instCombine.run(instr.def(0)->as<BlockRef>());
+        instCombine.run2(HWInstrRef{instr}.parentBlock(ctx));
+        instCombine.run2(instr.def(0)->as<BlockRef>());
         if (instr.isOpc(OP_WHILE))
-          instCombine.run(instr.def(1)->as<BlockRef>());
+          instCombine.run2(instr.def(1)->as<BlockRef>());
         // we might be able to simplify loops now that we were unable to before.
         instr = loopSimplify.runOnLoop(instr);
         if (!instr /*|| !instr.isOpc(OP_FOR)*/)
@@ -310,6 +311,9 @@ public:
   explicit LinearizeControlFlowPass(HWContext &ctx, InstCombinePass &icb)
       : ctx(ctx), copier(ctx), build(ctx), autoDebugInfo(ctx),
         loopSimplify(ctx), instCombine(icb) {}
+  static LinearizeControlFlowPass make(HWContext &ctx, InstCombinePass &icb) {
+    return LinearizeControlFlowPass{ctx, icb};
+  }
 };
 
 }; // namespace dyno

@@ -13,7 +13,8 @@ using OpOpcode = SpecificDialectOpcode<DialectID{DIALECT_OP}>;
 
 // clang-format off
 #define TYPES(x) \
-  x("func", OP_FUNC, 0 | TY_DEF_USE_START)
+  x("func", OP_FUNC, 0 | TY_DEF_USE_START) \
+  x("map",  OP_MAP,  1)
 // clang-format on
 
 #define ENUM_EXPAND(name, ident, idx) ident = idx,

@@ -4,27 +4,19 @@
 #include "dyno/Instr.h"
 #include "dyno/Obj.h"
 #include "dyno/ObjMap.h"
+#include "dyno/Pass.h"
 #include "hw/HWAbstraction.h"
 #include "hw/HWContext.h"
 #include "hw/HWPrinter.h"
 #include "hw/HWValue.h"
 #include "hw/IDs.h"
-#include "op/IDs.h"
-#include "support/Bits.h"
-#include "support/Debug.h"
-#include "support/DenseMap.h"
-#include "support/DenseMapInfo.h"
-#include "support/DenseMultimap.h"
-#include "support/DynBitSet.h"
-#include "support/ErrorRecovery.h"
-#include "support/SlabAllocator.h"
-#include <bit>
-#include <climits>
-
 #include "hw/analysis/MuxTree.h"
+#include "op/IDs.h"
+#include "support/Debug.h"
+#include "support/SlabAllocator.h"
 
 namespace dyno {
-class MuxTreeOptimizationPass {
+class MuxTreeOptimizationPass : public Pass<MuxTreeOptimizationPass> {
 
   SlabAllocator<MuxTree> muxTreeAlloc;
   ObjMapVec<Instr, bool> visitedMap;
@@ -437,6 +429,7 @@ public:
     muxTreeAlloc.clear();
   }
 
+  auto make(HWContext &ctx) { return MuxTreeOptimizationPass(ctx); }
   explicit MuxTreeOptimizationPass(HWContext &ctx) : ctx(ctx), build(ctx) {}
 };
 }; // namespace dyno

@@ -3,8 +3,8 @@
 #include "dyno/CFG.h"
 #include "dyno/Constant.h"
 #include "dyno/Instr.h"
+#include "dyno/Pass.h"
 #include "hw/AutoDebugInfo.h"
-#include "hw/DeepCopy.h"
 #include "hw/HWAbstraction.h"
 #include "hw/HWContext.h"
 #include "hw/HWInstr.h"
@@ -508,7 +508,7 @@ public:
   LoopSimplifer(HWContext &ctx) : ctx(ctx), autoDebugInfo(ctx), build(ctx) {}
 };
 
-class LoopSimplifyPass {
+class LoopSimplifyPass : public Pass<LoopSimplifyPass> {
   HWContext &ctx;
   LoopSimplifer loopSimplifier;
 
@@ -540,6 +540,7 @@ public:
     }
   }
 
+  auto make(HWContext &ctx) { return LoopSimplifyPass(ctx); }
   explicit LoopSimplifyPass(HWContext &ctx) : ctx(ctx), loopSimplifier(ctx) {}
 };
 }; // namespace dyno

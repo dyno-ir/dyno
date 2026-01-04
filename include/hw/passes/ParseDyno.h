@@ -1,30 +1,25 @@
 #pragma once
 #include "dyno/DialectInfo.h"
-#include "dyno/IDImpl.h"
-#include "dyno/Obj.h"
-#include "dyno/Opcode.h"
-#include "dyno/Parser.h"
+#include "dyno/InstrPrinter.h"
+#include "dyno/Pass.h"
 #include "hw/HWContext.h"
 #include "hw/HWParser.h"
 #include "hw/HWPrinter.h"
-#include "support/ArrayRef.h"
-#include "support/DenseMap.h"
 #include "support/ErrorRecovery.h"
-#include "support/Lexer.h"
 #include "support/MMap.h"
-#include "support/TempBind.h"
-#include "support/VectorLUT.h"
+#include <ostream>
 
 namespace dyno {
 
-class ParseDynoPass {
+class ParseDynoPass : public Pass<ParseDynoPass> {
   struct Config {
     std::string fileName;
   };
   HWContext &ctx;
 
 public:
-  ParseDynoPass(HWContext &ctx) : ctx(ctx) {}
+  auto make(HWContext &ctx) { return ParseDynoPass(ctx); }
+  explicit ParseDynoPass(HWContext &ctx) : ctx(ctx) {}
   Config config;
 
   void run() {

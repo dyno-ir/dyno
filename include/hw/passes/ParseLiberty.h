@@ -1,4 +1,5 @@
 #pragma once
+#include "dyno/Pass.h"
 #include "hw/HWAbstraction.h"
 #include "hw/HWContext.h"
 #include "hw/IDs.h"
@@ -516,7 +517,7 @@ public:
   LibertyToDyno(HWContext &ctx, LibertyLexer &lexer) : ctx(ctx), lexer(lexer) {}
 }; // namespace dyno
 
-class ParseLibertyPass {
+class ParseLibertyPass : public Pass<ParseLibertyPass> {
   HWContext &ctx;
 
 public:
@@ -538,6 +539,7 @@ public:
     libToDyno.copyIntoCtx(block);
   }
 
+  auto make(HWContext &ctx) { return ParseLibertyPass(ctx); }
   explicit ParseLibertyPass(HWContext &ctx) : ctx(ctx) {}
 };
 }; // namespace dyno

@@ -1,15 +1,15 @@
 #pragma once
 
+#include "dyno/Pass.h"
 #include "hw/HWContext.h"
 #include "hw/HWPrinter.h"
 #include "hw/HWValue.h"
 #include "hw/IDs.h"
 #include "hw/LoadStore.h"
-#include "support/DynBitSet.h"
 #include <cstdint>
 namespace dyno {
 
-class SimpleMemoryMappingPass {
+class SimpleMemoryMappingPass : public Pass<SimpleMemoryMappingPass> {
 
   struct AbstractMemory {
     uint32_t bitsPerWord;
@@ -276,7 +276,8 @@ class SimpleMemoryMappingPass {
   }
 
 public:
-  SimpleMemoryMappingPass(HWContext &ctx) : ctx(ctx) {}
+  auto make(HWContext &ctx) { return SimpleMemoryMappingPass(ctx); }
+  explicit SimpleMemoryMappingPass(HWContext &ctx) : ctx(ctx) {}
   void run() {
     for (auto mod : ctx.activeModules()) {
       runOnModule(mod.iref());

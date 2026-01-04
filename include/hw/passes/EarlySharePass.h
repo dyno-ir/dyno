@@ -1,6 +1,7 @@
 #pragma once
 
 #include "dyno/Obj.h"
+#include "dyno/Pass.h"
 #include "hw/HWAbstraction.h"
 #include "hw/HWContext.h"
 #include "hw/HWInstr.h"
@@ -11,7 +12,7 @@
 #include "support/Utility.h"
 namespace dyno {
 
-class EarlySharePass {
+class EarlySharePass : public Pass<EarlySharePass> {
   HWContext &ctx;
 
 public:
@@ -347,6 +348,7 @@ private:
   }
 
 public:
+  auto make(HWContext &ctx) { return EarlySharePass(ctx); }
   explicit EarlySharePass(HWContext &ctx) : ctx(ctx) {}
   void run() {
     for (auto mod : ctx.activeModules()) {

@@ -7,9 +7,10 @@
 #include "hw/IDs.h"
 #include "op/IDs.h"
 #include "support/Debug.h"
+#include "dyno/Pass.h"
 namespace dyno {
 
-class CheckPass {
+class CheckPass : public Pass<CheckPass> {
   HWContext &ctx;
   bool hasError = false;
 
@@ -138,7 +139,8 @@ public:
   }
 
 public:
-  CheckPass(HWContext &ctx) : ctx(ctx) {}
+  auto make(HWContext &ctx) { return CheckPass(ctx); }
+  explicit CheckPass(HWContext &ctx) : ctx(ctx) {}
   void run() {
     for (auto mod : ctx.activeModules()) {
       runOnModule(mod.iref());

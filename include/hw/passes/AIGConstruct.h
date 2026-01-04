@@ -210,7 +210,7 @@ public:
   }
 };
 
-class AIGConstructPass {
+class AIGConstructPass : public Pass<AIGConstructPass> {
   HWContext &ctx;
   HWInstrBuilder build;
   AIGObjRef aigRef;
@@ -425,6 +425,7 @@ public:
     }
   }
 
+  auto make(HWContext &ctx) { return AIGConstructPass(ctx); }
   explicit AIGConstructPass(HWContext &ctx) : ctx(ctx), build(ctx) {}
 };
 

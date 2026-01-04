@@ -3,10 +3,10 @@
 #include "dyno/Constant.h"
 #include "dyno/CustomInstr.h"
 #include "dyno/HierBlockIterator.h"
-#include "dyno/IDs.h"
 #include "dyno/Instr.h"
 #include "dyno/Obj.h"
 #include "dyno/Opcode.h"
+#include "dyno/Pass.h"
 #include "hw/FlipFlop.h"
 #include "hw/HWAbstraction.h"
 #include "hw/HWContext.h"
@@ -36,7 +36,7 @@ namespace dyno {
 bool generated(HWContext &ctx, SmallVecImpl<InstrRef> &matched,
                SmallVecImpl<OperandRef> &replaced, HWInstrRef);
 
-class InstCombinePass {
+class InstCombinePass : public Pass<InstCombinePass> {
   HWContext &ctx;
   SmallVec<InstrRef, 128> worklist;
   SmallVec<InstrRef, 8> currentMatched;
@@ -51,10 +51,17 @@ class InstCombinePass {
 public:
   using TaggedIRef = CustomInstrRef<InstrRef, uint64_t>;
 
-  struct Config {
-    bool fuseCommutative = true;
-    bool liftMUX = false;
-  };
+  // struct Config {
+  //   bool fuseCommutative = true;
+  //   bool liftMUX = false;
+  // };
+  // Config config;
+
+#define CONFIG_STRUCT_LAMBDA(FIELD, ENUM)                                      \
+  FIELD(bool, fuseCommutative, true)                                           \
+  FIELD(bool, liftMUX, false)
+  CONFIG_STRUCT(CONFIG_STRUCT_LAMBDA)
+#undef CONFIG_STRUCT_LAMBDA
   Config config;
 
 private:
@@ -1543,7 +1550,7 @@ public:
     destroyMarkedInstrs();
   }
 
-  void run(BlockRef block) {
+  void run2(BlockRef block) {
     for (auto instr : ctx.getInstrs())
       TaggedIRef{instr}.get() = 0;
     ctx.getInstrs().createHooks.emplace_back([&](InstrRef ref) {
@@ -1558,6 +1565,7 @@ public:
 public:
   explicit InstCombinePass(HWContext &ctx)
       : ctx(ctx), cbuild(ctx.constBuild()), bitAlias(ctx) {}
+  static InstCombinePass make(HWContext &ctx) { return InstCombinePass{ctx}; }
 };
 
 }; // namespace dyno

@@ -50,7 +50,7 @@ template <typename T> class TempBindVal {
 
 public:
   template <typename... Args>
-  [[nodiscard]] RAIIToken<TempBindVal> emplace(Args... args) {
+  [[nodiscard]] RAIIToken<TempBindVal> emplace(Args &&...args) {
     std::construct_at(&val, std::forward<Args>(args)...);
     return RAIIToken<TempBindVal>{*this};
   }

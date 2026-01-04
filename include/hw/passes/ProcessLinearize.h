@@ -2,6 +2,7 @@
 #include "dyno/CFG.h"
 #include "dyno/Obj.h"
 #include "dyno/ObjMap.h"
+#include "dyno/Pass.h"
 #include "hw/DeepCopy.h"
 #include "hw/HWAbstraction.h"
 #include "hw/HWPrinter.h"
@@ -16,11 +17,10 @@
 #include <algorithm>
 #include <ctime>
 #include <iterator>
-#include <random>
 
 namespace dyno {
 
-class ProcessLinearizePass {
+class ProcessLinearizePass : public Pass<ProcessLinearizePass> {
 
   using BitSet = UnsizedBitSet<SmallVec<uint64_t, 2>>;
 
@@ -43,12 +43,20 @@ class ProcessLinearizePass {
   ObjMapVec<Process, Custom> map;
 
 public:
-  struct Config {
-    bool retainIODeps = true;
-    bool retainInnerDeps = false;
-    enum ProcessKind { COMB, INIT };
-    ProcessKind kind = COMB;
-  };
+  // struct Config {
+  //   bool retainIODeps = true;
+  //   bool retainInnerDeps = false;
+  //   enum ProcessKind { COMB, INIT };
+  //   ProcessKind kind = COMB;
+  // };
+  // Config config;
+
+#define CONFIG_STRUCT_LAMBDA(FIELD, ENUM)                                      \
+  FIELD(bool, retainIODeps, true)                                              \
+  FIELD(bool, retainInnerDeps, false)                                          \
+  ENUM(kind, COMB, COMB, INIT)
+  CONFIG_STRUCT(CONFIG_STRUCT_LAMBDA)
+#undef CONFIG_STRUCT_LAMBDA
   Config config;
 
 private:
@@ -65,6 +73,7 @@ private:
   };
 
 public:
+  auto make(HWContext &ctx) { return ProcessLinearizePass(ctx); }
   explicit ProcessLinearizePass(HWContext &ctx) : ctx(ctx), copier(ctx) {}
   DeepCopier copier;
 

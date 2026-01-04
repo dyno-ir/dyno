@@ -2,6 +2,7 @@
 #include "aig/AIG.h"
 #include "dyno/Constant.h"
 #include "dyno/DestroyMap.h"
+#include "dyno/Pass.h"
 #include "hw/HWAbstraction.h"
 #include "hw/HWContext.h"
 #include "hw/HWInstr.h"
@@ -314,7 +315,7 @@ public:
   AIGERPrinter(HWContext &ctx, std::ostream &os) : ctx(ctx), os(os) {}
 };
 
-class ABCPass {
+class ABCPass : public Pass<ABCPass> {
   HWContext &ctx;
   DestroyMap<Instr> destroyMap;
 
@@ -386,6 +387,7 @@ public:
       HWInstrBuilder{ctx}.destroyInstr(ref);
     });
   }
+  auto make(HWContext &ctx) { return ABCPass(ctx); }
   explicit ABCPass(HWContext &ctx) : ctx(ctx) {}
 };
 

@@ -5,6 +5,7 @@
 #include "support/SlabAllocator.h"
 #include <cassert>
 #include <cctype>
+#include <cstdio>
 #include <iostream>
 #include <optional>
 #include <string>
@@ -15,6 +16,7 @@ struct Token {
   enum BaseType {
     NONE,
     IDENTIFIER,
+    PCT_IDENTIFIER,
 
     BIG_INT_LITERAL,
     INT_LITERAL,
@@ -59,8 +61,8 @@ public:
     return rv;
   }
   static Token makeKeyword(uint32_t type) { return makePlain(type); }
-  static Token makeIdent(uint32_t identIdx) {
-    auto rv = Token{IDENTIFIER};
+  static Token makeIdent(uint32_t identIdx, bool pctIdent = false) {
+    auto rv = Token{pctIdent ? PCT_IDENTIFIER : IDENTIFIER};
     rv.ident.idx = identIdx;
     return rv;
   }
@@ -115,10 +117,16 @@ public:
   bool operator!=(Token const &b) const { return !(*this == b); }
 };
 
+struct ParseError {
+  const char *message;
+  size_t start;
+  size_t end;
+  unsigned lineNumber;
+};
+
 // todo config struct
-template <bool ParseInlineCode = true,
-          bool IgnoreBackslash = true, bool CPPStyleComments = true,
-          bool LeadingPercentIdent = false>
+template <bool ParseInlineCode = true, bool IgnoreBackslash = true,
+          bool CPPStyleComments = true, bool LeadingPercentIdent = false>
 struct Lexer {
 
   struct Config {
@@ -133,10 +141,13 @@ struct Lexer {
 
   const std::string path;
   ArrayRef<char> src;
-  size_t i = 0;
-  size_t lastI = 0;
-  unsigned lineNumber = 1;
 
+  struct State {
+    size_t i;
+    size_t lastI;
+    unsigned lineNumber;
+  };
+  State state;
   SlabAllocator<dyno::BigInt> bigIntLiterals;
 
   ArrayRef<const char *> operators;
@@ -170,12 +181,10 @@ public:
         ArrayRef<const char *> operators, ArrayRef<const char *> keywords)
       : path(srcPath), src(src), operators(operators), keywords(keywords) {}
 
-  Token Pop() {
-    if (peekToken.has_value()) {
-      Token t = peekToken.value();
-      peekToken.reset();
-      return t;
-    }
+  Token lexNext() {
+    auto &i = state.i;
+    auto &lastI = state.lastI;
+    auto &lineNumber = state.lineNumber;
 
     size_t len = src.size();
     const char *srcC = src.data();
@@ -243,6 +252,7 @@ public:
     if (isalpha(srcC[i]) || srcC[i] == '_' ||
         (src[i] == '%' && LeadingPercentIdent)) {
       size_t identLen = 1;
+      bool pct = src[i] == '%';
       while (1) {
         char c = srcC[i + identLen];
         if (!isdigit(c) && !isalpha(c) && c != '_')
@@ -256,11 +266,11 @@ public:
         if (iter->second < NUM_KEYWORDS)
           return Token::makeKeyword(TOK_KW_START + iter->second);
         else
-          return Token::makeIdent(iter->second - NUM_KEYWORDS);
+          return Token::makeIdent(iter->second - NUM_KEYWORDS, pct);
       } else {
         rvStrings.push_back(substr);
         uint32_t idx = (strings[substr] = strings.size());
-        return Token::makeIdent(idx - NUM_KEYWORDS);
+        return Token::makeIdent(idx - NUM_KEYWORDS, pct);
       }
     }
 
@@ -288,7 +298,8 @@ public:
       }
     } else if (isdigit(src[i]) || src[i] == '.') {
       size_t len = 0;
-      while (isalnum(src[i + len]) || src[i + len] == '_' || src[i + len] == '.' || src[i + len] == '+' || src[i + len] == '-')
+      while (isalnum(src[i + len]) || src[i + len] == '_' ||
+             src[i + len] == '.' || src[i + len] == '+' || src[i + len] == '-')
         len++;
       i += len;
       return Token::makeNumericLit(std::string_view{&src[i - len], len});
@@ -324,10 +335,34 @@ public:
 
     return Token::makeNone();
   }
+
+  Token Pop() {
+    if (peekToken.has_value()) {
+      Token t = peekToken.value();
+      peekToken.reset();
+      return t;
+    }
+    return lexNext();
+  }
+
   Token Peek() {
     if (!peekToken.has_value())
-      peekToken = Pop();
+      peekToken = lexNext();
     return peekToken.value();
+  }
+
+  auto getState() const {
+    auto rv = state;
+    if (peekToken) {
+      // we do not back up the peek token, so reset to before it.
+      rv.i = rv.lastI;
+      rv.lastI = 0; // invalid w/o peek token
+    }
+    return rv;
+  }
+  void restoreState(State old) {
+    peekToken.reset();
+    state = old;
   }
 
   unsigned GetIdentIdx(std::string_view ident) {
@@ -366,24 +401,58 @@ public:
     peekEnsure(types...);
     return Pop();
   }
+  template <typename... Ts>
+  std::expected<Token, ParseError> tryPopEnsure(Ts... types) {
+    if (auto tok = tryPeekEnsure(types...)) {
+      return Pop();
+    } else {
+      return std::unexpected{tok.error()};
+    }
+  }
 
-  [[noreturn]] void printErrorOnPeekToken(const char *error) {
-    fprintf(stderr, "%s:%u: %s\n", path.c_str(), lineNumber, error);
-    auto line = extractEnclosingLine(std::string_view{src}, lastI);
+  void printError(const ParseError &error) {
+    fprintf(stderr, "%s:%u: %s\n", path.c_str(), error.lineNumber,
+            error.message);
+    auto line = extractEnclosingLine(std::string_view{src}, error.start);
     unsigned pos;
-    fprintf(stderr, "%s:%u: %n", path.c_str(), lineNumber, &pos);
+    fprintf(stderr, "%s:%u: %n", path.c_str(), error.lineNumber, &pos);
     std::cerr << line << "\n";
-    pos += &src[lastI] - line.begin();
+    pos += &src[error.start] - line.begin();
     for (unsigned i = 0; i < pos; i++)
       putc(' ', stderr);
-    fprintf(stderr, "^\n");
+    putc('^', stderr);
+    for (size_t i = error.start; i < error.end; i++)
+      putc('~', stderr);
+    putc('\n', stderr);
+  }
+
+  [[noreturn]] void printErrorOnPeekToken(const char *error) {
+    printError(makeErrorOnPeekToken(error));
     report_fatal_error("parser error");
+  }
+  ParseError makeErrorOnPeekToken(const char *error) {
+    assert(peekToken);
+    return ParseError{error, state.lastI, state.i, state.lineNumber};
+  }
+
+  ParseError makeErrorOnNextToken(const char *error) {
+    assert(peekToken);
+    return ParseError{error, state.i, state.i, state.lineNumber};
   }
 
   template <typename... Ts> Token peekEnsure(Ts... types) {
     Token t = Peek();
     if (!((t.type == types) || ...)) {
       printErrorOnPeekToken("unexpected token");
+    }
+    return t;
+  }
+
+  template <typename... Ts>
+  std::expected<Token, ParseError> tryPeekEnsure(Ts... types) {
+    Token t = Peek();
+    if (!((t.type == types) || ...)) {
+      return std::unexpected{makeErrorOnPeekToken("unexpected token")};
     }
     return t;
   }
@@ -397,5 +466,11 @@ public:
     if (rv)
       Pop();
     return rv;
+  }
+
+  void reset(ArrayRef<char> src) {
+    this->src = src;
+    this->state = State{0, 0, 1};
+    this->peekToken.reset();
   }
 };

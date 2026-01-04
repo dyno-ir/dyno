@@ -2,6 +2,7 @@
 
 #include "dyno/Constant.h"
 #include "dyno/Obj.h"
+#include "dyno/Pass.h"
 #include "hw/AutoDebugInfo.h"
 #include "hw/HWAbstraction.h"
 #include "hw/HWContext.h"
@@ -19,7 +20,7 @@
 
 namespace dyno {
 
-class LowerOpsPass {
+class LowerOpsPass : public Pass<LowerOpsPass> {
   HWContext &ctx;
   HWInstrBuilder build;
   ConstantBuilder cbuild;
@@ -979,6 +980,7 @@ public:
       build.destroyInstr(ctx.getInstrs().resolve(obj));
     }
   }
+  static auto make(HWContext &ctx) { return LowerOpsPass(ctx); }
   explicit LowerOpsPass(HWContext &ctx)
       : ctx(ctx), build(ctx), cbuild(ctx.getConstants()), autoDebugInfo(ctx) {}
 };

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "dyno/Type.h"
 #include "support/SmallVec.h"
 #include <cassert>
 #include <dyno/Obj.h>
@@ -50,6 +51,8 @@ private:
 
 public:
   using value_type = T;
+  static constexpr DialectType ty{Traits::ty};
+
   NewDeleteObjStore() {}
   NewDeleteObjStore(const NewDeleteObjStore &) = delete;
   NewDeleteObjStore(NewDeleteObjStore &&) = default;

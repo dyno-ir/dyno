@@ -2,6 +2,7 @@
 
 #include "dyno/DestroyMap.h"
 #include "dyno/HierBlockIterator.h"
+#include "dyno/Pass.h"
 #include "hw/HWAbstraction.h"
 #include "hw/HWContext.h"
 #include "hw/HWPrinter.h"
@@ -11,7 +12,7 @@
 #include "support/Debug.h"
 namespace dyno {
 
-class RemoveBuffersPass {
+class RemoveBuffersPass : public Pass<RemoveBuffersPass> {
   HWContext &ctx;
   ObjMapVec<Module, bool> isBuffer;
   DestroyMap<Instr> destroyMap;
@@ -51,7 +52,8 @@ class RemoveBuffersPass {
   }
 
 public:
-  RemoveBuffersPass(HWContext &ctx) : ctx(ctx) {}
+  auto make(HWContext &ctx) { return RemoveBuffersPass(ctx); }
+  explicit RemoveBuffersPass(HWContext &ctx) : ctx(ctx) {}
 
   void runOnModule(ModuleIRef mod) {
     for (auto instr : HierBlockRange{mod.block()}) {

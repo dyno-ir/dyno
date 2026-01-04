@@ -3,6 +3,7 @@
 #include "aig/AIG.h"
 #include "aig/IDs.h"
 #include "dyno/ObjMap.h"
+#include "dyno/Pass.h"
 #include "hw/FlipFlop.h"
 #include "hw/HWAbstraction.h"
 #include "hw/HWContext.h"
@@ -18,7 +19,8 @@
 namespace dyno {
 
 // todo: function support
-class AggressiveDeadCodeEliminationPass {
+class AggressiveDeadCodeEliminationPass
+    : public Pass<AggressiveDeadCodeEliminationPass> {
   HWContext &ctx;
   HWInstrBuilder build;
 
@@ -483,6 +485,7 @@ public:
     destroyDeadWires();
     destroyDeadConstants();
   }
-  AggressiveDeadCodeEliminationPass(HWContext &ctx) : ctx(ctx), build(ctx) {}
+  auto make(HWContext &ctx) { return AggressiveDeadCodeEliminationPass(ctx); }
+  explicit AggressiveDeadCodeEliminationPass(HWContext &ctx) : ctx(ctx), build(ctx) {}
 };
 }; // namespace dyno

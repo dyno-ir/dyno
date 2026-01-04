@@ -1,6 +1,7 @@
 #pragma once
 
 #include "dyno/Constant.h"
+#include "dyno/Pass.h"
 #include "hw/HWAbstraction.h"
 #include "hw/HWContext.h"
 #include "hw/IDs.h"
@@ -8,7 +9,7 @@
 #include "support/ErrorRecovery.h"
 namespace dyno {
 
-class ConstantMapping {
+class ConstantMappingPass : public Pass<ConstantMappingPass> {
   HWContext &ctx;
   HWInstrBuilder build;
   enum class ConstModType { NONE, ZERO, ONE, ZERO_ONE, ONE_ZERO };
@@ -158,7 +159,8 @@ class ConstantMapping {
   }
 
 public:
-  ConstantMapping(HWContext &ctx) : ctx(ctx), build(ctx) {}
+  auto make(HWContext &ctx) { return ConstantMappingPass(ctx); }
+  explicit ConstantMappingPass(HWContext &ctx) : ctx(ctx), build(ctx) {}
   void setup() { findConstantModules(); }
   void run() {
     setup();

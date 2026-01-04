@@ -1,11 +1,12 @@
 #pragma once
 
 #include "dyno/Obj.h"
+#include "dyno/Pass.h"
 #include "hw/HWAbstraction.h"
 #include "hw/HWContext.h"
 namespace dyno {
 
-class TriggerDedupePass {
+class TriggerDedupePass : public Pass<TriggerDedupePass> {
   HWContext &ctx;
 
   static bool triggerDeepEqual(TriggerIRef lhs, TriggerIRef rhs) {
@@ -55,6 +56,7 @@ public:
   }
 
 public:
+  auto make(HWContext &ctx) { return TriggerDedupePass(ctx); }
   explicit TriggerDedupePass(HWContext &ctx) : ctx(ctx) {}
 };
 

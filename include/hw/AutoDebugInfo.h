@@ -70,11 +70,11 @@ template <typename TempInfoT> class AutoDebugInfoStackBase {
   SmallVec<TempInfoT, 16> stack;
 
 public:
-  template <typename... Args> void pushDebugInfo(Args... args) {
+  template <typename... Args> void pushDebugInfo(Args &&...args) {
     stack.emplace_back(true, std::forward<Args>(args)...);
   }
   template <typename... Args>
-  void addDebugInfo(bool isNew = false, Args... args) {
+  void addDebugInfo(bool isNew = false, Args &&...args) {
     stack.emplace_back(isNew, std::forward<Args>(args)...);
   }
   void pushEmpty() { stack.emplace_back(TempInfoT::empty()); }

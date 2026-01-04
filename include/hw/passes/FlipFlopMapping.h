@@ -3,11 +3,11 @@
 #include "dyno/Constant.h"
 #include "dyno/DestroyMap.h"
 #include "dyno/Instr.h"
+#include "dyno/Pass.h"
 #include "hw/FlipFlop.h"
 #include "hw/HWAbstraction.h"
 #include "hw/HWContext.h"
 #include "hw/HWInstr.h"
-#include "hw/HWPrinter.h"
 #include "hw/HWValue.h"
 #include "hw/IDs.h"
 #include "hw/LoadStore.h"
@@ -18,12 +18,11 @@
 #include "support/PointerVariant.h"
 #include "support/SlabAllocator.h"
 #include "support/Utility.h"
-#include <bit>
 #include <bitset>
 #include <cstdint>
 namespace dyno {
 
-class FlipFlopMappingPass {
+class FlipFlopMappingPass : public Pass<FlipFlopMappingPass> {
 
   struct AbstractFF {
     enum Indices {
@@ -55,7 +54,7 @@ class FlipFlopMappingPass {
     auto getRaw() const { return raw; }
 
     AbstractFF() = default;
-    explicit AbstractFF(uint16_t raw) : raw(raw) {};
+    explicit AbstractFF(uint16_t raw) : raw(raw){};
   };
 
   enum class FFPortType : uint8_t {
@@ -679,6 +678,7 @@ public:
                      [&](InstrRef ref) { build.destroyInstr(ref); });
     destroyMap.clear();
   }
+  auto make(HWContext &ctx) { return FlipFlopMappingPass(ctx); }
   explicit FlipFlopMappingPass(HWContext &ctx) : ctx(ctx), build(ctx) {}
 };
 }; // namespace dyno

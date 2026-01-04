@@ -3,6 +3,7 @@
 #include "dyno/CustomInstr.h"
 #include "dyno/HierBlockIterator.h"
 #include "dyno/Instr.h"
+#include "dyno/Pass.h"
 #include "hw/AutoDebugInfo.h"
 #include "hw/HWAbstraction.h"
 #include "hw/HWInstr.h"
@@ -12,11 +13,12 @@
 
 namespace dyno {
 
-class SeqToCombPass {
+class SeqToCombPass : public Pass<SeqToCombPass> {
   HWContext &ctx;
   AutoCopyDebugInfoStack autoDbgInfo;
 
 public:
+  auto make(HWContext &ctx) { return SeqToCombPass(ctx); }
   explicit SeqToCombPass(HWContext &ctx) : ctx(ctx), autoDbgInfo(ctx) {}
 
   using TaggedRegRef = CustomInstrRef<RegisterIRef, uint64_t>;

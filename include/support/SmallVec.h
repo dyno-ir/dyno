@@ -202,6 +202,15 @@ protected:
     }
   }
 
+  void resize_no_init(size_type n) {
+    if (n < sz) {
+      std::destroy(begin() + n, end());
+    } else if (n > sz) {
+      reserve(n);
+    }
+    sz = n;
+  }
+
 public:
   T &operator[](size_type pos) {
     assert(pos < sz);
@@ -225,15 +234,6 @@ public:
   void clear() {
     destroyElts();
     sz = 0;
-  }
-
-  void resize_no_init(size_type n) {
-    if (n < sz) {
-      std::destroy(begin() + n, end());
-    } else if (n > sz) {
-      reserve(n);
-    }
-    sz = n;
   }
 
   void resize(size_type n, const T &templ) {

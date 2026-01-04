@@ -1,6 +1,7 @@
 #pragma once
 
 #include "dyno/HierBlockIterator.h"
+#include "dyno/Pass.h"
 #include "hw/AutoDebugInfo.h"
 #include "hw/HWAbstraction.h"
 #include "hw/HWContext.h"
@@ -14,7 +15,7 @@
 
 namespace dyno {
 
-class FuzzyCSEPass {
+class FuzzyCSEPass : public Pass<FuzzyCSEPass> {
   HWContext &ctx;
   BitAliasAnalysis bitAlias;
   HWInstrBuilder build;
@@ -398,6 +399,8 @@ public:
   FuzzyCSEPass(HWContext &ctx)
       : ctx(ctx), bitAlias(ctx), build(ctx), controlFlowAnalysis(ctx),
         autoDbgInfo(ctx) {}
+  static auto make(HWContext &ctx) { return FuzzyCSEPass{ctx}; }
+
   void run() {
     bitAlias.clearCache();
     for (auto mod : ctx.activeModules()) {

@@ -3,6 +3,7 @@
 #include "dyno/CFG.h"
 #include "dyno/DestroyMap.h"
 #include "dyno/ObjMap.h"
+#include "dyno/Pass.h"
 #include "hw/DeepCopy.h"
 #include "hw/HWAbstraction.h"
 #include "hw/HWContext.h"
@@ -11,7 +12,7 @@
 #include "hw/Register.h"
 #include "support/Debug.h"
 namespace dyno {
-class ModuleInlinePass {
+class ModuleInlinePass : public Pass<ModuleInlinePass> {
   HWContext &ctx;
   DeepCopier copier;
   ObjMapVec<Module, bool> isTopModule;
@@ -106,6 +107,7 @@ public:
   }
 
 public:
-  ModuleInlinePass(HWContext &ctx) : ctx(ctx), copier(ctx) {}
+  auto make(HWContext &ctx) { return ModuleInlinePass(ctx); }
+  explicit ModuleInlinePass(HWContext &ctx) : ctx(ctx), copier(ctx) {}
 };
 }; // namespace dyno

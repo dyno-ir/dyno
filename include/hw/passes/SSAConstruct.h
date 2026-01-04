@@ -3,6 +3,7 @@
 #include "dyno/Instr.h"
 #include "dyno/Obj.h"
 #include "dyno/ObjMap.h"
+#include "dyno/Pass.h"
 #include "hw/AutoDebugInfo.h"
 #include "hw/HWAbstraction.h"
 #include "hw/HWInstr.h"
@@ -19,7 +20,7 @@
 
 namespace dyno {
 
-class SSAConstructPass {
+class SSAConstructPass : public Pass<SSAConstructPass> {
   HWContext &ctx;
   unsigned depth = 0;
   ObjMapVec<Instr, bool> isNewInstr;
@@ -84,6 +85,7 @@ private:
   }
 
 public:
+  auto make(HWContext &ctx) { return SSAConstructPass(ctx); }
   explicit SSAConstructPass(HWContext &ctx) : ctx(ctx), autoDebugInfo(ctx) {}
 
   struct MultiwayResult {

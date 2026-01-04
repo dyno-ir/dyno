@@ -1,5 +1,6 @@
 #pragma once
 #include "dyno/Constant.h"
+#include "dyno/Pass.h"
 #include "hw/HWAbstraction.h"
 #include "hw/HWContext.h"
 #include "hw/HWPrinter.h"
@@ -15,7 +16,7 @@
 
 namespace dyno {
 
-class FlipFlopInferencePass {
+class FlipFlopInferencePass : public Pass<FlipFlopInferencePass> {
   HWContext &ctx;
   MuxtreeAnalysis muxTreeAnalysis;
   HWInstrBuilderStack build;
@@ -267,5 +268,6 @@ public:
 
   explicit FlipFlopInferencePass(HWContext &ctx)
       : ctx(ctx), build(ctx), cbuild(ctx.getConstants()) {}
+  static auto make(HWContext &ctx) { return FlipFlopInferencePass{ctx}; }
 }; // namespace dyno
 }; // namespace dyno

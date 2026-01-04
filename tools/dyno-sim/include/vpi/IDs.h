@@ -12,7 +12,7 @@
 namespace dyno {
 
 enum VPIDialectID : uint8_t {
-  DIALECT_VPI = 5
+  DIALECT_VPI = 6
 }; // FIXME: ID assignment is getting out of hand
 using VPIType = SpecificDialectType<DialectID{DIALECT_VPI}>;
 using VPIOpcode = SpecificDialectOpcode<DialectID{DIALECT_VPI}>;
