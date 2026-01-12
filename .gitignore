@@ -12,6 +12,7 @@
 !CMakePresets.json
 !.clang-format
 !README.md
+!LICENSE.txt
 
 *~
 .DS_store
