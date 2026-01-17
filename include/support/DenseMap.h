@@ -548,7 +548,7 @@ template <typename K, typename size_type = uint32_t> struct DenseSetBucket {
 
       // or-reduce pow2 mask for pmovmsk type functionality
       key_vec pow2s;
-      for (uint j = 0; j < vector_len; j++)
+      for (unsigned j = 0; j < vector_len; j++)
         pow2s[j] = 1 << j;
 
       mask &= pow2s;
