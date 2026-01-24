@@ -7,10 +7,11 @@
 #include "dyno/NewDeleteObjStore.h"
 #include "dyno/Obj.h"
 #include "hw/DebugInfo.h"
+#include "meta/MetaPassManager.h"
 namespace dyno {
 
 struct TypeErasedCtx {
-  void *store;
+  void *ctx;
 };
 
 template <> struct InterfaceTraits<TypeErasedCtx> {
@@ -29,15 +30,40 @@ template <DialectID ID> using DialectContextT = DialectContext<ID>::t;
 
 class Context {
   ArrayInterface<TypeErasedCtx> contexts;
+  ArrayInterface<MemberRef<FatDynObjRef<>(void *, DynObjRef)>> resolvers;
 
 public:
-  template <typename T> T &get() {
-    return *reinterpret_cast<T *>(contexts[T::ty.getDialectID()].store);
+  DialectInfos dialectInfos;
+  MetaPassManager metaPassManager;
+
+  template <typename T> T &getCtx() {
+    return *reinterpret_cast<T *>(contexts[T::dialect].ctx);
   }
 
   template <typename T> auto &getStore() {
-    return get<DialectContextT<ObjTraits<T>::ty.getDialectID()>>()
+    return getCtx<DialectContextT<ObjTraits<T>::ty.getDialectID()>>()
         .template getStore<T>();
+  }
+
+  FatDynObjRef<> resolve(DynObjRef ref) { return resolvers[ref](ref); }
+
+  template <typename T> void registerDialect(T &context) {
+    // context pointer
+    assert(!contexts[T::dialect].ctx && "already registered?");
+    contexts.registerDialect(T::dialect,
+                             TypeErasedCtx{reinterpret_cast<void *>(&context)});
+
+    // dialect info registration (this can be overriden by the dialect)
+    dyno::registerDialect<T::dialect>(dialectInfos.dialectInfoArr.data(),
+                                      dialectInfos.typeInfoArr.data(),
+                                      dialectInfos.opcodeInfoArr.data());
+
+    // last thing: passes
+    registerDialectPasses<T::dialect>(metaPassManager);
+
+    if constexpr (requires { context.resolverMethods; }) {
+      resolvers.registerDialect(T::dialect, ArrayRef{context.resolverMethods});
+    }
   }
 };
 

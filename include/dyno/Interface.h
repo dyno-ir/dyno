@@ -26,7 +26,7 @@ private:
   using Traits = InterfaceTraits<T>;
   using Dispatch1T = decltype(Traits::dispatch1(nullref, nullptr));
   using Dispatch2T = decltype(Traits::dispatch2(nullref, Dispatch1T()));
-  std::array<Dispatch1T, 256> entries = {};
+  std::array<std::remove_const_t<Dispatch1T>, 256> entries = {};
 
 public:
   constexpr ArrayInterface() = default;

@@ -1,3 +1,6 @@
+#include "aig/AIGContext.h"
+#include "dyno/Context.h"
+#include "dyno/Obj.h"
 #include "dyno/Parser.h"
 #include "hw/HWContext.h"
 #include "hw/HWParser.h"
@@ -9,6 +12,7 @@
 #include "meta/MetaParser.h"
 #include "meta/MetaPassManager.h"
 #include "op/MapObj.h"
+#include "op/OpContext.h"
 #include "support/CmdLineArgs.h"
 #include "support/Debug.h"
 #include "support/DenseMap.h"
@@ -16,7 +20,6 @@
 #include "support/MMap.h"
 #include <array>
 #include <string>
-#include "dyno/Context.h"
 using namespace dyno;
 
 CmdLineArg<std::string_view> argFileName{
@@ -57,38 +60,6 @@ CmdLineArg<bool> argCheckAfterAll{'c', "check-after-all",
 #endif
 };
 
-void registerPasses() {
-  metaPassManager.registerPass<FunctionInlinePass>();
-  metaPassManager.registerPass<TriggerDedupePass>();
-  metaPassManager.registerPass<SeqToCombPass>();
-  metaPassManager.registerPass<SSAConstructPass>();
-  metaPassManager.registerPass<ProcessLinearizePass>();
-  metaPassManager.registerPass<InstCombinePass>();
-  metaPassManager.registerPass<ModuleInlinePass>();
-  metaPassManager.registerPass<LoopSimplifyPass>();
-  metaPassManager.registerPass<LinearizeControlFlowPass>();
-  metaPassManager.registerPass<AggressiveDeadCodeEliminationPass>();
-  metaPassManager.registerPass<LowerOpsPass>();
-  metaPassManager.registerPass<AIGConstructPass>();
-  metaPassManager.registerPass<ABCPass>();
-  metaPassManager.registerPass<ParseLibertyPass>();
-  metaPassManager.registerPass<FlipFlopInferencePass>();
-  metaPassManager.registerPass<MuxTreeOptimizationPass>();
-  metaPassManager.registerPass<CommonSubexpressionEliminationPass>();
-  metaPassManager.registerPass<FlipFlopMappingPass>();
-  metaPassManager.registerPass<RemoveBuffersPass>();
-  metaPassManager.registerPass<OrderInstrsPass>();
-  metaPassManager.registerPass<ConstantMappingPass>();
-  metaPassManager.registerPass<FindLongestPathPass>();
-  metaPassManager.registerPass<CheckPass>();
-  metaPassManager.registerPass<RegisterPartitionPass>();
-  metaPassManager.registerPass<FuzzyCSEPass>();
-  metaPassManager.registerPass<EarlySharePass>();
-  metaPassManager.registerPass<SimpleMemoryMappingPass>();
-  metaPassManager.registerPass<LoadCoalescePass>();
-  metaPassManager.registerPass<RemoveInitProcsPass>();
-}
-
 class MetaPassPipelineInterpreter {
   DynoLexer &lexer;
   ArrayRef<void *> passCtorArgs;
@@ -119,14 +90,29 @@ public:
     }
   }
 
-
-
   MetaPassPipelineInterpreter(DynoLexer &lexer, ArrayRef<void *> passCtorArgs)
       : lexer(lexer), passCtorArgs(passCtorArgs) {}
 };
 
 int main(int argc, char **argv) {
-  registerPasses();
+  Context context;
+  HWDialectContext hwContext;
+  CoreDialectContext coreContext;
+  MetaDialectContext metaContext;
+  OpDialectContext opContext;
+  AIGDialectContext aigContext;
+  context.registerDialect(coreContext);
+  context.registerDialect(hwContext);
+  context.registerDialect(opContext);
+  context.registerDialect(aigContext);
+  // meta must be registered last
+  context.registerDialect(metaContext);
+
+  // use context
+  auto w = context.getStore<Wire>().create(32);
+  ObjRef<Wire> thin = w;
+  FatDynObjRef<> fatDyn = context.resolve(thin);
+  assert(w == fatDyn.as<WireRef>());
 
   CmdLineArgHandler cmdLineArgHandler;
   cmdLineArgHandler.registerArg(argFileName);

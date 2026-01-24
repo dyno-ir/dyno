@@ -3,8 +3,11 @@
 #include "dyno/Constant.h"
 #include "dyno/Context.h"
 #include "dyno/DialectInfo.h"
+#include "dyno/FixedFlatObjStore.h"
 #include "dyno/IDs.h"
+#include "dyno/Interface.h"
 #include "dyno/NewDeleteObjStore.h"
+#include "dyno/Obj.h"
 #include "hw/DebugInfo.h"
 #include "hw/IDs.h"
 #include "hw/Module.h"
@@ -13,7 +16,9 @@
 #include "hw/StdCellInfo.h"
 #include "hw/Wire.h"
 #include "op/MapObj.h"
-#include "dyno/FixedFlatObjStore.h"
+#include "support/CallableRef.h"
+#include "support/TemplateUtil.h"
+#include <array>
 namespace dyno {
 
 class HWDialectContext {
@@ -25,13 +30,12 @@ public:
 
   static constexpr DialectID dialect{DIALECT_HW};
 
-  StoreType_t<Module> modules;
-  StoreType_t<Register> registers;
   StoreType_t<Wire> wires;
+  StoreType_t<Register> registers;
   StoreType_t<Process> procs;
+  StoreType_t<Module> modules;
   StoreType_t<Trigger> triggers;
   StoreType_t<StdCellInfo> stdCellInfos;
-  FixedFlatObjStore<Wire> wires2;
 
   ValueNameInfo<Register> regNameInfo;
 
@@ -53,7 +57,6 @@ public:
   template <> StoreType_t<StdCellInfo> &get<StoreType_t<StdCellInfo>>() {
     return stdCellInfos;
   }
-
   template <typename T> StoreType_t<T> &getStore() {
     return get<StoreType_t<T>>();
   }
@@ -61,6 +64,17 @@ public:
   auto activeModules() {
     return Range{modules}.filter([](ModuleRef ref) { return !ref->ignore; });
   }
+
+  // clang-format off
+  std::array<MemberRef<FatDynObjRef<>(void *, DynObjRef)>, 6> resolverMethods = {
+    MemberRef{&wires, BindMethod<&StoreType_t<Wire>::resolveGeneric>::fv},
+    MemberRef{&registers, BindMethod<&StoreType_t<Register>::resolveGeneric>::fv},
+    MemberRef{&modules, BindMethod<&StoreType_t<Process>::resolveGeneric>::fv},
+    MemberRef{&modules, BindMethod<&StoreType_t<Module>::resolveGeneric>::fv},
+    MemberRef{&triggers, BindMethod<&StoreType_t<Trigger>::resolveGeneric>::fv},
+    MemberRef{&stdCellInfos, BindMethod<&StoreType_t<StdCellInfo>::resolveGeneric>::fv},
+  };
+  // clang-format on
 };
 
 template <> struct DialectContext<DialectID{DIALECT_HW}> {

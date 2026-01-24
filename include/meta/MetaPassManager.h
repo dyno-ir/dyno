@@ -61,7 +61,6 @@ struct MetaPassManager {
 
   std::vector<OpcodeInfo> metaOpcodeInfoArr;
   SlabAllocator<TypeErasedPass> typeErasedPasses;
-
   MixedSizeSlabAllocator<> stringAlloc;
 
   char *processString(std::string_view view) {
@@ -104,5 +103,7 @@ struct MetaPassManager {
     return TypeErasedPassObj{&typeErasedPasses[opc.getOpcodeID()], args};
   }
 };
+
+template <DialectID D> void registerDialectPasses(MetaPassManager &) {}
 
 }; // namespace dyno
