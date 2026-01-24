@@ -13,11 +13,11 @@ public:
   MetaDialectPrinter(PrinterBase *) {}
 };
 
-template <typename Derived> class MetaDialectParser {
-  ParserBase<Derived> *base;
+class MetaDialectParser {
+  ParserBase *base;
 
 public:
   static constexpr DialectID dialect{DIALECT_META};
-  explicit MetaDialectParser(ParserBase<Derived> *base) : base(base) {}
+  explicit MetaDialectParser(ParserBase *base) : base(base) {}
 };
 }; // namespace dyno

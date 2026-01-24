@@ -80,12 +80,12 @@ public:
   }
 };
 
-template <typename Derived> class AIGDialectParser {
-  ParserBase<Derived> *base;
+class AIGDialectParser {
+  ParserBase *base;
 
 public:
   static constexpr DialectID dialect{DIALECT_AIG};
-  explicit AIGDialectParser(ParserBase<Derived> *base) : base(base) {}
+  explicit AIGDialectParser(ParserBase *base) : base(base) {}
 
   // todo
 };

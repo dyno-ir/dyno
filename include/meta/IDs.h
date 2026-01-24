@@ -10,7 +10,7 @@ namespace dyno {
 using MetaType = SpecificDialectType<DialectID{DIALECT_META}>;
 using MetaOpcode = SpecificDialectOpcode<DialectID{DIALECT_META}>;
 
-inline MetaPassManager metaPassManager;
+inline PassRegistry metaPassManager;
 
 template <>
 inline void

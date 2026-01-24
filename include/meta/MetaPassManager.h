@@ -1,8 +1,8 @@
 #pragma once
 
 #include "dyno/DialectInfo.h"
+#include "dyno/Lexer.h"
 #include "dyno/Opcode.h"
-#include "dyno/Parser.h"
 #include "support/SlabAllocator.h"
 #include <cctype>
 #include <cstring>
@@ -57,7 +57,7 @@ struct TypeErasedPassObj {
     fns->config(obj, config, lexer);
   }
 };
-struct MetaPassManager {
+struct PassRegistry {
 
   std::vector<OpcodeInfo> metaOpcodeInfoArr;
   SlabAllocator<TypeErasedPass> typeErasedPasses;
@@ -104,6 +104,6 @@ struct MetaPassManager {
   }
 };
 
-template <DialectID D> void registerDialectPasses(MetaPassManager &) {}
+template <DialectID D> void registerDialectPasses(PassRegistry &) {}
 
 }; // namespace dyno

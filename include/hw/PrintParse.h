@@ -3,6 +3,7 @@
 #include "dyno/InstrPrinter.h"
 #include "dyno/Obj.h"
 #include "dyno/Parser.h"
+#include "hw/HWContext.h"
 #include "hw/Module.h"
 #include "support/CallableRef.h"
 #include "support/TemplateUtil.h"
@@ -29,7 +30,6 @@ public:
     base->interfaces.registerVal<PrinterBase::name_fn>(
         DIALECT_HW,
         MemberRef{this, BindMethod<&HWDialectPrinter::getObjectName>::fv});
-
   }
 
   bool printHWType(FatDynObjRef<> ref, bool def) {
@@ -108,28 +108,20 @@ public:
 
 // Parser is templated for access to context's object stores. We could make
 // type-erased object store wrapper but would always incur overhead.
-template <typename Derived> class HWDialectParser {
-  ParserBase<Derived> &base;
+class HWDialectParser {
+  ParserBase &base;
 
 public:
   static constexpr DialectID dialect{DIALECT_HW};
-  // this has to be initialized by the outer Parser wrapper (HWParser.h)
-  HWContext *ctx;
 
-  HWDialectParser(const HWDialectParser &) = default;
-  HWDialectParser(HWDialectParser &&) = default;
-  HWDialectParser &operator=(const HWDialectParser &) = default;
-  HWDialectParser &operator=(HWDialectParser &&) = default;
-
-  explicit HWDialectParser(ParserBase<Derived> *base) : base(*base) {
-    base->interfaces
-        .template registerVal<typename ParserBase<Derived>::obj_parse_fn>(
-            DIALECT_HW,
-            MemberRef{this, BindMethod<&HWDialectParser::parseHW>::fv});
+  explicit HWDialectParser(ParserBase *base) : base(*base) {
+    base->interfaces.template registerVal<typename ParserBase::obj_parse_fn>(
+        DIALECT_HW, MemberRef{this, BindMethod<&HWDialectParser::parseHW>::fv});
   }
 
   FatDynObjRef<> parseHW(DialectType type, ArrayRef<char> name) {
     auto *lexer = &*base.lexer;
+    auto *ctx = &base.ctx;
     switch (*type) {
     case *HW_MODULE: {
       lexer->popEnsure(DynoLexer::op_rbropen);

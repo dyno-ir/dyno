@@ -34,7 +34,7 @@
 namespace dyno {
 template <>
 inline void
-registerDialectPasses<DialectID{DIALECT_HW}>(MetaPassManager &metaPassManager) {
+registerDialectPasses<DialectID{DIALECT_HW}>(PassRegistry &metaPassManager) {
   metaPassManager.registerPass<FunctionInlinePass>();
   metaPassManager.registerPass<TriggerDedupePass>();
   metaPassManager.registerPass<SeqToCombPass>();

@@ -7,6 +7,7 @@
 #include "dyno/NewDeleteObjStore.h"
 #include "hw/DebugInfo.h"
 #include "op/MapObj.h"
+
 namespace dyno {
 class MetaContext {
   NewDeleteObjStore<Instr> instrs;
@@ -24,12 +25,8 @@ public:
 };
 
 class MetaDialectContext {
-  NewDeleteObjStore<MapObj> mapObjs;
-
 public:
   static constexpr DialectID dialect{DIALECT_META};
-  auto &getMaps() { return mapObjs; }
-  template <typename T> auto &get();
-  template <> auto &get<MapObj>() { return mapObjs; }
+  template <typename T> auto &getStore();
 };
 }; // namespace dyno

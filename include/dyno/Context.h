@@ -8,6 +8,7 @@
 #include "dyno/Obj.h"
 #include "hw/DebugInfo.h"
 #include "meta/MetaPassManager.h"
+#include "support/CallableRef.h"
 namespace dyno {
 
 struct TypeErasedCtx {
@@ -32,9 +33,12 @@ class Context {
   ArrayInterface<TypeErasedCtx> contexts;
   ArrayInterface<MemberRef<FatDynObjRef<>(void *, DynObjRef)>> resolvers;
 
-public:
   DialectInfos dialectInfos;
-  MetaPassManager metaPassManager;
+  PassRegistry passRegistry;
+
+public:
+  DialectInfos &getDialectInfos() { return dialectInfos; }
+  PassRegistry &getPassRegistry() { return passRegistry; }
 
   template <typename T> T &getCtx() {
     return *reinterpret_cast<T *>(contexts[T::dialect].ctx);
@@ -59,13 +63,27 @@ public:
                                       dialectInfos.opcodeInfoArr.data());
 
     // last thing: passes
-    registerDialectPasses<T::dialect>(metaPassManager);
+    registerDialectPasses<T::dialect>(passRegistry);
 
     if constexpr (requires { context.resolverMethods; }) {
       resolvers.registerDialect(T::dialect, ArrayRef{context.resolverMethods});
     }
   }
 };
+
+// ref type for easy reassigning
+// class ContextRef {
+// private:
+//   Context *context;
+//   Context &self() { return *context; }
+
+// public:
+//   DialectInfos &getDialectInfos() { return self().getDialectInfos(); }
+//   PassRegistry &getPassRegistry() { return self().getPassRegistry(); }
+//   template <typename T> T &getCtx() { return self().getCtx<T>(); }
+//   template <typename T> auto &getStore() { return self().getStore<T>(); }
+//   FatDynObjRef<> resolve(DynObjRef ref) { return self().resolve(ref); }
+// };
 
 class CoreDialectContext {
   using InstrStoreT = NewDeleteObjStore<Instr>;

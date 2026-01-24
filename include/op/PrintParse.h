@@ -1,10 +1,10 @@
 #pragma once
 #include "dyno/DialectInfo.h"
 #include "dyno/InstrPrinter.h"
-#include "dyno/NewDeleteObjStore.h"
 #include "dyno/Obj.h"
 #include "dyno/Parser.h"
 #include "op/MapObj.h"
+#include "op/OpContext.h"
 #include "support/Lexer.h"
 #include "support/TemplateUtil.h"
 
@@ -43,18 +43,14 @@ public:
   }
 };
 
-template <typename Derived> class OpDialectParser {
-  ParserBase<Derived> *base;
+class OpDialectParser {
+  ParserBase *base;
   // todo: real reference wrapper
 public:
   static constexpr DialectID dialect{DIALECT_OP};
-  NewDeleteObjStore<MapObj> *mapStore;
-  OpDialectParser(ParserBase<Derived> *base) : base(base) {
-    base->interfaces
-        .template registerVal<typename ParserBase<Derived>::obj_parse_fn>(
-            dialect,
-            MemberRef{this,
-                      BindMethod<&OpDialectParser<Derived>::parseObj>::fv});
+  OpDialectParser(ParserBase *base) : base(base) {
+    base->interfaces.template registerVal<typename ParserBase::obj_parse_fn>(
+        dialect, MemberRef{this, BindMethod<&OpDialectParser::parseObj>::fv});
   }
 
   FatDynObjRef<> parseObj(DialectType type, ArrayRef<char> name) {
@@ -73,7 +69,7 @@ public:
           break;
       }
       lexer.popEnsure(DynoLexer::op_rbrclose);
-      return mapStore->create(std::move(map));
+      return base->ctx.getStore<MapObj>().create(std::move(map));
     }
 
     default:
