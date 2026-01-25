@@ -21,10 +21,11 @@ class OrderInstrsPass : public Pass<OrderInstrsPass> {
   enum { PRE_MARK = 0, MARK = 1 };
 
 public:
-  struct Config {
-    bool assertNoCircularDeps = true;
-    bool moveStoresBeforeLoads = false;
-  };
+#define CONFIG_STRUCT_LAMBDA(FIELD, ENUM)                                      \
+  FIELD(bool, assertNoCircularDeps, true)                                      \
+  FIELD(bool, moveStoresBeforeLoads, false)
+  CONFIG_STRUCT(CONFIG_STRUCT_LAMBDA)
+#undef CONFIG_STRUCT_LAMBDA
   Config config;
 
 private:

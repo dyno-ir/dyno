@@ -239,9 +239,10 @@ public:
                         [](void *, const char *, std::vector<const char *>) {});
                   }) {
       auto &self = *reinterpret_cast<Derived *>(selfPtr);
+      // reset to default config
+      self.config = typename Derived::Config{};
 
       ConfigParser parser{lexer};
-
       self.config.for_fields(
           [&](void *ptr, ConfigStructType ty, const char *nm) {
             auto it = config.find(std::string(nm));

@@ -1,5 +1,6 @@
 #include "aig/AIGContext.h"
 #include "dyno/Context.h"
+#include "dyno/DialectInfo.h"
 #include "dyno/Obj.h"
 #include "dyno/Parser.h"
 #include "hw/HWContext.h"
@@ -13,11 +14,13 @@
 #include "meta/MetaPassManager.h"
 #include "op/MapObj.h"
 #include "op/OpContext.h"
+#include "support/ArrayRef.h"
 #include "support/CmdLineArgs.h"
 #include "support/Debug.h"
 #include "support/DenseMap.h"
 #include "support/ErrorRecovery.h"
 #include "support/MMap.h"
+#include "support/VectorLUT.h"
 #include <array>
 #include <string>
 using namespace dyno;
@@ -60,11 +63,36 @@ CmdLineArg<bool> argCheckAfterAll{'c', "check-after-all",
 #endif
 };
 
-class MetaPassPipelineInterpreter {
+class PassStorage {
   Context &ctx;
+  VectorLUT<TypeErasedPassObj> passes;
+
+public:
+  TypeErasedPassObj &create(DialectOpcode passOpc, ArrayRef<void *> args) {
+    assert(passOpc.getDialectID() == DIALECT_META);
+    return passes.insert(passOpc.getOpcodeID(),
+                         ctx.getPassRegistry().constructPass(passOpc, args));
+  }
+  TypeErasedPassObj &findOrCreate(DialectOpcode passOpc,
+                                  ArrayRef<void *> args) {
+    assert(passOpc.getDialectID() == DIALECT_META);
+    if (auto &pass = passes.find(passOpc.getOpcodeID()))
+      return *pass;
+    return create(passOpc, args);
+  }
+
+  TypeErasedPassObj &insertExisting(DialectOpcode passOpc,
+                                    TypeErasedPassObj &&existing) {
+    return passes.insert(passOpc.getDialectID(), std::move(existing));
+  }
+
+  PassStorage(Context &ctx) : ctx(ctx) {}
+};
+
+class MetaPassPipelineInterpreter {
   DynoLexer &lexer;
   ArrayRef<void *> passCtorArgs;
-  DenseMap<uint16_t, TypeErasedPassObj> passObjs;
+  PassStorage passes;
 
 public:
   void interpretPassPipeline(BlockRef block) {
@@ -72,13 +100,7 @@ public:
       if (instr.getDialect() != DIALECT_META)
         report_fatal_error("expected meta dialect instruction");
       auto opc = instr.getDialectOpcode();
-      auto &pass = passObjs
-                       .findOrInsert(opc.getOpcodeID().num,
-                                     [&]() {
-                                       return ctx.getPassRegistry().getPass(
-                                           opc, passCtorArgs);
-                                     })
-                       .second.val();
+      auto &pass = passes.findOrCreate(opc, passCtorArgs);
 
       if (instr.getNumOperands() != 0) {
         if (instr.getNumOperands() != 1)
@@ -94,7 +116,7 @@ public:
 
   MetaPassPipelineInterpreter(Context &ctx, DynoLexer &lexer,
                               ArrayRef<void *> passCtorArgs)
-      : ctx(ctx), lexer(lexer), passCtorArgs(passCtorArgs) {}
+      : lexer(lexer), passCtorArgs(passCtorArgs), passes(ctx) {}
 };
 
 int main(int argc, char **argv) {

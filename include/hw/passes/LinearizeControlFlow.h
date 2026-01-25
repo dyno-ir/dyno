@@ -27,7 +27,7 @@ class LinearizeControlFlowPass : public Pass<LinearizeControlFlowPass> {
   SmallVec<InstrRef, 64> worklist;
   AutoCopyDebugInfoStack autoDebugInfo;
   LoopSimplifer loopSimplify;
-  InstCombinePass &instCombine;
+  InstCombinePass instCombine;
 
 public:
   struct Config {
@@ -309,11 +309,11 @@ public:
       runOnModule(module.iref());
     }
   }
-  explicit LinearizeControlFlowPass(Context &ctx, InstCombinePass &icb)
+  explicit LinearizeControlFlowPass(Context &ctx)
       : ctx(ctx), copier(ctx), build(ctx), autoDebugInfo(ctx),
-        loopSimplify(ctx), instCombine(icb) {}
-  static LinearizeControlFlowPass make(Context &ctx, InstCombinePass &icb) {
-    return LinearizeControlFlowPass{ctx, icb};
+        loopSimplify(ctx), instCombine(ctx) {}
+  static LinearizeControlFlowPass make(Context &ctx) {
+    return LinearizeControlFlowPass{ctx};
   }
 };
 

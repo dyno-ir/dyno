@@ -15,7 +15,7 @@ class Optional {
 
 public:
   static constexpr auto Invalid = InvalidF();
-  constexpr Optional() : val(Invalid) {}
+  constexpr Optional() : val(InvalidF()) {}
   constexpr Optional(const T &val) : val(val) { assert(val != Invalid); }
   constexpr Optional(T &&val) : val(std::move(val)) { assert(val != Invalid); }
   constexpr Optional &operator=(const T &rhs) {

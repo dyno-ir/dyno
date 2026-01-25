@@ -464,11 +464,42 @@ class AggressiveDeadCodeEliminationPass
   }
 
   void runOnModule(ModuleIRef module) {
+    if (module.mod()->ignore)
+      return;
     instrMap[module] = 1;
-
     initialWorklist(module);
     while (!worklist.empty()) {
       visitInstr(worklist.pop_back_val());
+    }
+  }
+
+  void markLiveInstructions() {
+    // find roots (not in CFG or in un-def'd blocks)
+    for (auto instr : ctx.getStore<Instr>()) {
+      if (!ctx.getCFG().contains(instr) ||
+          ctx.getCFG()[instr].blockRef()->defUse.getNumDefs() == 0) {
+        worklist.emplace_back(instr);
+      }
+    }
+
+    // recursively mark alive unless encountering active module.
+    while (!worklist.empty()) {
+      auto instr = worklist.pop_back_val();
+      instrMap[instr] = 1;
+
+      if (instr.isOpc(HW_MODULE_DEF, HW_STDCELL_DEF)) {
+        // contents of non-ignored modules are DCEd, don't mark alive
+        if (!instr.as<ModuleIRef>().mod()->ignore)
+          break;
+      }
+
+      for (auto op : instr.defs()) {
+        if (!op->is<BlockRef>())
+          continue;
+        auto block = op->as<BlockRef>();
+        worklist.reserve_safe(worklist.size() + block.size());
+        worklist.push_back_range(Range{block});
+      }
     }
   }
 
@@ -481,6 +512,7 @@ public:
     instrMap.resize(ctx.getStore<Instr>().numIDs());
     wireMap.resize(ctx.getStore<Wire>().numIDs());
     constantMap.resize(ctx.getStore<Constant>().numIDs());
+    markLiveInstructions();
     for (auto mod : ctx.getStore<Module>()) {
       runOnModule(mod.iref());
     }

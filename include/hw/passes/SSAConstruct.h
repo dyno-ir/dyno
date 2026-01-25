@@ -27,16 +27,12 @@ class SSAConstructPass : public Pass<SSAConstructPass> {
   AutoCopyDebugInfoStack autoDebugInfo;
 
 public:
-  struct Config {
-
-    enum Mode {
-      IMMEDIATE,
-      DEFERRED,
-    };
-    Mode mode = IMMEDIATE;
-    bool lowerAllDynamic = true;
-    bool dynamicToFullRegAccess = true;
-  };
+#define CONFIG_STRUCT_LAMBDA(FIELD, ENUM)                                      \
+  ENUM(mode, IMMEDIATE, IMMEDIATE, DEFERRED)                                   \
+  FIELD(bool, lowerAllDynamic, true)                                           \
+  FIELD(bool, dynamicToFullRegAccess, true)
+  CONFIG_STRUCT(CONFIG_STRUCT_LAMBDA)
+#undef CONFIG_STRUCT_LAMBDA
   Config config;
 
 private:

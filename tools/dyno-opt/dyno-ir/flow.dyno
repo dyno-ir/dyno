@@ -1,8 +1,31 @@
 
 
-// can't yet have a LINEARIZE_CONTROL_FLOW_PASS here bc its constructor depends on InstCombinePass
-// (only such case). Currently the constructors of these passes are all just given Context.
+// preprocessing, inlining
+meta.REMOVE_INIT_PROCS_PASS
+meta.FUNCTION_INLINE_PASS
+meta.INST_COMBINE_PASS
+meta.MODULE_INLINE_PASS
+meta.TRIGGER_DEDUPE_PASS
 
-meta.PROCESS_LINEARIZE_PASS map("retainIODeps": "false", "retainInnerDeps": "false", "kind": "COMB")
+// early dedupe/simplification
+meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS map("differentBlocks": "false")
+meta.INST_COMBINE_PASS
+
+// process fusion & ssa construction
+meta.SEQ_TO_COMB_PASS
 meta.SSA_CONSTRUCT_PASS
-meta.INST_COMBINE_PASS map("fuseCommutative": "true", "liftMUX": "false")
+meta.PROCESS_LINEARIZE_PASS map("retainIODeps": "false", "retainInnerDeps": "false")
+meta.SSA_CONSTRUCT_PASS
+meta.SSA_CONSTRUCT_PASS map("mode": "DEFERRED")
+meta.INST_COMBINE_PASS
+meta.LOAD_COALESCE_PASS
+meta.INST_COMBINE_PASS
+
+// canonicalize
+meta.LOOP_SIMPLIFY_PASS
+meta.AGGRESSIVE_DEAD_CODE_ELIMINATION_PASS
+meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS map("differentBlocks": "true")
+meta.ORDER_INSTRS_PASS map("assertNoCircularDeps": "true", "moveStoresBeforeLoads": "false")
+meta.INST_COMBINE_PASS
+meta.AGGRESSIVE_DEAD_CODE_ELIMINATION_PASS
+meta.INST_COMBINE_PASS

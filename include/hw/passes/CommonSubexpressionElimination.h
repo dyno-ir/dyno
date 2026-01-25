@@ -94,9 +94,9 @@ class CommonSubexpressionEliminationPass
   ControlFlowAnalysis controlFlowAnalysis;
 
 public:
-  struct Config {
-    bool differentBlocks = true;
-  };
+#define CONFIG_STRUCT_LAMBDA(FIELD, ENUM) FIELD(bool, differentBlocks, true)
+  CONFIG_STRUCT(CONFIG_STRUCT_LAMBDA)
+#undef CONFIG_STRUCT_LAMBDA
   Config config;
 
 private:

@@ -49,7 +49,7 @@ class PassPipeline {
   InstCombinePass instCombine{ctx};
   ModuleInlinePass moduleInline{ctx};
   LoopSimplifyPass loopSimplify{ctx};
-  LinearizeControlFlowPass linearizeControlFlow{ctx, instCombine};
+  LinearizeControlFlowPass linearizeControlFlow{ctx};
   AggressiveDeadCodeEliminationPass aggressiveDCE{ctx};
   LowerOpsPass lowerOps{ctx};
   AIGConstructPass aigConstr{ctx};

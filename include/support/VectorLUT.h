@@ -19,11 +19,15 @@ private:
 
 public:
   void ensure(size_t idx) {
+    if (data.size() == 0) {
+      base = idx;
+    }
     if (idx < base) {
       Container newVec;
       newVec.reserve(data.size() + (base - idx));
-      newVec.resize(base - idx);
-      newVec.insert(newVec.end(), data.begin(), data.end());
+      newVec.resize(data.size() + base - idx);
+      std::move(data.begin(), data.end(), newVec.begin() + base - idx);
+
       data = std::move(newVec);
       base = idx;
     } else if (idx - base >= data.size()) {
@@ -31,11 +35,12 @@ public:
     }
   }
 
-  void insert(size_t k, T &&value) {
+  T &insert(size_t k, T &&value) {
     ensure(k);
     auto &entry = data[k - base];
     assert(!entry);
     entry = std::move(value);
+    return *entry;
   }
   void insertOrAssign(size_t k, T &&value) {
     ensure(k);

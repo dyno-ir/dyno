@@ -27,13 +27,16 @@ struct TypeErasedPass {
 };
 
 struct TypeErasedPassObj {
+  friend struct DenseMapInfo<dyno::TypeErasedPassObj>;
+
   TypeErasedPass *fns = nullptr;
   void *obj = nullptr;
 
   TypeErasedPassObj(TypeErasedPass *fns, ArrayRef<void *> args) : fns(fns) {
     obj = fns->create(args);
   }
-  ~TypeErasedPassObj() {
+  constexpr ~TypeErasedPassObj() {
+    // constexpr if uninitialized, for Optional
     if (obj)
       fns->destroy(obj);
   }
@@ -56,7 +59,14 @@ struct TypeErasedPassObj {
   void config(std::map<std::string, std::string> &config, DynoLexer &lexer) {
     fns->config(obj, config, lexer);
   }
+
+  auto operator<=>(const TypeErasedPassObj &other) const = default;
+
+private:
+  constexpr TypeErasedPassObj(TypeErasedPass *fns, void *obj)
+      : fns(fns), obj(obj) {}
 };
+
 struct PassRegistry {
 
   std::vector<OpcodeInfo> metaOpcodeInfoArr;
@@ -98,7 +108,7 @@ struct PassRegistry {
                                   T::typeErasedRun, T::typeErasedConfig);
   }
 
-  TypeErasedPassObj getPass(DialectOpcode opc, ArrayRef<void *> args) {
+  TypeErasedPassObj constructPass(DialectOpcode opc, ArrayRef<void *> args) {
     assert(opc.getDialectID() == DIALECT_META);
     return TypeErasedPassObj{&typeErasedPasses[opc.getOpcodeID()], args};
   }
@@ -107,3 +117,16 @@ struct PassRegistry {
 template <DialectID D> void registerDialectPasses(PassRegistry &) {}
 
 }; // namespace dyno
+
+template <> struct DenseMapInfo<dyno::TypeErasedPassObj> {
+private:
+  using T = dyno::TypeErasedPassObj;
+
+public:
+  static constexpr T getEmptyKey() {
+    return dyno::TypeErasedPassObj{nullptr, nullptr};
+  }
+  // static constexpr T getTombstoneKey() { }
+  // static unsigned getHashValue(const T &k) { }
+  // static bool isEqual(const T &lhs, const T &rhs) { }
+};
