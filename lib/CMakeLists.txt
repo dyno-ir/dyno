@@ -8,6 +8,7 @@ add_library(core STATIC
     hw/HWPrinter.cpp
     hw/passes/InstCombine.cpp
     support/ErrorRecovery.cpp
+    support/TruthTable.cpp
 )
 
 add_library(hw STATIC

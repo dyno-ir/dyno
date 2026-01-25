@@ -9,17 +9,19 @@ namespace dyno {
 
 class AIGBalance {
 public:
-  void updateHeight(AIGNodeRef node) {
-    assert(!node.isSpecial());
-    height[node] = 1 + std::max(height[node[0]], height[node[1]]);
-  }
+  struct Config {
+    unsigned maxUseCount = 2;
+  };
+  Config config;
 
   SmallVec<AIGNodeTRef, 8> findMulti(AIGNodeTRef root) {
     assert(root.isGate());
     SmallVec<AIGNodeTRef, 8> dfs;
     SmallVec<AIGNodeTRef, 8> multi;
     auto handleNode = [&](AIGNodeTRef node) {
-      if (node.invert() || node.isTerminator() || aig.getUseCount(node) > 2)
+      // TODO: stop if multigate to large?
+      if (node.invert() || node.isTerminator() ||
+          aig.getUseCount(node) > config.maxUseCount)
         multi.push_back(node);
       else
         dfs.push_back(node);
@@ -36,7 +38,7 @@ public:
     AIGNodeTRef node = newAig.createAND(lhs, rhs);
     if (!old.isSpecial()) {
       remap.insert(old, node);
-      updateHeight(newAig[node]);
+      height.get_ensure(node) = 1 + std::max(height[lhs], height[rhs]);
     }
     return node;
   }
@@ -55,7 +57,11 @@ public:
       nodeRef = remap[nodeRef];
     }
     auto comp = [&](AIGNodeTRef l, AIGNodeTRef r) {
-      return height[l] > height[r];
+      uint32_t lH = height[l];
+      uint32_t rH = height[r];
+      // if (lH == rH)
+      //   return newAig.getUseCount(l) < newAig.getUseCount(r);
+      return lH > rH;
     };
     std::make_heap(multi.begin(), multi.end(), comp);
     while (true) {
@@ -88,7 +94,7 @@ public:
     remap.reset(aig);
     newAig = aig.cloneInputs();
     remap.setupInputMap(aig, newAig);
-    height.reset(aig, 0);
+    height.reset(newAig, 0);
     for (auto out : aig.outputs) {
       balanceImpl(out.getSingleOperand());
       newAig.createOutput(remap[out.getSingleOperand()]);

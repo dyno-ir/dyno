@@ -1,35 +1,12 @@
 #pragma once
 
 #include "aig/AIG.h"
-#include "support/Bits.h"
 #include "support/Debug.h"
+#include "support/TruthTable.h"
 #include <cassert>
 #include <print>
 
 namespace dyno {
-
-template <typename T>
-static constexpr unsigned bit_increment_plane_num =
-    std::bit_width(unsigned(std::numeric_limits<T>::digits)) - 1;
-static_assert(bit_increment_plane_num<bool> == 0);
-static_assert(bit_increment_plane_num<uint8_t> == 3);
-
-template <typename T> static consteval T bit_increment_plane(unsigned k) {
-  unsigned halfPeriod = 1 << k;
-  return repeatBits<T>(bit_mask_ones<T>(halfPeriod, halfPeriod),
-                       2 * halfPeriod);
-}
-static_assert(bit_increment_plane<uint8_t>(0) == 0b10101010);
-static_assert(bit_increment_plane<uint8_t>(1) == 0b11001100);
-static_assert(bit_increment_plane<uint8_t>(2) == 0b11110000);
-
-template <typename T> static consteval auto bit_increment_planes() {
-  std::array<T, bit_increment_plane_num<T>> arr;
-  for (unsigned i = 0; i < arr.size(); ++i) {
-    arr[i] = bit_increment_plane<T>(i);
-  }
-  return arr;
-}
 
 template <std::unsigned_integral Word> class AIGSim {
   using StateMap = AIGNodeMap<std::vector<Word>>;
@@ -95,8 +72,7 @@ public:
     aSim.resetIO();
     bSim.resetIO();
 
-    static constexpr auto planes = bit_increment_planes<word_t>();
-
+    auto &planes = tt_increment_planes<word_t>;
     unsigned numStaticInputs = std::min(unsigned(planes.size()), numInputs);
     for (unsigned i = 0; i < numStaticInputs; ++i) {
       word_t in = planes[i];

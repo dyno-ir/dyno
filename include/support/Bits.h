@@ -1,4 +1,5 @@
 #pragma once
+
 #include "support/ErrorRecovery.h"
 #include <bit>
 #include <cassert>
@@ -6,7 +7,6 @@
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
-#include <limits>
 #include <type_traits>
 
 template <std::unsigned_integral T>
@@ -81,7 +81,7 @@ template <typename T> constexpr T ceil_to_pow2(T x) {
   return T(1) << (std::bit_width(x - 1));
 }
 
-template <typename T> static constexpr T repeatBits(T x, unsigned xBits) {
+template <typename T> constexpr T repeatBits(T x, unsigned xBits) {
   unsigned fact = xBits;
   assert(!(x & bit_mask_zeros<T>(xBits)));
   while (fact != bit_mask_sz<T>) {
@@ -91,7 +91,7 @@ template <typename T> static constexpr T repeatBits(T x, unsigned xBits) {
   return x;
 }
 
-static constexpr uint16_t pack_bits(uint32_t x) {
+constexpr uint16_t pack_bits(uint32_t x) {
   x &= 0x55555555;
 
   x = (x | (x >> 1)) & 0x33333333;
@@ -102,7 +102,7 @@ static constexpr uint16_t pack_bits(uint32_t x) {
   return x;
 }
 
-static constexpr uint32_t unpack_bits(uint16_t x) {
+constexpr uint32_t unpack_bits(uint16_t x) {
   uint32_t xx = x;
   xx = (xx | (xx << 8)) & 0x00FF00FF;
   xx = (xx | (xx << 4)) & 0x0F0F0F0F;
@@ -112,15 +112,15 @@ static constexpr uint32_t unpack_bits(uint16_t x) {
   return xx;
 }
 
-static constexpr uint32_t hash_combine(uint32_t a, uint32_t b) {
+constexpr uint32_t hash_combine(uint32_t a, uint32_t b) {
   return a ^ (b + 0x9e3779b9 + (a << 6) + (a >> 2));
 }
 
-static constexpr uint64_t hash_combine64(uint64_t a, uint64_t b) {
+constexpr uint64_t hash_combine64(uint64_t a, uint64_t b) {
   return a ^ (b + 0x9e3779b97f4a7c15ull + (a << 6) + (a >> 2));
 }
 
-static constexpr uint32_t hash_u32(uint32_t a) {
+constexpr uint32_t hash_u32(uint32_t a) {
   a = (a ^ 61) ^ (a >> 16);
   a = a + (a << 3);
   a = a ^ (a >> 4);
@@ -129,15 +129,14 @@ static constexpr uint32_t hash_u32(uint32_t a) {
   return a;
 }
 
-static constexpr uint64_t hash_u64(uint64_t a) {
+constexpr uint64_t hash_u64(uint64_t a) {
   a ^= a >> 33;
   a *= 0xff51afd7ed558ccdull;
   return a ^ (a >> 32);
 }
 
 // split integer into regions of N bits, return 1000... for each region if equal
-template <int N, std::integral T>
-static constexpr T n_equal_mask(T lhs, T rhs) {
+template <int N, std::integral T> constexpr T n_equal_mask(T lhs, T rhs) {
   constexpr T REP01 = repeatBits((T(1) << (N - 1)) - T(1), N);
   lhs ^= rhs;
   T lhsSC = ~(((lhs & REP01) + REP01) | lhs | REP01);
@@ -255,7 +254,7 @@ public:
   constexpr unsigned count() const { return std::popcount(num & mask_ones); }
 };
 
-template <std::integral NumT> class DynBitField {
+template <std::unsigned_integral NumT> class DynBitField {
 public:
   using num_t = NumT;
   using size_type = uint8_t;
@@ -307,6 +306,55 @@ public:
     assert(offs + len <= pos + n);
     return DynBitField{num, size_type(pos + offs), len};
   }
+};
+
+template <std::unsigned_integral NumT> class DynBoolField {
+public:
+  using num_t = NumT;
+  using size_type = uint8_t;
+
+private:
+  num_t &num;
+  const size_type pos;
+
+  constexpr num_t mask_one() const { return bit_mask<num_t>(pos); }
+  constexpr num_t mask_zero() const { return ~bit_mask<num_t>(pos); }
+  constexpr num_t mask(bool v) const { return num_t(v) << pos; }
+
+public:
+  explicit constexpr DynBoolField(num_t &v, size_t pos) : num(v), pos(pos) {
+    assert(pos < bit_mask_sz<num_t>);
+  }
+
+  constexpr bool get() const { return num & mask_one(); }
+  constexpr void clr() { num &= mask_zero(); }
+  constexpr void set() { num |= mask_one(); }
+  constexpr void flip() { num ^= mask_one(); }
+
+  constexpr void set(bool v) {
+    clr();
+    num |= mask(v);
+  }
+
+  constexpr DynBoolField &operator=(bool v) {
+    set(v);
+    return *this;
+  }
+
+  constexpr DynBoolField &operator|=(bool v) {
+    num |= mask(v);
+    return *this;
+  }
+  constexpr DynBoolField &operator^=(bool v) {
+    num ^= mask(v);
+    return *this;
+  }
+  constexpr DynBoolField &operator&=(bool v) {
+    num &= ~mask(!v);
+    return *this;
+  }
+
+  constexpr operator bool() const { return get(); }
 };
 
 template <typename Field, typename Get, typename Set> class GetSetField {

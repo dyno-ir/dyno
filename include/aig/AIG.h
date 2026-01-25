@@ -576,6 +576,14 @@ public:
       return special[node.getOffsetIdx()];
     return gates[node.idx()];
   }
+
+  reference get_ensure(AIGNodeTRef node) {
+    if (node.isSpecial()) [[unlikely]]
+      return special[node.getOffsetIdx()];
+    if (node.idx() >= gates.size())
+      gates.resize(node.idx() + 1);
+    return gates[node.idx()];
+  }
 };
 
 template <typename T> using AIGNodeVecMap = AIGNodeMap<std::vector<T>>;

@@ -28,7 +28,11 @@ int main() {
     //     .output();
     // ((~(ins[0] & ins[1]) & ins[2] & ins[3] & ins[4]) | (ins[2] & ins[3]))
     //     .output();
-    ((~ins[0] & ins[1]) & ~(ins[0] & ins[1])).output();
+    //((~ins[0] & ins[1]) & ~(ins[0] & ins[1])).output();
+    (ins[0] & ins[1] & ins[2]).output();
+    (~(ins[0] & ins[1]) & ins[2]).output();
+    // (ins[0] & (ins[1] & ins[2])).output();
+    // (ins[0] & (ins[1] & ins[3])).output();
   }
   // ((~(ins[0] & ins[1]) & ins[2] & ins[3] & ins[4]) & (ins[2] &
   // ins[3])).output();
@@ -38,6 +42,7 @@ int main() {
   //(~(ins[0] & ins[1]) & ins[1] & ins[4] & ins[4] & ins[4]).output();
   // aigPrinter.print(aig);
 
+  aigPrinter.print(aig);
   AIG newAIG = AIGBalance(aig).run();
   assert(AIGSim<uint64_t>::lec(aig, newAIG));
   // auto height = AIGBalance(aig).calcHeightMap(aig);

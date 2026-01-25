@@ -1,9 +1,8 @@
 #pragma once
 
 #include "aig/AIG.h"
-#include "aig/passes/AIGSim.h"
-#include "support/Bits.h"
 #include "support/Debug.h"
+#include "support/TruthTable.h"
 #include <cassert>
 
 namespace dyno {
@@ -16,12 +15,11 @@ class AIGCut {
 public:
   static constexpr unsigned MaxCut = 6;
   using bloom_t = uint64_t;
-  using truth_t = uint64_t;
 
   bloom_t bloom = 0;
   StaticVec<AIGNodeTRef, MaxCut, uint8_t> leaves;
   int32_t cost = 0;
-  uint64_t truth;
+  TruthTable truth;
 
   AIGCut() {}
 
@@ -34,6 +32,8 @@ public:
     leaves.clear();
     bloom = 0;
   }
+
+  size_t size() const { return leaves.size(); }
 
   bool empty() const { return leaves.empty(); }
 
@@ -128,7 +128,7 @@ private:
         out.leaves.push_back(bL);
         ++bI;
       }
-      if (out.leaves.size() >= config.numMaxLeaves)
+      if (out.size() >= config.numMaxLeaves)
         return false;
     }
     bool aHasRemain = aI != aEnd;
@@ -138,7 +138,7 @@ private:
     assert(aHasRemain != bHasRemain);
     auto remainI = aHasRemain ? aI : bI;
     auto remainEnd = aHasRemain ? aEnd : bEnd;
-    if (unsigned(remainEnd - remainI) + out.leaves.size() > config.numMaxLeaves)
+    if (unsigned(remainEnd - remainI) + out.size() > config.numMaxLeaves)
       return false;
     for (; remainI != remainEnd; ++remainI) {
       out.leaves.push_back(*remainI);
@@ -147,10 +147,23 @@ private:
   }
 
   bool mergeCutFast(AIGCut &out, const AIGCut &a, const AIGCut &b) {
-    if (a.leaves.size() + b.leaves.size() > config.numMaxLeaves &&
+    if (a.size() + b.size() > config.numMaxLeaves &&
         a.countBloomUnion(b) > config.numMaxLeaves)
       return false;
     return mergeCut(out, a, b);
+  }
+
+  static TruthTable expandTruth(const AIGCut &cut, const AIGCut &merged) {
+    if (cut.size() == merged.size())
+      return cut.truth;
+    uint8_t varMap[AIGCut::MaxCut];
+    unsigned cI = 0;
+    for (unsigned i = 0; i < merged.size() && cI < cut.size(); ++i) {
+      if (cut.leaves[cI] != merged.leaves[i])
+        continue;
+      varMap[cI++] = i;
+    }
+    return cut.truth.expand({varMap, cut.size()}, merged.size());
   }
 
   int insertCut(AIGNodeTRef node, const AIGCut &newCut) {
@@ -198,7 +211,7 @@ private:
         return -1;
     }
     DYNO_DBGV(dbgs() << ", inserted at " << (itInsert - nodeCuts.begin())
-                     << ", cost: " << newCut.cost << '\n');
+                     << ", cost: " << newCut.cost);
     if (itInsert == itEnd) {
       nodeCuts.emplace_back(newCut);
       return nodeCuts.size() - 1;
@@ -211,8 +224,10 @@ private:
   void computeCuts(AIGNodeTRef node) {
     DYNO_DBGV(dbgs() << "[Cut] CUTS FOR: " << node << '\n');
     auto &nodeCuts = cuts[node];
-    auto &lhsCuts = cuts[aig[node].operand(0)];
-    auto &rhsCuts = cuts[aig[node].operand(1)];
+    AIGNodeTRef lhsRef = aig[node].operand(0);
+    AIGNodeTRef rhsRef = aig[node].operand(1);
+    auto &lhsCuts = cuts[lhsRef];
+    auto &rhsCuts = cuts[rhsRef];
     bool insertedTrivialCut = false;
     for (auto &lhsCut : lhsCuts) {
       for (auto &rhsCut : rhsCuts) {
@@ -231,12 +246,24 @@ private:
         auto &insertedCut = nodeCuts[r];
         insertedTrivialCut |= insertedCut.isTrivial();
         if (config.computeTruth) {
+          TruthTable lhsTruth = expandTruth(lhsCut, insertedCut);
+          TruthTable rhsTruth = expandTruth(rhsCut, insertedCut);
+          if (lhsRef.invert())
+            lhsTruth = ~lhsTruth;
+          if (rhsRef.invert())
+            rhsTruth = ~rhsTruth;
+          insertedCut.truth = lhsTruth & rhsTruth;
+          DYNO_DBGV(dbgs() << ", truth: "
+                           << insertedCut.truth.format(insertedCut.size()));
         }
+        DYNO_DBGV(dbgs() << '\n');
       }
     }
 
     if (!insertedTrivialCut) {
-      nodeCuts.emplace_back(node);
+      AIGCut trivialCut(node);
+      trivialCut.truth = TruthTable::identity(0);
+      nodeCuts.emplace_back(trivialCut);
     }
   }
 
@@ -247,11 +274,11 @@ public:
     assert(config.numMaxLeaves <= AIGCut::MaxCut);
 
     cuts.reset(aig);
-    auto &cut = cuts[AIGNodeTRef::zero()].emplace_back();
-    cut.truth = 0;
+    auto &zeroCut = cuts[AIGNodeTRef::zero()].emplace_back();
+    zeroCut.truth = TruthTable::zero();
     for (auto &in : aig.inputs) {
-      cuts[in].emplace_back(in);
-      cut.truth = bit_increment_plane<AIGCut::truth_t>(0);
+      auto &inCut = cuts[in].emplace_back(in);
+      inCut.truth = TruthTable::identity(0);
     }
     for (auto node : aig.gates()) {
       computeCuts(node);
