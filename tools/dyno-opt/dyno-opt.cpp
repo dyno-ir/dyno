@@ -6,7 +6,7 @@
 #include "hw/HWParser.h"
 #include "hw/HWPrinter.h"
 #include "hw/PassPipeline.h"
-#include "hw/passes/LowerOps.h"
+#include "hw/passes/HWDialectPasses.h"
 #include "meta/IDs.h"
 #include "meta/MetaContext.h"
 #include "meta/MetaParser.h"
