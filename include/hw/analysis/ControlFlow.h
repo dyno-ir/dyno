@@ -1,6 +1,7 @@
 #pragma once
 
 #include "dyno/CFG.h"
+#include "dyno/Context.h"
 #include "hw/HWContext.h"
 #include "hw/HWInstr.h"
 #include "op/IDs.h"
@@ -8,7 +9,7 @@ namespace dyno {
 
 class ControlFlowAnalysis {
 
-  HWContext &ctx;
+  Context &ctx;
 
   template <typename T>
   static auto findFirstShared(ArrayRef<T> a, ArrayRef<T> b) {
@@ -29,7 +30,7 @@ class ControlFlowAnalysis {
   }
 
 public:
-  explicit ControlFlowAnalysis(HWContext &ctx) : ctx(ctx) {}
+  explicit ControlFlowAnalysis(Context &ctx) : ctx(ctx) {}
 
   void buildDepStack(SmallVecImpl<OperandRef> &stack, BlockRef instrBl) {
     auto buildStack = [&](BlockRef block, SmallVecImpl<OperandRef> &stack) {

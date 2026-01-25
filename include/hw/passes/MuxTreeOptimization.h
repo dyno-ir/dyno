@@ -1,6 +1,7 @@
 #pragma once
 
 #include "dyno/Constant.h"
+#include "dyno/Context.h"
 #include "dyno/Instr.h"
 #include "dyno/Obj.h"
 #include "dyno/ObjMap.h"
@@ -21,7 +22,7 @@ class MuxTreeOptimizationPass : public Pass<MuxTreeOptimizationPass> {
   SlabAllocator<MuxTree> muxTreeAlloc;
   ObjMapVec<Instr, bool> visitedMap;
 
-  HWContext &ctx;
+  Context &ctx;
   HWInstrBuilder build;
 
 public:
@@ -45,7 +46,7 @@ private:
         entry.expr.dump(false);
         dbgs() << ": ";
 
-        auto ref = ctx.resolveObj(entry.output);
+        auto ref = ctx.resolve(entry.output);
         if (auto wire = ref.dyn_as<WireRef>())
           dumpInstr(wire.getDefI(), ctx);
         else {
@@ -57,7 +58,7 @@ private:
       dbgs() << "symbols:\n";
       for (auto [i, cond] : Range{tree->conditions}.enumerate()) {
         dbgs() << i << ": bit " << cond.idx << " of ";
-        dumpInstr(ctx.getWires().resolve(cond.wire).getDefI(), ctx);
+        dumpInstr(ctx.getStore<Wire>().resolve(cond.wire).getDefI(), ctx);
       }
     });
   }
@@ -158,7 +159,7 @@ private:
   static std::pair<HWValue, bool>
   getLiteralVal(HWInstrBuilder &build, MuxTree *tree, BoolExprLiteral cond) {
     auto &ctx = build.ctx;
-    HWValue out = ctx.getWires().resolve(tree->conditions[cond.id].wire);
+    HWValue out = ctx.getStore<Wire>().resolve(tree->conditions[cond.id].wire);
     if (out.getNumBits() != 1)
       out = build.buildSplice(out, 1u, tree->conditions[cond.id].idx);
 
@@ -213,7 +214,7 @@ private:
 
   HWValue lowerMuxTreeSimple(MuxTree *tree) {
     if (tree->entries.empty())
-      return ctx.constBuild()
+      return ConstantBuilder{ctx.getStore<Constant>()}
           .undef(*tree->root.def(0)->as<WireRef>().getNumBits())
           .get();
     // left = false, right = true
@@ -221,13 +222,13 @@ private:
       build.setInsertPoint(tree->root);
 
     if (tree->entries.size() == 1) {
-      return ctx.resolveObj(tree->entries.front().output);
+      return ctx.resolve(tree->entries.front().output);
     }
 
     printMuxTree(tree);
     if (tree->entries.size() == 2) {
-      auto trueV = ctx.resolveObj(tree->entries[0].output);
-      auto falseV = ctx.resolveObj(tree->entries[1].output);
+      auto trueV = ctx.resolve(tree->entries[0].output);
+      auto falseV = ctx.resolve(tree->entries[1].output);
       if (auto asConst = trueV.dyn_as<ConstantRef>();
           asConst && asConst.allBitsUndef())
         return falseV;
@@ -417,19 +418,19 @@ private:
 public:
   void run() {
     visitedMap.clear();
-    visitedMap.resize(ctx.getInstrs().numIDs());
+    visitedMap.resize(ctx.getStore<Instr>().numIDs());
 
-    ctx.getInstrs().createHooks.emplace_back(
+    ctx.getStore<Instr>().createHooks.emplace_back(
         [&](InstrRef ref) { visitedMap.get_ensure(ref) = 1; });
 
-    for (auto mod : ctx.activeModules()) {
+    for (auto mod : ctx.getCtx<HWDialectContext>().activeModules()) {
       runOnModule(mod.iref());
     }
 
     muxTreeAlloc.clear();
   }
 
-  auto make(HWContext &ctx) { return MuxTreeOptimizationPass(ctx); }
-  explicit MuxTreeOptimizationPass(HWContext &ctx) : ctx(ctx), build(ctx) {}
+  auto make(Context &ctx) { return MuxTreeOptimizationPass(ctx); }
+  explicit MuxTreeOptimizationPass(Context &ctx) : ctx(ctx), build(ctx) {}
 };
 }; // namespace dyno

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "dyno/Context.h"
 #include "dyno/Pass.h"
 #include "hw/HWContext.h"
 #include "hw/HWPrinter.h"
@@ -42,7 +43,7 @@ class SimpleMemoryMappingPass : public Pass<SimpleMemoryMappingPass> {
     bool enablePolarity;
   };
 
-  HWContext &ctx;
+  Context &ctx;
   SmallDenseSet<ObjRef<Instr>, 2> coveredUses;
 
   bool findReadPorts(SmallVecImpl<ReadPort> &out, RegisterIRef reg) {
@@ -276,10 +277,10 @@ class SimpleMemoryMappingPass : public Pass<SimpleMemoryMappingPass> {
   }
 
 public:
-  auto make(HWContext &ctx) { return SimpleMemoryMappingPass(ctx); }
-  explicit SimpleMemoryMappingPass(HWContext &ctx) : ctx(ctx) {}
+  auto make(Context &ctx) { return SimpleMemoryMappingPass(ctx); }
+  explicit SimpleMemoryMappingPass(Context &ctx) : ctx(ctx) {}
   void run() {
-    for (auto mod : ctx.activeModules()) {
+    for (auto mod : ctx.getCtx<HWDialectContext>().activeModules()) {
       runOnModule(mod.iref());
     }
   }

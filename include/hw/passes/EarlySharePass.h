@@ -1,5 +1,6 @@
 #pragma once
 
+#include "dyno/Context.h"
 #include "dyno/Obj.h"
 #include "dyno/Pass.h"
 #include "hw/HWAbstraction.h"
@@ -13,7 +14,7 @@
 namespace dyno {
 
 class EarlySharePass : public Pass<EarlySharePass> {
-  HWContext &ctx;
+  Context &ctx;
 
 public:
   struct Config {
@@ -70,7 +71,8 @@ private:
     regs.reserve(maxOps);
     for (unsigned i = 0; i < maxOps; i++) {
       auto reg = regs.emplace_back(regBuild.buildRegister(maxBits));
-      build.buildStore(reg, ctx.constBuild().undef(maxBits).get());
+      build.buildStore(
+          reg, ConstantBuilder{ctx.getStore<Constant>()}.undef(maxBits).get());
     }
 
     RegisterRef resultReg = regBuild.buildRegister(maxBits);
@@ -82,7 +84,9 @@ private:
             regs[i], build.buildExt(maxBits, use->as<HWValue>(), OP_ANYEXT));
       }
       for (unsigned i = instr.getNumOthers(); i < regs.size(); i++)
-        build.buildStore(regs[i], ctx.constBuild().zero(maxBits).get());
+        build.buildStore(
+            regs[i],
+            ConstantBuilder{ctx.getStore<Constant>()}.zero(maxBits).get());
 
       auto reqBits = *instr.def()->as<WireRef>().getNumBits();
       instr.def(0)->as<WireRef>().replaceAllUsesWith(
@@ -97,7 +101,7 @@ private:
 
     auto ib =
         build.buildInstrRaw(instrs[0].getDialectOpcode(), 1 + regs.size());
-    auto defW = ctx.getWires().create(maxBits);
+    auto defW = ctx.getStore<Wire>().create(maxBits);
     build.buildStore(resultReg, defW);
 
     build.setInsertPoint(ib.instr());
@@ -148,11 +152,13 @@ private:
     regs.reserve(numTerms);
     for (unsigned i = 0; i < numTerms; i++) {
       auto reg = regs.emplace_back(regBuild.buildRegister(32));
-      build.buildStore(reg, ctx.constBuild().undef(32).get());
+      build.buildStore(
+          reg, ConstantBuilder{ctx.getStore<Constant>()}.undef(32).get());
     }
     RegisterRef inputReg = regBuild.buildRegister(base.getMemoryLen());
-    build.buildStore(inputReg,
-                     ctx.constBuild().undef(base.getMemoryLen()).get());
+    build.buildStore(inputReg, ConstantBuilder{ctx.getStore<Constant>()}
+                                   .undef(base.getMemoryLen())
+                                   .get());
 
     RegisterRef valueReg;
     if constexpr (requires { base.val(); }) {
@@ -348,10 +354,10 @@ private:
   }
 
 public:
-  auto make(HWContext &ctx) { return EarlySharePass(ctx); }
-  explicit EarlySharePass(HWContext &ctx) : ctx(ctx) {}
+  auto make(Context &ctx) { return EarlySharePass(ctx); }
+  explicit EarlySharePass(Context &ctx) : ctx(ctx) {}
   void run() {
-    for (auto mod : ctx.activeModules()) {
+    for (auto mod : ctx.getCtx<HWDialectContext>().activeModules()) {
       runOnModule(mod.iref());
     }
   }

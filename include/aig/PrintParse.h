@@ -5,6 +5,7 @@
 #include "dyno/DialectInfo.h"
 #include "dyno/IDImpl.h"
 #include "dyno/InstrPrinter.h"
+#include "dyno/Obj.h"
 #include "dyno/Parser.h"
 namespace dyno {
 
@@ -87,7 +88,10 @@ public:
   static constexpr DialectID dialect{DIALECT_AIG};
   explicit AIGDialectParser(ParserBase *base) : base(base) {}
 
-  // todo
+  FatDynObjRef<> parseAIG(DialectType type, ArrayRef<char> name) {
+    (void)base;
+    return nullref;
+  }
 };
 
 }; // namespace dyno

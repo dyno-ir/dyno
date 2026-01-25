@@ -1,4 +1,5 @@
 #pragma once
+#include "dyno/Context.h"
 #include "dyno/HierBlockIterator.h"
 #include "dyno/Obj.h"
 #include "dyno/Pass.h"
@@ -15,7 +16,7 @@ namespace dyno {
 // fixme: still needs mode to respect existing partial order. currently does not
 // respect order of side effect instrs.
 class OrderInstrsPass : public Pass<OrderInstrsPass> {
-  HWContext &ctx;
+  Context &ctx;
   ObjMap<Instr, DynSymbSet<std::vector<uint64_t>, 2>> map;
   enum { PRE_MARK = 0, MARK = 1 };
 
@@ -89,7 +90,7 @@ private:
       auto instr = asWire.getDefI();
       if (map[instr].at(MARK))
         return;
-      if (ctx.getCFG()[instr].blockRef() != block) {
+      if (ctx.getCtx<CoreDialectContext>().cfg[instr].blockRef() != block) {
         assert(!instr.isOpc(OP_UNYIELD));
         // dbgs() << "out of block:\n";
         // HWPrinter print{dbgs()};
@@ -173,7 +174,7 @@ private:
     InstrRef unyieldInstr = nullref;
 
     for (auto instr : ordered) {
-      auto ref = ctx.getInstrs().resolve(instr);
+      auto ref = ctx.getStore<Instr>().resolve(instr);
       it.insertPrev(ref);
       if (ref.isOpc(OP_UNYIELD)) {
         assert(!unyieldInstr);
@@ -183,7 +184,7 @@ private:
 
     // make sure unyield is first instr again if it exists
     if (unyieldInstr) {
-      ctx.getCFG()[unyieldInstr].erase();
+      ctx.getCtx<CoreDialectContext>().cfg[unyieldInstr].erase();
       block.begin().insertPrev(unyieldInstr);
     }
     assert(block.size() == ordered.size());
@@ -191,7 +192,7 @@ private:
 
   void runOnModule(ModuleIRef mod) {
     map.clear();
-    map.resize(ctx.getInstrs().numIDs());
+    map.resize(ctx.getStore<Instr>().numIDs());
     for (auto proc : mod.procs()) {
       auto blocks = getSCFBlocksPreorder(proc.block());
       for (auto block : blocks)
@@ -201,12 +202,12 @@ private:
 
 public:
   void run() {
-    for (auto mod : ctx.activeModules()) {
+    for (auto mod : ctx.getCtx<HWDialectContext>().activeModules()) {
       runOnModule(mod.iref());
     }
   }
-  auto make(HWContext &ctx) { return OrderInstrsPass(ctx); }
-  explicit OrderInstrsPass(HWContext &ctx) : ctx(ctx) {}
+  auto make(Context &ctx) { return OrderInstrsPass(ctx); }
+  explicit OrderInstrsPass(Context &ctx) : ctx(ctx) {}
 };
 
 }; // namespace dyno

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "DialectInfo.h"
 #include "dyno/CFG.h"
 #include "dyno/Constant.h"
 #include "dyno/DialectInfo.h"
@@ -298,8 +299,7 @@ protected:
 
 public:
   PrinterWrapper(std::ostream &str)
-      : AutoDialectInfos<Printers::dialect...>(),
-        PrinterBase(str,
+      : PrinterBase(str,
                     Interface<DialectInfo>{this->infos.dialectInfoArr.data()},
                     Interface<TyInfo>{this->infos.typeInfoArr.data()},
                     Interface<OpcodeInfo>{this->infos.opcodeInfoArr.data()}),

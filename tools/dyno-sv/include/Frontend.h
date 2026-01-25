@@ -1,5 +1,6 @@
 
 #include "dyno/Constant.h"
+#include "dyno/Context.h"
 #include "hw/AutoDebugInfo.h"
 #include "hw/HWAbstraction.h"
 #include "hw/HWContext.h"
@@ -81,7 +82,7 @@ class VisitorAST : public slang::ast::ASTVisitor<VisitorAST, true, true> {
 public:
   struct Value;
 
-  HWContext &ctx;
+  Context &ctx;
   slang::SourceManager &sm;
   ModuleIRef mod;
   ProcessIRef proc;
@@ -101,7 +102,7 @@ public:
 
   SmallVec<Value *, 4> assignLVStack;
 
-  VisitorAST(HWContext &ctx, slang::SourceManager &sm)
+  VisitorAST(Context &ctx, slang::SourceManager &sm)
       : ctx(ctx), sm(sm), build(ctx), print(sm), debugInfoStack(ctx) {}
 
   struct Value : public RTTIUtilMixin<Value> {
@@ -380,14 +381,18 @@ public:
            "only module and interface supported rn");
     auto &body = *(node.getCanonicalBody() ?: &node.body);
     auto [found, it] = moduleMap.findOrInsert(&body, [&] {
-      return ctx.createModule(node.name).def()->as<ObjRef<Module>>();
+      return HWInstrBuilder{ctx}
+          .buildModule(node.name)
+          .def()
+          ->as<ObjRef<Module>>();
     });
 
     if (found)
       return;
 
-    ModuleIRef module =
-        ModuleRef{it.val(), ctx.getModules()[it.val()]}.getSingleDef()->instr();
+    ModuleIRef module = ModuleRef{it.val(), ctx.getStore<Module>()[it.val()]}
+                            .getSingleDef()
+                            ->instr();
 
     build.setInsertPoint(module.block().end());
 
@@ -410,7 +415,7 @@ public:
         }
         auto reg = build.buildPort(module, ptype);
         reg->numBits = ps->getType().getBitstreamWidth();
-        ctx.regNameInfo.addName(reg, ps->name);
+        ctx.getCtx<HWDialectContext>().regNameInfo.addName(reg, ps->name);
 
       } else if (auto asIFS = port->as_if<slang::ast::InterfacePortSymbol>()) {
         // this runs if you have a port in your param list.
@@ -424,8 +429,8 @@ public:
         for (auto ifVar : ifVars) {
           auto reg = build.buildPort(module, HW_REF_REGISTER_DEF);
           reg->numBits = ifVar->getType().getBitstreamWidth();
-          ctx.regNameInfo.addName(reg,
-                                  (ifName + std::string{ifVar->name}).c_str());
+          ctx.getCtx<HWDialectContext>().regNameInfo.addName(
+              reg, (ifName + std::string{ifVar->name}).c_str());
         }
       }
     }
@@ -438,8 +443,8 @@ public:
       for (auto ifPort : extractIFModuleVars(body)) {
         auto reg = build.buildPort(module, HW_REF_REGISTER_DEF);
         reg->numBits = ifPort->getType().getBitstreamWidth();
-        ctx.regNameInfo.addName(reg,
-                                (ifName + std::string{ifPort->name}).c_str());
+        ctx.getCtx<HWDialectContext>().regNameInfo.addName(
+            reg, (ifName + std::string{ifPort->name}).c_str());
       }
     }
     visitDefault(node);
@@ -458,7 +463,7 @@ public:
 
     // can probably do this in parallel
     for (auto [slangMod, dynoMod] : modules) {
-      ModuleRef fDynoMod{dynoMod, ctx.getModules()[dynoMod]};
+      ModuleRef fDynoMod{dynoMod, ctx.getStore<Module>()[dynoMod]};
       mod = fDynoMod.getSingleDef()->instr();
       vars.clear();
       curModIsInterface = slangMod->parentInstance->isInterface();
@@ -484,7 +489,8 @@ public:
               asIFS->getConnection().first->as<slang::ast::InstanceSymbol>();
 
           auto [found, ifMod] = moduleMap.findOrInsert(&ifInstance.body, [&] {
-            return ctx.createModule(ifInstance.name)
+            return HWInstrBuilder{ctx}
+                .buildModule(ifInstance.name)
                 .def()
                 ->as<ObjRef<Module>>();
           });
@@ -520,7 +526,7 @@ public:
     reg->numBits = size;
     build.popInsertPoint();
     if (!name.empty())
-      ctx.regNameInfo.addName(reg, name);
+      ctx.getCtx<HWDialectContext>().regNameInfo.addName(reg, name);
     return reg;
   }
 
@@ -612,7 +618,7 @@ public:
 
           auto expr = conn->getExpression();
           if (!expr) {
-            auto mod = ctx.getModules().resolve(it.val());
+            auto mod = ctx.getStore<Module>().resolve(it.val());
             portRegs.emplace_back(makeReg(*mod->ports[connIdx].reg.getNumBits(),
                                           "__unused_port"));
             continue;
@@ -653,8 +659,7 @@ public:
 
           if (auto *asLV = val->dyn_as<RegLValue>(); asLV && asLV->fullReg()) {
             portRegs.emplace_back(asLV->lvReg);
-          }
-          else {
+          } else {
             build.pushInsertPoint(regsBackIt.succ());
             portRegs.emplace_back(build.buildRegister());
             regsBackIt = build.insert.pred();
@@ -668,7 +673,8 @@ public:
 
             build.pushInsertPoint(proc.block().end());
             if (isOutput)
-              val->as<LValue>().storeVal(build, build.buildLoad(portRegs.back()));
+              val->as<LValue>().storeVal(build,
+                                         build.buildLoad(portRegs.back()));
             else
               build.buildStore(portRegs.back(), val->proGetValue(build));
 
@@ -700,7 +706,8 @@ public:
           }
         }
 
-        ModuleRef instMod = ModuleRef{it.val(), ctx.getModules()[it.val()]};
+        ModuleRef instMod =
+            ModuleRef{it.val(), ctx.getStore<Module>()[it.val()]};
         build.buildInstance(instMod, portRegs);
         break;
       }
@@ -733,7 +740,8 @@ public:
         auto &asSubr = member.as<slang::ast::SubroutineSymbol>();
         auto [found, it] = functionMap.findOrInsert(
             &asSubr, [&] { return build.buildFunc().func(); });
-        auto func = FunctionRef{it.val(), ctx.getFuncs()[it.val()]}.iref();
+        auto func =
+            FunctionRef{it.val(), ctx.getStore<Function>()[it.val()]}.iref();
 
         build.pushInsertPoint(func.getBlock().begin());
         for (auto arg : asSubr.getArguments()) {
@@ -1220,8 +1228,9 @@ public:
   HWValue makeBool(HWValue val, bool inverse = false) {
     if (val.getNumBits() == 1 && !inverse)
       return val;
-    return build.buildICmp(val, ctx.constBuild().zeroLike(val).get(),
-                           inverse ? BigInt::ICMP_EQ : BigInt::ICMP_NE);
+    return build.buildICmp(
+        val, ConstantBuilder{ctx.getStore<Constant>()}.zeroLike(val).get(),
+        inverse ? BigInt::ICMP_EQ : BigInt::ICMP_NE);
   }
 
   ConstantRef toDynoConstant(const slang::SVInt &svint) {
@@ -1229,7 +1238,7 @@ public:
     ArrayRef data{reinterpret_cast<const uint32_t *>(svint.getRawPtr()),
                   2 * svint.getNumWords()};
     if (!svint.hasUnknown()) {
-      ref = ConstantBuilder{ctx.getConstants()}.raw(
+      ref = ConstantBuilder{ctx.getStore<Constant>()}.raw(
           (unsigned)svint.getBitWidth(), data);
     } else {
       SmallVec<uint32_t, 16> buf(round_up_div(2 * svint.getBitWidth(), 32U));
@@ -1244,8 +1253,8 @@ public:
         buf[i] ^= mask;
       }
 
-      ref = ConstantBuilder{ctx.getConstants()}.raw(2 * svint.getBitWidth(),
-                                                    std::move(buf), 0, 1);
+      ref = ConstantBuilder{ctx.getStore<Constant>()}.raw(
+          2 * svint.getBitWidth(), std::move(buf), 0, 1);
     }
     return ref;
   }
@@ -1254,7 +1263,7 @@ public:
     if (value.isInteger())
       return toDynoConstant(value.integer());
     if (value.isContainer()) {
-      auto cbuild = ctx.constBuild();
+      auto cbuild = ConstantBuilder{ctx.getStore<Constant>()};
       cbuild.val(0, 0);
       for (auto elem : Range{value.elements()}.reverse()) {
         cbuild.concat(toDynoConstant(elem));
@@ -1466,21 +1475,29 @@ public:
         return operand;
         break;
       case slang::ast::UnaryOperator::Minus:
-        val = build.buildSub(ctx.constBuild().zeroLike(operandVal).get(),
+        val = build.buildSub(ConstantBuilder{ctx.getStore<Constant>()}
+                                 .zeroLike(operandVal)
+                                 .get(),
                              operandVal);
         break;
       case slang::ast::UnaryOperator::BitwiseNot:
-        val = build.buildXor(ctx.constBuild().onesLike(operandVal).get(),
+        val = build.buildXor(ConstantBuilder{ctx.getStore<Constant>()}
+                                 .onesLike(operandVal)
+                                 .get(),
                              operandVal);
         break;
       case slang::ast::UnaryOperator::BitwiseAnd:
         val = build.buildICmp(operandVal,
-                              ctx.constBuild().onesLike(operandVal).get(),
+                              ConstantBuilder{ctx.getStore<Constant>()}
+                                  .onesLike(operandVal)
+                                  .get(),
                               BigInt::ICMP_EQ);
         break;
       case slang::ast::UnaryOperator::BitwiseOr:
         val = build.buildICmp(operandVal,
-                              ctx.constBuild().zeroLike(operandVal).get(),
+                              ConstantBuilder{ctx.getStore<Constant>()}
+                                  .zeroLike(operandVal)
+                                  .get(),
                               BigInt::ICMP_NE);
         break;
       case slang::ast::UnaryOperator::BitwiseXor:
@@ -1488,12 +1505,16 @@ public:
         break;
       case slang::ast::UnaryOperator::BitwiseNand:
         val = build.buildICmp(operandVal,
-                              ctx.constBuild().onesLike(operandVal).get(),
+                              ConstantBuilder{ctx.getStore<Constant>()}
+                                  .onesLike(operandVal)
+                                  .get(),
                               BigInt::ICMP_NE);
         break;
       case slang::ast::UnaryOperator::BitwiseNor:
         val = build.buildICmp(operandVal,
-                              ctx.constBuild().zeroLike(operandVal).get(),
+                              ConstantBuilder{ctx.getStore<Constant>()}
+                                  .zeroLike(operandVal)
+                                  .get(),
                               BigInt::ICMP_EQ);
         break;
       case slang::ast::UnaryOperator::BitwiseXnor:
@@ -1503,7 +1524,9 @@ public:
 
       case slang::ast::UnaryOperator::LogicalNot:
         val = build.buildICmp(operandVal,
-                              ctx.constBuild().zeroLike(operandVal).get(),
+                              ConstantBuilder{ctx.getStore<Constant>()}
+                                  .zeroLike(operandVal)
+                                  .get(),
                               BigInt::ICMP_EQ);
         break;
 
@@ -1516,7 +1539,8 @@ public:
         bool incr = unop.op == slang::ast::UnaryOperator::Preincrement ||
                     unop.op == slang::ast::UnaryOperator::Postincrement;
 
-        auto one = ctx.constBuild().oneLike(operandVal).get();
+        auto one =
+            ConstantBuilder{ctx.getStore<Constant>()}.oneLike(operandVal).get();
         auto nextV = incr ? build.buildAdd(operandVal, one)
                           : build.buildSub(operandVal, one);
 
@@ -1600,7 +1624,8 @@ public:
       case slang::ast::RangeSelectionKind::Simple: {
         offs = rangeRight;
         auto sub = build.buildSub(rangeLeft, rangeRight);
-        auto add = build.buildAdd(sub, ctx.constBuild().val(32, 1).get());
+        auto add = build.buildAdd(
+            sub, ConstantBuilder{ctx.getStore<Constant>()}.val(32, 1).get());
         len = add;
         break;
       }
@@ -1612,7 +1637,8 @@ public:
       case slang::ast::RangeSelectionKind::IndexedDown:
         len = rangeRight;
         auto sub = build.buildSub(rangeLeft, rangeRight);
-        auto add = build.buildAdd(sub, ctx.constBuild().val(32, 1).get());
+        auto add = build.buildAdd(
+            sub, ConstantBuilder{ctx.getStore<Constant>()}.val(32, 1).get());
         offs = add;
         break;
       }
@@ -1761,9 +1787,10 @@ public:
                 slang::ast::ExpressionKind::UnbasedUnsizedIntegerLiteral;
       } else {
         defaultVal =
-            std::make_unique<RValue>(
-                ctx.constBuild().zero(expr.type->getBitstreamWidth()).get(),
-                expr.type)
+            std::make_unique<RValue>(ConstantBuilder{ctx.getStore<Constant>()}
+                                         .zero(expr.type->getBitstreamWidth())
+                                         .get(),
+                                     expr.type)
                 ->proGetValue(build);
         defaultSext = false;
       }
@@ -1877,7 +1904,8 @@ public:
         build.popInsertPoint();
         return rv;
       });
-      auto func = FunctionRef{it.val(), ctx.getFuncs()[it.val()]}.iref();
+      auto func =
+          FunctionRef{it.val(), ctx.getStore<Function>()[it.val()]}.iref();
 
       if (subr->returnValVar) {
         auto rv = build.buildCall(func, args, 1);

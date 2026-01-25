@@ -29,6 +29,28 @@ template <> struct InterfaceTraits<TypeErasedCtx> {
 template <DialectID> struct DialectContext;
 template <DialectID ID> using DialectContextT = DialectContext<ID>::t;
 
+class CoreDialectContext {
+  using InstrStoreT = NewDeleteObjStore<Instr>;
+  using ConstantStoreT = ConstantStore;
+
+public:
+  static constexpr DialectID dialect{DIALECT_CORE};
+  InstrStoreT instrs;
+  CFG cfg;
+  ConstantStoreT constants;
+  SourceLocInfo<Instr> instrSourceLocInfo;
+
+  template <typename T> auto &getStore();
+  template <> auto &getStore<Instr>() { return instrs; }
+  template <> auto &getStore<Constant>() { return constants; }
+
+  BlockRef createBlock() { return cfg.blocks.create(cfg); };
+};
+
+template <> struct DialectContext<DialectID{DIALECT_CORE}> {
+  using t = CoreDialectContext;
+};
+
 class Context {
   ArrayInterface<TypeErasedCtx> contexts;
   ArrayInterface<MemberRef<FatDynObjRef<>(void *, DynObjRef)>> resolvers;
@@ -58,7 +80,7 @@ public:
                              TypeErasedCtx{reinterpret_cast<void *>(&context)});
 
     // dialect info registration (this can be overriden by the dialect)
-    dyno::registerDialect<T::dialect>(dialectInfos.dialectInfoArr.data(),
+    dyno::registerDialect<T::dialect>(this, dialectInfos.dialectInfoArr.data(),
                                       dialectInfos.typeInfoArr.data(),
                                       dialectInfos.opcodeInfoArr.data());
 
@@ -69,6 +91,8 @@ public:
       resolvers.registerDialect(T::dialect, ArrayRef{context.resolverMethods});
     }
   }
+
+  CFG &getCFG() { return getCtx<CoreDialectContext>().cfg; }
 };
 
 // ref type for easy reassigning
@@ -84,25 +108,5 @@ public:
 //   template <typename T> auto &getStore() { return self().getStore<T>(); }
 //   FatDynObjRef<> resolve(DynObjRef ref) { return self().resolve(ref); }
 // };
-
-class CoreDialectContext {
-  using InstrStoreT = NewDeleteObjStore<Instr>;
-  using ConstantStoreT = ConstantStore;
-
-public:
-  static constexpr DialectID dialect{DIALECT_CORE};
-  InstrStoreT instrs;
-  CFG cfg;
-  ConstantStoreT constants;
-  SourceLocInfo<Instr> instrSourceLocInfo;
-
-  template <typename T> auto &getStore();
-  template <> auto &getStore<Instr>() { return instrs; }
-  template <> auto &getStore<Constant>() { return constants; }
-};
-
-template <> struct DialectContext<DialectID{DIALECT_CORE}> {
-  using t = CoreDialectContext;
-};
 
 }; // namespace dyno

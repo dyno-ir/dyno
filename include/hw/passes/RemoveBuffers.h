@@ -1,5 +1,6 @@
 #pragma once
 
+#include "dyno/Context.h"
 #include "dyno/DestroyMap.h"
 #include "dyno/HierBlockIterator.h"
 #include "dyno/Pass.h"
@@ -13,7 +14,7 @@
 namespace dyno {
 
 class RemoveBuffersPass : public Pass<RemoveBuffersPass> {
-  HWContext &ctx;
+  Context &ctx;
   ObjMapVec<Module, bool> isBuffer;
   DestroyMap<Instr> destroyMap;
 
@@ -52,8 +53,8 @@ class RemoveBuffersPass : public Pass<RemoveBuffersPass> {
   }
 
 public:
-  auto make(HWContext &ctx) { return RemoveBuffersPass(ctx); }
-  explicit RemoveBuffersPass(HWContext &ctx) : ctx(ctx) {}
+  auto make(Context &ctx) { return RemoveBuffersPass(ctx); }
+  explicit RemoveBuffersPass(Context &ctx) : ctx(ctx) {}
 
   void runOnModule(ModuleIRef mod) {
     for (auto instr : HierBlockRange{mod.block()}) {
@@ -70,8 +71,8 @@ public:
 
   void findBuffers() {
     isBuffer.clear();
-    isBuffer.resize(ctx.getModules().numIDs());
-    for (auto mod : ctx.getModules()) {
+    isBuffer.resize(ctx.getStore<Module>().numIDs());
+    for (auto mod : ctx.getStore<Module>()) {
       bool buf = checkIfModuleIsBuf(mod.iref());
       isBuffer[mod] = buf;
       if (buf) {
@@ -86,10 +87,10 @@ public:
   void run() {
     findBuffers();
     destroyMap.clear();
-    destroyMap.resize(ctx.getInstrs().numIDs());
-    for (auto mod : ctx.activeModules())
+    destroyMap.resize(ctx.getStore<Instr>().numIDs());
+    for (auto mod : ctx.getCtx<HWDialectContext>().activeModules())
       runOnModule(mod.iref());
-    destroyMap.apply(ctx.getInstrs(), [&](InstrRef ref) {
+    destroyMap.apply(ctx.getStore<Instr>(), [&](InstrRef ref) {
       HWInstrBuilder{ctx}.destroyInstr(ref);
     });
   }

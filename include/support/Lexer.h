@@ -421,8 +421,9 @@ public:
     for (unsigned i = 0; i < pos; i++)
       putc(' ', stderr);
     putc('^', stderr);
-    for (size_t i = error.start; i < error.end; i++)
-      putc('~', stderr);
+    if (error.start != error.end)
+      for (size_t i = error.start; i < error.end - 1; i++)
+        putc('~', stderr);
     putc('\n', stderr);
   }
 

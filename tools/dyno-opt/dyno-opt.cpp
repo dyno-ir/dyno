@@ -61,6 +61,7 @@ CmdLineArg<bool> argCheckAfterAll{'c', "check-after-all",
 };
 
 class MetaPassPipelineInterpreter {
+  Context &ctx;
   DynoLexer &lexer;
   ArrayRef<void *> passCtorArgs;
   DenseMap<uint16_t, TypeErasedPassObj> passObjs;
@@ -71,12 +72,13 @@ public:
       if (instr.getDialect() != DIALECT_META)
         report_fatal_error("expected meta dialect instruction");
       auto opc = instr.getDialectOpcode();
-      auto &pass =
-          passObjs
-              .findOrInsert(
-                  opc.getOpcodeID().num,
-                  [&]() { return metaPassManager.getPass(opc, passCtorArgs); })
-              .second.val();
+      auto &pass = passObjs
+                       .findOrInsert(opc.getOpcodeID().num,
+                                     [&]() {
+                                       return ctx.getPassRegistry().getPass(
+                                           opc, passCtorArgs);
+                                     })
+                       .second.val();
 
       if (instr.getNumOperands() != 0) {
         if (instr.getNumOperands() != 1)
@@ -90,29 +92,24 @@ public:
     }
   }
 
-  MetaPassPipelineInterpreter(DynoLexer &lexer, ArrayRef<void *> passCtorArgs)
-      : lexer(lexer), passCtorArgs(passCtorArgs) {}
+  MetaPassPipelineInterpreter(Context &ctx, DynoLexer &lexer,
+                              ArrayRef<void *> passCtorArgs)
+      : ctx(ctx), lexer(lexer), passCtorArgs(passCtorArgs) {}
 };
 
 int main(int argc, char **argv) {
-  Context context;
+  Context ctx;
   HWDialectContext hwContext;
   CoreDialectContext coreContext;
   MetaDialectContext metaContext;
   OpDialectContext opContext;
   AIGDialectContext aigContext;
-  context.registerDialect(coreContext);
-  context.registerDialect(hwContext);
-  context.registerDialect(opContext);
-  context.registerDialect(aigContext);
+  ctx.registerDialect(coreContext);
+  ctx.registerDialect(hwContext);
+  ctx.registerDialect(opContext);
+  ctx.registerDialect(aigContext);
   // meta must be registered last
-  context.registerDialect(metaContext);
-
-  // use context
-  auto w = context.getStore<Wire>().create(32);
-  ObjRef<Wire> thin = w;
-  FatDynObjRef<> fatDyn = context.resolve(thin);
-  assert(w == fatDyn.as<WireRef>());
+  ctx.registerDialect(metaContext);
 
   CmdLineArgHandler cmdLineArgHandler;
   cmdLineArgHandler.registerArg(argFileName);
@@ -127,7 +124,6 @@ int main(int argc, char **argv) {
   cmdLineArgHandler.registerArg(argCheckAfterAll);
   cmdLineArgHandler.parse(argc, argv);
 
-  HWContext ctx;
   HWParser parser{ctx};
 
   std::string fileName{*argFileName};
@@ -137,9 +133,8 @@ int main(int argc, char **argv) {
   parser.parse(mmap, fileName);
   dumpCtx(ctx);
 
-  MetaContext metaCtx;
-  MetaParser metaParser{metaCtx};
-  auto flowBlock = metaCtx.getCFG().blocks.create(metaCtx.getCFG());
+  MetaParser metaParser{ctx};
+  auto flowBlock = ctx.getCFG().blocks.create(ctx.getCFG());
   auto flowFileName = std::string(*argFlowFileName);
   MMap flowFile{flowFileName};
   if (!flowFile)
@@ -147,7 +142,7 @@ int main(int argc, char **argv) {
   metaParser.parse(flowFile, flowFileName, flowBlock.end());
 
   SmallVec<void *, 1> passCtorArgs{reinterpret_cast<void *>(&ctx)};
-  MetaPassPipelineInterpreter pipeline{*parser.lexer, passCtorArgs};
+  MetaPassPipelineInterpreter pipeline{ctx, *parser.lexer, passCtorArgs};
 
   pipeline.interpretPassPipeline(flowBlock);
 

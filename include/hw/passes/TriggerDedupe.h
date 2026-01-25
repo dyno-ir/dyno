@@ -1,5 +1,6 @@
 #pragma once
 
+#include "dyno/Context.h"
 #include "dyno/Obj.h"
 #include "dyno/Pass.h"
 #include "hw/HWAbstraction.h"
@@ -7,7 +8,7 @@
 namespace dyno {
 
 class TriggerDedupePass : public Pass<TriggerDedupePass> {
-  HWContext &ctx;
+  Context &ctx;
 
   static bool triggerDeepEqual(TriggerIRef lhs, TriggerIRef rhs) {
     if (lhs.getNumOthers() != rhs.getNumOthers())
@@ -50,14 +51,14 @@ class TriggerDedupePass : public Pass<TriggerDedupePass> {
 
 public:
   void run() {
-    for (auto mod : ctx.activeModules()) {
+    for (auto mod : ctx.getCtx<HWDialectContext>().activeModules()) {
       runOnModule(mod.iref());
     }
   }
 
 public:
-  auto make(HWContext &ctx) { return TriggerDedupePass(ctx); }
-  explicit TriggerDedupePass(HWContext &ctx) : ctx(ctx) {}
+  auto make(Context &ctx) { return TriggerDedupePass(ctx); }
+  explicit TriggerDedupePass(Context &ctx) : ctx(ctx) {}
 };
 
 }; // namespace dyno

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "dyno/Constant.h"
+#include "dyno/Context.h"
 #include "dyno/Pass.h"
 #include "hw/AutoDebugInfo.h"
 #include "hw/DeepCopy.h"
@@ -20,7 +21,7 @@
 namespace dyno {
 
 class LinearizeControlFlowPass : public Pass<LinearizeControlFlowPass> {
-  HWContext &ctx;
+  Context &ctx;
   DeepCopier copier;
   HWInstrBuilder build;
   SmallVec<InstrRef, 64> worklist;
@@ -177,7 +178,7 @@ private:
         pred = BigInt::ICMP_CXEQ;
 
       auto orIB = build.buildInstrRaw(OP_OR, 1 + caseInstr.getNumOthers());
-      auto selWire = ctx.getWires().create(1);
+      auto selWire = ctx.getStore<Wire>().create(1);
       orIB.addRef(selWire).other();
       assert(caseInstr.getNumOthers() != 0);
       build.setInsertPoint(orIB.instr());
@@ -232,7 +233,7 @@ private:
     auto insertIter = BlockRef_iterator<true>{HWInstrRef{forLoop}.iter(ctx)};
     auto endIter = insertIter.succ();
 
-    auto cbuild = ctx.constBuild();
+    auto cbuild = ConstantBuilder{ctx.getStore<Constant>()};
 
     auto token = autoDebugInfo.addWithToken(forLoop);
 
@@ -304,14 +305,14 @@ private:
 
 public:
   void run() {
-    for (auto module : ctx.activeModules()) {
+    for (auto module : ctx.getCtx<HWDialectContext>().activeModules()) {
       runOnModule(module.iref());
     }
   }
-  explicit LinearizeControlFlowPass(HWContext &ctx, InstCombinePass &icb)
+  explicit LinearizeControlFlowPass(Context &ctx, InstCombinePass &icb)
       : ctx(ctx), copier(ctx), build(ctx), autoDebugInfo(ctx),
         loopSimplify(ctx), instCombine(icb) {}
-  static LinearizeControlFlowPass make(HWContext &ctx, InstCombinePass &icb) {
+  static LinearizeControlFlowPass make(Context &ctx, InstCombinePass &icb) {
     return LinearizeControlFlowPass{ctx, icb};
   }
 };

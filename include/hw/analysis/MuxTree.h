@@ -1,4 +1,5 @@
 #pragma once
+#include "dyno/Context.h"
 #include "dyno/Obj.h"
 #include "hw/Concat.h"
 #include "hw/HWContext.h"
@@ -1308,10 +1309,10 @@ public:
     tree->entries = std::move(newEntries);
   }
 
-  bool pruneDontCareOutputs(HWContext &ctx, MuxTree *tree) {
+  bool pruneDontCareOutputs(Context &ctx, MuxTree *tree) {
     SmallVec<uint32_t, 4> dcEntries;
     for (auto [i, entry] : Range{tree->entries}.enumerate()) {
-      auto ref = ctx.resolveObj(entry.output);
+      auto ref = ctx.resolve(entry.output);
       if (ref.is<ConstantRef>() && ref.as<ConstantRef>().allBitsUndef())
         dcEntries.emplace_back(i);
     }
@@ -1345,12 +1346,12 @@ public:
     return true;
   }
 
-  bool simplifyNonOverlapping(HWContext &ctx, MuxTree *tree) {
+  bool simplifyNonOverlapping(Context &ctx, MuxTree *tree) {
 
     SmallDenseMap<ObjRef<Wire>, Optional<uint32_t>, 4> map;
 
     auto signalToICMP = [&](MuxTree::InputSignal sig) -> InstrRef {
-      auto wire = ctx.getWires().resolve(sig.wire);
+      auto wire = ctx.getStore<Wire>().resolve(sig.wire);
       if (!wire.getDefI().isOpc(OP_ICMP_EQ) ||
           !wire.getDefI().other(1)->is<ConstantRef>())
         return nullref;
@@ -1431,7 +1432,7 @@ public:
     return true;
   }
 
-  void printMuxTree(HWContext &ctx, MuxTree *tree) {
+  void printMuxTree(Context &ctx, MuxTree *tree) {
     DYNO_DBG("MuxTreeAnalysis", {
       dbgs() << "mux tree at: ";
       if (tree->root)
@@ -1443,7 +1444,7 @@ public:
         entry.expr.dump(false);
         dbgs() << ": ";
 
-        dumpObj(ctx.resolveObj(entry.output));
+        dumpObj(ctx.resolve(entry.output));
         dbgs() << "\n";
       }
     });

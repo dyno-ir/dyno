@@ -1,11 +1,14 @@
 #pragma once
 
 #include "aig/AIG.h"
+#include "aig/AIGContext.h"
 #include "aig/IDs.h"
+#include "dyno/Context.h"
 #include "dyno/Instr.h"
 #include "dyno/NewDeleteObjStore.h"
 #include "dyno/Obj.h"
 #include "dyno/ObjMap.h"
+#include "dyno/Pass.h"
 #include "hw/HWAbstraction.h"
 #include "hw/HWContext.h"
 #include "hw/HWPrinter.h"
@@ -21,14 +24,14 @@
 namespace dyno {
 
 class AIGBuilder {
-  HWContext &ctx [[maybe_unused]];
+  Context &ctx [[maybe_unused]];
   ObjMapVec<Wire, ThinArrayRef<AIGNodeTRef>> wireToAIGNode;
   std::vector<AIGNodeTRef> wireToAIGNodeStorage;
 
 public:
   AIG &aig;
-  AIGBuilder(HWContext &ctx, AIG &aig) : ctx(ctx), aig(aig) {
-    wireToAIGNode.resize(ctx.getWires().numIDs());
+  AIGBuilder(Context &ctx, AIG &aig) : ctx(ctx), aig(aig) {
+    wireToAIGNode.resize(ctx.getStore<Wire>().numIDs());
   }
   ArrayRef<AIGNodeTRef> resolveWire(WireRef wire) {
     if (wireToAIGNode[wire].size() == 0) {
@@ -211,7 +214,7 @@ public:
 };
 
 class AIGConstructPass : public Pass<AIGConstructPass> {
-  HWContext &ctx;
+  Context &ctx;
   HWInstrBuilder build;
   AIGObjRef aigRef;
   ObjMapVec<Instr, bool> destroyMap;
@@ -389,7 +392,7 @@ class AIGConstructPass : public Pass<AIGConstructPass> {
   }
 
   void runOnProc(ProcessIRef proc) {
-    aigRef = ctx.getAIGs().create();
+    aigRef = ctx.getStore<AIGObj>().create();
 
     AIGBuilder abuild{ctx, aigRef->aig};
     build.setInsertPoint(proc.block().begin());
@@ -408,25 +411,25 @@ class AIGConstructPass : public Pass<AIGConstructPass> {
 
 public:
   void run() {
-    destroyMap.resize(ctx.getInstrs().numIDs());
+    destroyMap.resize(ctx.getStore<Instr>().numIDs());
 
-    ctx.getInstrs().createHooks.emplace_back(
+    ctx.getStore<Instr>().createHooks.emplace_back(
         [&](InstrRef ref) { destroyMap.get_ensure(ref) = 0; });
 
-    for (auto mod : ctx.activeModules()) {
+    for (auto mod : ctx.getCtx<HWDialectContext>().activeModules()) {
       runOnModule(mod.iref());
     }
-    ctx.getInstrs().createHooks.pop_back();
+    ctx.getStore<Instr>().createHooks.pop_back();
 
     for (auto [obj, destroy] : destroyMap) {
-      if (!destroy || !ctx.getInstrs().exists(obj))
+      if (!destroy || !ctx.getStore<Instr>().exists(obj))
         continue;
-      build.destroyInstr(ctx.getInstrs().resolve(obj));
+      build.destroyInstr(ctx.getStore<Instr>().resolve(obj));
     }
   }
 
-  auto make(HWContext &ctx) { return AIGConstructPass(ctx); }
-  explicit AIGConstructPass(HWContext &ctx) : ctx(ctx), build(ctx) {}
+  auto make(Context &ctx) { return AIGConstructPass(ctx); }
+  explicit AIGConstructPass(Context &ctx) : ctx(ctx), build(ctx) {}
 };
 
 }; // namespace dyno

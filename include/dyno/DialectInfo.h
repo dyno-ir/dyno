@@ -55,8 +55,10 @@ template <> struct InterfaceTraits<TyInfo> {
 };
 
 // specialize this for more sophisticated initialization.
+class Context;
 template <DialectID dialect>
-constexpr inline void registerDialect(const DialectInfo **dialectInfos,
+constexpr inline void registerDialect(Context *,
+                                      const DialectInfo **dialectInfos,
                                       ArrayRef<TyInfo> *typeInfos,
                                       ArrayRef<OpcodeInfo> *opcodeInfos) {
   dialectInfos[dialect.num] = &DialectTraits<dialect>::info;
@@ -74,7 +76,7 @@ template <DialectID... Dialects> struct AutoDialectInfos {
   DialectInfos infos;
 
   constexpr void registerDialects() {
-    ((registerDialect<Dialects>(infos.dialectInfoArr.data(),
+    ((registerDialect<Dialects>(nullptr, infos.dialectInfoArr.data(),
                                 infos.typeInfoArr.data(),
                                 infos.opcodeInfoArr.data())),
      ...);

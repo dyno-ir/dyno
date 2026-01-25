@@ -1,6 +1,7 @@
 #pragma once
 
 #include "dyno/Constant.h"
+#include "dyno/Context.h"
 #include "dyno/DestroyMap.h"
 #include "dyno/Instr.h"
 #include "dyno/Pass.h"
@@ -54,7 +55,7 @@ class FlipFlopMappingPass : public Pass<FlipFlopMappingPass> {
     auto getRaw() const { return raw; }
 
     AbstractFF() = default;
-    explicit AbstractFF(uint16_t raw) : raw(raw){};
+    explicit AbstractFF(uint16_t raw) : raw(raw) {};
   };
 
   enum class FFPortType : uint8_t {
@@ -111,7 +112,7 @@ class FlipFlopMappingPass : public Pass<FlipFlopMappingPass> {
     std::bitset<size_t(FFPortType::NUM_MANDATORY)> covered;
   };
 
-  HWContext &ctx;
+  Context &ctx;
   HWInstrBuilder build;
   DestroyMap<Instr> destroyMap;
 
@@ -149,7 +150,7 @@ class FlipFlopMappingPass : public Pass<FlipFlopMappingPass> {
     for (unsigned i = 0; i < bits; i++) {
       wires.d = build.buildSplice(dWire, 1, i).as<WireRef>();
       wires.bitIdx = i;
-      qWires.emplace_back(wires.q = ctx.getWires().create(1));
+      qWires.emplace_back(wires.q = ctx.getStore<Wire>().create(1));
 
       abstr.hasRst() = 0;
       abstr.rstPol() = 0;
@@ -207,7 +208,7 @@ class FlipFlopMappingPass : public Pass<FlipFlopMappingPass> {
         break;
       }
       case FFPortType::UNUSED_OUT: {
-        ib.addRef(ctx.getWires().create(1));
+        ib.addRef(ctx.getStore<Wire>().create(1));
         break;
       }
       default:
@@ -216,7 +217,7 @@ class FlipFlopMappingPass : public Pass<FlipFlopMappingPass> {
     }
 
     ib.other();
-    ib.addRef(ctx.getModules().resolve(ff.module));
+    ib.addRef(ctx.getStore<Module>().resolve(ff.module));
 
     // inputs
     for (auto port : ff.ports) {
@@ -523,7 +524,7 @@ public:
 
   void findFlipFlopStdCells() {
     unsigned count [[maybe_unused]] = 0;
-    for (auto obj : ctx.getModules()) {
+    for (auto obj : ctx.getStore<Module>()) {
       auto mod = obj.iref();
       if (!mod.isOpc(HW_STDCELL_DEF))
         continue;
@@ -663,22 +664,22 @@ public:
     findFlipFlopStdCells();
     precomputeFixups();
 
-    ctx.getInstrs().createHooks.emplace_back(
+    ctx.getStore<Instr>().createHooks.emplace_back(
         [&](InstrRef ref) { destroyMap.ensureUnmarked(ref); });
 
-    destroyMap.resize(ctx.getInstrs().numIDs());
-    for (auto mod : ctx.activeModules()) {
+    destroyMap.resize(ctx.getStore<Instr>().numIDs());
+    for (auto mod : ctx.getCtx<HWDialectContext>().activeModules()) {
       if (mod.iref().isOpc(HW_MODULE_DEF))
         runOnModule(mod.iref());
     }
 
-    ctx.getInstrs().createHooks.pop_back();
+    ctx.getStore<Instr>().createHooks.pop_back();
 
-    destroyMap.apply(ctx.getInstrs(),
+    destroyMap.apply(ctx.getStore<Instr>(),
                      [&](InstrRef ref) { build.destroyInstr(ref); });
     destroyMap.clear();
   }
-  auto make(HWContext &ctx) { return FlipFlopMappingPass(ctx); }
-  explicit FlipFlopMappingPass(HWContext &ctx) : ctx(ctx), build(ctx) {}
+  auto make(Context &ctx) { return FlipFlopMappingPass(ctx); }
+  explicit FlipFlopMappingPass(Context &ctx) : ctx(ctx), build(ctx) {}
 };
 }; // namespace dyno

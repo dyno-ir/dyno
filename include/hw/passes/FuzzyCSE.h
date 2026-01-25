@@ -1,5 +1,6 @@
 #pragma once
 
+#include "dyno/Context.h"
 #include "dyno/HierBlockIterator.h"
 #include "dyno/Pass.h"
 #include "hw/AutoDebugInfo.h"
@@ -16,7 +17,7 @@
 namespace dyno {
 
 class FuzzyCSEPass : public Pass<FuzzyCSEPass> {
-  HWContext &ctx;
+  Context &ctx;
   BitAliasAnalysis bitAlias;
   HWInstrBuilder build;
   ControlFlowAnalysis controlFlowAnalysis;
@@ -124,7 +125,8 @@ private:
       auto matchedLen = matchingPrefixes[idx].getLen();
       value = build.buildSplice(value, *value.getNumBits() - matchedLen,
                                 matchedLen);
-      auto zero = ctx.constBuild().zero(matchedLen).get();
+      auto zero =
+          ConstantBuilder{ctx.getStore<Constant>()}.zero(matchedLen).get();
       value = build.buildConcat(value, zero);
 
       lhsNewOps.emplace_back(value);
@@ -229,7 +231,8 @@ private:
       intersectOps.emplace_back(lhsLastOpIdx, rhsLastOpIdx);
       auto constVal = lhsAbstr.ref.other(lhsLastOpIdx)->as<ConstantRef>();
       ConstantRef truncVal =
-          ctx.constBuild().val(constVal).resize(matchingConstBits);
+          ConstantBuilder{ctx.getStore<Constant>()}.val(constVal).resize(
+              matchingConstBits);
       matchingPrefixes.emplace_back(
           RegisterValue{truncVal, truncVal.getNumBits(), 0, 0, nullopt});
       maxPrefixSize = std::max(maxPrefixSize, matchingConstBits);
@@ -254,7 +257,7 @@ private:
     build.setInsertPoint(parentBlock.begin());
     auto ib = build.buildInstrRaw(lhsAbstr.ref.getDialectOpcode(),
                                   1 + matchingPrefixes.size());
-    auto defW = ctx.getWires().create(maxPrefixSize + 1);
+    auto defW = ctx.getStore<Wire>().create(maxPrefixSize + 1);
     ib.addRef(defW).other();
 
     build.setInsertPoint(ib.instr());
@@ -396,14 +399,14 @@ private:
   }
 
 public:
-  FuzzyCSEPass(HWContext &ctx)
+  FuzzyCSEPass(Context &ctx)
       : ctx(ctx), bitAlias(ctx), build(ctx), controlFlowAnalysis(ctx),
         autoDbgInfo(ctx) {}
-  static auto make(HWContext &ctx) { return FuzzyCSEPass{ctx}; }
+  static auto make(Context &ctx) { return FuzzyCSEPass{ctx}; }
 
   void run() {
     bitAlias.clearCache();
-    for (auto mod : ctx.activeModules()) {
+    for (auto mod : ctx.getCtx<HWDialectContext>().activeModules()) {
       runOnModule(mod.iref());
     }
   }

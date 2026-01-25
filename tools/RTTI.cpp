@@ -29,8 +29,8 @@ struct DerivedB : Base
 };*/
 
 int main() {
-  HWContext ctx;
-  FatObjRef<Instr> instr = ctx.getInstrs().create(0, OP_ADD);
+  Context ctx;
+  FatObjRef<Instr> instr = ctx.getStore<Instr>().create(0, OP_ADD);
   DynObjRef instrDyn = instr;
 
   ObjRef<Instr>::is_impl(instrDyn);

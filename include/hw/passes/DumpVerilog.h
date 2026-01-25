@@ -1,5 +1,6 @@
 #pragma once
 
+#include "dyno/Context.h"
 #include "dyno/ObjMap.h"
 #include "dyno/Pass.h"
 #include "hw/HWContext.h"
@@ -28,7 +29,7 @@ private:
 };
 
 class DumpVerilogPass : public Pass<DumpVerilogPass> {
-  HWContext &ctx;
+  Context &ctx;
   std::ostream &os;
 
   void_stream voidStr;
@@ -55,7 +56,7 @@ class DumpVerilogPass : public Pass<DumpVerilogPass> {
 
   void dumpNetlistProcess(ProcessIRef proc) {
     ObjMapVec<Wire, Optional<uint32_t>> wireMap;
-    wireMap.resize(ctx.getWires().numIDs());
+    wireMap.resize(ctx.getStore<Wire>().numIDs());
     uint32_t wireIdCnt = 0;
     auto wireToID = [&](WireRef wire) {
       auto &entry = wireMap[wire];
@@ -186,7 +187,8 @@ class DumpVerilogPass : public Pass<DumpVerilogPass> {
           else
             dyno_unreachable("invalid port on stdcell");
 
-          auto names = ctx.regNameInfo.getNames(port.reg);
+          auto names =
+              ctx.getCtx<HWDialectContext>().regNameInfo.getNames(port.reg);
           if (names.begin() != names.end())
             std::print(os, ".{}(_w{}_)", *names.begin(), wireToID(wire));
           else
@@ -207,9 +209,9 @@ class DumpVerilogPass : public Pass<DumpVerilogPass> {
     }
 
     for (auto [obj, id] : wireMap) {
-      if (!id || !ctx.getWires().exists(obj))
+      if (!id || !ctx.getStore<Wire>().exists(obj))
         continue;
-      auto wire = ctx.getWires().resolve(obj);
+      auto wire = ctx.getStore<Wire>().resolve(obj);
       std::print(os, "wire[{}:0] _w{}_;\n", *wire.getNumBits() - 1, *id);
     }
   }
@@ -278,12 +280,13 @@ class DumpVerilogPass : public Pass<DumpVerilogPass> {
   }
 
 public:
-  explicit DumpVerilogPass(HWContext &ctx, std::ostream &os)
+  explicit DumpVerilogPass(Context &ctx, std::ostream &os)
       : ctx(ctx), os(os), print(voidStr) {}
   void run() {
     print.reset();
-    auto tok = print.regNames().bind(&ctx.regNameInfo);
-    for (auto mod : ctx.activeModules())
+    auto tok =
+        print.regNames().bind(&ctx.getCtx<HWDialectContext>().regNameInfo);
+    for (auto mod : ctx.getCtx<HWDialectContext>().activeModules())
       dumpModule(mod.iref());
   }
 };

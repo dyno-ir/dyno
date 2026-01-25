@@ -1,4 +1,5 @@
 #pragma once
+#include "dyno/Context.h"
 #include "dyno/DialectInfo.h"
 #include "dyno/InstrPrinter.h"
 #include "dyno/Obj.h"
@@ -127,29 +128,30 @@ public:
       lexer->popEnsure(DynoLexer::op_rbropen);
       auto str = lexer->popEnsure(Token::STRING_LITERAL);
       lexer->popEnsure(DynoLexer::op_rbrclose);
-      return ctx->getModules().create(std::string(str.strLit.value));
+      return ctx->getStore<Module>().create(std::string(str.strLit.value));
     }
     case *HW_REGISTER: {
       lexer->popEnsure(DynoLexer::op_rbropen);
       auto bits = lexer->popEnsure(Token::INT_LITERAL);
       lexer->popEnsure(DynoLexer::op_rbrclose);
-      auto reg = ctx->getRegs().create(bits.intLit.value);
+      auto reg = ctx->getStore<Register>().create(bits.intLit.value);
       if (!name.empty() && !isdigit(name[0]))
-        ctx->regNameInfo.addName(reg, std::string_view{name});
+        ctx->getCtx<HWDialectContext>().regNameInfo.addName(
+            reg, std::string_view{name});
       return reg;
     }
     case *HW_WIRE: {
       lexer->popEnsure(DynoLexer::op_rbropen);
       auto bits = lexer->popEnsure(Token::INT_LITERAL);
       lexer->popEnsure(DynoLexer::op_rbrclose);
-      return ctx->getWires().create(bits.intLit.value);
+      return ctx->getStore<Wire>().create(bits.intLit.value);
     }
     case *HW_PROCESS: {
-      return ctx->getProcs().create();
+      return ctx->getStore<Process>().create();
     }
     case *HW_TRIGGER: {
       lexer->popEnsure(DynoLexer::op_rbropen);
-      auto trigger = ctx->getTriggers().create();
+      auto trigger = ctx->getStore<Trigger>().create();
       while (lexer->peekIs(Token::IDENTIFIER)) {
         auto ident =
             lexer->GetIdent(lexer->popEnsure(Token::IDENTIFIER).ident.idx);

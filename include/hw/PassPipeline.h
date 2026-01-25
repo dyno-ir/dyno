@@ -1,5 +1,6 @@
 #pragma once
 
+#include "dyno/Context.h"
 #include "hw/HWContext.h"
 #include "hw/HWPrinter.h"
 #include "hw/IDs.h"
@@ -38,7 +39,7 @@
 namespace dyno {
 
 class PassPipeline {
-  HWContext &ctx;
+  Context &ctx;
 
   FunctionInlinePass funcInline{ctx};
   TriggerDedupePass triggerDedupe{ctx};
@@ -147,7 +148,7 @@ public:
 
   void runLibertyPipeline() {
     SmallVec<ModuleRef, 4> original;
-    for (auto mod : ctx.activeModules()) {
+    for (auto mod : ctx.getCtx<HWDialectContext>().activeModules()) {
       original.emplace_back(mod);
       mod->ignore = true;
     }
@@ -164,7 +165,7 @@ public:
     std::tie(printAfterAll, debugType) = old;
 
     // todo properly
-    for (auto mod : ctx.activeModules())
+    for (auto mod : ctx.getCtx<HWDialectContext>().activeModules())
       mod->ignore = 1;
     for (auto mod : original)
       mod->ignore = 0;
@@ -403,7 +404,7 @@ public:
   __attribute__((used)) void dumpDyno() { dumpDyno("dump_unnamed.dyno"); }
 
 public:
-  explicit PassPipeline(HWContext &ctx) : ctx(ctx) {}
+  explicit PassPipeline(Context &ctx) : ctx(ctx) {}
 };
 
 }; // namespace dyno

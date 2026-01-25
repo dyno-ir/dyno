@@ -1,5 +1,6 @@
 #pragma once
 
+#include "dyno/Context.h"
 #include "dyno/Pass.h"
 #include "hw/HWContext.h"
 #include "hw/HWPrinter.h"
@@ -8,7 +9,7 @@
 namespace dyno {
 
 class FindLongestPathPass : public Pass<FindLongestPathPass> {
-  HWContext &ctx;
+  Context &ctx;
 
   struct Path {
     Optional<uint32_t> length = nullopt;
@@ -22,7 +23,7 @@ class FindLongestPathPass : public Pass<FindLongestPathPass> {
 
   void reset() {
     map.clear();
-    map.resize(ctx.getInstrs().numIDs());
+    map.resize(ctx.getStore<Instr>().numIDs());
     longestPathInstr = nullref;
     circularDepsIgnored = false;
     area = 0;
@@ -103,13 +104,13 @@ class FindLongestPathPass : public Pass<FindLongestPathPass> {
 
 public:
   void run() {
-    for (auto mod : ctx.activeModules()) {
+    for (auto mod : ctx.getCtx<HWDialectContext>().activeModules()) {
       runOnModule(mod.iref());
     }
   }
 
-  auto make(HWContext &ctx) { return FindLongestPathPass(ctx); }
-  explicit FindLongestPathPass(HWContext &ctx) : ctx(ctx) {}
+  auto make(Context &ctx) { return FindLongestPathPass(ctx); }
+  explicit FindLongestPathPass(Context &ctx) : ctx(ctx) {}
 };
 
 }; // namespace dyno

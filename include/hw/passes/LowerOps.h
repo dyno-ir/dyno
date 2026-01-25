@@ -1,6 +1,7 @@
 #pragma once
 
 #include "dyno/Constant.h"
+#include "dyno/Context.h"
 #include "dyno/Obj.h"
 #include "dyno/Pass.h"
 #include "hw/AutoDebugInfo.h"
@@ -21,7 +22,7 @@
 namespace dyno {
 
 class LowerOpsPass : public Pass<LowerOpsPass> {
-  HWContext &ctx;
+  Context &ctx;
   HWInstrBuilder build;
   ConstantBuilder cbuild;
   DelayAnalysis delay;
@@ -118,8 +119,8 @@ private:
     while (operands.size() > 2) {
       auto compressIns = std::min(maxCompressIns, operands.size());
       auto ibuild = build.buildInstrRaw(HW_ADD_COMPRESS, compressIns + 2);
-      auto sum = ctx.getWires().create(numBits);
-      auto carry = ctx.getWires().create(numBits);
+      auto sum = ctx.getStore<Wire>().create(numBits);
+      auto carry = ctx.getStore<Wire>().create(numBits);
       ibuild.addRef(sum);
       ibuild.addRef(carry);
       ibuild.other();
@@ -299,7 +300,7 @@ private:
       auto compressIns = std::min(maxFactor, operands.size());
       auto ibuild =
           build.buildInstrRaw(instr.getDialectOpcode(), 1 + compressIns);
-      auto sum = ctx.getWires().create(numBits);
+      auto sum = ctx.getStore<Wire>().create(numBits);
       ibuild.addRef(sum);
       ibuild.other();
       uint32_t worstDelay = 0;
@@ -386,7 +387,8 @@ private:
       *constantOperand = build.buildAdd(*constantOperand,
                                         cbuild.oneLike(*constantOperand).get());
     auto ibuild = build.buildInstrRaw(OP_ADD, constantOperand ? 3 : 4);
-    auto sumWire = ctx.getWires().create(isSigned ? numBits : numBits + 1);
+    auto sumWire =
+        ctx.getStore<Wire>().create(isSigned ? numBits : numBits + 1);
     ibuild.addRef(sumWire);
     ibuild.other();
     build.setInsertPoint(ibuild.instr());
@@ -485,7 +487,7 @@ private:
     auto ibOR = build.buildInstrRaw(OP_OR, 1 + bits);
 
     if (instr.isOpc(OP_ICMP_EQ)) {
-      auto tmp = ctx.getWires().create(1);
+      auto tmp = ctx.getStore<Wire>().create(1);
       ibOR.addRef(tmp);
       build.buildInstrRaw(OP_NOT, 2)
           .addRef(instr.def(0)->as<WireRef>())
@@ -774,7 +776,7 @@ private:
     // SmallVec<std::pair<WireRef, uint32_t>, 4> pow2Terms;
 
     // for (auto [obj, fact] : res.terms) {
-    //   auto wire = ctx.getWires().resolve(obj);
+    //   auto wire = ctx.getStore<Wire>().resolve(obj);
     //   if (BigInt::countBitsExact(fact, 1) == 1) {
     //     pow2Terms.emplace_back(wire, fact.getNumBits() -
     //                                      BigInt::leadingZeros(fact) - 1);
@@ -955,14 +957,14 @@ public:
     };
 
     destroyMap.clear();
-    destroyMap.resize(ctx.getInstrs().numIDs());
-    ctx.getInstrs().createHooks.emplace_back([&](InstrRef ref) {
+    destroyMap.resize(ctx.getStore<Instr>().numIDs());
+    ctx.getStore<Instr>().createHooks.emplace_back([&](InstrRef ref) {
       if (isLoweringInstr(ref))
         worklist.emplace_back(ref);
       destroyMap.get_ensure(ref) = 0;
     });
 
-    for (auto instr : ctx.getInstrs()) {
+    for (auto instr : ctx.getStore<Instr>()) {
       if (isLoweringInstr(instr))
         worklist.emplace_back(instr);
     }
@@ -972,16 +974,17 @@ public:
       delay.clearCache();
     }
 
-    ctx.getInstrs().createHooks.pop_back();
+    ctx.getStore<Instr>().createHooks.pop_back();
 
     for (auto [obj, destroy] : destroyMap) {
-      if (!destroy || !ctx.getInstrs().exists(obj))
+      if (!destroy || !ctx.getStore<Instr>().exists(obj))
         continue;
-      build.destroyInstr(ctx.getInstrs().resolve(obj));
+      build.destroyInstr(ctx.getStore<Instr>().resolve(obj));
     }
   }
-  static auto make(HWContext &ctx) { return LowerOpsPass(ctx); }
-  explicit LowerOpsPass(HWContext &ctx)
-      : ctx(ctx), build(ctx), cbuild(ctx.getConstants()), autoDebugInfo(ctx) {}
+  static auto make(Context &ctx) { return LowerOpsPass(ctx); }
+  explicit LowerOpsPass(Context &ctx)
+      : ctx(ctx), build(ctx), cbuild(ctx.getStore<Constant>()),
+        autoDebugInfo(ctx) {}
 };
 }; // namespace dyno

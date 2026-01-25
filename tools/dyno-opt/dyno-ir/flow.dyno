@@ -1,7 +1,7 @@
 
 
 // can't yet have a LINEARIZE_CONTROL_FLOW_PASS here bc its constructor depends on InstCombinePass
-// (only such case). Currently the constructors of these passes are all just given HWContext.
+// (only such case). Currently the constructors of these passes are all just given Context.
 
 meta.PROCESS_LINEARIZE_PASS map("retainIODeps": "false", "retainInnerDeps": "false", "kind": "COMB")
 meta.SSA_CONSTRUCT_PASS

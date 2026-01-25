@@ -1,5 +1,6 @@
 #pragma once
 
+#include "dyno/Context.h"
 #include "hw/HWContext.h"
 namespace dyno {
 
@@ -18,9 +19,9 @@ struct SimpleDebugInfo {
     return SimpleDebugInfo{true, std::string_view{}, 0, 0, 0, 0};
   }
 
-  void addToInstr(HWContext &ctx, InstrRef instr) {
-    ctx.sourceLocInfo.addSrcLoc(instr, name, beginLine, beginCol, endLine,
-                                endCol);
+  void addToInstr(Context &ctx, InstrRef instr) {
+    ctx.getCtx<CoreDialectContext>().instrSourceLocInfo.addSrcLoc(
+        instr, name, beginLine, beginCol, endLine, endCol);
   }
 
   bool isStartEntry() { return isNewEntry; }
@@ -34,8 +35,9 @@ struct CopyDebugInfo {
 
   static CopyDebugInfo empty() { return CopyDebugInfo{true, nullref}; }
 
-  void addToInstr(HWContext &ctx, InstrRef instr) {
-    ctx.sourceLocInfo.copyDebugInfo(src, instr);
+  void addToInstr(Context &ctx, InstrRef instr) {
+    ctx.getCtx<CoreDialectContext>().instrSourceLocInfo.copyDebugInfo(src,
+                                                                      instr);
   }
 
   bool isStartEntry() { return isNewEntry; }
@@ -44,7 +46,7 @@ struct CopyDebugInfo {
 };
 
 template <typename TempInfoT> class AutoDebugInfoStackBase {
-  HWContext &ctx;
+  Context &ctx;
 
   void instrCreateHook(InstrRef instr) {
     for (size_t i = stack.size(); i-- > 0;) {
@@ -62,10 +64,10 @@ template <typename TempInfoT> class AutoDebugInfoStackBase {
   }
 
   void registerHook() {
-    ctx.getInstrs().createHooks.emplace_back(getBoundHook());
+    ctx.getStore<Instr>().createHooks.emplace_back(getBoundHook());
   }
 
-  void removeHook() { ctx.getInstrs().createHooks.pop_back(); }
+  void removeHook() { ctx.getStore<Instr>().createHooks.pop_back(); }
 
   SmallVec<TempInfoT, 16> stack;
 
@@ -103,7 +105,7 @@ public:
     return ScopeToken{*this};
   }
 
-  explicit AutoDebugInfoStackBase(HWContext &ctx) : ctx(ctx) { registerHook(); }
+  explicit AutoDebugInfoStackBase(Context &ctx) : ctx(ctx) { registerHook(); }
   ~AutoDebugInfoStackBase() { removeHook(); }
 };
 

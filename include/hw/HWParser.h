@@ -2,6 +2,7 @@
 
 #include "aig/PrintParse.h"
 #include "dyno/Parser.h"
+#include "dyno/Context.h"
 #include "hw/HWContext.h"
 #include "hw/PrintParse.h"
 #include "meta/PrintParse.h"

@@ -8,6 +8,7 @@
 #include "dyno/Lexer.h"
 #include "dyno/Obj.h"
 #include "hw/DebugInfo.h"
+#include "support/ErrorRecovery.h"
 #include "support/Lexer.h"
 #include "support/ResultUnwrap.h"
 #include "support/SmallVec.h"
@@ -32,7 +33,6 @@ public:
       MemberRef<FatDynObjRef<>(void *, DialectType type, ArrayRef<char> name)>;
   Interfaces<NUM_DIALECTS, obj_parse_fn> interfaces;
   Context &ctx;
-  SourceLocInfo<Instr> *sourceLocInfo = nullptr;
 
   auto &getInstrs() { return ctx.getStore<Instr>(); }
   auto &getConstants() { return ctx.getStore<Constant>(); }
@@ -134,8 +134,6 @@ protected:
 
   std::expected<void, ParseError> parseSourceLoc(InstrRef instr) {
     UNWRAP(tok, lexer->tryPeekEnsure(Token::STRING_LITERAL))
-    if (!sourceLocInfo)
-      return std::expected<void, ParseError>{};
     auto pos = tok.strLit.value.find_first_of(':');
     auto file = tok.strLit.value.substr(0, pos);
     auto lines = tok.strLit.value.substr(pos);
@@ -185,8 +183,8 @@ protected:
     }
 
     lexer->Pop();
-    sourceLocInfo->addSrcLoc(instr, file, lineNums[0], lineNums[1], lineNums[2],
-                             lineNums[3]);
+    ctx.getCtx<CoreDialectContext>().instrSourceLocInfo.addSrcLoc(
+        instr, file, lineNums[0], lineNums[1], lineNums[2], lineNums[3]);
     return {};
   }
 
@@ -253,6 +251,7 @@ public:
     while (!lexer->peekIs(Token::NONE)) {
       if (auto res = parseInstr(); !res) {
         lexer->printError(res.error());
+        report_fatal_error("parse error");
       }
     }
   }
@@ -263,9 +262,10 @@ public:
     auto val = lexer.emplace(ctx.getDialectInfos(), src, std::move(fileName));
 
     while (!lexer->peekIs(Token::NONE)) {
-      if (auto instr = parseInstr(); !instr)
+      if (auto instr = parseInstr(); !instr) {
         lexer->printError(instr.error());
-      else
+        report_fatal_error("parse error");
+      } else
         insert.insertPrev(*instr);
     }
   }

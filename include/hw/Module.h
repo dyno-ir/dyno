@@ -12,7 +12,7 @@
 
 namespace dyno {
 
-class HWContext;
+class Context;
 
 class Module {
 

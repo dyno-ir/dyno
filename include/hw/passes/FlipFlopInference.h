@@ -1,5 +1,6 @@
 #pragma once
 #include "dyno/Constant.h"
+#include "dyno/Context.h"
 #include "dyno/Pass.h"
 #include "hw/HWAbstraction.h"
 #include "hw/HWContext.h"
@@ -17,7 +18,7 @@
 namespace dyno {
 
 class FlipFlopInferencePass : public Pass<FlipFlopInferencePass> {
-  HWContext &ctx;
+  Context &ctx;
   MuxtreeAnalysis muxTreeAnalysis;
   HWInstrBuilderStack build;
   ConstantBuilder cbuild;
@@ -35,7 +36,7 @@ class FlipFlopInferencePass : public Pass<FlipFlopInferencePass> {
 
     auto &mtree = *muxTree;
     for (auto [i, cond] : Range{mtree.conditions}.enumerate()) {
-      auto instr = ctx.getWires().resolve(cond.wire).getDefI();
+      auto instr = ctx.getStore<Wire>().resolve(cond.wire).getDefI();
       // not sure if this is 100% to spec in weird cases. we might want to
       // assert that reset gets set before this load (if it gets set in the same
       // process.)
@@ -57,7 +58,7 @@ class FlipFlopInferencePass : public Pass<FlipFlopInferencePass> {
     for (auto &entry : mtree.entries) {
       if (!entry.output.is<ObjRef<Constant>>())
         continue;
-      auto outputConst = ctx.getConstants().resolve(entry.output);
+      auto outputConst = ctx.getStore<Constant>().resolve(entry.output);
       for (auto [i, rstExpr] : Range{resetExprs}.enumerate()) {
         SmallBoolExprCNF copy = entry.expr;
         auto sat = copy.simplifyWith(rstExpr.first, mtree.conditions.size());
@@ -86,7 +87,8 @@ class FlipFlopInferencePass : public Pass<FlipFlopInferencePass> {
       auto val = knownBits.getKnownBitsWith(store.value(), assignments);
 
       if (!val.getIs4S())
-        return std::make_pair(ctx.constBuild().val(val).get(), i);
+        return std::make_pair(
+            ConstantBuilder{ctx.getStore<Constant>()}.val(val).get(), i);
     }
     return std::make_pair(nullref, 0);
   }
@@ -113,7 +115,7 @@ class FlipFlopInferencePass : public Pass<FlipFlopInferencePass> {
     if (store.value().as<WireRef>().getNumUses() != 1)
       return nullopt;
     for (auto [i, entry] : Range{muxTree->entries}.enumerate()) {
-      auto ref = ctx.resolveObj(entry.output);
+      auto ref = ctx.resolve(entry.output);
       if (isQLoad(q, ref.as<HWValue>()))
         return i;
     }
@@ -261,13 +263,13 @@ class FlipFlopInferencePass : public Pass<FlipFlopInferencePass> {
 
 public:
   void run() {
-    for (auto mod : ctx.activeModules()) {
+    for (auto mod : ctx.getCtx<HWDialectContext>().activeModules()) {
       runOnModule(mod.iref());
     }
   }
 
-  explicit FlipFlopInferencePass(HWContext &ctx)
-      : ctx(ctx), build(ctx), cbuild(ctx.getConstants()) {}
-  static auto make(HWContext &ctx) { return FlipFlopInferencePass{ctx}; }
+  explicit FlipFlopInferencePass(Context &ctx)
+      : ctx(ctx), build(ctx), cbuild(ctx.getStore<Constant>()) {}
+  static auto make(Context &ctx) { return FlipFlopInferencePass{ctx}; }
 }; // namespace dyno
 }; // namespace dyno

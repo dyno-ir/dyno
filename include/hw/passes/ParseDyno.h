@@ -1,4 +1,5 @@
 #pragma once
+#include "dyno/Context.h"
 #include "dyno/DialectInfo.h"
 #include "dyno/InstrPrinter.h"
 #include "dyno/Pass.h"
@@ -15,11 +16,11 @@ class ParseDynoPass : public Pass<ParseDynoPass> {
   struct Config {
     std::string fileName;
   };
-  HWContext &ctx;
+  Context &ctx;
 
 public:
-  auto make(HWContext &ctx) { return ParseDynoPass(ctx); }
-  explicit ParseDynoPass(HWContext &ctx) : ctx(ctx) {}
+  auto make(Context &ctx) { return ParseDynoPass(ctx); }
+  explicit ParseDynoPass(Context &ctx) : ctx(ctx) {}
   Config config;
 
   void run() {

@@ -19,5 +19,10 @@ class MetaDialectParser {
 public:
   static constexpr DialectID dialect{DIALECT_META};
   explicit MetaDialectParser(ParserBase *base) : base(base) {}
+
+  FatDynObjRef<> parseMeta(DialectType type, ArrayRef<char> name) {
+    (void)base;
+    return nullref;
+  }
 };
 }; // namespace dyno

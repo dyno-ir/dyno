@@ -21,7 +21,7 @@
 namespace dyno {
 
 class SSAConstructPass : public Pass<SSAConstructPass> {
-  HWContext &ctx;
+  Context &ctx;
   unsigned depth = 0;
   ObjMapVec<Instr, bool> isNewInstr;
   AutoCopyDebugInfoStack autoDebugInfo;
@@ -81,12 +81,12 @@ private:
   InstrRef resolve(ObjRef<Instr> ref) {
     if (!ref)
       return nullref;
-    return InstrRef{ctx.getInstrs().resolve(ref)};
+    return InstrRef{ctx.getStore<Instr>().resolve(ref)};
   }
 
 public:
-  auto make(HWContext &ctx) { return SSAConstructPass(ctx); }
-  explicit SSAConstructPass(HWContext &ctx) : ctx(ctx), autoDebugInfo(ctx) {}
+  auto make(Context &ctx) { return SSAConstructPass(ctx); }
+  explicit SSAConstructPass(Context &ctx) : ctx(ctx), autoDebugInfo(ctx) {}
 
   struct MultiwayResult {
     SmallVec<std::tuple<RegisterRef, std::pair<uint32_t, uint32_t>, TriggerID>,
@@ -151,7 +151,7 @@ public:
       if (topDepth <= startDepth)
         continue;
 
-      auto reg = RegisterRef{ctx.getRegs().resolve(obj)};
+      auto reg = RegisterRef{ctx.getStore<Register>().resolve(obj)};
 
       RegisterValue lazyLoad{reg, startDepth, true, nullopt};
       SmallVec<RegisterValue *, 4> vals(wayBlocks.size() + 1, &lazyLoad);
@@ -238,7 +238,7 @@ public:
         }
         continue;
       }
-      auto reg = RegisterRef{ctx.getRegs().resolve(obj)};
+      auto reg = RegisterRef{ctx.getStore<Register>().resolve(obj)};
 
       // check if parent block has a state for this reg.
       RegisterValue defaultVal{reg, ~0U, true, nullopt};
@@ -279,7 +279,7 @@ public:
         if (diff.untouched()) {
           // value not actually different, we just got a diff because value
           // was materialized. Hoist materialization out of loop.
-          build.setInsertPoint(ctx.getCFG()[loopInstr]);
+          build.setInsertPoint(ctx.getCtx<CoreDialectContext>().cfg[loopInstr]);
           auto matVal = parentVal->get(build, diff.addr(), diff.len());
           for (auto [i, val] : Range{blockVals}.drop_front().enumerate())
             // could also overwriteNoMaterialize here to not hoist but lazily
@@ -303,8 +303,8 @@ public:
 
           // now overwrite with unyield wire for next pass (source for this
           // value becomes yield of previous).
-          auto wire =
-              unyieldWires[i].emplace_back(ctx.getWires().create(diff.len()));
+          auto wire = unyieldWires[i].emplace_back(
+              ctx.getStore<Wire>().create(diff.len()));
           val->overwrite(wire, 0, diff.addr(), diff.len(), false,
                          diff.triggerID());
         }
@@ -348,7 +348,7 @@ public:
         if (entryBelow.depth == startDepth)
           parentVal = &entryBelow;
       }
-      auto reg = RegisterRef{ctx.getRegs().resolve(obj)};
+      auto reg = RegisterRef{ctx.getStore<Register>().resolve(obj)};
       if (!parentVal) {
         parentVal =
             state.stack.insert(state.stack.end() - 1,
@@ -362,7 +362,7 @@ public:
         if (frag.ref == obj && frag.srcAddr == frag.dstAddr)
           continue;
         if (frag.untouched) {
-          build.setInsertPoint(ctx.getCFG()[loopInstr]);
+          build.setInsertPoint(ctx.getCtx<CoreDialectContext>().cfg[loopInstr]);
 
           auto matVal = parentVal->get(build, frag.dstAddr, frag.len);
           frag.ref = matVal;
@@ -385,7 +385,8 @@ public:
         materializedYieldVals.emplace_back(matVal);
 
         // for next pass: make this point to the unyield value.
-        frag.ref = unyieldWires.emplace_back(ctx.getWires().create(frag.len));
+        frag.ref =
+            unyieldWires.emplace_back(ctx.getStore<Wire>().create(frag.len));
         frag.srcAddr = 0;
       }
     }
@@ -417,7 +418,7 @@ public:
     for (auto [reg, range, trigger] : yieldVals) {
       auto &val = regMap[reg].getOrSetDefault(depth, reg);
       // set reg state after loop to output yield vals.
-      auto wire = ctx.getWires().create(range.second);
+      auto wire = ctx.getStore<Wire>().create(range.second);
       newDefs.emplace_back(wire);
       val.overwrite(wire, 0, range.first, range.second, false, trigger);
     }
@@ -433,7 +434,7 @@ public:
         if (!state.has(depth))
           continue;
 
-        auto reg = ctx.getRegs().resolve(obj);
+        auto reg = ctx.getStore<Register>().resolve(obj);
         dumpInstr(reg.iref());
 
         HWPrinter print{dbgs()};
@@ -541,7 +542,7 @@ public:
               spliceBase = asLoad.getBase();
             }
 
-            build.setInsertPoint(ctx.getCFG()[asLoad]);
+            build.setInsertPoint(ctx.getCtx<CoreDialectContext>().cfg[asLoad]);
             auto matVal =
                 build.buildSplice(val.get(build, boundAddr, boundLen),
                                   asLoad.getLen(), spliceBase, asLoad.terms());
@@ -568,7 +569,7 @@ public:
         BlockRef falseBlock =
             asIf.hasFalseBlock() ? asIf.getFalseBlock() : nullref;
         if (!falseBlock)
-          falseBlock = ctx.createBlock();
+          falseBlock = ctx.getCtx<CoreDialectContext>().createBlock();
 
         std::array<BlockRef, 2> blocks{asIf.getTrueBlock(), falseBlock};
         auto res = runOnMultiway(proc, blocks);
@@ -734,7 +735,7 @@ public:
 
         for (auto [reg, range, trig] : res.yieldRegs) {
           auto yieldVal =
-              newYields.emplace_back(ctx.getWires().create(range.second));
+              newYields.emplace_back(ctx.getStore<Wire>().create(range.second));
           regMap[reg]
               .getOrSetDefault(depth, reg)
               .overwrite(yieldVal, 0, range.first, range.second, false, trig);
@@ -758,7 +759,7 @@ public:
         auto &state = regState.get();
         if (state.untouched)
           continue;
-        auto reg = RegisterRef{ctx.getRegs().resolve(obj)};
+        auto reg = RegisterRef{ctx.getStore<Register>().resolve(obj)};
         assert(reg.getNumBits() == state.getLen());
 
         uint32_t addr = 0;
@@ -770,7 +771,7 @@ public:
             return;
           TriggerIRef trigger = nullref;
           if (triggerID) {
-            trigger = ctx.getTriggers()
+            trigger = ctx.getStore<Trigger>()
                           .resolve(ObjRef<Trigger>{ObjID{*triggerID}})
                           .iref();
           }
@@ -812,7 +813,7 @@ public:
     // modules in the context. Otherwise better use some other type of map
     // or double indirection for mapping without eager allocation.
     regMap.clear();
-    regMap.resize(ctx.getRegs().numIDs());
+    regMap.resize(ctx.getStore<Register>().numIDs());
 
     runOnBlock(proc, proc.block());
   }
@@ -825,15 +826,15 @@ public:
 
   void run() {
     isNewInstr.clear();
-    isNewInstr.resize(ctx.getInstrs().numIDs());
-    auto &createHooks = ctx.getInstrs().createHooks;
+    isNewInstr.resize(ctx.getStore<Instr>().numIDs());
+    auto &createHooks = ctx.getStore<Instr>().createHooks;
     auto hookSize = createHooks.size();
 
     if (config.mode == Config::DEFERRED)
       createHooks.emplace_back(
           [&](InstrRef ref) { isNewInstr.get_ensure(ref) = true; });
 
-    for (auto mod : ctx.activeModules()) {
+    for (auto mod : ctx.getCtx<HWDialectContext>().activeModules()) {
       runOnModule(mod.iref());
     }
 

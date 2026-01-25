@@ -1,5 +1,6 @@
 #pragma once
 
+#include "dyno/Context.h"
 #include "hw/HWAbstraction.h"
 #include "hw/HWContext.h"
 #include "support/Bits.h"
@@ -59,23 +60,23 @@ struct RegisterValueFragment {
                                         uint32_t len) {
     addr += srcAddr;
     if (auto regThin = ref.dyn_as<ObjRef<Register>>()) {
-      auto reg = RegisterRef{build.ctx.getRegs().resolve(regThin)};
+      auto reg = RegisterRef{build.ctx.getStore<Register>().resolve(regThin)};
       return std::make_pair(build.buildLoad(reg, len, addr), BitRange{0, len});
     }
     if (auto wireThin = ref.dyn_as<ObjRef<Wire>>()) {
-      auto wire = WireRef{build.ctx.getWires().resolve(wireThin)};
+      auto wire = WireRef{build.ctx.getStore<Wire>().resolve(wireThin)};
       return std::make_pair(wire, BitRange{addr, len});
     }
     if (ref.is<ObjRef<Constant>>()) {
       auto constant = ref.isCustom()
                           ? ConstantRef{ref}
-                          : ConstantRef{build.ctx.getConstants().resolve(
+                          : ConstantRef{build.ctx.getStore<Constant>().resolve(
                                 ref.as<ObjRef<Constant>>())};
       return std::make_pair(constant, BitRange{addr, len});
     }
     dyno_unreachable("unsupported");
     // auto store =
-    // StoreIRef{build.ctx.getInstrs().resolve(ref.as<ObjRef<Instr>>())};
+    // StoreIRef{build.ctx.getStore<Instr>().resolve(ref.as<ObjRef<Instr>>())};
     // assert(len <= this->len);
     // return std::make_pair(store.value(), BitRange{addr, len});
   }
@@ -211,7 +212,7 @@ struct RegisterValue : public RegisterFrags<RegisterValueFragment> {
     }
   }
 
-  bool defragmentValues(HWContext &ctx) {
+  bool defragmentValues(Context &ctx) {
     if (frags.size() == 0)
       return false;
     // clean up constants
@@ -219,8 +220,9 @@ struct RegisterValue : public RegisterFrags<RegisterValueFragment> {
     for (unsigned i = 0; i < frags.size(); i++) {
       auto &low = frags[i];
       if (low.ref.is<ObjRef<Constant>>() && low.srcAddr != 0) {
-        auto newConst =
-            ctx.constBuild().val(ctx.getConstants().resolve(low.ref)).get();
+        auto newConst = ConstantBuilder{ctx.getStore<Constant>()}
+                            .val(ctx.getStore<Constant>().resolve(low.ref))
+                            .get();
         low.srcAddr = 0;
         low.ref = newConst;
         rv = true;
@@ -240,9 +242,9 @@ struct RegisterValue : public RegisterFrags<RegisterValueFragment> {
       assert(high.dstAddr != ~0u);
 
       if (low.ref.is<ObjRef<Constant>>() && high.ref.is<ObjRef<Constant>>()) {
-        auto newConst = ctx.constBuild()
-                            .val(ctx.getConstants().resolve(low.ref))
-                            .concat(ctx.getConstants().resolve(high.ref))
+        auto newConst = ConstantBuilder{ctx.getStore<Constant>()}
+                            .val(ctx.getStore<Constant>().resolve(low.ref))
+                            .concat(ctx.getStore<Constant>().resolve(high.ref))
                             .get();
         low.ref = newConst;
         low.len += high.len;

@@ -1,6 +1,7 @@
 #pragma once
 #include "aig/AIG.h"
 #include "dyno/Constant.h"
+#include "dyno/Context.h"
 #include "dyno/DestroyMap.h"
 #include "dyno/Pass.h"
 #include "hw/HWAbstraction.h"
@@ -15,7 +16,7 @@
 namespace dyno {
 
 class BLIF_Printer {
-  HWContext &ctx [[maybe_unused]];
+  Context &ctx [[maybe_unused]];
   std::ostream &os;
 
   std::string getName(AIGObjID idLit) const {
@@ -68,11 +69,11 @@ public:
     os << ".end\n";
   }
 
-  BLIF_Printer(HWContext &ctx, std::ostream &os) : ctx(ctx), os(os) {}
+  BLIF_Printer(Context &ctx, std::ostream &os) : ctx(ctx), os(os) {}
 };
 
 class BLIF_Parser {
-  HWContext &ctx;
+  Context &ctx;
   std::istream &is;
 
   template <char Delim = ' '> class SplitIterator {
@@ -121,7 +122,7 @@ class BLIF_Parser {
   }
 
 public:
-  BLIF_Parser(HWContext &ctx, std::istream &is) : ctx(ctx), is(is) {}
+  BLIF_Parser(Context &ctx, std::istream &is) : ctx(ctx), is(is) {}
 
   /*
     Imports techmapped BLIF. Each gate turns into a standard cell instance.
@@ -135,7 +136,7 @@ public:
     std::unordered_map<std::string, HWValue> names;
     std::unordered_map<std::string, ModuleRef> modules;
 
-    for (auto mod : ctx.getModules()) {
+    for (auto mod : ctx.getStore<Module>()) {
       modules[mod->name] = mod;
     }
 
@@ -187,7 +188,7 @@ public:
           }
 
           assert(defI.isOpc(AIG_OUTPUT));
-          auto wire = ctx.getWires().create(1);
+          auto wire = ctx.getStore<Wire>().create(1);
           outputBitArr.emplace_back(wire);
 
           names.insert(std::make_pair(tok, wire));
@@ -234,14 +235,15 @@ public:
               } else {
                 wire->second.as<WireRef>().replaceAllUsesWith(
                     ConstantRef::fromBool(*constVal));
-                ctx.getWires().destroy(wire->second.as<WireRef>());
+                ctx.getStore<Wire>().destroy(wire->second.as<WireRef>());
                 wire->second = ConstantRef::fromBool(*constVal);
               }
             }
           } else if (wire == names.end()) {
-            wire =
-                names.insert(std::make_pair(tokStr, ctx.getWires().create(1)))
-                    .first;
+            wire = names
+                       .insert(std::make_pair(tokStr,
+                                              ctx.getStore<Wire>().create(1)))
+                       .first;
           }
 
           if (mod) {
@@ -264,7 +266,7 @@ public:
 };
 
 class AIGERPrinter {
-  HWContext &ctx [[maybe_unused]];
+  Context &ctx [[maybe_unused]];
   std::ostream &os;
 
   struct AIGERMeta {
@@ -312,11 +314,11 @@ public:
   }
 
 public:
-  AIGERPrinter(HWContext &ctx, std::ostream &os) : ctx(ctx), os(os) {}
+  AIGERPrinter(Context &ctx, std::ostream &os) : ctx(ctx), os(os) {}
 };
 
 class ABCPass : public Pass<ABCPass> {
-  HWContext &ctx;
+  Context &ctx;
   DestroyMap<Instr> destroyMap;
 
   void runOnAIG(InstrRef aigInstr) {
@@ -330,7 +332,11 @@ class ABCPass : public Pass<ABCPass> {
       BLIF_Printer print{ctx, blifFile};
       print.print(aigRef);
     }
-    system(("yosys-abc -q \"read_blif aig.blif; read_lib -X sky130_fd_sc_hd__lpflow_inputiso1p_1 -X sky130_fd_sc_hd__lpflow_isobufsrc_1 -X sky130_fd_sc_hd__clkinv_1 -w " + config.path +
+    system(("yosys-abc -q \"read_blif aig.blif; read_lib -X "
+            "sky130_fd_sc_hd__lpflow_inputiso1p_1 -X "
+            "sky130_fd_sc_hd__lpflow_isobufsrc_1 -X sky130_fd_sc_hd__clkinv_1 "
+            "-w " +
+            config.path +
             "; strash; &get -n; &fraig -x; "
             "&put; scorr; dc2; dretime; strash; &get -n; &dch -f; &nf; &put;"
             "print_stats; write_blif "
@@ -376,19 +382,19 @@ public:
   Config config;
   void run() {
     destroyMap.clear();
-    destroyMap.resize(ctx.getInstrs().numIDs());
+    destroyMap.resize(ctx.getStore<Instr>().numIDs());
 
-    auto tok = destroyMap.registerCreateHook(ctx.getInstrs());
-    for (auto mod : ctx.activeModules()) {
+    auto tok = destroyMap.registerCreateHook(ctx.getStore<Instr>());
+    for (auto mod : ctx.getCtx<HWDialectContext>().activeModules()) {
       runOnModule(mod.iref());
     }
 
-    destroyMap.apply(ctx.getInstrs(), [&](InstrRef ref) {
+    destroyMap.apply(ctx.getStore<Instr>(), [&](InstrRef ref) {
       HWInstrBuilder{ctx}.destroyInstr(ref);
     });
   }
-  auto make(HWContext &ctx) { return ABCPass(ctx); }
-  explicit ABCPass(HWContext &ctx) : ctx(ctx) {}
+  auto make(Context &ctx) { return ABCPass(ctx); }
+  explicit ABCPass(Context &ctx) : ctx(ctx) {}
 };
 
 }; // namespace dyno
