@@ -3,6 +3,7 @@
 #include "dyno/CustomInstr.h"
 #include "dyno/HierBlockIterator.h"
 #include "dyno/Instr.h"
+#include "dyno/Pass.h"
 #include "hw/AutoDebugInfo.h"
 #include "hw/HWAbstraction.h"
 #include "hw/HWInstr.h"
@@ -12,12 +13,13 @@
 
 namespace dyno {
 
-class SeqToCombPass {
-  HWContext &ctx;
+class SeqToCombPass : public Pass<SeqToCombPass> {
+  Context &ctx;
   AutoCopyDebugInfoStack autoDbgInfo;
 
 public:
-  explicit SeqToCombPass(HWContext &ctx) : ctx(ctx), autoDbgInfo(ctx) {}
+  auto make(Context &ctx) { return SeqToCombPass(ctx); }
+  explicit SeqToCombPass(Context &ctx) : ctx(ctx), autoDbgInfo(ctx) {}
 
   using TaggedRegRef = CustomInstrRef<RegisterIRef, uint64_t>;
 
@@ -27,7 +29,7 @@ public:
 
     auto trigger = proc.other(0)->as<TriggerRef>().iref();
     ObjMapVec<Instr, bool> handled;
-    handled.resize(ctx.getInstrs().numIDs());
+    handled.resize(ctx.getStore<Instr>().numIDs());
     HWInstrBuilder build{ctx};
     std::optional<BlockRef_iterator<true>> regs_end;
 
@@ -102,7 +104,7 @@ public:
     SmallVec<ProcessIRef, 32> destroyList;
     for (auto proc : module.procs()) {
       if (proc.isOpc(HW_SEQ_PROCESS_DEF)) {
-        auto newProc = ctx.getInstrs().create(2, HW_COMB_PROCESS_DEF);
+        auto newProc = ctx.getStore<Instr>().create(2, HW_COMB_PROCESS_DEF);
         InstrBuilder ibuild{newProc};
         ibuild.addRef(proc.operand(0)->fat());
         proc.operand(0).replace(FatDynObjRef<>{nullref});
@@ -110,7 +112,7 @@ public:
         ibuild.addRef(proc.operand(1)->fat());
         proc.operand(1).replace(FatDynObjRef<>{nullref});
 
-        build.setInsertPoint(ctx.getCFG()[proc]);
+        build.setInsertPoint(ctx.getCtx<CoreDialectContext>().cfg[proc]);
         build.insertInstr(newProc);
 
         destroyList.emplace_back(proc);
@@ -122,7 +124,7 @@ public:
   }
 
   void run() {
-    for (auto mod : ctx.activeModules()) {
+    for (auto mod : ctx.getCtx<HWDialectContext>().activeModules()) {
       runOnModule(mod.iref());
     }
   }

@@ -1,12 +1,14 @@
 #pragma once
 
+#include "dyno/Context.h"
 #include "dyno/Obj.h"
+#include "dyno/Pass.h"
 #include "hw/HWAbstraction.h"
 #include "hw/HWContext.h"
 namespace dyno {
 
-class TriggerDedupePass {
-  HWContext &ctx;
+class TriggerDedupePass : public Pass<TriggerDedupePass> {
+  Context &ctx;
 
   static bool triggerDeepEqual(TriggerIRef lhs, TriggerIRef rhs) {
     if (lhs.getNumOthers() != rhs.getNumOthers())
@@ -49,13 +51,14 @@ class TriggerDedupePass {
 
 public:
   void run() {
-    for (auto mod : ctx.activeModules()) {
+    for (auto mod : ctx.getCtx<HWDialectContext>().activeModules()) {
       runOnModule(mod.iref());
     }
   }
 
 public:
-  explicit TriggerDedupePass(HWContext &ctx) : ctx(ctx) {}
+  auto make(Context &ctx) { return TriggerDedupePass(ctx); }
+  explicit TriggerDedupePass(Context &ctx) : ctx(ctx) {}
 };
 
 }; // namespace dyno

@@ -42,9 +42,15 @@ public:
       : storage(round_up_div(preallocSymbs, WordSymbs)) {}
 
   void ensureSymbs(size_t i) { ensureWords(round_up_div(i, WordSymbs)); }
+  void ensureSymbsExp(size_t i) { ensureWordsExp(round_up_div(i, WordSymbs)); }
+
   void ensureWords(size_t words) {
     if (storage.size() <= words) [[unlikely]]
       storage.resize(words, DefaultWord);
+  }
+  void ensureWordsExp(size_t words) {
+    if (storage.size() <= words) [[unlikely]]
+      storage.resize(ceil_to_pow2(words), DefaultWord);
   }
   void resizeSymbs(size_t i) { resizeWords(round_up_div(i, WordSymbs)); }
   void resizeWords(size_t words) { storage.resize(words, DefaultWord); }
@@ -58,7 +64,7 @@ public:
                        SymbolBits};
   }
   auto at(size_t i) {
-    ensureSymbs(i + 1);
+    ensureSymbsExp(i + 1);
     return DynBitField{storage[wordIdx(i)], symbIdx(i) * SymbolBits,
                        SymbolBits};
   }

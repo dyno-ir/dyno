@@ -1,15 +1,16 @@
 #pragma once
 
+#include "dyno/Context.h"
+#include "dyno/Pass.h"
 #include "hw/HWAbstraction.h"
 #include "hw/HWContext.h"
-#include "hw/HWPrinter.h"
 #include "hw/analysis/RegisterValue.h"
 #include "support/Utility.h"
 namespace dyno {
 
 // fuse loads in processes. should only be run after SSA construct
-class LoadCoalescePass {
-  HWContext &ctx;
+class LoadCoalescePass : public Pass<LoadCoalescePass> {
+  Context &ctx;
 
   struct LoadCoalesceFragment {
     uint32_t dstAddr;
@@ -89,11 +90,12 @@ class LoadCoalescePass {
 
 public:
   void run() {
-    for (auto mod : ctx.activeModules()) {
+    for (auto mod : ctx.getCtx<HWDialectContext>().activeModules()) {
       runOnModule(mod.iref());
     }
   }
-  explicit LoadCoalescePass(HWContext &ctx) : ctx(ctx) {}
+  auto make(Context &ctx) { return LoadCoalescePass(ctx); }
+  explicit LoadCoalescePass(Context &ctx) : ctx(ctx) {}
 };
 
 }; // namespace dyno

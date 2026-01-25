@@ -1,5 +1,6 @@
 #pragma once
 
+#include "dyno/Type.h"
 #include "support/SmallVec.h"
 #include <cassert>
 #include <dyno/Obj.h>
@@ -50,6 +51,8 @@ private:
 
 public:
   using value_type = T;
+  static constexpr DialectType ty{Traits::ty};
+
   NewDeleteObjStore() {}
   NewDeleteObjStore(const NewDeleteObjStore &) = delete;
   NewDeleteObjStore(NewDeleteObjStore &&) = default;
@@ -113,6 +116,12 @@ public:
   bool exists(ObjRef<T> ref) { return !!map[ref]; }
 
   FatRefT resolve(ObjRef<T> ref) { return FatRefT{ref, map[ref]}; }
+  FatDynObjRef<> resolveGeneric(DynObjRef ref) {
+    // Only used for Context resolver.
+    // if need we can also autogenerate this method from
+    // BindMethod<...::resolve>
+    return resolve(ref.as<ObjRef<T>>());
+  }
 
   auto begin() { return objs().begin(); }
   auto end() { return objs().end(); }

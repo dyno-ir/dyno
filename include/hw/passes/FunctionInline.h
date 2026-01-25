@@ -1,10 +1,13 @@
 #pragma once
 #include "dyno/CFG.h"
+#include "dyno/Context.h"
 #include "dyno/CustomInstr.h"
 #include "dyno/Instr.h"
 #include "dyno/Obj.h"
+#include "dyno/Pass.h"
 #include "hw/DeepCopy.h"
 #include "hw/HWAbstraction.h"
+#include "hw/HWContext.h"
 #include "hw/HWInstr.h"
 #include "hw/HWValue.h"
 #include "hw/IDs.h"
@@ -19,12 +22,12 @@ namespace dyno {
 
 using TaggedCallRef = CustomInstrRef<CallInstrRef, uint64_t>;
 
-class FunctionInlinePass {
-  HWContext &ctx;
+class FunctionInlinePass : public Pass<FunctionInlinePass> {
+  Context &ctx;
   DeepCopier copier;
 
+private:
   void runOnModule(ModuleIRef mod) {
-
     SmallVec<CallInstrRef, 8> worklist;
     for (FunctionIRef instr : mod.funcs()) {
       for (auto call : instr.func().uses()) {
@@ -79,7 +82,7 @@ class FunctionInlinePass {
             callInstr.retvals().begin()[i]->as<WireRef>()->numBits);
 
       for (auto [i, def] : callInstr.defs().enumerate()) {
-        auto loadInstr = InstrRef{ctx.getInstrs().create(2, HW_LOAD)};
+        auto loadInstr = InstrRef{ctx.getStore<Instr>().create(2, HW_LOAD)};
         InstrBuilder build{loadInstr};
         build.addRef(def->fat()).other().addRef(returnRegs[i]);
         dstIter.succ().insertPrev(loadInstr);
@@ -146,10 +149,11 @@ class FunctionInlinePass {
 
 public:
   void run() {
-    for (auto mod : ctx.activeModules()) {
+    for (auto mod : ctx.getCtx<HWDialectContext>().activeModules()) {
       runOnModule(mod.iref());
     }
   }
-  explicit FunctionInlinePass(HWContext &ctx) : ctx(ctx), copier(ctx) {}
+  auto make(Context &ctx) { return FunctionInlinePass(ctx); }
+  explicit FunctionInlinePass(Context &ctx) : ctx(ctx), copier(ctx) {}
 };
 }; // namespace dyno

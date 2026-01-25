@@ -1,11 +1,11 @@
 #pragma once
 
-#include "dyno/Constant.h"
+#include "dyno/Context.h"
 #include "dyno/DestroyMap.h"
 #include "dyno/HierBlockIterator.h"
-#include "dyno/IDs.h"
 #include "dyno/Instr.h"
 #include "dyno/Obj.h"
+#include "dyno/Pass.h"
 #include "hw/HWAbstraction.h"
 #include "hw/HWContext.h"
 #include "hw/HWInstr.h"
@@ -18,11 +18,10 @@
 #include "support/Bits.h"
 #include "support/Debug.h"
 #include "support/DenseMultimap.h"
-#include "support/Utility.h"
 namespace dyno {
 
 class CSEDedupeMap {
-  HWContext &ctx;
+  Context &ctx;
   DenseMultimap<uint32_t, ObjRef<Instr>> instrDedupeMap;
 
   uint32_t hashOperand(OperandRef operand) {
@@ -73,7 +72,7 @@ public:
     uint32_t hash = hashInstr(instr);
     auto it = instrDedupeMap.find(hash);
     for (; it != instrDedupeMap.end(); it = instrDedupeMap.find_next(it)) {
-      auto otherI = ctx.getInstrs().resolve(it.val());
+      auto otherI = ctx.getStore<Instr>().resolve(it.val());
       if (!instrDeepEqual(instr, otherI))
         continue;
       return otherI;
@@ -84,11 +83,12 @@ public:
 
   void clear() { instrDedupeMap.clear(); }
 
-  CSEDedupeMap(HWContext &ctx) : ctx(ctx) {}
+  CSEDedupeMap(Context &ctx) : ctx(ctx) {}
 };
 
-class CommonSubexpressionEliminationPass {
-  HWContext &ctx;
+class CommonSubexpressionEliminationPass
+    : public Pass<CommonSubexpressionEliminationPass> {
+  Context &ctx;
   CSEDedupeMap map;
   DestroyMap<Instr> instrDestroy;
   ControlFlowAnalysis controlFlowAnalysis;
@@ -128,7 +128,8 @@ private:
           other.def(i)->as<FatDynObjRef<InstrDefUse>>());
     }
     instrDestroy.mark(instr);
-    ctx.sourceLocInfo.copyDebugInfo(instr, other);
+    ctx.getCtx<CoreDialectContext>().instrSourceLocInfo.copyDebugInfo(instr,
+                                                                      other);
 
     BlockRef otherBl = HWInstrRef{other}.parentBlock(ctx);
     BlockRef instrBl = HWInstrRef{instr}.parentBlock(ctx);
@@ -149,7 +150,7 @@ private:
       dumpInstr(other, ctx);
     })
 
-    ctx.getCFG()[other].erase();
+    ctx.getCtx<CoreDialectContext>().cfg[other].erase();
     auto it = block.begin();
     it.insertPrev(other);
 
@@ -157,7 +158,7 @@ private:
     //   if (*it == otherPred || *it == instrPred) {
     //     if (*it == other)
     //       return;
-    //     ctx.getCFG()[other].erase();
+    //     ctx.getCtx<CoreDialectContext>().cfg[other].erase();
     //     it.insertPrev(other);
     //     return;
     //   }
@@ -194,17 +195,20 @@ private:
 
 public:
   void run() {
-    instrDestroy.resize(ctx.getInstrs().numIDs());
-    for (auto mod : ctx.activeModules()) {
+    instrDestroy.resize(ctx.getStore<Instr>().numIDs());
+    for (auto mod : ctx.getCtx<HWDialectContext>().activeModules()) {
       runOnModule(mod.iref());
     }
     HWInstrBuilder build{ctx};
-    instrDestroy.apply(ctx.getInstrs(),
+    instrDestroy.apply(ctx.getStore<Instr>(),
                        [&](InstrRef ref) { build.destroyInstr(ref); });
     instrDestroy.clear();
   }
-  explicit CommonSubexpressionEliminationPass(HWContext &ctx)
+  explicit CommonSubexpressionEliminationPass(Context &ctx)
       : ctx(ctx), map(ctx), controlFlowAnalysis(ctx) {}
+  static auto make(Context &ctx) {
+    return CommonSubexpressionEliminationPass{ctx};
+  }
 };
 
 }; // namespace dyno

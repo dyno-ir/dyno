@@ -50,6 +50,7 @@ public:
   std::array<AIGObjID, 2> op;
 
   AIGNode(AIGObjID lhs, AIGObjID rhs) : op{lhs, rhs} {}
+  AIGNode() = default;
 
   static constexpr uint32_t hash(AIGNode node) {
     // todo specialized hashing

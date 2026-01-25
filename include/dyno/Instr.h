@@ -663,12 +663,12 @@ public:
 };
 
 template <> struct InterfaceTraits<OpcodeInfo> {
-  static const OpcodeInfo *dispatch1(InstrRef ref,
-                                     const OpcodeInfo **interfaces) {
+  static const ArrayRef<OpcodeInfo>
+  dispatch1(InstrRef ref, ArrayRef<OpcodeInfo> *interfaces) {
     return interfaces[ref.getDialect()];
   }
   static const OpcodeInfo &dispatch2(InstrRef ref,
-                                     const OpcodeInfo *interface) {
+                                     ArrayRef<OpcodeInfo> interface) {
     return interface[ref.getOpcode()];
   }
 };
@@ -809,13 +809,16 @@ struct UniqueOperand {
 
 template <> struct DenseMapInfo<dyno::UniqueOperand> {
   static constexpr dyno::UniqueOperand getEmptyKey() { return {nullptr, 0}; }
-  static constexpr dyno::UniqueOperand getTombstoneKey() { return {nullptr, 1}; }
+  static constexpr dyno::UniqueOperand getTombstoneKey() {
+    return {nullptr, 1};
+  }
   static unsigned getHashValue(const dyno::UniqueOperand &k) {
     auto ptrHash = hash_u64(uintptr_t(k.instr));
     return hash_combine(hash_combine(uint32_t(ptrHash), hash_u32(k.idx)),
                         ptrHash >> 32);
   }
-  static bool isEqual(const dyno::UniqueOperand &lhs, const dyno::UniqueOperand &rhs) {
+  static bool isEqual(const dyno::UniqueOperand &lhs,
+                      const dyno::UniqueOperand &rhs) {
     return lhs.instr == rhs.instr && lhs.idx == rhs.idx;
   }
 };

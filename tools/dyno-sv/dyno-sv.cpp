@@ -37,7 +37,7 @@ int main(int argc, char **argv) {
   if (!driver.reportDiagnostics(true))
     return 1;
 
-  HWContext ctx;
+  Context ctx;
 
   VisitorAST visitor{ctx, driver.sourceManager};
   compilation->getRoot().visit(visitor);

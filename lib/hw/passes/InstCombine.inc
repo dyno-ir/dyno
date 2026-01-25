@@ -148,7 +148,7 @@ r15 = r5.begin();
 r16 = r5.end();
 if (r6 != r2) goto fail_4;
 
-  FatDynObjRef<> w = ctx.getWires().create((*Range{r8, r10}.begin())->as<HWValue>().getNumBits()); RefRange{r18, r19} = w;
+  FatDynObjRef<> w = ctx.getStore<Wire>().create((*Range{r8, r10}.begin())->as<HWValue>().getNumBits()); RefRange{r18, r19} = w;
 
   FatDynObjRef<> constant = cbuild.val("1'h1"_bv).resize(*(*Range{r1, r3}.begin())->as<WireRef>().getNumBits(), false).get();
   RefRange{r21, r22} = constant;
@@ -206,7 +206,7 @@ r9 = std::next(r3);
 if ((*r3)->fat() != (*r5)->fat()) goto fail_5;
 r10 = std::next(r9);
 
-  FatDynObjRef<> w = ctx.getWires().create((*Range{r5, r7}.begin())->as<HWValue>().getNumBits()); RefRange{r12, r13} = w;
+  FatDynObjRef<> w = ctx.getStore<Wire>().create((*Range{r5, r7}.begin())->as<HWValue>().getNumBits()); RefRange{r12, r13} = w;
 
   FatDynObjRef<> constant = cbuild.val("1'h1"_bv).resize(*(*Range{r1, r3}.begin())->as<WireRef>().getNumBits(), false).get();
   RefRange{r15, r16} = constant;
@@ -327,9 +327,9 @@ r20 = r5.begin();
 r21 = r5.end();
 if (r6 != r2) goto fail_7;
 
-  FatDynObjRef<> w = ctx.getWires().create((*Range{r14, r15}.begin())->as<HWValue>().getNumBits()); RefRange{r23, r24} = w;
+  FatDynObjRef<> w = ctx.getStore<Wire>().create((*Range{r14, r15}.begin())->as<HWValue>().getNumBits()); RefRange{r23, r24} = w;
 
-  FatDynObjRef<> w2 = ctx.getWires().create((*Range{r15, r16}.begin())->as<HWValue>().getNumBits()); RefRange{r26, r27} = w2;
+  FatDynObjRef<> w2 = ctx.getStore<Wire>().create((*Range{r15, r16}.begin())->as<HWValue>().getNumBits()); RefRange{r26, r27} = w2;
 
   FatDynObjRef<> constant = cbuild.val("1'h1"_bv).resize(*(*Range{r14, r15}.begin())->as<WireRef>().getNumBits(), false).get();
   RefRange{r29, r30} = constant;
@@ -453,7 +453,7 @@ r27 = r5.begin();
 r28 = r5.end();
 if (r6 != r2) goto fail_8;
 
-  FatDynObjRef<> w = ctx.getWires().create((*Range{r11, r12}.begin())->as<HWValue>().getNumBits()); RefRange{r30, r31} = w;
+  FatDynObjRef<> w = ctx.getStore<Wire>().create((*Range{r11, r12}.begin())->as<HWValue>().getNumBits()); RefRange{r30, r31} = w;
 
   FatDynObjRef<> constant = cbuild.val("1'h0"_bv).resize(*(*Range{r14, r16}.begin())->as<WireRef>().getNumBits(), false).get();
   RefRange{r32, r33} = constant;
@@ -1651,7 +1651,7 @@ if ((*r5)->as<FatDynObjRef<>>().getType() != CORE_CONSTANT) goto fail_38;
 if ((*r5)->as<ConstantRef>() != "1'h1"_bv) goto fail_38;
 r6 = std::next(r5);
 
-  FatDynObjRef<> w = ctx.getWires().create((*Range{r3, r4}.begin())->as<HWValue>().getNumBits()); RefRange{r8, r9} = w;
+  FatDynObjRef<> w = ctx.getStore<Wire>().create((*Range{r3, r4}.begin())->as<HWValue>().getNumBits()); RefRange{r8, r9} = w;
 auto r7 = build.buildInstrRaw(OP_NOT, (r9-r8)+(r4-r3));
 copyOperands(r7, r8, r9);
 r7.other();
@@ -1715,7 +1715,7 @@ r5 = std::next(r4);
 if ((*r5)->as<FatDynObjRef<>>().getType() != HW_WIRE) goto fail_40;
 r6 = std::next(r5);
 
-  FatDynObjRef<> w = ctx.getWires().create((*Range{r3, r4}.begin())->as<HWValue>().getNumBits()); RefRange{r8, r9} = w;
+  FatDynObjRef<> w = ctx.getStore<Wire>().create((*Range{r3, r4}.begin())->as<HWValue>().getNumBits()); RefRange{r8, r9} = w;
 auto r7 = build.buildInstrRaw(OP_NOT, (r9-r8)+(r4-r3));
 copyOperands(r7, r8, r9);
 r7.other();
@@ -1768,7 +1768,7 @@ if ((*r4)->fat() != (*r6)->fat()) goto fail_41;
 r13 = std::next(r12);
 if ((*r12)->fat() != (*r10)->fat()) goto fail_41;
 
-  FatDynObjRef<> w = ctx.getWires().create((*Range{r8, r9}.begin())->as<HWValue>().getNumBits()); RefRange{r15, r16} = w;
+  FatDynObjRef<> w = ctx.getStore<Wire>().create((*Range{r8, r9}.begin())->as<HWValue>().getNumBits()); RefRange{r15, r16} = w;
 auto r14 = build.buildInstrRaw(OP_AND, (r16-r15)+(r9-r8)+(r4-r3));
 copyOperands(r14, r15, r16);
 r14.other();
@@ -1826,9 +1826,9 @@ if ((*r4)->fat() != (*r6)->fat()) goto fail_42;
 r13 = std::next(r12);
 if ((*r12)->fat() != (*r9)->fat()) goto fail_42;
 
-  FatDynObjRef<> w2 = ctx.getWires().create((*Range{r8, r9}.begin())->as<HWValue>().getNumBits()); RefRange{r15, r16} = w2;
+  FatDynObjRef<> w2 = ctx.getStore<Wire>().create((*Range{r8, r9}.begin())->as<HWValue>().getNumBits()); RefRange{r15, r16} = w2;
 
-  FatDynObjRef<> w = ctx.getWires().create((*Range{r8, r9}.begin())->as<HWValue>().getNumBits()); RefRange{r18, r19} = w;
+  FatDynObjRef<> w = ctx.getStore<Wire>().create((*Range{r8, r9}.begin())->as<HWValue>().getNumBits()); RefRange{r18, r19} = w;
 auto r14 = build.buildInstrRaw(OP_NOT, (r16-r15)+(r9-r8));
 copyOperands(r14, r15, r16);
 r14.other();
@@ -1890,9 +1890,9 @@ if ((*r11)->fat() != (*r4)->fat()) goto fail_43;
 r13 = std::next(r5);
 if ((*r5)->fat() != (*r7)->fat()) goto fail_43;
 
-  FatDynObjRef<> w2 = ctx.getWires().create((*Range{r9, r10}.begin())->as<HWValue>().getNumBits()); RefRange{r15, r16} = w2;
+  FatDynObjRef<> w2 = ctx.getStore<Wire>().create((*Range{r9, r10}.begin())->as<HWValue>().getNumBits()); RefRange{r15, r16} = w2;
 
-  FatDynObjRef<> w = ctx.getWires().create((*Range{r9, r10}.begin())->as<HWValue>().getNumBits()); RefRange{r18, r19} = w;
+  FatDynObjRef<> w = ctx.getStore<Wire>().create((*Range{r9, r10}.begin())->as<HWValue>().getNumBits()); RefRange{r18, r19} = w;
 auto r14 = build.buildInstrRaw(OP_NOT, (r16-r15)+(r4-r3));
 copyOperands(r14, r15, r16);
 r14.other();
@@ -1952,7 +1952,7 @@ r12 = std::next(r11);
 r13 = std::next(r5);
 if ((*r5)->fat() != (*r7)->fat()) goto fail_44;
 
-  FatDynObjRef<> w = ctx.getWires().create((*Range{r9, r10}.begin())->as<HWValue>().getNumBits()); RefRange{r15, r16} = w;
+  FatDynObjRef<> w = ctx.getStore<Wire>().create((*Range{r9, r10}.begin())->as<HWValue>().getNumBits()); RefRange{r15, r16} = w;
 auto r14 = build.buildInstrRaw(OP_OR, (r16-r15)+(r10-r9)+(r4-r3));
 copyOperands(r14, r15, r16);
 r14.other();
@@ -2092,9 +2092,9 @@ if (r26 != r2) goto fail_46;
 
   auto offsVal = (*RefRange{r14, r15}.begin())->as<ConstantRef>().getExactVal();
   auto shortSize = *(*RefRange{r11, r13}.begin())->as<WireRef>().getNumBits();
-  FatDynObjRef<> newWire = ctx.getWires().create(offsVal + shortSize);
+  FatDynObjRef<> newWire = ctx.getStore<Wire>().create(offsVal + shortSize);
   RefRange{r27, r28} = newWire;
-  FatDynObjRef<> newWire2 = ctx.getWires().create(offsVal + shortSize);
+  FatDynObjRef<> newWire2 = ctx.getStore<Wire>().create(offsVal + shortSize);
   RefRange{r29, r30} = newWire2;
 
   FatDynObjRef<> sum = cbuild.val((*Range{r14, r15}.begin())->as<ConstantRef>()).add((*Range{r17, r18}.begin())->as<ConstantRef>()).get();
@@ -2212,9 +2212,9 @@ if (r25 != r2) goto fail_47;
 
   auto offsVal = (*RefRange{r8, r9}.begin())->as<ConstantRef>().getExactVal();
   auto highSize = *(*RefRange{r5, r7}.begin())->as<WireRef>().getNumBits();
-  FatDynObjRef<> newWire = ctx.getWires().create(offsVal + highSize);
+  FatDynObjRef<> newWire = ctx.getStore<Wire>().create(offsVal + highSize);
   RefRange{r26, r27} = newWire;
-  FatDynObjRef<> newWire2 = ctx.getWires().create(offsVal + highSize);
+  FatDynObjRef<> newWire2 = ctx.getStore<Wire>().create(offsVal + highSize);
   RefRange{r28, r29} = newWire2;
 auto r30 = build.buildInstrRaw(OP_TRUNC, (r27-r26)+(r8-r7));
 copyOperands(r30, r26, r27);

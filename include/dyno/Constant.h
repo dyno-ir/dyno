@@ -1,5 +1,6 @@
 #pragma once
 
+#include "dyno/Type.h"
 #include "support/ArrayRef.h"
 #include "support/Bits.h"
 #include "support/Debug.h"
@@ -2877,6 +2878,8 @@ class ConstantStore {
   DenseMultimap<uint32_t, ObjRef<Constant>> map;
 
 public:
+  using value_type = Constant;
+  static constexpr DialectType ty{CORE_CONSTANT};
   template <typename T> uint32_t constantHash(const T &constant) {
     uint32_t acc = 0;
     acc ^= hash_u32(constant.getIs4S());

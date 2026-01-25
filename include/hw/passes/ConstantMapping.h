@@ -1,6 +1,8 @@
 #pragma once
 
 #include "dyno/Constant.h"
+#include "dyno/Context.h"
+#include "dyno/Pass.h"
 #include "hw/HWAbstraction.h"
 #include "hw/HWContext.h"
 #include "hw/IDs.h"
@@ -8,8 +10,8 @@
 #include "support/ErrorRecovery.h"
 namespace dyno {
 
-class ConstantMapping {
-  HWContext &ctx;
+class ConstantMappingPass : public Pass<ConstantMappingPass> {
+  Context &ctx;
   HWInstrBuilder build;
   enum class ConstModType { NONE, ZERO, ONE, ZERO_ONE, ONE_ZERO };
 
@@ -58,7 +60,7 @@ class ConstantMapping {
   }
   void findConstantModules() {
     constMods.clear();
-    for (auto module : ctx.getModules()) {
+    for (auto module : ctx.getStore<Module>()) {
       if (!module.iref().isOpc(HW_STDCELL_DEF))
         continue;
       auto res = checkIfModuleIsConst(module.iref());
@@ -71,8 +73,8 @@ class ConstantMapping {
   }
 
   std::pair<WireRef, WireRef> getConstant01Wires() {
-    WireRef zeroW = ctx.getWires().create(1);
-    WireRef oneW = ctx.getWires().create(1);
+    WireRef zeroW = ctx.getStore<Wire>().create(1);
+    WireRef oneW = ctx.getStore<Wire>().create(1);
 
     // if one cell outputs both use that
     auto it = Range{constMods}.find_if([](auto pair) {
@@ -117,7 +119,7 @@ class ConstantMapping {
       return oneW;
 
     auto ib = build.buildInstrRaw(HW_CONCAT, 1 + val.getNumBits());
-    WireRef w = ctx.getWires().create(val.getNumBits());
+    WireRef w = ctx.getStore<Wire>().create(val.getNumBits());
     ib.addRef(w).other();
 
     // note: could use repeat to reduce operand count
@@ -158,11 +160,12 @@ class ConstantMapping {
   }
 
 public:
-  ConstantMapping(HWContext &ctx) : ctx(ctx), build(ctx) {}
+  auto make(Context &ctx) { return ConstantMappingPass(ctx); }
+  explicit ConstantMappingPass(Context &ctx) : ctx(ctx), build(ctx) {}
   void setup() { findConstantModules(); }
   void run() {
     setup();
-    for (auto mod : ctx.activeModules())
+    for (auto mod : ctx.getCtx<HWDialectContext>().activeModules())
       runOnModule(mod.iref());
   }
 };

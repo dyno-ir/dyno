@@ -1,6 +1,8 @@
 #pragma once
 
+#include "dyno/Context.h"
 #include "dyno/HierBlockIterator.h"
+#include "dyno/Pass.h"
 #include "hw/HWContext.h"
 #include "hw/HWInstr.h"
 #include "hw/HWPrinter.h"
@@ -9,8 +11,8 @@
 #include "support/Debug.h"
 namespace dyno {
 
-class CheckPass {
-  HWContext &ctx;
+class CheckPass : public Pass<CheckPass> {
+  Context &ctx;
   bool hasError = false;
 
 public:
@@ -33,7 +35,7 @@ public:
   }
 
   template <typename... Ts> void error(DynObjRef ref, Ts... ts) {
-    dumpObj(ctx.resolveObj(ref));
+    dumpObj(ctx.resolve(ref));
     dbgs() << "\nerror: ";
     ((dbgs() << ts), ...);
     dbgs() << "\n";
@@ -96,7 +98,7 @@ public:
     if (proc.isOpc(HW_NETLIST_PROCESS_DEF))
       return;
     ObjMapVec<Wire, bool> seen;
-    seen.resize(ctx.getWires().numIDs());
+    seen.resize(ctx.getStore<Wire>().numIDs());
 
     Range range{HierBlockRangeIter{proc.block().begin()},
                 HierBlockRangeIter{proc.block().end()}};
@@ -117,13 +119,13 @@ public:
   }
 
   void checkNoDanglingBlocks() {
-    for (auto block : ctx.getCFG().blocks)
+    for (auto block : ctx.getCtx<CoreDialectContext>().cfg.blocks)
       if (block->defUse.getNumDefs() == 0)
         error(block, "dangling block");
   }
 
   void checkNoLoops() {
-    for (auto instr : ctx.getInstrs())
+    for (auto instr : ctx.getStore<Instr>())
       if (instr.isOpc(OP_FOR, OP_WHILE, OP_DO_WHILE)) {
         error(instr, "illegal loop");
       }
@@ -138,9 +140,10 @@ public:
   }
 
 public:
-  CheckPass(HWContext &ctx) : ctx(ctx) {}
+  auto make(Context &ctx) { return CheckPass(ctx); }
+  explicit CheckPass(Context &ctx) : ctx(ctx) {}
   void run() {
-    for (auto mod : ctx.activeModules()) {
+    for (auto mod : ctx.getCtx<HWDialectContext>().activeModules()) {
       runOnModule(mod.iref());
     }
     if (config.danglingBlocks)

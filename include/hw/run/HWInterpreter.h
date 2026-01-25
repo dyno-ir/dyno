@@ -16,6 +16,7 @@
 #include "support/Debug.h"
 
 #include "dyno/Constant.h"
+#include "dyno/Context.h"
 #include "hw/HWContext.h"
 #include "hw/IDs.h"
 #include "hw/Module.h"
@@ -24,7 +25,7 @@
 namespace dyno {
 
 class HWInterpreter {
-  HWContext &ctx;
+  Context &ctx;
   ModuleIRef module;
   std::ostream &os;
   std::ostream &errs;
@@ -315,7 +316,9 @@ public:
       auto val = getValue(instr.other(0)->as<HWValue>());
       if (!val.valueEquals(1)) {
         std::print(errs, "Assertion Failed at: ");
-        for (auto loc : ctx.sourceLocInfo.getSourceLocs(instr))
+        for (auto loc :
+             ctx.getCtx<CoreDialectContext>().instrSourceLocInfo.getSourceLocs(
+                 instr))
           std::print(errs, "{}:{}.{}-{}.{}\n", loc.fileName, loc.beginLine,
                      loc.beginCol, loc.endLine, loc.endCol);
         errs << "\n";
@@ -500,18 +503,18 @@ public:
   }
 
   void setup() {
-    wireVals.resize(ctx.getWires().numIDs());
-    regVals.resize(ctx.getRegs().numIDs());
-    triggers.resize(ctx.getRegs().numIDs());
-    deferredStores.resize(ctx.getRegs().numIDs());
+    wireVals.resize(ctx.getStore<Wire>().numIDs());
+    regVals.resize(ctx.getStore<Register>().numIDs());
+    triggers.resize(ctx.getStore<Register>().numIDs());
+    deferredStores.resize(ctx.getStore<Register>().numIDs());
 
-    for (auto reg : ctx.getRegs()) {
+    for (auto reg : ctx.getStore<Register>()) {
       if (reg.getNumBits())
         regVals[reg] =
             PatBigInt::fromFourState(FourState::SX, *reg.getNumBits());
     }
 
-    for (auto trigger : ctx.getTriggers()) {
+    for (auto trigger : ctx.getStore<Trigger>()) {
       auto iref = trigger.iref();
       for (auto use : iref.others())
         triggers[use->as<RegisterRef>()].emplace_back(use);
@@ -561,8 +564,8 @@ public:
   }
 
   void clearRegs() {
-    regVals.resize(ctx.getRegs().numIDs());
-    for (auto reg : ctx.getRegs()) {
+    regVals.resize(ctx.getStore<Register>().numIDs());
+    for (auto reg : ctx.getStore<Register>()) {
       regVals[reg] = PatBigInt::undef(*reg.getNumBits());
     }
   }
@@ -571,8 +574,8 @@ public:
     for (auto [ref, val] : regVals) {
       if (!ref)
         continue;
-      auto reg = ctx.getRegs().resolve(ref);
-      auto names = ctx.regNameInfo.getNames(reg);
+      auto reg = ctx.getStore<Register>().resolve(ref);
+      auto names = ctx.getCtx<HWDialectContext>().regNameInfo.getNames(reg);
       auto name = names.empty() ? "reg" + std::to_string(reg.getObjID())
                                 : (*names.begin());
       fstWriter->createVar(reg, RegWireFSTWriter::VarType::INTEGER,
@@ -585,7 +588,7 @@ public:
     for (auto [ref, val] : regVals) {
       if (!ref)
         continue;
-      auto reg = ctx.getRegs().resolve(ref);
+      auto reg = ctx.getStore<Register>().resolve(ref);
       fstWriter->updateValue(reg, regVals[reg]);
     }
   }
@@ -596,7 +599,7 @@ public:
   }
 
 public:
-  HWInterpreter(HWContext &ctx, ModuleIRef module, std::ostream &os,
+  HWInterpreter(Context &ctx, ModuleIRef module, std::ostream &os,
                 std::ostream &errs)
       : ctx(ctx), module(module), os(os), errs(errs) {}
 }; // namespace dyno

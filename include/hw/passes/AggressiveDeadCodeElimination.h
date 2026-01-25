@@ -2,7 +2,9 @@
 
 #include "aig/AIG.h"
 #include "aig/IDs.h"
+#include "dyno/Context.h"
 #include "dyno/ObjMap.h"
+#include "dyno/Pass.h"
 #include "hw/FlipFlop.h"
 #include "hw/HWAbstraction.h"
 #include "hw/HWContext.h"
@@ -18,8 +20,9 @@
 namespace dyno {
 
 // todo: function support
-class AggressiveDeadCodeEliminationPass {
-  HWContext &ctx;
+class AggressiveDeadCodeEliminationPass
+    : public Pass<AggressiveDeadCodeEliminationPass> {
+  Context &ctx;
   HWInstrBuilder build;
 
   // for objects with 1:1 mapping to instrs we don't need a separate map.
@@ -104,7 +107,8 @@ class AggressiveDeadCodeEliminationPass {
     }
 
     if (block.defI().isOpc(OP_CASE, OP_CASE_DEFAULT, HW_CASE_Z, HW_CASE_X)) {
-      auto instr = ctx.getCFG()[block.defI()].blockRef().defI();
+      auto instr =
+          ctx.getCtx<CoreDialectContext>().cfg[block.defI()].blockRef().defI();
       if (!instrMap[instr])
         pushInstr(instr);
     }
@@ -379,12 +383,13 @@ class AggressiveDeadCodeEliminationPass {
 
   void destroyDeadInstrs() {
     ObjMapVec<Block, bool> blockDestroyMap;
-    blockDestroyMap.resize(ctx.getCFG().blocks.numIDs());
+    blockDestroyMap.resize(
+        ctx.getCtx<CoreDialectContext>().cfg.blocks.numIDs());
 
     for (auto [obj, live] : instrMap) {
-      if (!ctx.getInstrs().exists(obj) || live)
+      if (!ctx.getStore<Instr>().exists(obj) || live)
         continue;
-      auto instr = ctx.getInstrs().resolve(obj);
+      auto instr = ctx.getStore<Instr>().resolve(obj);
 
       switch (*instr.getDialectOpcode()) {
       case *HW_INIT_PROCESS_DEF:
@@ -426,35 +431,35 @@ class AggressiveDeadCodeEliminationPass {
       }
       }
 
-      if (ctx.getCFG().contains(instr))
-        ctx.getCFG()[instr].erase();
+      if (ctx.getCtx<CoreDialectContext>().cfg.contains(instr))
+        ctx.getCtx<CoreDialectContext>().cfg[instr].erase();
       instr.destroyOperands();
-      ctx.getInstrs().destroy(instr);
+      ctx.getStore<Instr>().destroy(instr);
     }
 
     for (auto [obj, destroy] : blockDestroyMap) {
-      if (!ctx.getCFG().blocks.exists(obj) || !destroy)
+      if (!ctx.getCtx<CoreDialectContext>().cfg.blocks.exists(obj) || !destroy)
         continue;
-      auto block = ctx.getCFG().blocks.resolve(obj);
-      ctx.getCFG().blocks.destroy(block);
+      auto block = ctx.getCtx<CoreDialectContext>().cfg.blocks.resolve(obj);
+      ctx.getCtx<CoreDialectContext>().cfg.blocks.destroy(block);
     }
   }
 
   void destroyDeadWires() {
     for (auto [obj, live] : wireMap) {
-      if (!ctx.getWires().exists(obj) || live)
+      if (!ctx.getStore<Wire>().exists(obj) || live)
         continue;
-      auto wire = ctx.getWires().resolve(obj);
-      ctx.getWires().destroy(wire);
+      auto wire = ctx.getStore<Wire>().resolve(obj);
+      ctx.getStore<Wire>().destroy(wire);
     }
   }
 
   void destroyDeadConstants() {
     for (auto [obj, live] : constantMap) {
-      if (!ctx.getConstants().exists(obj) || live)
+      if (!ctx.getStore<Constant>().exists(obj) || live)
         continue;
-      auto constant = ctx.getConstants().resolve(obj);
-      ctx.getConstants().destroy(constant);
+      auto constant = ctx.getStore<Constant>().resolve(obj);
+      ctx.getStore<Constant>().destroy(constant);
     }
   }
 
@@ -473,16 +478,18 @@ public:
     wireMap.clear();
     constantMap.clear();
 
-    instrMap.resize(ctx.getInstrs().numIDs());
-    wireMap.resize(ctx.getWires().numIDs());
-    constantMap.resize(ctx.getConstants().numIDs());
-    for (auto mod : ctx.getModules()) {
+    instrMap.resize(ctx.getStore<Instr>().numIDs());
+    wireMap.resize(ctx.getStore<Wire>().numIDs());
+    constantMap.resize(ctx.getStore<Constant>().numIDs());
+    for (auto mod : ctx.getStore<Module>()) {
       runOnModule(mod.iref());
     }
     destroyDeadInstrs();
     destroyDeadWires();
     destroyDeadConstants();
   }
-  AggressiveDeadCodeEliminationPass(HWContext &ctx) : ctx(ctx), build(ctx) {}
+  auto make(Context &ctx) { return AggressiveDeadCodeEliminationPass(ctx); }
+  explicit AggressiveDeadCodeEliminationPass(Context &ctx)
+      : ctx(ctx), build(ctx) {}
 };
 }; // namespace dyno

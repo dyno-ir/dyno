@@ -1,11 +1,13 @@
 #pragma once
 
+#include "DialectInfo.h"
 #include "dyno/CFG.h"
 #include "dyno/Constant.h"
 #include "dyno/DialectInfo.h"
 #include "dyno/IDs.h"
 #include "dyno/Obj.h"
 #include "hw/DebugInfo.h"
+#include "support/CallableRef.h"
 #include "support/DenseMap.h"
 #include "support/RTTI.h"
 #include "support/TempBind.h"
@@ -16,6 +18,7 @@
 #include <initializer_list>
 #include <iostream>
 #include <ostream>
+#include <tuple>
 
 namespace dyno {
 
@@ -62,7 +65,8 @@ public:
     IntroducedName(uint32_t numeric, std::array<char, 4> prefix)
         : type(NUMERIC), storage{.numeric = {{prefix}, numeric}} {}
     IntroducedName(uint32_t numeric)
-        : type(NUMERIC), storage{.numeric = {{'\0', '\0', '\0', '\0'}, numeric}} {}
+        : type(NUMERIC),
+          storage{.numeric = {{'\0', '\0', '\0', '\0'}, numeric}} {}
     IntroducedName(const char *string)
         : type(STRING), storage{.string = string} {}
 
@@ -83,26 +87,25 @@ private:
   std::vector<bool> isDefault = std::vector<bool>(NUM_DIALECTS);
 
 protected:
-  IndentPrinter indentPrint;
   TempBindPtr<SourceLocInfo<Instr>> sourceLocInfo;
 
 public:
+  IndentPrinter indentPrint;
   Interface<DialectInfo> dialectI;
   Interface<TyInfo> tyI;
   Interface<OpcodeInfo> opcodeI;
 
-protected:
+public:
   struct type {
-    using print_fn = bool (PrinterBase::*)(FatDynObjRef<> ref, bool def);
+    using print_fn = MemberRef<bool(void *, FatDynObjRef<>, bool)>;
   };
   struct opc {
-    using print_fn = bool (PrinterBase::*)(FatDynObjRef<> ref, bool def);
+    using print_fn = MemberRef<bool(void *, FatDynObjRef<>, bool)>;
   };
   using name_fn =
-      std::optional<IntroducedName> (PrinterBase::*)(FatDynObjRef<> ref);
+      MemberRef<std::optional<IntroducedName>(void *, FatDynObjRef<>)>;
   Interfaces<NUM_DIALECTS, type::print_fn, opc::print_fn, name_fn> interfaces;
 
-public:
   std::ostream &str;
 
   PrinterBase(std::ostream &str, Interface<DialectInfo> dialectI,
@@ -131,7 +134,7 @@ public:
 
   void printUse(FatDynObjRef<> ref) {
     if (auto func = interfaces.getVal<type::print_fn>(ref.getDialectID())) {
-      if ((this->*func)(ref, false))
+      if (func(ref, false))
         return;
     }
     printTypeDefault(ref);
@@ -141,7 +144,7 @@ public:
 
   void printDef(FatDynObjRef<> ref) {
     if (auto func = interfaces.getVal<type::print_fn>(ref.getDialectID())) {
-      if ((this->*func)(ref, true))
+      if (func(ref, true))
         return;
     }
     printTypeDefault(ref);
@@ -158,7 +161,7 @@ public:
     noCustom.clearCustom();
     auto [found, it] = introduced.findOrInsert(noCustom, [&] -> IntroducedName {
       if (auto func = interfaces.getVal<name_fn>(ref.getDialectID())) {
-        if (auto nm = (this->*func)(ref))
+        if (auto nm = func(ref))
           return *nm;
       }
       return IntroducedName{numericNameCnt++};
@@ -284,15 +287,41 @@ protected:
 public:
   Printer(std::ostream &str, Interface<DialectInfo> dialectI,
           Interface<TyInfo> tyI, Interface<OpcodeInfo> opcodeI)
-      : PrinterBase(str, dialectI, tyI, opcodeI) {
-    interfaces.registerVal<type::print_fn>(
-        DIALECT_CORE, static_cast<type::print_fn>(&Printer::printTypeCore));
+      : PrinterBase(str, dialectI, tyI, opcodeI) {}
+};
+
+template <typename... Printers>
+class PrinterWrapper : private AutoDialectInfos<Printers::dialect...>,
+                       public PrinterBase {
+
+protected:
+  std::tuple<Printers...> printers;
+
+public:
+  PrinterWrapper(std::ostream &str)
+      : PrinterBase(str,
+                    Interface<DialectInfo>{this->infos.dialectInfoArr.data()},
+                    Interface<TyInfo>{this->infos.typeInfoArr.data()},
+                    Interface<OpcodeInfo>{this->infos.opcodeInfoArr.data()}),
+        printers{(static_cast<void>(sizeof(Printers)), this)...} {}
+};
+
+class CoreDialectPrinter {
+  PrinterBase &base;
+
+public:
+  constexpr static DialectID dialect{DIALECT_CORE};
+
+  CoreDialectPrinter(PrinterBase *base) : base(*base) {
+    base->interfaces.registerVal<PrinterBase::type::print_fn>(
+        DIALECT_CORE,
+        MemberRef{this, &BindMethod<&CoreDialectPrinter::printTypeCore>::fv});
   }
 
   bool printTypeCore(FatDynObjRef<> ref, bool def) {
     switch (ref.getTyID()) {
     case CORE_CONSTANT.type: {
-      str << '#' << ref.as<ConstantRef>();
+      base.str << '#' << ref.as<ConstantRef>();
       return true;
     }
     default:

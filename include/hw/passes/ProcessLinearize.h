@@ -2,6 +2,7 @@
 #include "dyno/CFG.h"
 #include "dyno/Obj.h"
 #include "dyno/ObjMap.h"
+#include "dyno/Pass.h"
 #include "hw/DeepCopy.h"
 #include "hw/HWAbstraction.h"
 #include "hw/HWPrinter.h"
@@ -16,11 +17,10 @@
 #include <algorithm>
 #include <ctime>
 #include <iterator>
-#include <random>
 
 namespace dyno {
 
-class ProcessLinearizePass {
+class ProcessLinearizePass : public Pass<ProcessLinearizePass> {
 
   using BitSet = UnsizedBitSet<SmallVec<uint64_t, 2>>;
 
@@ -43,16 +43,24 @@ class ProcessLinearizePass {
   ObjMapVec<Process, Custom> map;
 
 public:
-  struct Config {
-    bool retainIODeps = true;
-    bool retainInnerDeps = false;
-    enum ProcessKind { COMB, INIT };
-    ProcessKind kind = COMB;
-  };
+  // struct Config {
+  //   bool retainIODeps = true;
+  //   bool retainInnerDeps = false;
+  //   enum ProcessKind { COMB, INIT };
+  //   ProcessKind kind = COMB;
+  // };
+  // Config config;
+
+#define CONFIG_STRUCT_LAMBDA(FIELD, ENUM)                                      \
+  FIELD(bool, retainIODeps, true)                                              \
+  FIELD(bool, retainInnerDeps, false)                                          \
+  ENUM(kind, COMB, COMB, INIT)
+  CONFIG_STRUCT(CONFIG_STRUCT_LAMBDA)
+#undef CONFIG_STRUCT_LAMBDA
   Config config;
 
 private:
-  HWContext &ctx;
+  Context &ctx;
 
   bool ignoredKind(ProcessIRef iref) {
     switch (config.kind) {
@@ -65,7 +73,8 @@ private:
   };
 
 public:
-  explicit ProcessLinearizePass(HWContext &ctx) : ctx(ctx), copier(ctx) {}
+  auto make(Context &ctx) { return ProcessLinearizePass(ctx); }
+  explicit ProcessLinearizePass(Context &ctx) : ctx(ctx), copier(ctx) {}
   DeepCopier copier;
 
   void findDeps(ModuleIRef module) {
@@ -160,7 +169,7 @@ public:
                     if (val == UINT32_MAX)
                       return std::optional<ProcessIRef>{};
                     return std::make_optional(
-                        ProcessIRef{ctx.getProcs()
+                        ProcessIRef{ctx.getStore<Process>()
                                         .resolve(ObjRef<Process>{ObjID{val}})
                                         ->defUse.getSingleDef()
                                         ->instr()});
@@ -203,13 +212,13 @@ public:
     }
 
     for (auto [proc, custom] : map) {
-      if (!ctx.getProcs().exists(proc))
+      if (!ctx.getStore<Process>().exists(proc))
         continue;
       custom.predsVec.reserve(custom.predsSet.size());
       custom.predsVec.push_back_range(Range{custom.predsSet});
       Range{custom.predsVec}.stable_sort([&](ObjRef<Instr> a, ObjRef<Instr> b) {
-        auto procA = ctx.getInstrs().resolve(a).as<ProcessIRef>().proc();
-        auto procB = ctx.getInstrs().resolve(b).as<ProcessIRef>().proc();
+        auto procA = ctx.getStore<Instr>().resolve(a).as<ProcessIRef>().proc();
+        auto procB = ctx.getStore<Instr>().resolve(b).as<ProcessIRef>().proc();
         return map[procA].numRefs < map[procB].numRefs;
       });
     }
@@ -276,7 +285,7 @@ public:
 
       if (entry.it != custom.predsVec.end()) {
         auto ref = *entry.it;
-        auto proc = ctx.getInstrs().resolve(ref).as<ProcessIRef>();
+        auto proc = ctx.getStore<Instr>().resolve(ref).as<ProcessIRef>();
         stack.emplace_back(proc.proc(), Iterator{});
         stack.back().proc.setCustom(0);
         ++entry.it;
@@ -329,7 +338,7 @@ public:
       for (auto proc : Range{ordered}.reverse()) {
         auto &custom = map[proc.proc()];
         for (auto obj : Range{custom.predsSet}) {
-          auto pred = ctx.getInstrs().resolve(obj).as<ProcessIRef>();
+          auto pred = ctx.getStore<Instr>().resolve(obj).as<ProcessIRef>();
           custom.dependingOutputs |= map[pred.proc()].dependingOutputs;
         }
       }
@@ -337,7 +346,7 @@ public:
       for (auto proc : Range{ordered}) {
         auto &custom = map[proc.proc()];
         for (auto obj : Range{custom.predsSet}) {
-          auto pred = ctx.getInstrs().resolve(obj).as<ProcessIRef>();
+          auto pred = ctx.getStore<Instr>().resolve(obj).as<ProcessIRef>();
           custom.dependingInputs |= map[pred.proc()].dependingInputs;
         }
       }
@@ -424,13 +433,13 @@ public:
 
   void runOnModule(ModuleIRef module) {
     map.clear();
-    map.resize(ctx.getProcs().numIDs());
+    map.resize(ctx.getStore<Process>().numIDs());
     findDeps(module);
     linearize(module);
   }
 
   void run() {
-    for (auto mod : ctx.activeModules()) {
+    for (auto mod : ctx.getCtx<HWDialectContext>().activeModules()) {
       runOnModule(ModuleRef{mod}.iref());
     }
   }

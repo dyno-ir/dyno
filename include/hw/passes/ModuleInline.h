@@ -1,8 +1,10 @@
 #pragma once
 
 #include "dyno/CFG.h"
+#include "dyno/Context.h"
 #include "dyno/DestroyMap.h"
 #include "dyno/ObjMap.h"
+#include "dyno/Pass.h"
 #include "hw/DeepCopy.h"
 #include "hw/HWAbstraction.h"
 #include "hw/HWContext.h"
@@ -11,8 +13,8 @@
 #include "hw/Register.h"
 #include "support/Debug.h"
 namespace dyno {
-class ModuleInlinePass {
-  HWContext &ctx;
+class ModuleInlinePass : public Pass<ModuleInlinePass> {
+  Context &ctx;
   DeepCopier copier;
   ObjMapVec<Module, bool> isTopModule;
   SmallVec<HWInstrRef, 32> worklist;
@@ -57,7 +59,7 @@ class ModuleInlinePass {
 
   DestroyMap<Module> destroyMap;
   void deleteRec(ModuleIRef ref) {
-    if (!ctx.getInstrs().exists(ref))
+    if (!ctx.getStore<Instr>().exists(ref))
       return;
     for (auto use : ref.mod()->defUse.uses()) {
       deleteRec(HWInstrRef{use.instr()}.parentMod(ctx));
@@ -73,12 +75,12 @@ class ModuleInlinePass {
 public:
   void run() {
     destroyMap.clear();
-    destroyMap.resize(ctx.getModules().numIDs());
+    destroyMap.resize(ctx.getStore<Module>().numIDs());
     worklist.clear();
     isTopModule.clear();
-    isTopModule.resize(ctx.getModules().numIDs());
+    isTopModule.resize(ctx.getStore<Module>().numIDs());
 
-    for (auto mod : ctx.activeModules()) {
+    for (auto mod : ctx.getCtx<HWDialectContext>().activeModules()) {
       if (mod.getNumUses() == 0) {
         isTopModule[mod] = 1;
       } else {
@@ -95,17 +97,18 @@ public:
       inlineInstance(inst);
     }
 
-    for (auto mod : ctx.activeModules()) {
+    for (auto mod : ctx.getCtx<HWDialectContext>().activeModules()) {
       if (!isTopModule[mod]) {
         deleteRec(mod.iref());
       }
     }
     HWInstrBuilder build{ctx};
-    destroyMap.apply(ctx.getModules(),
+    destroyMap.apply(ctx.getStore<Module>(),
                      [&](ModuleRef mod) { build.destroyInstr(mod.iref()); });
   }
 
 public:
-  ModuleInlinePass(HWContext &ctx) : ctx(ctx), copier(ctx) {}
+  auto make(Context &ctx) { return ModuleInlinePass(ctx); }
+  explicit ModuleInlinePass(Context &ctx) : ctx(ctx), copier(ctx) {}
 };
 }; // namespace dyno

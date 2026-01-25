@@ -2,9 +2,10 @@
 
 #include "dyno/CFG.h"
 #include "dyno/Constant.h"
+#include "dyno/Context.h"
 #include "dyno/Instr.h"
+#include "dyno/Pass.h"
 #include "hw/AutoDebugInfo.h"
-#include "hw/DeepCopy.h"
 #include "hw/HWAbstraction.h"
 #include "hw/HWContext.h"
 #include "hw/HWInstr.h"
@@ -20,7 +21,7 @@
 namespace dyno {
 
 class LoopSimplifer {
-  HWContext &ctx;
+  Context &ctx;
   AutoCopyDebugInfoStack autoDebugInfo;
   HWInstrBuilder build;
   // inspect yields.
@@ -294,7 +295,10 @@ public:
           auto rem = ((forUpperC - forLowerC) % forStepC);
           if (!rem.valueEquals(0))
             rem = forStepC - rem;
-          forUpper = ctx.constBuild().val(forUpperC).add(rem).get();
+          forUpper = ConstantBuilder{ctx.getStore<Constant>()}
+                         .val(forUpperC)
+                         .add(rem)
+                         .get();
           break;
         }
         case *OP_ICMP_NE: {
@@ -309,7 +313,10 @@ public:
           auto rem = ((upperPlusOne - forLowerC) % forStepC);
           if (!rem.valueEquals(0))
             rem = forStepC - rem;
-          forUpper = ctx.constBuild().val(upperPlusOne).add(rem).get();
+          forUpper = ConstantBuilder{ctx.getStore<Constant>()}
+                         .val(upperPlusOne)
+                         .add(rem)
+                         .get();
           break;
         }
         default:
@@ -323,7 +330,10 @@ public:
           auto rem = ((forLowerC - forUpperC) % (-forStepC));
           if (!rem.valueEquals(0))
             rem = (-forStepC) - rem;
-          forUpper = ctx.constBuild().val(forUpperC).sub(rem).get();
+          forUpper = ConstantBuilder{ctx.getStore<Constant>()}
+                         .val(forUpperC)
+                         .sub(rem)
+                         .get();
           break;
         }
         case *OP_ICMP_NE: {
@@ -338,7 +348,10 @@ public:
           auto rem = ((forLowerC - upperMinusOne) % (-forStepC));
           if (!rem.valueEquals(0))
             rem = (-forStepC) - rem;
-          forUpper = ctx.constBuild().val(upperMinusOne).sub(rem).get();
+          forUpper = ConstantBuilder{ctx.getStore<Constant>()}
+                         .val(upperMinusOne)
+                         .sub(rem)
+                         .get();
           break;
         }
         default:
@@ -403,7 +416,7 @@ public:
       WireRef forIterWire;
       if (isForLoop) {
         forIterWire = isNewForLoop
-                          ? ctx.getWires().create(
+                          ? ctx.getStore<Wire>().create(
                                 yieldVals[*forLoopIter].init.getNumBits())
                           : unyield.def(0)->as<WireRef>();
         unyieldBuild.addRef(forIterWire);
@@ -505,11 +518,11 @@ public:
   }
 
 public:
-  LoopSimplifer(HWContext &ctx) : ctx(ctx), autoDebugInfo(ctx), build(ctx) {}
+  LoopSimplifer(Context &ctx) : ctx(ctx), autoDebugInfo(ctx), build(ctx) {}
 };
 
-class LoopSimplifyPass {
-  HWContext &ctx;
+class LoopSimplifyPass : public Pass<LoopSimplifyPass> {
+  Context &ctx;
   LoopSimplifer loopSimplifier;
 
 public:
@@ -535,11 +548,12 @@ private:
 
 public:
   void run() {
-    for (auto mod : ctx.activeModules()) {
+    for (auto mod : ctx.getCtx<HWDialectContext>().activeModules()) {
       runOnModule(mod.iref());
     }
   }
 
-  explicit LoopSimplifyPass(HWContext &ctx) : ctx(ctx), loopSimplifier(ctx) {}
+  auto make(Context &ctx) { return LoopSimplifyPass(ctx); }
+  explicit LoopSimplifyPass(Context &ctx) : ctx(ctx), loopSimplifier(ctx) {}
 };
 }; // namespace dyno

@@ -1,0 +1,34 @@
+MODULE_DEF %Counter:module("Counter"), %0:block {
+  INPUT_REGISTER_DEF %clk:register(1)
+  INPUT_REGISTER_DEF %rst:register(1)
+  INPUT_REGISTER_DEF %en:register(1)
+  OUTPUT_REGISTER_DEF %cnt:register(8)
+  REGISTER_DEF %next_cnt:register(8)
+  TRIGGER_DEF %1:trigger(pos), %clk
+  COMB_PROCESS_DEF %2:process, %3:block {
+    LOAD %4:wire(8), %cnt  ["sv/counter.sv:12:3-17"]
+    FOR %5:block, %6:wire(8), #32'd0, #32'd10, #32'd1, %4 {
+      UNYIELD %7:wire(32), %8:wire(8)  ["sv/counter.sv:13.3-14.29"]
+      ADD %9:wire(8), %8, #8'd1  ["sv/counter.sv:14:16-28", "sv/counter.sv:14:16-24"]
+      YIELD %9  ["sv/counter.sv:13.3-14.29"]
+    }  ["sv/counter.sv:13.3-14.29"]
+    STORE %6, %next_cnt
+  }
+  COMB_PROCESS_DEF %10:process, %11:block {
+    LOAD %12:wire(1), %rst  ["sv/counter.sv:18.3-22.6"]
+    IF %13:block, %14:block, %15:wire(8), %12 {
+      YIELD #8'd0  ["sv/counter.sv:18.3-22.6"]
+    }{
+      LOAD %16:wire(1), %en  ["sv/counter.sv:20.8-22.6"]
+      IF %17:block, %18:block, %19:wire(8), %16 {
+        LOAD %20:wire(8), %next_cnt  ["sv/counter.sv:21:7-22"]
+        YIELD %20  ["sv/counter.sv:20.8-22.6"]
+      }{
+        LOAD %21:wire(8), %cnt  ["sv/counter.sv:20.8-22.6"]
+        YIELD %21  ["sv/counter.sv:20.8-22.6"]
+      }  ["sv/counter.sv:20.8-22.6"]
+      YIELD %19  ["sv/counter.sv:18.3-22.6"]
+    }  ["sv/counter.sv:18.3-22.6"]
+    STORE_DEFER %15, %cnt, %1
+  }
+}

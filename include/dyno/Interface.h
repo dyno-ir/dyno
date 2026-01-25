@@ -1,51 +1,64 @@
 #pragma once
 
 #include "dyno/ObjMap.h"
+#include "support/ArrayRef.h"
 #include <array>
 #include <dyno/Obj.h>
+#include <type_traits>
 
 namespace dyno {
 
 template <typename T> class Interface;
 
 template <typename T> struct InterfaceTraits {
-  static const T *dispatch1(DynObjRef ref, const T **interfaces) {
+  static const ArrayRef<T> dispatch1(DynObjRef ref,
+                                     const ArrayRef<T> *interfaces) {
     return interfaces[ref.getDialectID()];
   }
-  static const T &dispatch2(DynObjRef ref, const T *interface) {
-    return *interface;
+  static const T &dispatch2(DynObjRef ref, ArrayRef<T> interface) {
+    return interface.front();
   }
   static const unsigned ID = ~0;
 };
 
-template <typename T, size_t N> class StaticInterface {
-  friend class Interface<T>;
-
-  std::array<T *, N> entries;
+template <typename T> class ArrayInterface {
+private:
+  using Traits = InterfaceTraits<T>;
+  using Dispatch1T = decltype(Traits::dispatch1(nullref, nullptr));
+  using Dispatch2T = decltype(Traits::dispatch2(nullref, Dispatch1T()));
+  std::array<std::remove_const_t<Dispatch1T>, 256> entries = {};
 
 public:
-  constexpr StaticInterface(std::initializer_list<T *> entries)
-      : entries(entries) {}
+  constexpr ArrayInterface() = default;
+  Dispatch1T operator[](DialectID dialect) { return entries[dialect]; }
+
+  template <typename RefT> Dispatch2T operator[](RefT ref) {
+    return Traits::dispatch2(
+        ref,
+        Traits::dispatch1(ref, const_cast<std::remove_const_t<Dispatch1T> *>(
+                                   entries.data())));
+  }
+
+  constexpr void registerDialect(DialectID dialect, const Dispatch1T val) {
+    entries[dialect] = val;
+  }
 };
 
 template <typename T> class Interface {
 private:
   using Traits = InterfaceTraits<T>;
-  using DispatchT = const T *;
-  using DispatchRefT = const T &;
-  const DispatchT *entries;
+  using Dispatch1T = decltype(Traits::dispatch1(nullref, nullptr));
+  using Dispatch2T = decltype(Traits::dispatch2(nullref, Dispatch1T()));
+  const Dispatch1T *entries;
 
 public:
-  Interface(const DispatchT *entries) : entries(entries) {}
+  constexpr Interface(const Dispatch1T *entries) : entries(entries) {}
+  Dispatch1T operator[](DialectID dialect) { return entries[dialect]; }
 
-  template <size_t N>
-  Interface(StaticInterface<T, N> interface) : entries(interface.entries) {}
-
-  DispatchT operator[](DialectID dialect) { return entries[dialect]; }
-
-  template <typename RefT> DispatchRefT operator[](RefT ref) {
+  template <typename RefT> Dispatch2T operator[](RefT ref) {
     return Traits::dispatch2(
-        ref, Traits::dispatch1(ref, const_cast<const T **>(entries)));
+        ref, Traits::dispatch1(
+                 ref, const_cast<std::remove_const_t<Dispatch1T> *>(entries)));
   }
 
   /*template <typename... Args> auto operator()(ObjRef ref, Args &&...args) {*/
@@ -154,7 +167,9 @@ public:
   template <typename K> void resize(size_t sz) { return map<K>().resize(sz); }
   template <typename K> void clear() { return map<K>().clear(); }
   template <typename K> size_t size() { return map<K>().size(); }
-  template <typename K> auto &operator[](ObjRef<K> ref) { return map<K>()[ref]; }
+  template <typename K> auto &operator[](ObjRef<K> ref) {
+    return map<K>()[ref];
+  }
   template <typename K> auto &get_ensure(ObjRef<K> ref) {
     return map<K>().get_ensure(ref);
   }

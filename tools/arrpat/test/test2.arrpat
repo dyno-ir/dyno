@@ -17,10 +17,10 @@ macro constant_like_anyorder_obj $val, $other -> $rv [{
   $rv = constant;
 }]
 macro wire_like $other -> $rv [{
-  FatDynObjRef<> w = ctx.getWires().create((*$other.begin())->as<HWValue>().getNumBits()); $rv = w;
+  FatDynObjRef<> w = ctx.getStore<Wire>().create((*$other.begin())->as<HWValue>().getNumBits()); $rv = w;
 }]
 macro wire_like2 $other -> $rv [{
-  FatDynObjRef<> w2 = ctx.getWires().create((*$other.begin())->as<HWValue>().getNumBits()); $rv = w2;
+  FatDynObjRef<> w2 = ctx.getStore<Wire>().create((*$other.begin())->as<HWValue>().getNumBits()); $rv = w2;
 }]
 macro const_like_reg_len $op, $reg [{
   auto asConstant = (*$op.begin())->dyn_as<ConstantRef>();
@@ -596,9 +596,9 @@ match {
 with [{
   auto offsVal = (*$offs.begin())->as<ConstantRef>().getExactVal();
   auto shortSize = *(*$short.begin())->as<WireRef>().getNumBits();
-  FatDynObjRef<> newWire = ctx.getWires().create(offsVal + shortSize);
+  FatDynObjRef<> newWire = ctx.getStore<Wire>().create(offsVal + shortSize);
   $temp = newWire;
-  FatDynObjRef<> newWire2 = ctx.getWires().create(offsVal + shortSize);
+  FatDynObjRef<> newWire2 = ctx.getStore<Wire>().create(offsVal + shortSize);
   $temp2 = newWire2;
 }]
 replace {
@@ -617,9 +617,9 @@ match {
 with [{
   auto offsVal = (*$offs.begin())->as<ConstantRef>().getExactVal();
   auto highSize = *(*$high.begin())->as<WireRef>().getNumBits();
-  FatDynObjRef<> newWire = ctx.getWires().create(offsVal + highSize);
+  FatDynObjRef<> newWire = ctx.getStore<Wire>().create(offsVal + highSize);
   $temp = newWire;
-  FatDynObjRef<> newWire2 = ctx.getWires().create(offsVal + highSize);
+  FatDynObjRef<> newWire2 = ctx.getStore<Wire>().create(offsVal + highSize);
   $temp2 = newWire2;
 }]
 replace {
@@ -631,7 +631,7 @@ replace {
 
 /*
 macro wire32 -> $rv [{
-  FatDynObjRef<> w = ctx.getWires().create(32);
+  FatDynObjRef<> w = ctx.getStore<Wire>().create(32);
   $rv = w;
 }]
 

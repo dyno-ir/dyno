@@ -1,17 +1,35 @@
+#include "aig/AIGContext.h"
+#include "dyno/Context.h"
+#include "dyno/Obj.h"
+#include "dyno/Parser.h"
 #include "hw/HWContext.h"
 #include "hw/HWParser.h"
 #include "hw/HWPrinter.h"
 #include "hw/PassPipeline.h"
+#include "hw/passes/HWDialectPasses.h"
+#include "meta/IDs.h"
+#include "meta/MetaContext.h"
+#include "meta/MetaParser.h"
+#include "meta/MetaPassManager.h"
+#include "op/MapObj.h"
+#include "op/OpContext.h"
 #include "support/CmdLineArgs.h"
 #include "support/Debug.h"
+#include "support/DenseMap.h"
 #include "support/ErrorRecovery.h"
 #include "support/MMap.h"
+#include <array>
 #include <string>
 using namespace dyno;
 
 CmdLineArg<std::string_view> argFileName{
     std::nullopt, "input file", "Input Dyno-IR file path.",
     CmdLineArgFlags::POSITIONAL | CmdLineArgFlags::MANDATORY};
+
+CmdLineArg<std::string_view> argFlowFileName{
+    'f', "flow", "Input Dyno-IR flow file path (passes to execute).",
+    CmdLineArgFlags::VALUE_REQUIRED | CmdLineArgFlags::MANDATORY};
+
 CmdLineArg<std::string_view> argOutFile('o', "", "Output Dyno-IR file path.",
                                         CmdLineArgFlags::VALUE_REQUIRED,
                                         "out.dyno");
@@ -42,10 +60,60 @@ CmdLineArg<bool> argCheckAfterAll{'c', "check-after-all",
 #endif
 };
 
+class MetaPassPipelineInterpreter {
+  Context &ctx;
+  DynoLexer &lexer;
+  ArrayRef<void *> passCtorArgs;
+  DenseMap<uint16_t, TypeErasedPassObj> passObjs;
+
+public:
+  void interpretPassPipeline(BlockRef block) {
+    for (auto instr : block) {
+      if (instr.getDialect() != DIALECT_META)
+        report_fatal_error("expected meta dialect instruction");
+      auto opc = instr.getDialectOpcode();
+      auto &pass = passObjs
+                       .findOrInsert(opc.getOpcodeID().num,
+                                     [&]() {
+                                       return ctx.getPassRegistry().getPass(
+                                           opc, passCtorArgs);
+                                     })
+                       .second.val();
+
+      if (instr.getNumOperands() != 0) {
+        if (instr.getNumOperands() != 1)
+          report_fatal_error("expected at most one operand (config)");
+        auto cfg = instr.operand(0)->dyn_as<MapRef>();
+        if (!cfg)
+          report_fatal_error("expected map object");
+        pass.config(cfg->data, lexer);
+      }
+      pass.run(ArrayRef<void *>::emptyRef());
+    }
+  }
+
+  MetaPassPipelineInterpreter(Context &ctx, DynoLexer &lexer,
+                              ArrayRef<void *> passCtorArgs)
+      : ctx(ctx), lexer(lexer), passCtorArgs(passCtorArgs) {}
+};
+
 int main(int argc, char **argv) {
+  Context ctx;
+  HWDialectContext hwContext;
+  CoreDialectContext coreContext;
+  MetaDialectContext metaContext;
+  OpDialectContext opContext;
+  AIGDialectContext aigContext;
+  ctx.registerDialect(coreContext);
+  ctx.registerDialect(hwContext);
+  ctx.registerDialect(opContext);
+  ctx.registerDialect(aigContext);
+  // meta must be registered last
+  ctx.registerDialect(metaContext);
 
   CmdLineArgHandler cmdLineArgHandler;
   cmdLineArgHandler.registerArg(argFileName);
+  cmdLineArgHandler.registerArg(argFlowFileName);
   cmdLineArgHandler.registerArg(argOutFile);
   cmdLineArgHandler.registerArg(argLibertyFile);
   cmdLineArgHandler.registerArg(argOptPipeline);
@@ -56,25 +124,28 @@ int main(int argc, char **argv) {
   cmdLineArgHandler.registerArg(argCheckAfterAll);
   cmdLineArgHandler.parse(argc, argv);
 
-  HWContext ctx;
   HWParser parser{ctx};
+
   std::string fileName{*argFileName};
   MMap mmap{fileName};
   if (!mmap)
     report_fatal_error("failed to open file: {}", fileName);
-  parser.parse(mmap, std::move(fileName));
+  parser.parse(mmap, fileName);
+  dumpCtx(ctx);
 
-  PassPipeline pipeline{ctx};
-  pipeline.dumpAfterAll = *argDumpAfterAll;
-  pipeline.printAfterAll = *argPrintAfterAll;
-  pipeline.checkAfterAll = *argCheckAfterAll;
-  pipeline.setLibertyPath(std::string(*argLibertyFile));
-  pipeline.startIdx = *argRunStart;
+  MetaParser metaParser{ctx};
+  auto flowBlock = ctx.getCFG().blocks.create(ctx.getCFG());
+  auto flowFileName = std::string(*argFlowFileName);
+  MMap flowFile{flowFileName};
+  if (!flowFile)
+    report_fatal_error("failed to open file: {}", flowFileName);
+  metaParser.parse(flowFile, flowFileName, flowBlock.end());
 
-  if (*argOptPipeline)
-    pipeline.runOptPipeline();
-  if (*argLowerPipeline)
-    pipeline.runLoweringPipeline();
+  SmallVec<void *, 1> passCtorArgs{reinterpret_cast<void *>(&ctx)};
+  MetaPassPipelineInterpreter pipeline{ctx, *parser.lexer, passCtorArgs};
 
-  pipeline.dumpDyno(std::string(*argOutFile));
+  pipeline.interpretPassPipeline(flowBlock);
+
+  std::ofstream str{argOutFile->data()};
+  HWPrinter{str}.printCtx(ctx);
 }

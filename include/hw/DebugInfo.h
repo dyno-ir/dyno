@@ -2,6 +2,7 @@
 
 #include "dyno/Instr.h"
 #include "dyno/ObjMap.h"
+#include "dyno/Type.h"
 #include "hw/Register.h"
 #include "hw/Wire.h"
 #include "support/Bits.h"
@@ -124,10 +125,10 @@ public:
 template <typename ValueObj> class ValueNameInfo {
   StringDedupeMap strDedupe;
   ObjMapVec<ValueObj, SmallVec<uint32_t, 1>> valueMap;
-
-  using RefT = ObjRef<Register>;
+  using RefT = ObjRef<ValueObj>;
 
 public:
+  static constexpr DialectType ty{ObjTraits<ValueObj>::ty};
   void addName(RefT ref, std::string_view name) {
     auto nameIdx = strDedupe.getCanonicalIdx(name);
     valueMap.get_ensure(ref).emplace_back(nameIdx);

@@ -1,4 +1,5 @@
 #pragma once
+#include "dyno/Context.h"
 #include "dyno/RefUnion.h"
 #include "hw/HWContext.h"
 
@@ -15,13 +16,16 @@ public:
     return operandW(n);
   }
   // todo: get rid of ctx params via global directory.
-  auto iter(HWContext &ctx) { return ctx.getCFG()[this->as<ObjRef<Instr>>()]; }
-  BlockRef parentBlock(HWContext &ctx) {
-    return ctx.getCFG().contains(this->as<ObjRef<Instr>>())
+  auto iter(Context &ctx) {
+    return ctx.getCtx<CoreDialectContext>().cfg[this->as<ObjRef<Instr>>()];
+  }
+  BlockRef parentBlock(Context &ctx) {
+    return ctx.getCtx<CoreDialectContext>().cfg.contains(
+               this->as<ObjRef<Instr>>())
                ? iter(ctx).blockRef()
                : nullref;
   }
-  FatRefUnion<ProcessIRef, FunctionIRef> parent(HWContext &ctx) {
+  FatRefUnion<ProcessIRef, FunctionIRef> parent(Context &ctx) {
     while (true) {
       auto block = parentBlock(ctx);
       assert(block);
@@ -31,17 +35,17 @@ public:
       return HWInstrRef{block.defI()}.parent(ctx);
     }
   }
-  ProcessIRef parentProc(HWContext &ctx) {
+  ProcessIRef parentProc(Context &ctx) {
     auto rv = parent(ctx);
     assert(rv.is<ProcessIRef>() && "parent is not process");
     return rv.as<ProcessIRef>();
   }
-  FunctionIRef parentFunc(HWContext &ctx) {
+  FunctionIRef parentFunc(Context &ctx) {
     auto rv = parent(ctx);
     assert(rv.is<FunctionIRef>() && "parent is not function");
     return rv.as<FunctionIRef>();
   }
-  ModuleIRef parentMod(HWContext &ctx) {
+  ModuleIRef parentMod(Context &ctx) {
     while (true) {
       auto block = parentBlock(ctx);
       if (auto mod = block.defI().dyn_as<ModuleIRef>())
@@ -49,10 +53,10 @@ public:
       return HWInstrRef{block.defI()}.parentMod(ctx);
     }
   }
-  bool isDescendantOf(BlockRef block, HWContext &ctx) {
+  bool isDescendantOf(BlockRef block, Context &ctx) {
     HWInstrRef instr = *this;
-    while (ctx.getCFG().contains(instr)) {
-      auto parent = ctx.getCFG()[instr];
+    while (ctx.getCtx<CoreDialectContext>().cfg.contains(instr)) {
+      auto parent = ctx.getCtx<CoreDialectContext>().cfg[instr];
       if (parent.blockRef() == block)
         return true;
       instr = parent.blockRef().defI();

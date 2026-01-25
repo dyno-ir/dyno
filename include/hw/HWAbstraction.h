@@ -3,9 +3,11 @@
 #include "HWValue.h"
 #include "dyno/CFG.h"
 #include "dyno/Constant.h"
+#include "dyno/Context.h"
 #include "dyno/IDs.h"
 #include "dyno/Instr.h"
 #include "dyno/Obj.h"
+#include "dyno/Opcode.h"
 #include "hw/BitRange.h"
 #include "hw/HWContext.h"
 #include "hw/HWInstr.h"
@@ -16,9 +18,11 @@
 #include "hw/Process.h"
 #include "hw/Register.h"
 #include "hw/SensList.h"
+#include "hw/StdCellInfo.h"
 #include "hw/Wire.h"
 #include "op/Function.h"
 #include "op/IDs.h"
+#include "op/OpContext.h"
 #include "op/StructuredControlFlow.h"
 #include "support/ArrayRef.h"
 #include "support/ErrorRecovery.h"
@@ -33,17 +37,17 @@ namespace dyno {
 
 class HWInstrBuilder {
 public:
-  HWContext &ctx;
+  Context &ctx;
   BlockRef_iterator<true> insert;
 
-  HWInstrBuilder(HWContext &ctx, BlockRef_iterator<true> insert)
+  HWInstrBuilder(Context &ctx, BlockRef_iterator<true> insert)
       : ctx(ctx), insert(insert) {}
 
-  HWInstrBuilder(HWContext &ctx, InstrRef insert) : ctx(ctx) {
+  HWInstrBuilder(Context &ctx, InstrRef insert) : ctx(ctx) {
     setInsertPoint(insert);
   }
 
-  HWInstrBuilder(HWContext &ctx) : ctx(ctx), insert() {}
+  HWInstrBuilder(Context &ctx) : ctx(ctx), insert() {}
 
   void insertInstr(InstrRef instr) { insert.insertPrev(instr); }
 
@@ -77,7 +81,7 @@ public:
   void addRefs(InstrRef instr, bool addWireDef, Ts... operands) {
     InstrBuilder build{instr};
     if (addWireDef) {
-      auto defWire = ctx.getWires().create();
+      auto defWire = ctx.getStore<Wire>().create();
       build.addRef(defWire);
     }
     build.other();
@@ -110,10 +114,32 @@ public:
     return size;
   }
 
+  // does not place in CFG
+  ModuleIRef buildModule(std::string_view name,
+                         DialectOpcode defOpc = HW_MODULE_DEF) {
+    auto moduleRef = ctx.getStore<Module>().create(std::string(name));
+    auto moduleInstr = ctx.getStore<Instr>().create(2, defOpc);
+
+    InstrBuilder{moduleInstr}.addRef(moduleRef).addRef(
+        ctx.getCtx<CoreDialectContext>().createBlock());
+    return moduleInstr;
+  }
+  ModuleIRef buildStdCell(std::string_view name, StdCellInfoRef info,
+                          DialectOpcode defOpc = HW_STDCELL_DEF) {
+    auto moduleRef = ctx.getStore<Module>().create(std::string(name));
+    auto moduleInstr = ctx.getStore<Instr>().create(2, defOpc);
+
+    InstrBuilder{moduleInstr}
+        .addRef(moduleRef)
+        .addRef(ctx.getCtx<CoreDialectContext>().createBlock())
+        .addRef(info);
+    return moduleInstr;
+  }
+
   template <typename... Ts>
   HWInstrRef buildInstr(DialectID dialect, OpcodeID opcode, bool addWireDef,
                         Ts... operands) {
-    auto instr = InstrRef{ctx.getInstrs().create(
+    auto instr = InstrRef{ctx.getStore<Instr>().create(
         addWireDef + getNumOperands<Ts...>(operands...), dialect, opcode)};
 
     insertInstr(instr);
@@ -123,13 +149,13 @@ public:
 
   HWInstrRef buildInstr(DialectOpcode opc, bool addWireDef,
                         ArrayRef<HWValue> operands) {
-    auto instr =
-        InstrRef{ctx.getInstrs().create(addWireDef + operands.size(), opc)};
+    auto instr = InstrRef{
+        ctx.getStore<Instr>().create(addWireDef + operands.size(), opc)};
 
     insertInstr(instr);
     InstrBuilder build{instr};
     if (addWireDef) {
-      auto defWire = ctx.getWires().create();
+      auto defWire = ctx.getStore<Wire>().create();
       build.addRef(defWire);
     }
     build.other();
@@ -139,7 +165,7 @@ public:
   }
 
   InstrBuilder buildInstrRaw(DialectOpcode opc, unsigned numOperands) {
-    auto instr = InstrRef{ctx.getInstrs().create(numOperands, opc)};
+    auto instr = InstrRef{ctx.getStore<Instr>().create(numOperands, opc)};
     insertInstr(instr);
     return InstrBuilder{instr};
   }
@@ -157,7 +183,7 @@ public:
                     (std::is_same_v<Ts, WireRef> || ...)))                     \
       if (first.template is<ConstantRef>() &&                                  \
           (rest.template is<ConstantRef>() && ...)) {                          \
-        ConstantBuilder build{ctx.getConstants()};                             \
+        ConstantBuilder build{ctx.getStore<Constant>()};                       \
         build.val(first.template as<ConstantRef>());                           \
         ([&] { build.constFunc(rest.template as<ConstantRef>()); }(), ...);    \
         return build.get();                                                    \
@@ -178,7 +204,7 @@ public:
         [&](HWValue val) { return val.getNumBits() == bits; }));               \
                                                                                \
     if (multipleConstants) {                                                   \
-      auto cbuild = ctx.constBuild();                                          \
+      auto cbuild = ConstantBuilder{ctx.getStore<Constant>()};                 \
       cbuild.val(bits, 0);                                                     \
                                                                                \
       size_t index = operands.size() - 1;                                      \
@@ -197,7 +223,7 @@ public:
     if (operands.size() == 1)                                                  \
       return operands[0];                                                      \
                                                                                \
-    auto defW = ctx.getWires().create(bits);                                   \
+    auto defW = ctx.getStore<Wire>().create(bits);                             \
     auto ib = buildInstrRaw(opcode, 1 + operands.size());                      \
     ib.addRef(defW).other();                                                   \
     ib.addRefs(operands);                                                      \
@@ -247,12 +273,12 @@ public:
   //   }
 
   //   auto instr = InstrRef{
-  //       ctx.getInstrs().create(1 + sizeof...(operands) + operandDelta,
+  //       ctx.getStore<Instr>().create(1 + sizeof...(operands) + operandDelta,
   //                              DialectID{DIALECT_OP}, OpcodeID{OP_ADD})};
   //   insertInstr(instr);
   //   InstrBuilder build{instr};
   //   // todo: size?
-  //   build.addRef(ctx.getWires().create());
+  //   build.addRef(ctx.getStore<Wire>().create());
   //   build.other();
 
   //   index = 0;
@@ -263,8 +289,8 @@ public:
   //            operand.as<WireRef>().getSingleDef()->instr().others())
   //         build.addRef(subOp->template as<HWValue>());
 
-  //       ctx.getCFG()[otherInstr].erase();
-  //       ctx.getInstrs().destroy(otherInstr);
+  //       ctx.getCtx<CoreDialectContext>().cfg[otherInstr].erase();
+  //       ctx.getStore<Instr>().destroy(otherInstr);
   //     } else
   //       build.addRef(operand);
   //     index++;
@@ -277,7 +303,7 @@ public:
   template <IsAnyHWValue LHS, IsAnyHWValue RHS>                                \
   HWValue ident(LHS lhs, RHS rhs) {                                            \
     if (lhs.template is<ConstantRef>() && rhs.template is<ConstantRef>()) {    \
-      return ConstantBuilder{ctx.getConstants()}                               \
+      return ConstantBuilder{ctx.getStore<Constant>()}                         \
           .val(lhs.template as<ConstantRef>())                                 \
           .constFunc(rhs.template as<ConstantRef>())                           \
           .get();                                                              \
@@ -325,7 +351,7 @@ public:
       return value;
     if (auto asConst = value.dyn_as<ConstantRef>()) {
       assert(asConst.getNumBits() <= newSize);
-      return ctx.constBuild()
+      return ConstantBuilder{ctx.getStore<Constant>()}
           .val(value.as<ConstantRef>())
           .resize(newSize, sign)
           .get();
@@ -342,7 +368,7 @@ public:
       return value;
     if (auto asConst = value.dyn_as<ConstantRef>()) {
       assert(asConst.getNumBits() <= newSize);
-      return ctx.constBuild()
+      return ConstantBuilder{ctx.getStore<Constant>()}
           .val(value.as<ConstantRef>())
           .resize(newSize, type.is(OP_SEXT))
           .get();
@@ -364,7 +390,7 @@ public:
       return ConstantRef::zeroBitZero();
     if (auto asConst = value.dyn_as<ConstantRef>()) {
       assert(asConst.getNumBits() >= newSize);
-      return ctx.constBuild()
+      return ConstantBuilder{ctx.getStore<Constant>()}
           .val(value.as<ConstantRef>())
           .resize(newSize)
           .get();
@@ -510,12 +536,12 @@ public:
       return buildTrunc(numBits, src);
 
     if (baseAddr >= *src.as<HWValue>().getNumBits()) {
-      return ctx.constBuild().undef(numBits).get();
+      return ConstantBuilder{ctx.getStore<Constant>()}.undef(numBits).get();
     }
 
     if constexpr (sizeof...(terms) == 0) {
       if (auto asConst = src.dyn_as<ConstantRef>()) {
-        auto cbuild = ctx.constBuild();
+        auto cbuild = ConstantBuilder{ctx.getStore<Constant>()};
         return cbuild.valRange(asConst, baseAddr, numBits).get();
       }
 
@@ -547,7 +573,7 @@ public:
       return buildSplice(src, numBits, baseAddr);
     auto len = std::distance(terms.begin(), terms.end());
     auto ib = buildInstrRaw(HW_SPLICE, 1 + 2 + 3 * len);
-    auto defW = ctx.getWires().create(numBits);
+    auto defW = ctx.getStore<Wire>().create(numBits);
     ib.addRef(defW).other();
     ib.addRef(src);
     ib.addRef(ConstantRef::fromU32(baseAddr));
@@ -560,7 +586,7 @@ public:
 
   //   auto [len, num, isConst] = spliceNumBitsOps(operands...);
   //   if (isConst) {
-  //     auto cbuild = ctx.constBuild();
+  //     auto cbuild = ConstantBuilder{ctx.getStore<Constant>()};
   //     cbuild.val(0, 0);
   //     HWValue last;
   //     (
@@ -580,11 +606,11 @@ public:
   //     return cbuild.get();
   //   }
 
-  //   auto instr = HWInstrRef{ctx.getInstrs().create(1 + 3 * num, HW_SPLICE)};
-  //   insertInstr(instr);
+  //   auto instr = HWInstrRef{ctx.getStore<Instr>().create(1 + 3 * num,
+  //   HW_SPLICE)}; insertInstr(instr);
 
   //   InstrBuilder build{instr};
-  //   build.addRef(ctx.getWires().create(len)).other();
+  //   build.addRef(ctx.getStore<Wire>().create(len)).other();
 
   //   HWValue last;
   //   (
@@ -609,7 +635,7 @@ public:
           return pair.first.template is<ConstantRef>() &&
                  pair.second.isConstant();
         })) {
-      auto cbuild = ctx.constBuild();
+      auto cbuild = ConstantBuilder{ctx.getStore<Constant>()};
       cbuild.val(0, 0);
       for (size_t i = 0; i < values.size(); i++)
         cbuild.concatRangeLHS(
@@ -639,7 +665,8 @@ public:
       numOperands++;
     }
 
-    auto instr = InstrRef{ctx.getInstrs().create(1 + numOperands, HW_CONCAT)};
+    auto instr =
+        InstrRef{ctx.getStore<Instr>().create(1 + numOperands, HW_CONCAT)};
     insertInstr(instr);
 
     auto insertSave = insert;
@@ -647,7 +674,7 @@ public:
 
     InstrBuilder build{instr};
 
-    build.addRef(ctx.getWires().create());
+    build.addRef(ctx.getStore<Wire>().create());
     build.other();
 
     Optional<uint32_t> numBits = 0;
@@ -702,17 +729,17 @@ public:
     static_assert(sizeof...(operands) > 1);
     auto [len, num, isConst] = concatNumBitsOps(operands...);
     if (isConst) {
-      auto cbuild = ctx.constBuild();
+      auto cbuild = ConstantBuilder{ctx.getStore<Constant>()};
       cbuild.val(0, 0);
       ([&] { cbuild.concatLHS(operands.template as<ConstantRef>()); }(), ...);
       return cbuild.get();
     }
 
-    auto instr = HWInstrRef{ctx.getInstrs().create(1 + num, HW_CONCAT)};
+    auto instr = HWInstrRef{ctx.getStore<Instr>().create(1 + num, HW_CONCAT)};
     insertInstr(instr);
 
     InstrBuilder build{instr};
-    build.addRef(ctx.getWires().create(len)).other();
+    build.addRef(ctx.getStore<Wire>().create(len)).other();
     (
         [&] {
           if constexpr (std::is_convertible_v<decltype(operands), HWValue>)
@@ -731,7 +758,7 @@ public:
 
     if (std::all_of(values.begin(), values.end(),
                     [](const HWValue &val) { return val.is<ConstantRef>(); })) {
-      auto cbuild = ctx.constBuild();
+      auto cbuild = ConstantBuilder{ctx.getStore<Constant>()};
       if (values.size() == 0)
         return cbuild.val(0, 0).get();
       for (auto val : values)
@@ -740,12 +767,13 @@ public:
       return cbuild.get();
     }
 
-    auto instr = InstrRef{ctx.getInstrs().create(1 + values.size(), HW_CONCAT)};
+    auto instr =
+        InstrRef{ctx.getStore<Instr>().create(1 + values.size(), HW_CONCAT)};
 
     insertInstr(instr);
     InstrBuilder build{instr};
 
-    build.addRef(ctx.getWires().create());
+    build.addRef(ctx.getStore<Wire>().create());
     build.other();
 
     Optional<uint32_t> numBits = 0;
@@ -763,7 +791,10 @@ public:
 
   HWValue buildRepeat(HWValue value, unsigned count) {
     if (value.is<ConstantRef>()) {
-      return ctx.constBuild().val(value.as<ConstantRef>()).repeat(count).get();
+      return ConstantBuilder{ctx.getStore<Constant>()}
+          .val(value.as<ConstantRef>())
+          .repeat(count)
+          .get();
     }
 
     if (count == 1)
@@ -785,7 +816,10 @@ public:
 
   HWValue buildNot(HWValue value) {
     if (auto asConst = value.dyn_as<ConstantRef>()) {
-      return ctx.constBuild().val(asConst).bitNOT().get();
+      return ConstantBuilder{ctx.getStore<Constant>()}
+          .val(asConst)
+          .bitNOT()
+          .get();
     }
     auto wire = value.as<WireRef>();
     if (wire.getDefI().isOpc(OP_NOT))
@@ -850,8 +884,8 @@ public:
   }
 
   RegisterRef buildRegister(Optional<uint32_t> bitSize = nullopt) {
-    auto regRef = RegisterRef{ctx.getRegs().create(bitSize)};
-    auto regInstr = InstrRef{ctx.getInstrs().create(1, HW_REGISTER_DEF)};
+    auto regRef = RegisterRef{ctx.getStore<Register>().create(bitSize)};
+    auto regInstr = InstrRef{ctx.getStore<Instr>().create(1, HW_REGISTER_DEF)};
     InstrBuilder{regInstr}.addRef(regRef);
     insertInstr(regInstr);
     return regRef;
@@ -859,8 +893,8 @@ public:
 
   RegisterRef buildPort(ModuleIRef module, HWOpcode opcode,
                         Optional<uint32_t> bitSize = nullopt) {
-    auto regRef = RegisterRef{ctx.getRegs().create(bitSize)};
-    auto regInstr = InstrRef{ctx.getInstrs().create(1, opcode)};
+    auto regRef = RegisterRef{ctx.getStore<Register>().create(bitSize)};
+    auto regInstr = InstrRef{ctx.getStore<Instr>().create(1, opcode)};
     InstrBuilder{regInstr}.addRef(regRef);
     insertInstr(regInstr);
 
@@ -886,11 +920,13 @@ public:
     assert(type == HW_INIT_PROCESS_DEF || type == HW_COMB_PROCESS_DEF ||
            type == HW_SEQ_PROCESS_DEF || type == HW_FINAL_PROCESS_DEF ||
            type == HW_LATCH_PROCESS_DEF || type == HW_NETLIST_PROCESS_DEF);
-    auto procRef = ctx.getProcs().create();
-    auto procInstRef =
-        ProcessIRef{ctx.getInstrs().create(2 + (trigger != nullref), type)};
+    auto procRef = ctx.getStore<Process>().create();
+    auto procInstRef = ProcessIRef{
+        ctx.getStore<Instr>().create(2 + (trigger != nullref), type)};
     InstrBuilder build{procInstRef};
-    build.addRef(procRef).addRef(ctx.createBlock()).other();
+    build.addRef(procRef)
+        .addRef(ctx.getCtx<CoreDialectContext>().createBlock())
+        .other();
 
     if (trigger)
       build.addRef(trigger.oref());
@@ -902,7 +938,8 @@ public:
   // HWInstrRef buildEventDelay(RegisterRef dReg, RegisterRef qReg,
   //                            const SensList &sens) {
   //   auto instrRef = ProcessIRef{
-  //       ctx.getInstrs().create(3 + sens.signals.size(), HW_TRIGGER_DEF)};
+  //       ctx.getStore<Instr>().create(3 + sens.signals.size(),
+  //       HW_TRIGGER_DEF)};
   //   insertInstr(instrRef);
   //   InstrBuilder build{instrRef};
   //   build.other().addRef(dReg).addRef(qReg).addRef(
@@ -920,9 +957,9 @@ public:
       return nullref;
 
     auto instrRef = TriggerIRef{
-        ctx.getInstrs().create(1 + list.signals.size(), HW_TRIGGER_DEF)};
+        ctx.getStore<Instr>().create(1 + list.signals.size(), HW_TRIGGER_DEF)};
     insertInstr(instrRef);
-    TriggerRef trigRef = TriggerRef{ctx.getTriggers().create()};
+    TriggerRef trigRef = TriggerRef{ctx.getStore<Trigger>().create()};
 
     InstrBuilder build{instrRef};
     build.addRef(trigRef).other();
@@ -936,8 +973,8 @@ public:
   }
 
   HWInstrRef buildInstance(ModuleRef module, ArrayRef<RegisterRef> portRegs) {
-    auto instr =
-        InstrRef{ctx.getInstrs().create(1 + portRegs.size(), HW_INSTANCE)};
+    auto instr = InstrRef{
+        ctx.getStore<Instr>().create(1 + portRegs.size(), HW_INSTANCE)};
 
     assert(portRegs.size() == module->ports.size());
 
@@ -956,15 +993,15 @@ public:
   IfInstrRef buildIfElse(HWValue cond, unsigned yieldPrealloc = 0) {
     assert(cond.getNumBits() == 1);
     InstrRef instrRef =
-        InstrRef{ctx.getInstrs().create(3 + yieldPrealloc, OP_IF)};
+        InstrRef{ctx.getStore<Instr>().create(3 + yieldPrealloc, OP_IF)};
     insertInstr(instrRef);
     InstrBuilder build{instrRef};
-    auto trueBl = ctx.createBlock();
-    auto falseBl = ctx.createBlock();
+    auto trueBl = ctx.getCtx<CoreDialectContext>().createBlock();
+    auto falseBl = ctx.getCtx<CoreDialectContext>().createBlock();
     build.addRef(trueBl).addRef(falseBl);
 
     for (unsigned i = 0; i < yieldPrealloc; i++)
-      build.addRef(ctx.getWires().create());
+      build.addRef(ctx.getStore<Wire>().create());
 
     build.other().addRef(cond);
 
@@ -973,10 +1010,10 @@ public:
 
   IfInstrRef buildIf(HWValue cond) {
     assert(cond.getNumBits() == 1);
-    InstrRef instrRef = InstrRef{ctx.getInstrs().create(2, OP_IF)};
+    InstrRef instrRef = InstrRef{ctx.getStore<Instr>().create(2, OP_IF)};
     insertInstr(instrRef);
     InstrBuilder build{instrRef};
-    auto trueBl = ctx.createBlock();
+    auto trueBl = ctx.getCtx<CoreDialectContext>().createBlock();
     build.addRef(trueBl);
     build.other().addRef(cond);
     return IfInstrRef{instrRef};
@@ -985,13 +1022,15 @@ public:
   IfInstrRef buildIfElse(IfInstrRef old, unsigned yieldPrealloc = 0,
                          BlockRef falseBlock = nullref) {
     InstrRef instrRef =
-        InstrRef{ctx.getInstrs().create(3 + yieldPrealloc, OP_IF)};
+        InstrRef{ctx.getStore<Instr>().create(3 + yieldPrealloc, OP_IF)};
     insertInstr(instrRef);
     InstrBuilder build{instrRef};
 
     build.addRef(old.getTrueBlock())
-        .addRef(old.hasFalseBlock() ? old.getFalseBlock()
-                                    : (falseBlock ?: ctx.createBlock()));
+        .addRef(old.hasFalseBlock()
+                    ? old.getFalseBlock()
+                    : (falseBlock
+                           ?: ctx.getCtx<CoreDialectContext>().createBlock()));
 
     old.operand(0).replace(FatDynObjRef<>{nullref});
     if (old.hasFalseBlock())
@@ -999,7 +1038,7 @@ public:
 
     for (unsigned i = 0; i < yieldPrealloc; i++) {
       if (i >= old.getNumYieldValues())
-        build.addRef(ctx.getWires().create());
+        build.addRef(ctx.getStore<Wire>().create());
       else {
         auto operand = old.getYieldValue(i);
         build.addRef(operand->as<FatDynObjRef<>>());
@@ -1012,11 +1051,11 @@ public:
   }
 
   SwitchInstrRef buildSwitch(HWValue cond, unsigned yieldPrealloc = 0) {
-    SwitchInstrRef instrRef =
-        SwitchInstrRef{ctx.getInstrs().create(2 + yieldPrealloc, OP_SWITCH)};
+    SwitchInstrRef instrRef = SwitchInstrRef{
+        ctx.getStore<Instr>().create(2 + yieldPrealloc, OP_SWITCH)};
     insertInstr(instrRef);
     InstrBuilder build{instrRef};
-    build.addRef(ctx.createBlock());
+    build.addRef(ctx.getCtx<CoreDialectContext>().createBlock());
     build.other();
     build.addRef(cond);
     return instrRef;
@@ -1025,20 +1064,20 @@ public:
   CaseInstrRef buildCase(ArrayRef<HWValue> conds,
                          DialectOpcode type = OP_CASE) {
     CaseInstrRef instrRef =
-        CaseInstrRef{ctx.getInstrs().create(1 + conds.size(), type)};
+        CaseInstrRef{ctx.getStore<Instr>().create(1 + conds.size(), type)};
     insertInstr(instrRef);
     InstrBuilder build{instrRef};
-    build.addRef(ctx.createBlock()).other();
+    build.addRef(ctx.getCtx<CoreDialectContext>().createBlock()).other();
     for (auto cond : conds)
       build.addRef(cond);
     return instrRef;
   }
   CaseInstrRef buildDefaultCase() {
     CaseInstrRef instrRef =
-        CaseInstrRef{ctx.getInstrs().create(1, OP_CASE_DEFAULT)};
+        CaseInstrRef{ctx.getStore<Instr>().create(1, OP_CASE_DEFAULT)};
     insertInstr(instrRef);
     InstrBuilder build{instrRef};
-    build.addRef(ctx.createBlock());
+    build.addRef(ctx.getCtx<CoreDialectContext>().createBlock());
     return instrRef;
   }
 
@@ -1057,7 +1096,7 @@ public:
       if (sizeof...(value) > asIf.getNumYieldValues()) {
 
         auto newInstr =
-            InstrRef{ctx.getInstrs().create(sizeof...(value) + 3, OP_IF)};
+            InstrRef{ctx.getStore<Instr>().create(sizeof...(value) + 3, OP_IF)};
 
         InstrBuilder build{newInstr};
 
@@ -1068,7 +1107,7 @@ public:
         // new wire defs
         for (unsigned i = 0; i < sizeof...(value) - asIf.getNumYieldValues();
              i++)
-          build.addRef(ctx.getWires().create());
+          build.addRef(ctx.getStore<Wire>().create());
         build.other();
 
         // condition
@@ -1076,7 +1115,7 @@ public:
 
         HWInstrRef{instr}.iter(ctx).replace(newInstr);
         instr.destroyOperands();
-        ctx.getInstrs().destroy(instr);
+        ctx.getStore<Instr>().destroy(instr);
         instr = newInstr;
         asIf = newInstr;
       }
@@ -1125,7 +1164,7 @@ public:
     unsigned newYieldVals =
         addedYieldVals.size() + (old ? old.getNumOperands() : 0);
 
-    auto instr = InstrRef{ctx.getInstrs().create(newYieldVals, OP_YIELD)};
+    auto instr = InstrRef{ctx.getStore<Instr>().create(newYieldVals, OP_YIELD)};
     insertInstr(instr);
     InstrBuilder ibuild{instr};
     ibuild.other();
@@ -1153,7 +1192,8 @@ public:
     unsigned newYieldVals =
         addedYieldVals.size() + (old ? old.getNumOperands() : 0);
 
-    auto instr = InstrRef{ctx.getInstrs().create(newYieldVals, OP_UNYIELD)};
+    auto instr =
+        InstrRef{ctx.getStore<Instr>().create(newYieldVals, OP_UNYIELD)};
     insertInstr(instr);
     InstrBuilder ibuild{instr};
 
@@ -1178,8 +1218,8 @@ public:
 
   InstrRef addOperands(InstrRef old, ArrayRef<WireRef> newDefs,
                        ArrayRef<HWValue> newUses) {
-    setInsertPoint(ctx.getCFG()[old]);
-    auto newInstr = InstrRef{ctx.getInstrs().create(
+    setInsertPoint(ctx.getCtx<CoreDialectContext>().cfg[old]);
+    auto newInstr = InstrRef{ctx.getStore<Instr>().create(
         old.getNumOperands() + newDefs.size() + newUses.size(),
         old.getDialectOpcode())};
     insertInstr(newInstr);
@@ -1204,16 +1244,16 @@ public:
   }
 
   template <typename... Ts> auto buildWhile(Ts... inputs) {
-    InstrRef instrRef =
-        InstrRef{ctx.getInstrs().create(2 + 2 * sizeof...(inputs), OP_WHILE)};
+    InstrRef instrRef = InstrRef{
+        ctx.getStore<Instr>().create(2 + 2 * sizeof...(inputs), OP_WHILE)};
     insertInstr(instrRef);
 
     InstrBuilder build{instrRef};
-    build.addRef(ctx.createBlock());
-    build.addRef(ctx.createBlock());
+    build.addRef(ctx.getCtx<CoreDialectContext>().createBlock());
+    build.addRef(ctx.getCtx<CoreDialectContext>().createBlock());
 
     for (unsigned i = 0; i < sizeof...(inputs); i++)
-      build.addRef(ctx.getWires().create());
+      build.addRef(ctx.getStore<Wire>().create());
     build.other();
     ([&]() { build.addRef(inputs); }(), ...);
     return WhileInstrRef{instrRef};
@@ -1221,14 +1261,14 @@ public:
 
   template <typename... Ts> auto buildDoWhile(Ts... inputs) {
     InstrRef instrRef = InstrRef{
-        ctx.getInstrs().create(1 + 2 * sizeof...(inputs), OP_DO_WHILE)};
+        ctx.getStore<Instr>().create(1 + 2 * sizeof...(inputs), OP_DO_WHILE)};
     insertInstr(instrRef);
 
     InstrBuilder build{instrRef};
-    build.addRef(ctx.createBlock());
+    build.addRef(ctx.getCtx<CoreDialectContext>().createBlock());
 
     for (unsigned i = 0; i < sizeof...(inputs); i++)
-      build.addRef(ctx.getWires().create());
+      build.addRef(ctx.getStore<Wire>().create());
     build.other();
 
     ([&]() { build.addRef(inputs); }(), ...);
@@ -1242,8 +1282,8 @@ public:
   }
 
   auto buildFuncParam(Optional<uint32_t> numBits = nullopt) {
-    auto reg = ctx.getRegs().create(numBits);
-    auto instr = InstrRef{ctx.getInstrs().create(1, OP_PARAM)};
+    auto reg = ctx.getStore<Register>().create(numBits);
+    auto instr = InstrRef{ctx.getStore<Instr>().create(1, OP_PARAM)};
     insertInstr(instr);
     InstrBuilder build{instr};
     build.addRef(reg);
@@ -1259,25 +1299,27 @@ public:
   }
 
   auto buildFunc() {
-    auto funcRef = FunctionRef{ctx.getFuncs().create()};
-    auto funcInstr = FunctionIRef{ctx.getInstrs().create(2, OP_FUNCTION_DEF)};
+    auto funcRef = FunctionRef{ctx.getStore<Function>().create()};
+    auto funcInstr =
+        FunctionIRef{ctx.getStore<Instr>().create(2, OP_FUNCTION_DEF)};
     insertInstr(funcInstr);
 
-    InstrBuilder{funcInstr}.addRef(funcRef).addRef(ctx.createBlock());
+    InstrBuilder{funcInstr}.addRef(funcRef).addRef(
+        ctx.getCtx<CoreDialectContext>().createBlock());
     return funcInstr;
   }
 
   auto buildCall(FunctionIRef func, ArrayRef<HWValueOrReg> args,
                  unsigned numRetvals = 0) {
     auto callInstr = CallInstrRef{
-        ctx.getInstrs().create(numRetvals + 1 + args.size(), OP_CALL)};
+        ctx.getStore<Instr>().create(numRetvals + 1 + args.size(), OP_CALL)};
     // assert(args.size() == func.func()->params.size() && "param size
     // mismatch");
     insertInstr(callInstr);
 
     InstrBuilder build{callInstr};
     for (unsigned i = 0; i < numRetvals; i++)
-      build.addRef(ctx.getWires().create());
+      build.addRef(ctx.getStore<Wire>().create());
     build.other();
     build.addRef(func.func());
     for (size_t i = 0; i < args.size(); i++)
@@ -1288,7 +1330,7 @@ public:
 
   // todo: full constant support
   ConstantRef buildConst(unsigned bits, uint64_t value) {
-    return ConstantBuilder{ctx.getConstants()}.val(bits, value);
+    return ConstantBuilder{ctx.getStore<Constant>()}.val(bits, value);
   }
 
   HWValue buildMux(HWValue sel, HWValue trueV, HWValue falseV) {
@@ -1323,27 +1365,27 @@ public:
       break;
     }
     case *OP_FUNC: {
-      ctx.getFuncs().destroy(obj.as<FunctionRef>());
+      ctx.getStore<Function>().destroy(obj.as<FunctionRef>());
       break;
     }
     case *HW_REGISTER: {
-      ctx.getRegs().destroy(obj.as<RegisterRef>());
+      ctx.getStore<Register>().destroy(obj.as<RegisterRef>());
       break;
     }
     case *HW_WIRE: {
-      ctx.getWires().destroy(obj.as<WireRef>());
+      ctx.getStore<Wire>().destroy(obj.as<WireRef>());
       break;
     }
     case *HW_PROCESS: {
-      ctx.getProcs().destroy(obj.as<ProcessRef>());
+      ctx.getStore<Process>().destroy(obj.as<ProcessRef>());
       break;
     }
     case *HW_TRIGGER: {
-      ctx.getTriggers().destroy(obj.as<TriggerRef>());
+      ctx.getStore<Trigger>().destroy(obj.as<TriggerRef>());
       break;
     }
     case *HW_MODULE: {
-      ctx.getModules().destroy(obj.as<ModuleRef>());
+      ctx.getStore<Module>().destroy(obj.as<ModuleRef>());
       break;
     }
     default:
@@ -1356,10 +1398,10 @@ public:
       destroyObj(obj);
     }
 
-    if (ctx.getCFG().contains(instr))
-      ctx.getCFG()[instr].erase();
+    if (ctx.getCtx<CoreDialectContext>().cfg.contains(instr))
+      ctx.getCtx<CoreDialectContext>().cfg[instr].erase();
     instr.destroyOthers();
-    ctx.getInstrs().destroy(instr);
+    ctx.getStore<Instr>().destroy(instr);
   }
   void destroyBlock(BlockRef block) {
     SmallVec<InstrRef, 16> toDestroy{block.size()};
@@ -1369,11 +1411,13 @@ public:
     for (auto instr : toDestroy)
       destroyInstr(instr);
 
-    ctx.getCFG().blocks.destroy(block);
+    ctx.getCtx<CoreDialectContext>().cfg.blocks.destroy(block);
   }
 
   void setInsertPoint(BlockRef_iterator<true> it) { insert = it; }
-  void setInsertPoint(InstrRef ref) { insert = ctx.getCFG()[ref]; }
+  void setInsertPoint(InstrRef ref) {
+    insert = ctx.getCtx<CoreDialectContext>().cfg[ref];
+  }
 }; // namespace dyno
 
 class HWInstrBuilderStack : public HWInstrBuilder {

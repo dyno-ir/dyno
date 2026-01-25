@@ -1,5 +1,6 @@
 #pragma once
 
+#include "dyno/Context.h"
 #include "hw/HWContext.h"
 #include "hw/HWPrinter.h"
 #include "hw/IDs.h"
@@ -38,7 +39,7 @@
 namespace dyno {
 
 class PassPipeline {
-  HWContext &ctx;
+  Context &ctx;
 
   FunctionInlinePass funcInline{ctx};
   TriggerDedupePass triggerDedupe{ctx};
@@ -60,7 +61,7 @@ class PassPipeline {
   FlipFlopMappingPass ffMap{ctx};
   RemoveBuffersPass removeBufs{ctx};
   OrderInstrsPass orderInstrs{ctx};
-  ConstantMapping constMap{ctx};
+  ConstantMappingPass constMap{ctx};
   FindLongestPathPass longestPath{ctx};
   CheckPass checkPass{ctx};
   RegisterPartitionPass regPartition{ctx};
@@ -79,17 +80,23 @@ public:
 
   template <typename T> void runPass(T &pass, bool skipCheck = false) {
     if (idx >= startIdx) {
-    pass.run();
-    if (printAfterAll) {
-      std::print(std::cerr, "\n\nIR after {}:\n", __PRETTY_FUNCTION__);
-      HWPrinter{std::cerr}.printCtx(ctx);
-    }
-    if (dumpAfterAll)
+      pass.run();
+      std::string_view name;
+      if constexpr (requires { T::passName; })
+        name = T::passName;
+      else
+        name = __PRETTY_FUNCTION__;
+      if (printAfterAll) {
+
+        std::print(std::cerr, "\n\nIR after {}:\n", name);
+        HWPrinter{std::cerr}.printCtx(ctx);
+      }
+      if (dumpAfterAll)
         dumpDyno(std::string("dumps/_") + std::to_string(idx) +
-                 __PRETTY_FUNCTION__);
+                 std::string(name));
       // dumpDyno();
-    if (checkAfterAll && !skipCheck)
-      checkPass.run();
+      if (checkAfterAll && !skipCheck)
+        checkPass.run();
     }
     idx++;
   }
@@ -141,7 +148,7 @@ public:
 
   void runLibertyPipeline() {
     SmallVec<ModuleRef, 4> original;
-    for (auto mod : ctx.activeModules()) {
+    for (auto mod : ctx.getCtx<HWDialectContext>().activeModules()) {
       original.emplace_back(mod);
       mod->ignore = true;
     }
@@ -158,7 +165,7 @@ public:
     std::tie(printAfterAll, debugType) = old;
 
     // todo properly
-    for (auto mod : ctx.activeModules())
+    for (auto mod : ctx.getCtx<HWDialectContext>().activeModules())
       mod->ignore = 1;
     for (auto mod : original)
       mod->ignore = 0;
@@ -242,7 +249,6 @@ public:
     runPass(orderInstrs);
     runPass(aggressiveDCE);
 
-
     linearizeControlFlow.config.flattenLoops = 1;
     linearizeControlFlow.config.flattenMultiway = 1;
     runPass(linearizeControlFlow);
@@ -265,8 +271,8 @@ public:
     runPass(instCombine);
     runPass(aggressiveDCE);
 
-    //muxTreeOpt.config.exploreConditions = true;
-    //runPass(muxTreeOpt);
+    // muxTreeOpt.config.exploreConditions = true;
+    // runPass(muxTreeOpt);
     runPass(cse);
     runPass(instCombine);
 
@@ -321,7 +327,7 @@ public:
     // dumpDyno("pre_mux_opt.dyno");
     muxTreeOpt.config.dontCareMUXsOnly = true;
     muxTreeOpt.config.exploreConditions = false;
-    //runPass(muxTreeOpt);
+    // runPass(muxTreeOpt);
     runPass(instCombine);
     // dumpDyno("postmux_opt.dyno");
 
@@ -398,7 +404,7 @@ public:
   __attribute__((used)) void dumpDyno() { dumpDyno("dump_unnamed.dyno"); }
 
 public:
-  explicit PassPipeline(HWContext &ctx) : ctx(ctx) {}
+  explicit PassPipeline(Context &ctx) : ctx(ctx) {}
 };
 
 }; // namespace dyno

@@ -1,5 +1,7 @@
 #pragma once
 
+#include "dyno/Context.h"
+#include "dyno/Pass.h"
 #include "hw/HWAbstraction.h"
 #include "hw/HWContext.h"
 #include "hw/HWInstr.h"
@@ -14,8 +16,8 @@
 namespace dyno {
 
 // attempt to partition registers on all bounds not crossed by any access
-class RegisterPartitionPass {
-  HWContext &ctx;
+class RegisterPartitionPass : public Pass<RegisterPartitionPass> {
+  Context &ctx;
   BitAliasAnalysis bitAlias;
 
   void getStoreRegions(RegisterPartitions &part, StoreIRef store) {
@@ -101,7 +103,7 @@ class RegisterPartitionPass {
       }
     });
 
-    auto cbuild = ctx.constBuild();
+    auto cbuild = ConstantBuilder{ctx.getStore<Constant>()};
 
     ModuleIRef mod = HWInstrRef{reg}.parentMod(ctx);
     HWInstrBuilder build{ctx, mod.regs_end()};
@@ -149,9 +151,10 @@ class RegisterPartitionPass {
   }
 
 public:
-  explicit RegisterPartitionPass(HWContext &ctx) : ctx(ctx), bitAlias(ctx) {}
+  auto make(Context &ctx) { return RegisterPartitionPass(ctx); }
+  explicit RegisterPartitionPass(Context &ctx) : ctx(ctx), bitAlias(ctx) {}
   void run() {
-    for (auto mod : ctx.activeModules()) {
+    for (auto mod : ctx.getCtx<HWDialectContext>().activeModules()) {
       runOnModule(mod.iref());
     }
   }

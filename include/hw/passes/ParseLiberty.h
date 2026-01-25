@@ -1,4 +1,6 @@
 #pragma once
+#include "dyno/Context.h"
+#include "dyno/Pass.h"
 #include "hw/HWAbstraction.h"
 #include "hw/HWContext.h"
 #include "hw/IDs.h"
@@ -220,7 +222,7 @@ public:
 };
 
 class LibertyToDyno {
-  HWContext &ctx;
+  Context &ctx;
   LibertyLexer &lexer;
 
   void err() { report_fatal_error("liberty format error"); };
@@ -409,8 +411,8 @@ public:
           object->params.front().type != Token::STRING_LITERAL)
         err();
 
-      auto info = ctx.getStdCellInfos().create();
-      auto mod = ctx.createStdCell(object->params[0].strLit.value, info);
+      auto info = ctx.getStore<StdCellInfo>().create();
+      auto mod = build.buildStdCell(object->params[0].strLit.value, info);
 
       build.setInsertPoint(mod.block().end());
       portNameMap.clear();
@@ -432,7 +434,8 @@ public:
             if (param.type != Token::STRING_LITERAL)
               err();
             auto reg = build.buildRegister(1);
-            ctx.regNameInfo.addName(reg, param.strLit.value);
+            ctx.getCtx<HWDialectContext>().regNameInfo.addName(
+                reg, param.strLit.value);
             portNameMap.emplace(param.strLit.value, reg);
             outs.emplace_back(reg);
           }
@@ -485,7 +488,8 @@ public:
           break;
         port->numBits = 1;
         portNameMap.insert(std::make_pair(sub->params[0].strLit.value, port));
-        ctx.regNameInfo.addName(port, sub->params[0].strLit.value);
+        ctx.getCtx<HWDialectContext>().regNameInfo.addName(
+            port, sub->params[0].strLit.value);
 
         if (function) {
           fmtCheck(function);
@@ -513,11 +517,11 @@ public:
   }
 
 public:
-  LibertyToDyno(HWContext &ctx, LibertyLexer &lexer) : ctx(ctx), lexer(lexer) {}
+  LibertyToDyno(Context &ctx, LibertyLexer &lexer) : ctx(ctx), lexer(lexer) {}
 }; // namespace dyno
 
-class ParseLibertyPass {
-  HWContext &ctx;
+class ParseLibertyPass : public Pass<ParseLibertyPass> {
+  Context &ctx;
 
 public:
   struct Config {
@@ -538,6 +542,7 @@ public:
     libToDyno.copyIntoCtx(block);
   }
 
-  explicit ParseLibertyPass(HWContext &ctx) : ctx(ctx) {}
+  auto make(Context &ctx) { return ParseLibertyPass(ctx); }
+  explicit ParseLibertyPass(Context &ctx) : ctx(ctx) {}
 };
 }; // namespace dyno

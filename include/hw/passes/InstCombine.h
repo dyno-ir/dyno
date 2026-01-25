@@ -1,12 +1,13 @@
 #pragma once
 
 #include "dyno/Constant.h"
+#include "dyno/Context.h"
 #include "dyno/CustomInstr.h"
 #include "dyno/HierBlockIterator.h"
-#include "dyno/IDs.h"
 #include "dyno/Instr.h"
 #include "dyno/Obj.h"
 #include "dyno/Opcode.h"
+#include "dyno/Pass.h"
 #include "hw/FlipFlop.h"
 #include "hw/HWAbstraction.h"
 #include "hw/HWContext.h"
@@ -33,11 +34,11 @@
 
 namespace dyno {
 
-bool generated(HWContext &ctx, SmallVecImpl<InstrRef> &matched,
+bool generated(Context &ctx, SmallVecImpl<InstrRef> &matched,
                SmallVecImpl<OperandRef> &replaced, HWInstrRef);
 
-class InstCombinePass {
-  HWContext &ctx;
+class InstCombinePass : public Pass<InstCombinePass> {
+  Context &ctx;
   SmallVec<InstrRef, 128> worklist;
   SmallVec<InstrRef, 8> currentMatched;
   SmallVec<OperandRef, 4> currentReplaced;
@@ -51,10 +52,17 @@ class InstCombinePass {
 public:
   using TaggedIRef = CustomInstrRef<InstrRef, uint64_t>;
 
-  struct Config {
-    bool fuseCommutative = true;
-    bool liftMUX = false;
-  };
+  // struct Config {
+  //   bool fuseCommutative = true;
+  //   bool liftMUX = false;
+  // };
+  // Config config;
+
+#define CONFIG_STRUCT_LAMBDA(FIELD, ENUM)                                      \
+  FIELD(bool, fuseCommutative, true)                                           \
+  FIELD(bool, liftMUX, false)
+  CONFIG_STRUCT(CONFIG_STRUCT_LAMBDA)
+#undef CONFIG_STRUCT_LAMBDA
   Config config;
 
 private:
@@ -183,7 +191,7 @@ private:
 
     bool sign = false;
 
-    WireRef intermWire = ctx.getWires().create(activeBits);
+    WireRef intermWire = ctx.getStore<Wire>().create(activeBits);
 
     HWInstrBuilder build{ctx};
     build.setInsertPoint(instr);
@@ -472,7 +480,7 @@ private:
     auto operandEqualsFrag = [&](HWValue val,
                                  RegisterValueFragment &frag) -> HWValue {
       auto instr = !val.is<WireRef>() ? nullref : val.as<WireRef>().getDefI();
-      auto fragRef = ctx.resolveObj(frag.ref);
+      auto fragRef = ctx.resolve(frag.ref);
       if (frag.srcAddr == 0 && frag.ref == val && frag.len == val.getNumBits())
         return nullref;
       if (frag.srcAddr == 0) {
@@ -509,10 +517,10 @@ private:
       if (front.ref != end.ref || front.srcAddr != 0 ||
           end.srcAddr != end.dstAddr)
         return nullopt;
-      auto pad = ctx.resolveObj(front.ref).as<HWValue>();
+      auto pad = ctx.resolve(front.ref).as<HWValue>();
       if (pad.getNumBits() != aliases.getLen())
         return nullopt;
-      auto midRef = ctx.resolveObj(mid.ref).as<HWValue>();
+      auto midRef = ctx.resolve(mid.ref).as<HWValue>();
       HWValue midVal;
 
       if (instr.isOpc(HW_INSERT)) {
@@ -548,7 +556,7 @@ private:
             : nullref;
     for (unsigned i = 0; i < aliases.frags.size(); i++) {
       auto &frag = aliases.frags[aliases.frags.size() - i - 1];
-      auto ref = ctx.resolveObj(frag.ref);
+      auto ref = ctx.resolve(frag.ref);
       auto existing = concat ? concat.other(i)->as<HWValue>() : nullref;
       auto op = operandEqualsFrag(existing, frag);
       if (!op) {
@@ -748,7 +756,8 @@ private:
       // auto expandIfNecessary = [&](HWValue value) {
       //   if (!extendType)
       //     return value;
-      //   return HWInstrBuilder{ctx, ctx.getCFG()[root]}.buildExt(
+      //   return HWInstrBuilder{ctx,
+      //   ctx.getCtx<CoreDialectContext>().cfg[root]}.buildExt(
       //       extendBits, value, *extendType);
       // };
 
@@ -877,7 +886,7 @@ private:
     }
     deleteMatchedInstr(root);
     HWInstrBuilder build{ctx};
-    build.setInsertPoint(ctx.getCFG()[root]);
+    build.setInsertPoint(ctx.getCtx<CoreDialectContext>().cfg[root]);
 
     std::sort(operands.begin(), operands.end(),
               HWInstrBuilder::commutativeOpWireOrder);
@@ -994,7 +1003,7 @@ private:
       switch (*instr.getDialectOpcode()) {
       case *HW_LOAD: {
         auto defW = instr.def(0)->as<WireRef>();
-        auto invW = ctx.getWires().create(*defW.getNumBits());
+        auto invW = ctx.getStore<Wire>().create(*defW.getNumBits());
         replaceUses(defW, invW);
         build.buildInstrRaw(OP_NOT, 2).addRef(invW).other().addRef(defW);
         break;
@@ -1408,7 +1417,8 @@ private:
 
   void oldInstrHook(InstrRef old, ArrayRef<InstrRef> newInstrs) {
     for (auto newInstr : newInstrs)
-      ctx.sourceLocInfo.copyDebugInfo(old, newInstr);
+      ctx.getCtx<CoreDialectContext>().instrSourceLocInfo.copyDebugInfo(
+          old, newInstr);
     if (TaggedIRef{old}.get()) {
       for (auto op : old) {
 
@@ -1514,7 +1524,7 @@ private:
 
   void destroyMarkedInstrs() {
     HWInstrBuilder build{ctx};
-    for (auto instr : ctx.getInstrs()) {
+    for (auto instr : ctx.getStore<Instr>()) {
       if (TaggedIRef{instr}.get())
         build.destroyInstr(instr);
     }
@@ -1522,42 +1532,44 @@ private:
 
 public:
   void run() {
-    for (auto instr : ctx.getInstrs())
+    for (auto instr : ctx.getStore<Instr>())
       TaggedIRef{instr}.get() = 0;
 
-    ctx.getInstrs().createHooks.emplace_back([&](InstrRef ref) {
+    ctx.getStore<Instr>().createHooks.emplace_back([&](InstrRef ref) {
       TaggedIRef{ref}.get() = 0;
       worklist.emplace_back(ref);
     });
 
-    // ctx.getWires().createHooks.emplace_back(
+    // ctx.getStore<Wire>().createHooks.emplace_back(
     //     [&](WireRef wire) { knownBits.cache.clear(wire); });
 
-    for (auto mod : ctx.activeModules()) {
+    for (auto mod : ctx.getCtx<HWDialectContext>().activeModules()) {
       runOnModule(mod.iref());
     }
 
-    ctx.getInstrs().createHooks.pop_back();
-    // ctx.getWires().createHooks.pop_back();
+    ctx.getStore<Instr>().createHooks.pop_back();
+    // ctx.getStore<Wire>().createHooks.pop_back();
 
     destroyMarkedInstrs();
   }
 
-  void run(BlockRef block) {
-    for (auto instr : ctx.getInstrs())
+  void run2(BlockRef block) {
+    for (auto instr : ctx.getStore<Instr>())
       TaggedIRef{instr}.get() = 0;
-    ctx.getInstrs().createHooks.emplace_back([&](InstrRef ref) {
+    ctx.getStore<Instr>().createHooks.emplace_back([&](InstrRef ref) {
       TaggedIRef{ref}.get() = 0;
       worklist.emplace_back(ref);
     });
     runOnBlock(block);
-    ctx.getInstrs().createHooks.pop_back();
+    ctx.getStore<Instr>().createHooks.pop_back();
     destroyMarkedInstrs();
   }
 
 public:
-  explicit InstCombinePass(HWContext &ctx)
-      : ctx(ctx), cbuild(ctx.constBuild()), bitAlias(ctx) {}
+  explicit InstCombinePass(Context &ctx)
+      : ctx(ctx), cbuild(ConstantBuilder{ctx.getStore<Constant>()}),
+        bitAlias(ctx) {}
+  static InstCombinePass make(Context &ctx) { return InstCombinePass{ctx}; }
 };
 
 }; // namespace dyno

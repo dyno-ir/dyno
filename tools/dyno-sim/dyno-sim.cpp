@@ -1,5 +1,6 @@
 
 #include "dyno/Constant.h"
+#include "dyno/Context.h"
 #include "dyno/IDs.h"
 #include "dyno/NewDeleteObjStore.h"
 #include "dyno/Obj.h"
@@ -90,7 +91,7 @@ public:
 
 class VPIHandler {
 public:
-  HWContext *ctx;
+  Context *ctx;
   HWInterpreter *interpreter;
   ModuleIRef top;
   InstrRef topInstance;
@@ -113,7 +114,8 @@ public:
           for (auto reg : mod.regs()) {
             found = false;
             // todo: better data structure
-            for (auto nm : ctx->regNameInfo.getNames(reg.oref())) {
+            for (auto nm : ctx->getCtx<HWDialectContext>().regNameInfo.getNames(
+                     reg.oref())) {
               if (nm == t) {
                 ref = reg;
                 found = true;
@@ -139,9 +141,9 @@ VPIHandler *handler;
 
 // Build a wrapper top module in which the actual top is instantiated.
 // This is so we have an instance of our top module to point to.
-InstrRef createTopInstance(HWContext &ctx, ModuleIRef topLevelModule) {
-  ModuleIRef mod = ctx.createModule("__Top");
+InstrRef createTopInstance(Context &ctx, ModuleIRef topLevelModule) {
   HWInstrBuilder build{ctx};
+  ModuleIRef mod = build.buildModule("__Top");
   build.setInsertPoint(mod.block().begin());
 
   SmallVec<RegisterRef, 16> ports;
@@ -153,7 +155,7 @@ InstrRef createTopInstance(HWContext &ctx, ModuleIRef topLevelModule) {
 }
 
 int main(int argc, char **argv) {
-  HWContext ctx;
+  Context ctx;
 
   if (argc != 3) {
     fprintf(stderr, "usage: %s <dyno file> <cocotb lib>\n", argv[0]);
@@ -169,7 +171,7 @@ int main(int argc, char **argv) {
   HWPrinter print{std::cout};
   print.printCtx(ctx);
 
-  auto mod = *ctx.getModules().begin();
+  auto mod = *ctx.getStore<Module>().begin();
   mod.iref().rebuildSignature();
   auto topInstance = createTopInstance(ctx, mod.iref());
 
@@ -259,7 +261,8 @@ PLI_INT32 vpi_get(PLI_INT32 property, vpiHandle object) {
     case *HW_REGISTER:
       return vpiReg;
     case *CORE_INSTR: {
-      auto instr = handler->ctx->getInstrs().resolve(ref.as<ObjRef<Instr>>());
+      auto instr =
+          handler->ctx->getStore<Instr>().resolve(ref.as<ObjRef<Instr>>());
       switch (*instr.getDialectOpcode()) {
       case *HW_INSTANCE:
         return vpiModule;
@@ -283,14 +286,16 @@ PLI_INT32 vpi_get(PLI_INT32 property, vpiHandle object) {
 
   case vpiVector: {
     // assuming reg
-    auto instr = handler->ctx->getInstrs().resolve(ref.as<ObjRef<Instr>>());
+    auto instr =
+        handler->ctx->getStore<Instr>().resolve(ref.as<ObjRef<Instr>>());
     auto reg = instr.as<RegisterIRef>();
     return reg.getNumBits() != 1;
   }
 
   case vpiSize: {
     // assuming reg
-    auto instr = handler->ctx->getInstrs().resolve(ref.as<ObjRef<Instr>>());
+    auto instr =
+        handler->ctx->getStore<Instr>().resolve(ref.as<ObjRef<Instr>>());
     auto reg = instr.as<RegisterIRef>();
     return *reg.getNumBits();
   }
@@ -311,14 +316,16 @@ PLI_BYTE8 *vpi_get_str(PLI_INT32 property, vpiHandle object) {
     auto ref = fromHandle(object);
     switch (*ref.getType()) {
     case *HW_MODULE: {
-      auto mod = handler->ctx->getModules().resolve(ref.as<ObjRef<Module>>());
+      auto mod =
+          handler->ctx->getStore<Module>().resolve(ref.as<ObjRef<Module>>());
       data.clear();
       data.insert(data.end(), mod->name.c_str(),
                   mod->name.c_str() + mod->name.size() + 1);
       return data.data();
     }
     case *CORE_INSTR: {
-      auto instr = handler->ctx->getInstrs().resolve(ref.as<ObjRef<Instr>>());
+      auto instr =
+          handler->ctx->getStore<Instr>().resolve(ref.as<ObjRef<Instr>>());
       switch (*instr.getDialectOpcode()) {
       case *HW_INSTANCE: {
         // todo: once instances are specific
@@ -368,7 +375,7 @@ void vpi_get_value(vpiHandle expr, p_vpi_value value_p) {
   case vpiObjTypeVal:;
     abort();
   case vpiIntVal: {
-    auto val = getValue(handler->ctx->resolveObj(fromHandle(expr)));
+    auto val = getValue(handler->ctx->resolve(fromHandle(expr)));
     value_p->value.integer = val.getExactVal();
     return;
   }
@@ -376,7 +383,7 @@ void vpi_get_value(vpiHandle expr, p_vpi_value value_p) {
     static std::vector<char> buffer;
     buffer.clear();
     std::stringstream str;
-    auto val = getValue(handler->ctx->resolveObj(fromHandle(expr)));
+    auto val = getValue(handler->ctx->resolve(fromHandle(expr)));
     BigInt::stream_bin_4s_vlog(str, val, false);
     buffer.insert(buffer.end(), str.view().begin(), str.view().end());
     buffer.push_back(0);
@@ -436,17 +443,18 @@ vpiHandle vpi_iterate(PLI_INT32 type, vpiHandle refHandle) {
     auto ref = fromHandle(refHandle);
     switch (*ref.getType()) {
     case *HW_REGISTER:
-      bits = *handler->ctx->getRegs()
+      bits = *handler->ctx->getStore<Register>()
                   .resolve(ref.as<ObjRef<Register>>())
                   .getNumBits();
       break;
     case *HW_WIRE:
-      bits = *handler->ctx->getWires()
+      bits = *handler->ctx->getStore<Wire>()
                   .resolve(ref.as<ObjRef<Wire>>())
                   .getNumBits();
       break;
     case *CORE_INSTR: {
-      auto instr = handler->ctx->getInstrs().resolve(ref.as<ObjRef<Instr>>());
+      auto instr =
+          handler->ctx->getStore<Instr>().resolve(ref.as<ObjRef<Instr>>());
       switch (*instr.getDialectOpcode()) {
       case *HW_REGISTER_DEF:
       case *HW_INPUT_REGISTER_DEF:
@@ -474,8 +482,9 @@ vpiHandle vpi_iterate(PLI_INT32 type, vpiHandle refHandle) {
   //  {
   //   assert(refHandle == nullptr);
   //   std::function<DynObjRef()> func =
-  //       [ref = handler->ctx->getModules().begin()]() mutable -> DynObjRef {
-  //     if (ref == handler->ctx->getModules().end())
+  //       [ref = handler->ctx->getStore<Module>().begin()]() mutable ->
+  //       DynObjRef {
+  //     if (ref == handler->ctx->getStore<Module>().end())
   //       return nullref;
   //     auto rv = *ref;
   //     ++ref;
@@ -503,7 +512,7 @@ vpiHandle vpi_put_value(vpiHandle object, p_vpi_value value_p,
 
   assert(time_p->type == vpiSimTime && time_p->low == 0 && time_p->high == 0);
   auto ref = fromHandle(object);
-  auto reg = handler->ctx->getInstrs()
+  auto reg = handler->ctx->getStore<Instr>()
                  .resolve(ref.as<ObjRef<Instr>>())
                  .as<RegisterIRef>();
 

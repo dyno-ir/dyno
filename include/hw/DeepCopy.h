@@ -17,7 +17,7 @@ concept IsCopyHook =
 
 class DeepCopier {
 public:
-  HWContext &ctx;
+  Context &ctx;
 
   // we actually don't need to store dialect/ty twice so could just store
   // objID for new. Then we need another type switch to get the ptr though, so
@@ -37,7 +37,7 @@ public:
     switch (*obj.getType()) {
     case *CORE_BLOCK: {
       auto asBlock = obj.as<BlockRef>();
-      BlockRef blockRef = ctx.createBlock();
+      BlockRef blockRef = ctx.getCtx<CoreDialectContext>().createBlock();
       blockRef.reserve(asBlock.size());
       blockDepth++;
       deepCopyInstrsImpl(asBlock.begin(), blockRef.begin(), instrCallback);
@@ -50,19 +50,19 @@ public:
     }
     case *HW_WIRE: {
       auto asWire = obj.as<WireRef>();
-      return ctx.getWires().create(asWire->numBits);
+      return ctx.getStore<Wire>().create(asWire->numBits);
     }
     case *HW_REGISTER: {
       auto asReg = obj.as<RegisterRef>();
-      return ctx.getWires().create(asReg->numBits);
+      return ctx.getStore<Wire>().create(asReg->numBits);
     }
     case *HW_PROCESS: {
       // auto asProc = obj.as<ProcessRef>();
-      return ctx.getProcs().create();
+      return ctx.getStore<Process>().create();
     }
     case *HW_TRIGGER: {
       auto asTrigger = obj.as<TriggerRef>();
-      return ctx.getTriggers().create(*asTrigger);
+      return ctx.getStore<Trigger>().create(*asTrigger);
     }
     default:
       dyno_unreachable("copying is not supported");
@@ -71,7 +71,7 @@ public:
   template <IsCopyHook InstrHook>
   InstrRef copyInstr(InstrRef srcInstr, BlockRef_iterator<true> dstIt,
                      InstrHook instrCallback) {
-    auto copyInstr = InstrRef{ctx.getInstrs().create(
+    auto copyInstr = InstrRef{ctx.getStore<Instr>().create(
         srcInstr.getNumOperands(), srcInstr.getDialectOpcode())};
     dstIt.insertPrev(copyInstr);
     InstrBuilder build{copyInstr};
@@ -93,7 +93,8 @@ public:
       build.addRef(ref);
     }
 
-    ctx.sourceLocInfo.copyDebugInfo(srcInstr, copyInstr);
+    ctx.getCtx<CoreDialectContext>().instrSourceLocInfo.copyDebugInfo(
+        srcInstr, copyInstr);
     return copyInstr;
   }
 
@@ -104,7 +105,7 @@ public:
   template <IsCopyHook InstrHook>
   InstrRef moveInstr(InstrRef srcInstr, BlockRef_iterator<true> dstIt,
                      InstrHook instrCallback) {
-    ctx.getCFG()[srcInstr] = dstIt;
+    ctx.getCtx<CoreDialectContext>().cfg[srcInstr] = dstIt;
     return srcInstr;
   }
 
@@ -158,7 +159,7 @@ public:
   }
 
 public:
-  DeepCopier(HWContext &ctx) : ctx(ctx) {}
+  DeepCopier(Context &ctx) : ctx(ctx) {}
 };
 
 }; // namespace dyno

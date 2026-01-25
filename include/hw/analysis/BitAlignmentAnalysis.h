@@ -1,6 +1,7 @@
 #pragma once
 
 #include "dyno/Constant.h"
+#include "dyno/Context.h"
 #include "dyno/Instr.h"
 #include "dyno/Obj.h"
 #include "dyno/Opcode.h"
@@ -13,7 +14,7 @@
 
 namespace dyno {
 class LinearExpressionAnalysis {
-  HWContext &ctx [[maybe_unused]];
+  Context &ctx [[maybe_unused]];
 
   class LinearExpr {
   public:
@@ -139,7 +140,7 @@ class LinearExpressionAnalysis {
   LinearExpr retVal;
 
 public:
-  LinearExpressionAnalysis(HWContext &ctx) : ctx(ctx) {}
+  LinearExpressionAnalysis(Context &ctx) : ctx(ctx) {}
   auto getLinearExpression(WireRef wire) {
     stack.emplace_back(wire.getDef());
 

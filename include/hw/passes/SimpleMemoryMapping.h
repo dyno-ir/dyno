@@ -1,15 +1,16 @@
 #pragma once
 
+#include "dyno/Context.h"
+#include "dyno/Pass.h"
 #include "hw/HWContext.h"
 #include "hw/HWPrinter.h"
 #include "hw/HWValue.h"
 #include "hw/IDs.h"
 #include "hw/LoadStore.h"
-#include "support/DynBitSet.h"
 #include <cstdint>
 namespace dyno {
 
-class SimpleMemoryMappingPass {
+class SimpleMemoryMappingPass : public Pass<SimpleMemoryMappingPass> {
 
   struct AbstractMemory {
     uint32_t bitsPerWord;
@@ -42,7 +43,7 @@ class SimpleMemoryMappingPass {
     bool enablePolarity;
   };
 
-  HWContext &ctx;
+  Context &ctx;
   SmallDenseSet<ObjRef<Instr>, 2> coveredUses;
 
   bool findReadPorts(SmallVecImpl<ReadPort> &out, RegisterIRef reg) {
@@ -276,9 +277,10 @@ class SimpleMemoryMappingPass {
   }
 
 public:
-  SimpleMemoryMappingPass(HWContext &ctx) : ctx(ctx) {}
+  auto make(Context &ctx) { return SimpleMemoryMappingPass(ctx); }
+  explicit SimpleMemoryMappingPass(Context &ctx) : ctx(ctx) {}
   void run() {
-    for (auto mod : ctx.activeModules()) {
+    for (auto mod : ctx.getCtx<HWDialectContext>().activeModules()) {
       runOnModule(mod.iref());
     }
   }

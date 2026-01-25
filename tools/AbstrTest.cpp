@@ -5,9 +5,9 @@
 using namespace dyno;
 
 int main() {
-  HWContext ctx;
+  Context ctx;
 
-  auto mod = ctx.createModule("test");
+  auto mod = HWInstrBuilder{ctx}.buildModule("test");
   HWInstrBuilder buildTop{ctx, mod.block().begin()};
 
   buildTop.buildInputPort(mod);
@@ -44,7 +44,7 @@ int main() {
 
   // auto endIt = ifelse.getFalseBlock().end();
   //--endIt;
-  // ctx.getInstrs().destroy(endIt.instr());
+  // ctx.getStore<Instr>().destroy(endIt.instr());
   // endIt.erase();
 
   auto block3 = buildTop.buildProcess().block();
@@ -64,7 +64,7 @@ int main() {
   auto param = build.buildFuncParam();
   auto ret = build.buildFuncReturn(param, build.buildConst(64, 1UL << 40));
   auto ret2 =
-      build.buildFuncReturn(param, ConstantBuilder{ctx.getConstants()}
+      build.buildFuncReturn(param, ConstantBuilder{ctx.getStore<Constant>()}
                                        .add(ret.operand(1)->as<ConstantRef>())
                                        .add(1)
                                        .bitAND(-2)

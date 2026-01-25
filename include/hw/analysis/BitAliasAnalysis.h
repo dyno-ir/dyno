@@ -2,6 +2,7 @@
 
 #include "dyno/AnalysisCache.h"
 #include "dyno/Constant.h"
+#include "dyno/Context.h"
 #include "dyno/Instr.h"
 #include "dyno/Obj.h"
 #include "dyno/Opcode.h"
@@ -18,7 +19,7 @@
 #include <optional>
 namespace dyno {
 class BitAliasAnalysis : public CacheInvalidation<BitAliasAnalysis> {
-  HWContext &ctx;
+  Context &ctx;
   bool change;
 
   class BitAliasAcc : public RegisterValue {
@@ -98,12 +99,14 @@ class BitAliasAnalysis : public CacheInvalidation<BitAliasAnalysis> {
 
       int64_t oobLen = int64_t(addr + len) - retVal.getLen();
       if (addr >= retVal.getLen()) {
-        frame.acc = BitAliasAcc{ctx.constBuild().undef(len)};
+        frame.acc =
+            BitAliasAcc{ConstantBuilder{ctx.getStore<Constant>()}.undef(len)};
         change = 1;
       } else if (oobLen > 0) {
         frame.acc = retVal.getRange(addr, len - oobLen);
-        frame.acc.frags.emplace_back(ctx.constBuild().undef(oobLen).get(), 0,
-                                     len - oobLen, oobLen, false, nullopt);
+        frame.acc.frags.emplace_back(
+            ConstantBuilder{ctx.getStore<Constant>()}.undef(oobLen).get(), 0,
+            len - oobLen, oobLen, false, nullopt);
         change = 1;
       } else {
         frame.acc = retVal.getRange(addr, len);
@@ -131,8 +134,9 @@ class BitAliasAnalysis : public CacheInvalidation<BitAliasAnalysis> {
       auto outLen = *instr.def(0)->as<WireRef>().getNumBits();
       auto inLen = *instr.other(0)->as<HWValue>().getNumBits();
       assert(outLen >= inLen);
-      retVal.appendTop(ctx.constBuild().zero(outLen - inLen).get(), 0,
-                       outLen - inLen);
+      retVal.appendTop(
+          ConstantBuilder{ctx.getStore<Constant>()}.zero(outLen - inLen).get(),
+          0, outLen - inLen);
       frame.acc = std::move(retVal);
       change |= nested;
       change |= notRoot && !rootIsConcatOrInsert;
@@ -145,8 +149,9 @@ class BitAliasAnalysis : public CacheInvalidation<BitAliasAnalysis> {
       auto outLen = *instr.def(0)->as<WireRef>().getNumBits();
       auto inLen = *instr.other(0)->as<HWValue>().getNumBits();
       assert(outLen >= inLen);
-      retVal.appendTop(ctx.constBuild().undef(outLen - inLen).get(), 0,
-                       outLen - inLen);
+      retVal.appendTop(
+          ConstantBuilder{ctx.getStore<Constant>()}.undef(outLen - inLen).get(),
+          0, outLen - inLen);
       frame.acc = std::move(retVal);
       change |= nested;
       change |= notRoot && !rootIsConcatOrInsert;
@@ -236,7 +241,7 @@ class BitAliasAnalysis : public CacheInvalidation<BitAliasAnalysis> {
 public:
   AnalysisCache<ObjRef<Wire>, BitAliasAcc> cache;
 
-  BitAliasAnalysis(HWContext &ctx) : ctx(ctx) {}
+  BitAliasAnalysis(Context &ctx) : ctx(ctx) {}
   std::pair<RegisterValue, bool> getReprAliases(HWValue root) {
     if (auto asConst = root.dyn_as<ConstantRef>()) {
       return {BitAliasAcc{asConst}, false};
@@ -281,7 +286,7 @@ public:
     if (retVal.frags.size() == 1) {
       // if the result is just a single HWValue (that's not the root wire),
       // we can just do replace all uses on the root wire, so always change
-      if (ctx.resolveObj(retVal.frags.front().ref).as<HWValue>().getNumBits() ==
+      if (ctx.resolve(retVal.frags.front().ref).as<HWValue>().getNumBits() ==
           rootWire.getNumBits()) {
         assert(retVal.frags.front().srcAddr == 0);
         assert(retVal.frags.front().len == *rootWire.getNumBits());

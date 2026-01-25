@@ -31,7 +31,7 @@ static InstrRef getDefInstr(InstrRef::iterator use) {
   return (*use)->as<WireRef>().getDefI();
 }
 
-static void deleteF(SmallVecImpl<InstrRef> &matched, HWContext &ctx,
+static void deleteF(SmallVecImpl<InstrRef> &matched, Context &ctx,
                     InstrRef ref) {
   // for (auto op : ref)
   //   op.replace(FatDynObjRef<>{nullref});
@@ -39,7 +39,7 @@ static void deleteF(SmallVecImpl<InstrRef> &matched, HWContext &ctx,
   matched.emplace_back(ref);
 }
 
-static void deleteIfSingleUse(SmallVecImpl<InstrRef> &matched, HWContext &ctx,
+static void deleteIfSingleUse(SmallVecImpl<InstrRef> &matched, Context &ctx,
                               InstrRef ref) {
 
   // this is only valid for direct users replaced values.
@@ -70,12 +70,12 @@ static void replaceAllUses(SmallVecImpl<OperandRef> &replaced,
       newOp, [&replaced](OperandRef r) { replaced.emplace_back(r); });
 }
 
-bool dyno::generated(HWContext &ctx, SmallVecImpl<InstrRef> &matched,
+bool dyno::generated(Context &ctx, SmallVecImpl<InstrRef> &matched,
                      SmallVecImpl<OperandRef> &replaced, HWInstrRef r0) {
 
   HWInstrBuilder build{ctx};
   build.setInsertPoint(r0.iter(ctx));
-  auto cbuild = ctx.constBuild();
+  auto cbuild = ConstantBuilder{ctx.getStore<Constant>()};
 
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wunused-label"

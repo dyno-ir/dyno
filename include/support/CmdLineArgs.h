@@ -313,8 +313,8 @@ public:
 template <>
 inline void CmdLineArg<CmdLineHelpObj>::parse(CmdLineArgBase *self,
                                               const char *ptr) {
-  static_cast<CmdLineArg<CmdLineHelpObj> *>(self)
-      ->value.parent->printHelpExit();
+  static_cast<CmdLineArg<CmdLineHelpObj> *>(self)->value.parent->printHelpExit(
+      false);
 }
 template <>
 inline void CmdLineArg<ArrayRef<char>>::parse(CmdLineArgBase *self,
@@ -383,3 +383,4 @@ PARSE_NUMERIC(uint32_t)
 PARSE_NUMERIC(int32_t)
 PARSE_NUMERIC(uint64_t)
 PARSE_NUMERIC(int64_t)
+#undef PARSE_NUMERIC
