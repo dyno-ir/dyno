@@ -75,6 +75,11 @@ public:
     MemberRef{&stdCellInfos, BindMethod<&StoreType_t<StdCellInfo>::resolveGeneric>::fv},
   };
   // clang-format on
+
+  HWDialectContext() {
+    registers.destroyHooks.emplace_back(
+        [&](RegisterRef ref) { regNameInfo.clearNames(ref); });
+  }
 };
 
 template <> struct DialectContext<DialectID{DIALECT_HW}> {

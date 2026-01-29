@@ -8,6 +8,7 @@
 #include "hw/Module.h"
 #include "support/CallableRef.h"
 #include "support/TemplateUtil.h"
+#include <cctype>
 
 namespace dyno {
 class HWDialectPrinter {
@@ -135,7 +136,9 @@ public:
       auto bits = lexer->popEnsure(Token::INT_LITERAL);
       lexer->popEnsure(DynoLexer::op_rbrclose);
       auto reg = ctx->getStore<Register>().create(bits.intLit.value);
-      if (!name.empty() && !isdigit(name[0]))
+      if (!name.empty() && !isdigit(name[0]) &&
+          !(name[0] == 'r' && Range{name.begin() + 1, name.end()}.all(
+                                  [](char c) { return isdigit(c); })))
         ctx->getCtx<HWDialectContext>().regNameInfo.addName(
             reg, std::string_view{name});
       return reg;

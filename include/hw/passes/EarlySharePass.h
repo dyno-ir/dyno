@@ -17,9 +17,10 @@ class EarlySharePass : public Pass<EarlySharePass> {
   Context &ctx;
 
 public:
-  struct Config {
-    DialectOpcode opToShare = OP_ADD;
-  };
+#define CONFIG_STRUCT_LAMBDA(FIELD, ENUM)                                      \
+  FIELD(DialectOpcode, opToShare, OP_ADD)
+  CONFIG_STRUCT(CONFIG_STRUCT_LAMBDA)
+#undef CONFIG_STRUCT_LAMBDA
   Config config;
 
 private:

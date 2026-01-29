@@ -1,6 +1,7 @@
 #include "aig/AIGContext.h"
 #include "dyno/Context.h"
 #include "dyno/DialectInfo.h"
+#include "dyno/Lexer.h"
 #include "dyno/Obj.h"
 #include "dyno/Parser.h"
 #include "hw/HWContext.h"
@@ -90,7 +91,7 @@ public:
 };
 
 class MetaPassPipelineInterpreter {
-  DynoLexer &lexer;
+  Context &ctx;
   ArrayRef<void *> passCtorArgs;
   PassStorage passes;
 
@@ -108,15 +109,16 @@ public:
         auto cfg = instr.operand(0)->dyn_as<MapRef>();
         if (!cfg)
           report_fatal_error("expected map object");
+        DynoLexer lexer{ctx.getDialectInfos(), ArrayRef<char>::emptyRef(),
+                        "<internal>"};
         pass.config(cfg->data, lexer);
       }
       pass.run(ArrayRef<void *>::emptyRef());
     }
   }
 
-  MetaPassPipelineInterpreter(Context &ctx, DynoLexer &lexer,
-                              ArrayRef<void *> passCtorArgs)
-      : lexer(lexer), passCtorArgs(passCtorArgs), passes(ctx) {}
+  MetaPassPipelineInterpreter(Context &ctx, ArrayRef<void *> passCtorArgs)
+      : ctx(ctx), passCtorArgs(passCtorArgs), passes(ctx) {}
 };
 
 int main(int argc, char **argv) {
@@ -164,7 +166,8 @@ int main(int argc, char **argv) {
   metaParser.parse(flowFile, flowFileName, flowBlock.end());
 
   SmallVec<void *, 1> passCtorArgs{reinterpret_cast<void *>(&ctx)};
-  MetaPassPipelineInterpreter pipeline{ctx, *parser.lexer, passCtorArgs};
+
+  MetaPassPipelineInterpreter pipeline{ctx, passCtorArgs};
 
   pipeline.interpretPassPipeline(flowBlock);
 

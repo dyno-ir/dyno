@@ -8,13 +8,13 @@ meta.MODULE_INLINE_PASS
 meta.TRIGGER_DEDUPE_PASS
 
 // early dedupe/simplification
-meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS map("differentBlocks": "false")
+meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS map("differentBlocks": "0")
 meta.INST_COMBINE_PASS
 
 // process fusion & ssa construction
 meta.SEQ_TO_COMB_PASS
 meta.SSA_CONSTRUCT_PASS
-meta.PROCESS_LINEARIZE_PASS map("retainIODeps": "false", "retainInnerDeps": "false")
+meta.PROCESS_LINEARIZE_PASS map("retainIODeps": "0", "retainInnerDeps": "0")
 meta.SSA_CONSTRUCT_PASS
 meta.SSA_CONSTRUCT_PASS map("mode": "DEFERRED")
 meta.INST_COMBINE_PASS
@@ -24,8 +24,82 @@ meta.INST_COMBINE_PASS
 // canonicalize
 meta.LOOP_SIMPLIFY_PASS
 meta.AGGRESSIVE_DEAD_CODE_ELIMINATION_PASS
-meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS map("differentBlocks": "true")
-meta.ORDER_INSTRS_PASS map("assertNoCircularDeps": "true", "moveStoresBeforeLoads": "false")
+meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS map("differentBlocks": "1")
+meta.ORDER_INSTRS_PASS map("assertNoCircularDeps": "1", "moveStoresBeforeLoads": "0")
 meta.INST_COMBINE_PASS
 meta.AGGRESSIVE_DEAD_CODE_ELIMINATION_PASS
+meta.INST_COMBINE_PASS
+
+// unroll loops, simplify
+meta.LINEARIZE_CONTROL_FLOW_PASS map("flattenLoops": "1", "flattenMultiway": "0")
+meta.PROCESS_LINEARIZE_PASS map("retainIODeps": "0", "retainInnerDeps": "0")
+meta.SSA_CONSTRUCT_PASS
+meta.LOAD_COALESCE_PASS
+meta.INST_COMBINE_PASS
+meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS map("differentBlocks": "1")
+meta.ORDER_INSTRS_PASS map("assertNoCircularDeps": "1", "moveStoresBeforeLoads": "0")
+meta.INST_COMBINE_PASS
+meta.AGGRESSIVE_DEAD_CODE_ELIMINATION_PASS
+
+// lower arith to ADD
+meta.LOWER_OPS_PASS map(
+  "lowerMultiInputAdd"     : "0",
+  "lowerAddCompress"       : "0",
+  "lowerSimpleAdd"         : "0",
+  "lowerSub"               : "1",
+  "lowerConstantMul"       : "1",
+  "lowerMultiInputBitwise" : "0",
+  "lowerEqualityICMP"      : "0",
+  "lowerOrderingICMP"      : "1",
+  "lowerShift"             : "0",
+  "lowerInsert"            : "0",
+  "lowerExtract"           : "0",
+)
+meta.INST_COMBINE_PASS
+meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS
+
+// share
+meta.FUZZY_CSE_PASS
+meta.ORDER_INSTRS_PASS map("assertNoCircularDeps": "1", "moveStoresBeforeLoads": "0")
+meta.INST_COMBINE_PASS
+meta.EARLY_SHARE_PASS map("opToShare": "op.ADD")
+meta.EARLY_SHARE_PASS map("opToShare": "hw.SPLICE")
+meta.EARLY_SHARE_PASS map("opToShare": "hw.INSERT")
+meta.INST_COMBINE_PASS
+meta.SSA_CONSTRUCT_PASS
+meta.INST_COMBINE_PASS
+meta.AGGRESSIVE_DEAD_CODE_ELIMINATION_PASS
+
+// merge processes created during share
+meta.PROCESS_LINEARIZE_PASS map("retainIODeps": "0", "retainInnerDeps": "0")
+meta.ORDER_INSTRS_PASS map("assertNoCircularDeps": "1", "moveStoresBeforeLoads": "1")
+meta.SSA_CONSTRUCT_PASS
+meta.LOAD_COALESCE_PASS
+meta.INST_COMBINE_PASS
+meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS
+meta.ORDER_INSTRS_PASS map("assertNoCircularDeps": "1", "moveStoresBeforeLoads": "1")
+meta.AGGRESSIVE_DEAD_CODE_ELIMINATION_PASS
+
+// flatten all remaining control flow
+meta.LINEARIZE_CONTROL_FLOW_PASS map("flattenLoops": "1", "flattenMultiway": "1")
+meta.SSA_CONSTRUCT_PASS
+meta.LOAD_COALESCE_PASS
+meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS
+meta.INST_COMBINE_PASS
+meta.AGGRESSIVE_DEAD_CODE_ELIMINATION_PASS
+
+// optimize, share
+meta.INST_COMBINE_PASS
+meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS
+meta.FUZZY_CSE_PASS
+meta.ORDER_INSTRS_PASS map("moveStoresBeforeLoads": "1")
+meta.INST_COMBINE_PASS
+meta.SSA_CONSTRUCT_PASS
+meta.INST_COMBINE_PASS
+meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS
+meta.INST_COMBINE_PASS
+meta.AGGRESSIVE_DEAD_CODE_ELIMINATION_PASS
+
+// MUX tree testing
+meta.MUX_TREE_FLATTEN_PASS
 meta.INST_COMBINE_PASS

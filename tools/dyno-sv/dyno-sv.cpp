@@ -12,6 +12,9 @@ int main(int argc, char **argv) {
   driver.cmdLine.add("--liberty", libertyFile,
                      "Liberty file (stdcell definitions)");
 
+  std::optional<bool> parseOnly = std::nullopt;
+  driver.cmdLine.add("--parseOnly", parseOnly, "Parse only.");
+
   if (!driver.parseCommandLine(argc, argv))
     return 1;
 
@@ -38,6 +41,17 @@ int main(int argc, char **argv) {
     return 1;
 
   Context ctx;
+  HWDialectContext hwContext;
+  CoreDialectContext coreContext;
+  OpDialectContext opContext;
+  AIGDialectContext aigContext;
+  ctx.registerDialect(coreContext);
+  ctx.registerDialect(hwContext);
+  ctx.registerDialect(opContext);
+  ctx.registerDialect(aigContext);
+
+  ctx.getStore<Instr>().destroyHooks.emplace_back(
+      [&](InstrRef instr) { assert(!ctx.getCFG().contains(instr)); });
 
   VisitorAST visitor{ctx, driver.sourceManager};
   compilation->getRoot().visit(visitor);
@@ -51,12 +65,14 @@ int main(int argc, char **argv) {
   pipeline.checkAfterAll = true;
   pipeline.dumpAfterAll = true;
   debugType = 1;
-  pipeline.runOptPipeline();
-  pipeline.runLoweringPipeline();
+
+  if (!parseOnly || !*parseOnly) {
+    pipeline.runOptPipeline();
+    pipeline.runLoweringPipeline();
+    std::ofstream ofV{"dump.v"};
+    pipeline.dumpVerilog(ofV);
+  }
 
   std::ofstream of{"dump.dyno"};
   pipeline.dumpDyno(of);
-
-  std::ofstream ofV{"dump.v"};
-  pipeline.dumpVerilog(ofV);
 }

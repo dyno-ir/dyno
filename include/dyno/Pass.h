@@ -155,6 +155,7 @@ struct ConfigParser {
       if (!opc)
         return false;
       *reinterpret_cast<DialectOpcode *>(ptr) = *opc;
+      break;
     }
     case ConfigStructType::DIALECT_TYPE: {
       lexer.reset(data);
@@ -162,6 +163,7 @@ struct ConfigParser {
       if (!type)
         return false;
       *reinterpret_cast<DialectType *>(ptr) = *type;
+      break;
     }
     case ConfigStructType::DIALECT: {
       lexer.reset(data);

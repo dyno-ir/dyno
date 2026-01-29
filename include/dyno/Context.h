@@ -45,6 +45,11 @@ public:
   template <> auto &getStore<Constant>() { return constants; }
 
   BlockRef createBlock() { return cfg.blocks.create(cfg); };
+
+  CoreDialectContext() {
+    instrs.destroyHooks.emplace_back(
+        [&](InstrRef instr) { instrSourceLocInfo.resetDebugInfo(instr); });
+  }
 };
 
 template <> struct DialectContext<DialectID{DIALECT_CORE}> {

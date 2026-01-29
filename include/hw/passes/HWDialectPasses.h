@@ -7,6 +7,7 @@
 #include "hw/passes/CheckPass.h"
 #include "hw/passes/CommonSubexpressionElimination.h"
 #include "hw/passes/ConstantMapping.h"
+#include "hw/passes/DumpPass.h"
 #include "hw/passes/EarlySharePass.h"
 #include "hw/passes/FindLongestPath.h"
 #include "hw/passes/FlipFlopInference.h"
@@ -19,6 +20,7 @@
 #include "hw/passes/LoopSimplify.h"
 #include "hw/passes/LowerOps.h"
 #include "hw/passes/ModuleInline.h"
+#include "hw/passes/MuxTreeFlatten.h"
 #include "hw/passes/OrderInstrs.h"
 #include "hw/passes/ParseLiberty.h"
 #include "hw/passes/ProcessLinearize.h"
@@ -34,35 +36,37 @@
 namespace dyno {
 template <>
 inline void
-registerDialectPasses<DialectID{DIALECT_HW}>(PassRegistry &metaPassManager) {
-  metaPassManager.registerPass<FunctionInlinePass>();
-  metaPassManager.registerPass<TriggerDedupePass>();
-  metaPassManager.registerPass<SeqToCombPass>();
-  metaPassManager.registerPass<SSAConstructPass>();
-  metaPassManager.registerPass<ProcessLinearizePass>();
-  metaPassManager.registerPass<InstCombinePass>();
-  metaPassManager.registerPass<ModuleInlinePass>();
-  metaPassManager.registerPass<LoopSimplifyPass>();
-  metaPassManager.registerPass<LinearizeControlFlowPass>();
-  metaPassManager.registerPass<AggressiveDeadCodeEliminationPass>();
-  metaPassManager.registerPass<LowerOpsPass>();
-  metaPassManager.registerPass<AIGConstructPass>();
-  metaPassManager.registerPass<ABCPass>();
-  metaPassManager.registerPass<ParseLibertyPass>();
-  metaPassManager.registerPass<FlipFlopInferencePass>();
-  metaPassManager.registerPass<MuxTreeOptimizationPass>();
-  metaPassManager.registerPass<CommonSubexpressionEliminationPass>();
-  metaPassManager.registerPass<FlipFlopMappingPass>();
-  metaPassManager.registerPass<RemoveBuffersPass>();
-  metaPassManager.registerPass<OrderInstrsPass>();
-  metaPassManager.registerPass<ConstantMappingPass>();
-  metaPassManager.registerPass<FindLongestPathPass>();
-  metaPassManager.registerPass<CheckPass>();
-  metaPassManager.registerPass<RegisterPartitionPass>();
-  metaPassManager.registerPass<FuzzyCSEPass>();
-  metaPassManager.registerPass<EarlySharePass>();
-  metaPassManager.registerPass<SimpleMemoryMappingPass>();
-  metaPassManager.registerPass<LoadCoalescePass>();
-  metaPassManager.registerPass<RemoveInitProcsPass>();
+registerDialectPasses<DialectID{DIALECT_HW}>(PassRegistry &passRegistry) {
+  passRegistry.registerPass<FunctionInlinePass>();
+  passRegistry.registerPass<TriggerDedupePass>();
+  passRegistry.registerPass<SeqToCombPass>();
+  passRegistry.registerPass<SSAConstructPass>();
+  passRegistry.registerPass<ProcessLinearizePass>();
+  passRegistry.registerPass<InstCombinePass>();
+  passRegistry.registerPass<ModuleInlinePass>();
+  passRegistry.registerPass<LoopSimplifyPass>();
+  passRegistry.registerPass<LinearizeControlFlowPass>();
+  passRegistry.registerPass<AggressiveDeadCodeEliminationPass>();
+  passRegistry.registerPass<LowerOpsPass>();
+  passRegistry.registerPass<AIGConstructPass>();
+  passRegistry.registerPass<ABCPass>();
+  passRegistry.registerPass<ParseLibertyPass>();
+  passRegistry.registerPass<FlipFlopInferencePass>();
+  passRegistry.registerPass<MuxTreeOptimizationPass>();
+  passRegistry.registerPass<CommonSubexpressionEliminationPass>();
+  passRegistry.registerPass<FlipFlopMappingPass>();
+  passRegistry.registerPass<RemoveBuffersPass>();
+  passRegistry.registerPass<OrderInstrsPass>();
+  passRegistry.registerPass<ConstantMappingPass>();
+  passRegistry.registerPass<FindLongestPathPass>();
+  passRegistry.registerPass<CheckPass>();
+  passRegistry.registerPass<RegisterPartitionPass>();
+  passRegistry.registerPass<FuzzyCSEPass>();
+  passRegistry.registerPass<EarlySharePass>();
+  passRegistry.registerPass<SimpleMemoryMappingPass>();
+  passRegistry.registerPass<LoadCoalescePass>();
+  passRegistry.registerPass<RemoveInitProcsPass>();
+  passRegistry.registerPass<MuxTreeFlattenPass>();
+  passRegistry.registerPass<DumpPass>();
 }
 }; // namespace dyno

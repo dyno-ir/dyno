@@ -3,6 +3,7 @@
 #include "aig/AIGPrinter.h"
 #include "aig/IDs.h"
 #include "aig/PrintParse.h"
+#include "dyno/Context.h"
 #include "dyno/IDs.h"
 #include "dyno/InstrPrinter.h"
 #include "dyno/Obj.h"
@@ -10,7 +11,6 @@
 #include "dynomite/IDs.h"
 #include "hw/DebugInfo.h"
 #include "hw/HWAbstraction.h"
-#include "dyno/Context.h"
 #include "hw/HWContext.h"
 #include "hw/IDs.h"
 #include "hw/PrintParse.h"
@@ -44,14 +44,16 @@ public:
   auto &regNames() { return std::get<HWDialectPrinter>(printers).regNames; }
 
   [[nodiscard]] auto bindCtx(Context &ctx) {
-    return std::pair(sourceLocInfo.bind(&ctx.getCtx<CoreDialectContext>().instrSourceLocInfo),
-                     regNames().bind(&ctx.getCtx<HWDialectContext>().regNameInfo));
+    return std::pair(
+        sourceLocInfo.bind(
+            &ctx.getCtx<CoreDialectContext>().instrSourceLocInfo),
+        regNames().bind(&ctx.getCtx<HWDialectContext>().regNameInfo));
   }
 
-  void printCtx(Context &ctx) {
+  void printCtx(Context &ctx, bool printStdCells = false) {
     auto tok = bindCtx(ctx);
     for (auto mod : ctx.getStore<Module>()) {
-      if (mod.iref().isOpc(HW_STDCELL_DEF))
+      if (mod.iref().isOpc(HW_STDCELL_DEF) && !printStdCells)
         continue;
       printInstr(mod.iref());
     }

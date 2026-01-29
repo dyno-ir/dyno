@@ -127,7 +127,7 @@ public:
   ModuleIRef buildStdCell(std::string_view name, StdCellInfoRef info,
                           DialectOpcode defOpc = HW_STDCELL_DEF) {
     auto moduleRef = ctx.getStore<Module>().create(std::string(name));
-    auto moduleInstr = ctx.getStore<Instr>().create(2, defOpc);
+    auto moduleInstr = ctx.getStore<Instr>().create(3, defOpc);
 
     InstrBuilder{moduleInstr}
         .addRef(moduleRef)
@@ -1344,6 +1344,21 @@ public:
     auto rv = buildInstr(HW_MUX, true, sel, trueV, falseV).defW();
     rv->numBits = trueV.getNumBits();
     return rv;
+  }
+
+  HWValue buildOneHotMux(MutArrayRef<std::pair<HWValue, HWValue>> cases) {
+    assert(!cases.empty());
+
+    Range{cases}.sort([](auto &lhs, auto &rhs) {
+      return commutativeOpOperandOrder(lhs.second, rhs.second);
+    });
+
+    auto ib = buildInstrRaw(HW_ONEHOT_MUX, 1 + cases.size() * 2);
+    auto defW = ctx.getStore<Wire>().create(cases[0].second.getNumBits());
+    ib.addRef(defW).other();
+    for (auto [sel, val] : cases)
+      ib.addRef(sel).addRef(val);
+    return defW;
   }
 
   void destroyObj(FatDynObjRef<> obj) {

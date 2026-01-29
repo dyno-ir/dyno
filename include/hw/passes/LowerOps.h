@@ -33,19 +33,20 @@ class LowerOpsPass : public Pass<LowerOpsPass> {
   AutoCopyDebugInfoStack autoDebugInfo;
 
 public:
-  struct Config {
-    bool lowerMultiInputAdd = true;
-    bool lowerAddCompress = true;
-    bool lowerSimpleAdd = true;
-    bool lowerSub = true;
-    bool lowerConstantMul = true;
-    bool lowerMultiInputBitwise = true;
-    bool lowerEqualityICMP = true;
-    bool lowerOrderingICMP = true;
-    bool lowerShift = true;
-    bool lowerInsert = true;
-    bool lowerExtract = true;
-  };
+#define CONFIG_STRUCT_LAMBDA(FIELD, ENUM)                                      \
+  FIELD(bool, lowerMultiInputAdd, true)                                        \
+  FIELD(bool, lowerAddCompress, true)                                          \
+  FIELD(bool, lowerSimpleAdd, true)                                            \
+  FIELD(bool, lowerSub, true)                                                  \
+  FIELD(bool, lowerConstantMul, true)                                          \
+  FIELD(bool, lowerMultiInputBitwise, true)                                    \
+  FIELD(bool, lowerEqualityICMP, true)                                         \
+  FIELD(bool, lowerOrderingICMP, true)                                         \
+  FIELD(bool, lowerShift, true)                                                \
+  FIELD(bool, lowerInsert, true)                                               \
+  FIELD(bool, lowerExtract, true)
+  CONFIG_STRUCT(CONFIG_STRUCT_LAMBDA)
+#undef CONFIG_STRUCT_LAMBDA
   Config config;
 
 private:

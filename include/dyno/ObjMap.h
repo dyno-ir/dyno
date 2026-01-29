@@ -18,7 +18,7 @@ public:
     if (inRange(ref)) [[likely]] {
       return;
     }
-    resize(ref.getObjID().num + 1);
+    resize(ceil_to_pow2(ref.getObjID().num + 1));
   }
 
   bool inRange(ObjRef<K> ref) { return ref.getObjID() < elements.size(); }

@@ -95,13 +95,16 @@ public:
   InstrRef instr() const { return entry().ref; }
 
   void erase() {
-    block->sorted = false;
+    cfg().map[entry().ref] = CFG::Node{nullref, 0};
     entryOrderedPrev().next = entry().next;
     entryOrderedNext().prev = entry().prev;
     if (block->instrs.erase_unordered(block->instrs.begin() + pos)) {
+      // pos is now the former tail element. make sure prev/next and cfg have
+      // the updated index
       entryOrderedPrev().next = pos;
       entryOrderedNext().prev = pos;
       cfg().map[entry().ref].blockPos = pos;
+      block->sorted = false;
     }
   }
 
@@ -297,8 +300,8 @@ inline BlockRef_iterator_base::BlockRef_iterator_base(BlockRef block,
 inline BlockRef_iterator_base CFG::operator[](ObjRef<Instr> ref) {
   assert(contains(ref));
   auto &refEntry = map[ref];
-  auto blockRef = BlockRef{refEntry.block, blocks[refEntry.block]};
-  return {blockRef, refEntry.blockPos};
+  auto blockRef = blocks.resolve(refEntry.block);
+  return BlockRef_iterator_base{blockRef, refEntry.blockPos};
 }
 
 inline auto BlockRef_iterator_base::blockRef() const {

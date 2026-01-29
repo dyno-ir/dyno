@@ -147,9 +147,7 @@ public:
   }
 
   void runLibertyPipeline() {
-    SmallVec<ModuleRef, 4> original;
     for (auto mod : ctx.getCtx<HWDialectContext>().activeModules()) {
-      original.emplace_back(mod);
       mod->ignore = true;
     }
 
@@ -165,10 +163,8 @@ public:
     std::tie(printAfterAll, debugType) = old;
 
     // todo properly
-    for (auto mod : ctx.getCtx<HWDialectContext>().activeModules())
-      mod->ignore = 1;
-    for (auto mod : original)
-      mod->ignore = 0;
+    for (auto mod : ctx.getCtx<HWDialectContext>().modules)
+      mod->ignore = !mod->ignore;
   }
 
   void runLoweringPipeline() {

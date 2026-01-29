@@ -143,9 +143,9 @@ struct Lexer {
   ArrayRef<char> src;
 
   struct State {
-    size_t i;
-    size_t lastI;
-    unsigned lineNumber;
+    size_t i = 0;
+    size_t lastI = 0;
+    unsigned lineNumber = 1;
   };
   State state;
   SlabAllocator<dyno::BigInt> bigIntLiterals;
@@ -471,7 +471,7 @@ public:
 
   void reset(ArrayRef<char> src) {
     this->src = src;
-    this->state = State{0, 0, 1};
+    this->state = State{};
     this->peekToken.reset();
   }
 };

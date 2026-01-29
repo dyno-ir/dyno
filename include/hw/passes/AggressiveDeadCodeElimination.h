@@ -2,13 +2,16 @@
 
 #include "aig/AIG.h"
 #include "aig/IDs.h"
+#include "dyno/Constant.h"
 #include "dyno/Context.h"
+#include "dyno/IDs.h"
 #include "dyno/ObjMap.h"
 #include "dyno/Pass.h"
 #include "hw/FlipFlop.h"
 #include "hw/HWAbstraction.h"
 #include "hw/HWContext.h"
 #include "hw/HWInstr.h"
+#include "hw/HWPrinter.h"
 #include "hw/HWValue.h"
 #include "hw/IDs.h"
 #include "hw/LoadStore.h"
@@ -16,6 +19,7 @@
 #include "hw/SensList.h"
 #include "op/IDs.h"
 #include "op/StructuredControlFlow.h"
+#include "support/Debug.h"
 #include "support/Utility.h"
 namespace dyno {
 
@@ -490,15 +494,29 @@ class AggressiveDeadCodeEliminationPass
       if (instr.isOpc(HW_MODULE_DEF, HW_STDCELL_DEF)) {
         // contents of non-ignored modules are DCEd, don't mark alive
         if (!instr.as<ModuleIRef>().mod()->ignore)
-          break;
+          continue;
       }
 
-      for (auto op : instr.defs()) {
-        if (!op->is<BlockRef>())
-          continue;
-        auto block = op->as<BlockRef>();
-        worklist.reserve_safe(worklist.size() + block.size());
-        worklist.push_back_range(Range{block});
+      for (auto op : instr) {
+        switch (*op->fat().getType()) {
+        case *CORE_BLOCK: {
+          if (!op.isDef())
+            break;
+          auto block = op->as<BlockRef>();
+          worklist.reserve_safe(worklist.size() + block.size());
+          worklist.push_back_range(Range{block});
+          break;
+        }
+        case *HW_WIRE: {
+          wireMap[op->as<WireRef>()] = 1;
+          break;
+        }
+        case *CORE_CONSTANT: {
+          if (!op->as<ConstantRef>().isInline())
+            constantMap[op->as<ConstantRef>()] = 1;
+          break;
+        }
+        }
       }
     }
   }
@@ -513,7 +531,7 @@ public:
     wireMap.resize(ctx.getStore<Wire>().numIDs());
     constantMap.resize(ctx.getStore<Constant>().numIDs());
     markLiveInstructions();
-    for (auto mod : ctx.getStore<Module>()) {
+    for (auto mod : ctx.getCtx<HWDialectContext>().activeModules()) {
       runOnModule(mod.iref());
     }
     destroyDeadInstrs();
