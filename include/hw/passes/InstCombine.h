@@ -60,7 +60,8 @@ public:
 
 #define CONFIG_STRUCT_LAMBDA(FIELD, ENUM)                                      \
   FIELD(bool, fuseCommutative, true)                                           \
-  FIELD(bool, liftMUX, false)
+  FIELD(bool, liftMUX, false)                                                  \
+  FIELD(bool, simplifyDeMorgan, true)
   CONFIG_STRUCT(CONFIG_STRUCT_LAMBDA)
 #undef CONFIG_STRUCT_LAMBDA
   Config config;
@@ -440,6 +441,8 @@ private:
   }
 
   bool simplifyDeMorgan(InstrRef instr) {
+    if (!config.simplifyDeMorgan)
+      return false;
     unsigned inverted = 0;
     for (auto op : instr.others()) {
       if (op->is<WireRef>() && op->as<WireRef>().getDefI().isOpc(OP_NOT))

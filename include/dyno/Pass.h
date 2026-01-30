@@ -120,7 +120,7 @@ struct ConfigParser {
     auto [end, ec] = std::from_chars(                                          \
         data.begin(), data.end(),                                              \
         *reinterpret_cast<ConfigStructEnumToType<type>::t *>(ptr));            \
-    if (end != ptr || ec != std::errc{})                                       \
+    if (end != data.end() || ec != std::errc{})                                \
       return false;                                                            \
     break;                                                                     \
   }

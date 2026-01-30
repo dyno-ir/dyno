@@ -102,4 +102,7 @@ meta.AGGRESSIVE_DEAD_CODE_ELIMINATION_PASS
 
 // MUX tree testing
 meta.MUX_TREE_FLATTEN_PASS
+meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS
+meta.FUZZY_CSE_PASS map("minSharedBitsForMerge": "1", "maxSharedBitsForMerge": "1", "opToShare": "op.AND")
+meta.ORDER_INSTRS_PASS map("assertNoCircularDeps": "1", "moveStoresBeforeLoads": "1")
 meta.INST_COMBINE_PASS

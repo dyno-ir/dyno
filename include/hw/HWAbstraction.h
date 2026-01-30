@@ -243,6 +243,18 @@ public:
 
   FOR_HW_COMM_OPS(COMM_OP)
 
+  HWValue buildCommutative(DialectOpcode opc, MutArrayRef<HWValue> operands) {
+    switch (*opc) {
+#define LAMBDA(opc, func, ...)                                                 \
+  case *opc:                                                                   \
+    return func(operands);
+      FOR_HW_COMM_OPS(LAMBDA)
+#undef LAMBDA
+    default:
+      dyno_unreachable("invalid opcode");
+    }
+  }
+
   // template <IsAnyHWValue... Ts> HWInstrRef buildAdd2(Ts... operands) {
 
   //   // canonicalize further by having constants rightmost, possible even

@@ -2,6 +2,7 @@
 
 #include "dyno/Context.h"
 #include "dyno/HierBlockIterator.h"
+#include "dyno/Opcode.h"
 #include "dyno/Pass.h"
 #include "hw/AutoDebugInfo.h"
 #include "hw/HWAbstraction.h"
@@ -10,6 +11,7 @@
 #include "hw/HWValue.h"
 #include "hw/analysis/BitAliasAnalysis.h"
 #include "hw/analysis/ControlFlow.h"
+#include "support/Bits.h"
 #include "support/Debug.h"
 #include "support/DynBitSet.h"
 #include <cassert>
@@ -41,10 +43,12 @@ class FuzzyCSEPass : public Pass<FuzzyCSEPass> {
   };
 
 public:
-  struct Config {
-    bool enableShare = false;
-    uint32_t minSharedBitsForMerge = 4;
-  };
+#define CONFIG_STRUCT_LAMBDA(FIELD, ENUM)                                      \
+  FIELD(uint32_t, minSharedBitsForMerge, 4)                                    \
+  FIELD(uint32_t, maxSharedBitsForMerge, 0xFFFFFFFF)                           \
+  FIELD(DialectOpcode, opToShare, OP_ADD)
+  CONFIG_STRUCT(CONFIG_STRUCT_LAMBDA)
+#undef CONFIG_STRUCT_LAMBDA
   Config config;
 
 private:
@@ -68,6 +72,23 @@ private:
 
   // }
 
+  static size_t numIntersect(ArrayRef<std::pair<uint16_t, AbstractValue>> lhs,
+                             ArrayRef<std::pair<uint16_t, AbstractValue>> rhs) {
+    size_t i = 0;
+    size_t j = 0;
+    size_t rv = 0;
+    while (i != lhs.size() && j != rhs.size()) {
+      if (lhs[i].second == rhs[j].second) {
+        i++;
+        j++;
+        rv++;
+      } else if (lhs[i].second < rhs[j].second) {
+        i++;
+      } else
+        j++;
+    }
+    return rv;
+  }
   static void intersect(SmallVecImpl<std::pair<uint16_t, uint16_t>> &out,
                         ArrayRef<std::pair<uint16_t, AbstractValue>> lhs,
                         ArrayRef<std::pair<uint16_t, AbstractValue>> rhs) {
@@ -108,9 +129,9 @@ private:
                     IsRange auto matchedIdxs, WireRef sharedSum) {
     // Rebuild the two instructions, with (1) adding the shared sum as an
     // additional operand and (2) replacing all matched operand fragments with
-    // zero.
+    // neutral element.
     auto tok = autoDbgInfo.addWithToken(instr.ref);
-    SmallVec<HWValue, 4> lhsNewOps;
+    SmallVec<HWValue, 8> lhsNewOps;
     for (auto [opIdx, op] : Range{instr.ref.others()}.enumerate()) {
       if (covered[opIdx])
         continue;
@@ -121,20 +142,27 @@ private:
       assert(covered[opIdx]);
       auto op = instr.ref.other(opIdx);
       HWValue value = op->template as<HWValue>();
-
       auto matchedLen = matchingPrefixes[idx].getLen();
+
+      if (*value.getNumBits() == matchedLen)
+        continue;
+
       value = build.buildSplice(value, *value.getNumBits() - matchedLen,
                                 matchedLen);
-      auto zero =
-          ConstantBuilder{ctx.getStore<Constant>()}.zero(matchedLen).get();
-      value = build.buildConcat(value, zero);
+      ConstantRef neutral;
+      auto cbuild = ConstantBuilder{ctx.getStore<Constant>()};
+      if (config.opToShare == OP_AND)
+        neutral = cbuild.ones(matchedLen);
+      else
+        neutral = cbuild.zero(matchedLen);
 
+      value = build.buildConcat(value, neutral);
       lhsNewOps.emplace_back(value);
     }
     auto outBits = *instr.ref.def(0)->as<WireRef>().getNumBits();
     lhsNewOps.emplace_back(build.buildResize(sharedSum, outBits, false));
-    auto ibLHS = build.buildInstrRaw(OP_ADD, 1 + lhsNewOps.size());
-    ibLHS.addRef(instr.ref.def(0)->as<WireRef>()).other().addRefs(lhsNewOps);
+    auto newVal = build.buildCommutative(config.opToShare, lhsNewOps);
+    instr.ref.def(0)->as<WireRef>().replaceAllUsesWith(newVal);
 
     // Delete all uses of this instruction (todo: better data structure or don't
     // reimplement def use)
@@ -146,15 +174,38 @@ private:
       uses.erase_unordered(useIt);
     }
 
-    instr.ref.def(0).replace(FatDynObjRef{nullref});
     build.destroyInstr(instr.ref);
     instr.ref = nullref;
     bitAlias.clearCache();
+    return newVal;
+  }
 
-    return ibLHS.instr();
+  auto addToAbstractDefUse(HWValue newVal) {
+    // Insert new instruction into abstract def/use
+    if (auto w = newVal.as<WireRef>()) {
+      auto instr = w.getDefI();
+
+      assert(Range{candidates}.find_if(
+                 [&](auto c) { return c.ref == instr; }) == candidates.end());
+
+      auto &abstr = candidates.emplace_back();
+      abstr.idx = candidates.size() - 1;
+      abstr.ref = instr;
+      for (auto [opIdx, op] : instr.others().enumerate()) {
+        auto w = op->as<WireRef>();
+        if (!w)
+          continue;
+        convertToAbstractOperand(w, opIdx, abstr);
+      }
+      Range{abstr.operands}.sort(
+          [](auto lhs, auto rhs) { return lhs.second < rhs.second; });
+      worklist.emplace_back(abstr.idx);
+    }
   }
 
   bool tryCombineInstrs(AbstractInstr &lhsAbstr, AbstractInstr &rhsAbstr) {
+    assert(&lhsAbstr != &rhsAbstr);
+    assert(lhsAbstr.ref != rhsAbstr.ref);
 
     // we call this based on heuristic match of one operand.
     SmallVec<std::pair<uint16_t, uint16_t>, 4> intersectOps;
@@ -170,6 +221,7 @@ private:
     lhsCovered.resize(lhsAbstr.ref.getNumOthers());
     rhsCovered.resize(rhsAbstr.ref.getNumOthers());
 
+    // find matching prefixes
     SmallVec<RegisterValue, 4> matchingPrefixes;
     uint32_t maxPrefixSize = 0;
     for (auto it = intersectOps.begin(); it != intersectOps.end();) {
@@ -219,6 +271,8 @@ private:
     // don't merge tiny ops
     if (maxPrefixSize < config.minSharedBitsForMerge)
       return false;
+    if (maxPrefixSize > config.maxSharedBitsForMerge)
+      return false;
 
     assert(matchingPrefixes.size() == intersectOps.size());
 
@@ -237,6 +291,10 @@ private:
           RegisterValue{truncVal, truncVal.getNumBits(), 0, 0, nullopt});
       maxPrefixSize = std::max(maxPrefixSize, matchingConstBits);
     }
+
+    uint32_t sharedInstSize = maxPrefixSize;
+    if (config.opToShare == OP_ADD)
+      sharedInstSize += 1;
 
     if (matchingPrefixes.size() == 0)
       return false;
@@ -257,7 +315,7 @@ private:
     build.setInsertPoint(parentBlock.begin());
     auto ib = build.buildInstrRaw(lhsAbstr.ref.getDialectOpcode(),
                                   1 + matchingPrefixes.size());
-    auto defW = ctx.getStore<Wire>().create(maxPrefixSize + 1);
+    auto defW = ctx.getStore<Wire>().create(sharedInstSize);
     ib.addRef(defW).other();
 
     build.setInsertPoint(ib.instr());
@@ -270,7 +328,7 @@ private:
     newInstrAbstr.idx = candidates.size();
     for (auto [idx, prefix] : Range{matchingPrefixes}.enumerate()) {
       auto val = prefix.get(build, false);
-      ib.addRef(build.buildZExt(maxPrefixSize + 1, val));
+      ib.addRef(build.buildZExt(sharedInstSize, val));
       auto ref = prefix.frags.front().ref;
       if (ref.is<ObjRef<Wire>>()) {
         auto it = operands.find(ref);
@@ -279,6 +337,9 @@ private:
         uses.emplace_back(newInstrAbstr.idx);
       }
     }
+    // do we need to re-sort?
+    Range{newInstrAbstr.operands}.sort(
+        [](auto lhs, auto rhs) { return lhs.second < rhs.second; });
     worklist.emplace_back(newInstrAbstr.idx);
 
     autoDbgInfo.popDebugInfo();
@@ -302,12 +363,22 @@ private:
       dbgs() << "shared: ";
       print.printInstr(ib.instr(), ctx);
       dbgs() << "new lhs: ";
-      print.printInstr(newLHS, ctx);
+      if (auto w = newLHS.as<WireRef>())
+        print.printInstr(w.getDefI(), ctx);
+      else
+        dbgs() << "<none>\n";
       dbgs() << "new rhs: ";
-      print.printInstr(newRHS, ctx);
+      if (auto w = newRHS.as<WireRef>())
+        print.printInstr(w.getDefI(), ctx);
+      else
+        dbgs() << "<none>\n";
     })
 
     candidates.emplace_back(newInstrAbstr);
+    if (newLHS != defW)
+      addToAbstractDefUse(newLHS);
+    if (newRHS != defW)
+      addToAbstractDefUse(newRHS);
     return true;
   }
 
@@ -319,6 +390,23 @@ private:
   SmallVec<AbstractInstr, 16> candidates;
   SmallVec<uint32_t, 32> worklist;
 
+  void convertToAbstractOperand(WireRef wire, uint16_t opIdx,
+                                AbstractInstr &abstr) {
+
+    auto [aliases, change] = bitAlias.getReprAliases(wire);
+    auto &front = aliases.frags.front();
+    // we use the first fragment's ref as the operand for heuristic
+    // matching. higher fragments (if any) will be checked during detailed
+    // matching.
+    auto [found, id] = operands.findOrInsert(front.ref, operands.size());
+
+    abstr.operands.emplace_back(uint16_t(opIdx),
+                                AbstractValue{uint16_t(id.val())});
+    if (id.val() >= operandUses.size())
+      operandUses.resize(ceil_to_pow2(id.val() + 1));
+    operandUses[id.val()].emplace_back(abstr.idx);
+  }
+
   void runOnProcess(ProcessIRef proc) {
     operands.clear();
     operandUses.clear();
@@ -327,7 +415,7 @@ private:
     candidates.clear();
 
     for (auto instr : HierBlockRange{proc.block()}) {
-      if (instr.isOpc(OP_ADD)) {
+      if (instr.isOpc(config.opToShare)) {
         assert(Range{candidates}.find_if([&](AbstractInstr &abstr) {
           return abstr.ref == instr;
         }) == candidates.end());
@@ -339,27 +427,19 @@ private:
           if (!op->is<WireRef>())
             continue;
           auto wire = op->as<WireRef>();
-          auto [aliases, change] = bitAlias.getReprAliases(wire);
-          auto &front = aliases.frags.front();
-          // we use the first fragment's ref as the operand for heuristic
-          // matching. higher fragments (if any) will be checked during detailed
-          // matching.
-          auto [found, id] = operands.findOrInsert(front.ref, operands.size());
-
-          abstr.operands.emplace_back(uint16_t(opIdx),
-                                      AbstractValue{uint16_t(id.val())});
+          convertToAbstractOperand(wire, opIdx, abstr);
         }
         Range{abstr.operands}.sort(
             [](auto lhs, auto rhs) { return lhs.second < rhs.second; });
       }
     }
 
-    operandUses.resize(operands.size());
-    for (auto [candidateIdx, abstr] : Range{candidates}.enumerate()) {
-      for (auto [opIndex, op] : Range{abstr.operands}.enumerate()) {
-        operandUses[op.second.id].emplace_back(candidateIdx);
-      }
-    }
+    // operandUses.resize(operands.size());
+    // for (auto [candidateIdx, abstr] : Range{candidates}.enumerate()) {
+    //   for (auto [opIndex, op] : Range{abstr.operands}.enumerate()) {
+    //     operandUses[op.second.id].emplace_back(candidateIdx);
+    //   }
+    // }
 
     worklist.resize(candidates.size());
     for (unsigned i = 0; i < worklist.size(); i++)
@@ -372,19 +452,36 @@ private:
       if (!candidate.ref)
         continue;
 
+      dbgs() << "inspecting: ";
+      dumpInstr(candidate.ref, ctx);
+
       for (auto op : candidate.operands) {
         auto &arr = operandUses[op.second.id];
-        for (auto &otherUse : arr) {
+
+        SmallVec<std::pair<uint32_t, uint32_t>, 4> subCandidates;
+
+        for (auto [otherUseIdx, otherUse] : Range{arr}.enumerate()) {
           if (otherUse.instr == candidate.idx) {
             continue;
           }
           auto &other = candidates[otherUse.instr];
           assert(candidate.ref);
           assert(other.ref);
+
+          auto score = numIntersect(candidate.operands, other.operands) +
+                       intersectConstants(candidate.ref, other.ref);
+          if (score > 1)
+            subCandidates.emplace_back(otherUseIdx, score);
+        }
+
+        Range{subCandidates}.stable_sort(
+            [](auto &a, auto &b) { return a.second > b.second; });
+        for (auto [otherUseIdx, score] : Range{subCandidates}) {
+          auto &otherUse = arr[otherUseIdx];
+          auto &other = candidates[otherUse.instr];
+
           auto success = tryCombineInstrs(candidate, other);
           if (success) {
-            assert(candidate.ref == nullref);
-            assert(other.ref == nullref);
             goto next;
           }
         }
