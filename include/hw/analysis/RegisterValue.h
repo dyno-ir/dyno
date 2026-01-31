@@ -728,7 +728,7 @@ struct RegisterRegions : public RegisterFrags<RegisterRegionsFragment> {
   }
 
   auto getAccessors(uint32_t addr, uint32_t len) {
-    SmallDenseSet<uint32_t, 1> writers;
+    SmallDenseSet<uint32_t> writers;
     uint32_t end = addr + len;
 
     auto it = getInsertIt(addr);

@@ -513,12 +513,13 @@ template <typename K, typename size_type = uint32_t> struct DenseSetBucket {
   // buckets are searched linearly
   // keys are contiguous for SIMD compare
   // values are still here for better locality though
-  std::array<K, entriesPerBucket> keys alignas(vector_len * sizeof(K));
+  std::array<K, entriesPerBucket> keys; // alignas(vector_len * sizeof(K));
 
   template <bool Inverse, typename... Args>
   size_type findVec(size_type cur = ~0, Args... k) {
     using key_unsigned = uint_of_size<sizeof(K)>::type;
-    typedef key_unsigned key_vec __attribute__((ext_vector_type(vector_len)));
+    typedef key_unsigned key_vec
+        __attribute__((ext_vector_type(vector_len), aligned(alignof(K))));
     using key_vec_ptr = key_vec *;
     key_vec_ptr keys_arr = reinterpret_cast<key_vec_ptr>(keys.data());
 
@@ -619,7 +620,7 @@ template <typename K, typename size_type = uint32_t> struct DenseSetBucket {
 };
 
 template <typename K, typename V, typename size_type = uint32_t>
-struct DenseMapBucket : DenseSetBucket<K, size_type> {
+struct DenseMapBucket : public DenseSetBucket<K, size_type> {
   using Base = DenseSetBucket<K, size_type>;
   std::array<V, Base::entriesPerBucket> values;
 };
@@ -629,27 +630,30 @@ template <typename Base> class LargeSetMap : public Base {
   Bucket *buckets;
 
 public:
+  // try to alloc buckets for 64 elements.
+  static constexpr size_t initNumBuckets =
+      std::max(4UL, ceil_to_pow2(64UL / Bucket::entriesPerBucket));
   Bucket *&getBuckets() const { return const_cast<Bucket *&>(buckets); }
   void deleteArr(Bucket *buckets) {
     ::operator delete[](buckets, std::align_val_t(alignof(Bucket)));
   }
 
 public:
-  LargeSetMap() : Base(1, 0) {
+  LargeSetMap() : Base(initNumBuckets, 0) {
     // asan does not support mixing of placement and regular new/delete
-    buckets = (Bucket *)::operator new[](sizeof(Bucket) * 1,
+    buckets = (Bucket *)::operator new[](sizeof(Bucket) * initNumBuckets,
                                          std::align_val_t(alignof(Bucket)));
-    std::uninitialized_default_construct_n(buckets, 1);
+    std::uninitialized_default_construct_n(buckets, initNumBuckets);
   }
 
-  LargeSetMap(const LargeSetMap &other) : Base(1, 0) {
+  LargeSetMap(const LargeSetMap &other) : Base(other.cap, 0) {
     buckets = (Bucket *)::operator new[](sizeof(Bucket) * other.cap,
                                          std::align_val_t(alignof(Bucket)));
     std::uninitialized_copy_n(other.buckets, other.cap, buckets);
     this->cap = other.cap;
     this->sz = other.sz;
   }
-  LargeSetMap(LargeSetMap &&other) : Base(1, 0) {
+  LargeSetMap(LargeSetMap &&other) : Base(initNumBuckets, 0) {
     this->buckets = other.buckets;
     this->cap = other.cap;
     this->sz = other.sz;
@@ -676,8 +680,10 @@ public:
   }
 };
 
-template <typename Base, size_t InlineBuckets> class SmallSetMap : public Base {
+template <typename Base, size_t InlineElemns> class SmallSetMap : public Base {
   using Bucket = Base::bucket_type;
+  static constexpr size_t InlineBuckets = std::max(
+      1ul, floor_to_pow2(InlineElemns / size_t(Bucket::entriesPerBucket)));
   Bucket *buckets;
   InlineStorageArr<Bucket, InlineBuckets> arr;
 
@@ -767,14 +773,18 @@ class DenseMap : public LargeSetMap<
   using Base::Base;
 };
 
-template <typename K, typename V, size_t InlineBuckets>
+template <typename K, typename V,
+          // fit as much as possible into 128 bytes (with 16 used by map itself)
+          size_t InlineElemns = std::max(
+              4UL, floor_to_pow2((64 + 48) / sizeof(DenseMapBucket<K, V>)) *
+                       DenseMapBucket<K, V>::entriesPerBucket)>
 class SmallDenseMap
-    : public SmallSetMap<DenseMapBase<SmallDenseMap<K, V, InlineBuckets>, K, V,
+    : public SmallSetMap<DenseMapBase<SmallDenseMap<K, V, InlineElemns>, K, V,
                                       DenseMapBucket<K, V>>,
-                         InlineBuckets> {
-  using Base = SmallSetMap<DenseMapBase<SmallDenseMap<K, V, InlineBuckets>, K,
-                                        V, DenseMapBucket<K, V>>,
-                           InlineBuckets>;
+                         InlineElemns> {
+  using Base = SmallSetMap<DenseMapBase<SmallDenseMap<K, V, InlineElemns>, K, V,
+                                        DenseMapBucket<K, V>>,
+                           InlineElemns>;
   using Base::Base;
 };
 
@@ -785,13 +795,17 @@ class DenseSet
   using Base::Base;
 };
 
-template <typename K, size_t InlineBuckets>
+template <typename K,
+          // fit as much as possible into 128 bytes (with 16 used by set itself)
+          size_t InlineElemns = std::max(
+              4UL, floor_to_pow2((64 + 48) / sizeof(DenseSetBucket<K>)) *
+                       DenseSetBucket<K>::entriesPerBucket)>
 class SmallDenseSet
     : public SmallSetMap<
-          DenseSetBase<SmallDenseSet<K, InlineBuckets>, K, DenseSetBucket<K>>,
-          InlineBuckets> {
+          DenseSetBase<SmallDenseSet<K, InlineElemns>, K, DenseSetBucket<K>>,
+          InlineElemns> {
   using Base = SmallSetMap<
-      DenseSetBase<SmallDenseSet<K, InlineBuckets>, K, DenseSetBucket<K>>,
-      InlineBuckets>;
+      DenseSetBase<SmallDenseSet<K, InlineElemns>, K, DenseSetBucket<K>>,
+      InlineElemns>;
   using Base::Base;
 };

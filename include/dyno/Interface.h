@@ -2,6 +2,7 @@
 
 #include "dyno/ObjMap.h"
 #include "support/ArrayRef.h"
+#include "support/Bits.h"
 #include <array>
 #include <dyno/Obj.h>
 #include <type_traits>
@@ -16,7 +17,8 @@ template <typename T> struct InterfaceTraits {
     return interfaces[ref.getDialectID()];
   }
   static const T &dispatch2(DynObjRef ref, ArrayRef<T> interface) {
-    return interface.front();
+    return interface[ref.getTyID() & bit_mask_zeros<TyID::num_t>(
+                                         1, bit_mask_sz<TyID::num_t> - 1)];
   }
   static const unsigned ID = ~0;
 };

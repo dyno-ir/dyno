@@ -2945,6 +2945,7 @@ public:
       return ConstantRef{ref};
     return store.resolve(ref.as<ObjRef<Constant>>());
   }
+  FatDynObjRef<> resolveGeneric(DynObjRef ref) { return resolve(ref); }
   bool exists(ObjRef<Constant> ref) { return store.exists(ref); }
   auto numIDs() { return store.numIDs(); }
 };

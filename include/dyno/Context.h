@@ -46,6 +46,16 @@ public:
 
   BlockRef createBlock() { return cfg.blocks.create(cfg); };
 
+  // clang-format off
+  std::array<MemberRef<FatDynObjRef<>(void *, DynObjRef)>, 4> resolverMethods = {
+    // zeroth element is invalid in core dialect, forward to instr resolver which will assert
+    MemberRef{&instrs, BindMethod<&InstrStoreT::resolveGeneric>::fv},
+    MemberRef{&instrs, BindMethod<&InstrStoreT::resolveGeneric>::fv},
+    MemberRef{&constants, BindMethod<&ConstantStoreT::resolveGeneric>::fv},
+    MemberRef{&cfg.blocks, BindMethod<&decltype(cfg.blocks)::resolveGeneric>::fv},
+  };
+  // clang-format on
+
   CoreDialectContext() {
     instrs.destroyHooks.emplace_back(
         [&](InstrRef instr) { instrSourceLocInfo.resetDebugInfo(instr); });

@@ -80,6 +80,9 @@ template <typename T> constexpr T ceil_to_pow2(T x) {
     return 1;
   return T(1) << (std::bit_width(x - 1));
 }
+template <typename T> constexpr T floor_to_pow2(T x) {
+  return std::bit_floor(x);
+}
 
 template <typename T> constexpr T repeatBits(T x, unsigned xBits) {
   unsigned fact = xBits;

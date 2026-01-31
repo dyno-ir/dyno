@@ -19,16 +19,16 @@ class LinearExpressionAnalysis {
   class LinearExpr {
   public:
     BigInt base;
-    SmallDenseMap<ObjRef<Wire>, BigInt, 1> terms;
+    SmallDenseMap<ObjRef<Wire>, BigInt> terms;
 
     void setEqualWire(WireRef wire) {
       base.set(0u, 0);
-      terms = SmallDenseMap<ObjRef<Wire>, BigInt, 1>{};
+      terms = SmallDenseMap<ObjRef<Wire>, BigInt>{};
       terms.insert(wire, BigInt::fromU64(1, *wire.getNumBits()));
     }
     void setEqualConst(ConstantRef constant) {
       base = constant;
-      terms = SmallDenseMap<ObjRef<Wire>, BigInt, 1>{};
+      terms = SmallDenseMap<ObjRef<Wire>, BigInt>{};
     }
 
     // switches to fallback wire if expr becomes quadratic or above

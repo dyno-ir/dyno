@@ -449,6 +449,43 @@ public:
   }
 };
 
+template <typename T> class pairwise_iterator {
+  T it;
+
+public:
+  using iterator_category = std::forward_iterator_tag;
+  using value_type = std::pair<decltype(*it), decltype(*it)>;
+  using pointer = value_type *;
+  using reference = value_type &;
+  using difference_type = std::iterator_traits<T>::difference_type;
+
+  pairwise_iterator() = default;
+  pairwise_iterator(T it) : it(it) {}
+
+  value_type operator*() { return {*it, *std::next(it)}; }
+
+  pairwise_iterator &operator++() {
+    std::advance(it, 2);
+    return *this;
+  }
+
+  pairwise_iterator operator++(int) {
+    enumerate_iterator tmp(*this);
+    ++(*this);
+    return tmp;
+  }
+
+  friend bool operator==(const pairwise_iterator &a,
+                         const pairwise_iterator &b) {
+    return a.it == b.it;
+  }
+
+  friend bool operator!=(const pairwise_iterator &a,
+                         const pairwise_iterator &b) {
+    return a.it != b.it;
+  }
+};
+
 template <typename It> class Range {
 public:
   using iterator = It;
@@ -556,6 +593,12 @@ public:
   template <typename T> auto zip(T &other) {
     return ::Range{zip_iterator{begin(), other.begin()},
                    zip_iterator{end(), other.end()}};
+  }
+  auto pairwise() {
+    if constexpr (requires { endIt - beginIt; }) {
+      assert((endIt - beginIt) % 2 == 0);
+    }
+    return ::Range{pairwise_iterator{beginIt}, pairwise_iterator{endIt}};
   }
 
   template <typename T> auto sorted_intersect(T &other) {

@@ -229,6 +229,10 @@ public:
     ib.addRefs(operands);                                                      \
                                                                                \
     return defW;                                                               \
+  }                                                                            \
+  template <typename T> HWValue ident(Range<T> range) {                        \
+    SmallVec<HWValue, 8> vec{range};                                           \
+    return ident(MutArrayRef{vec});                                            \
   }
 
   static bool commutativeOpWireOrder(WireRef lhs, WireRef rhs) {

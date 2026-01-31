@@ -49,8 +49,8 @@ template <> struct InterfaceTraits<TyInfo> {
     return interfaces[ref.getDialectID()];
   }
   static const TyInfo &dispatch2(DynObjRef ref, ArrayRef<TyInfo> interface) {
-    return interface[ref.getTyID() & ~bit_mask_ones<TyID::num_t>(
-                                         2, bit_mask_sz<TyID::num_t> - 2)];
+    return interface[ref.getTyID() & bit_mask_zeros<TyID::num_t>(
+                                         1, bit_mask_sz<TyID::num_t> - 1)];
   }
 };
 

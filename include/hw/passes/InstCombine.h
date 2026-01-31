@@ -26,6 +26,7 @@
 #include "op/StructuredControlFlow.h"
 #include "support/Bits.h"
 #include "support/Debug.h"
+#include "support/DenseMap.h"
 #include "support/DynBitSet.h"
 #include "support/ErrorRecovery.h"
 #include "support/SmallVec.h"
@@ -101,6 +102,42 @@ private:
         bitAlias.recomputeAt(def->as<HWValue>());
       }
     }
+  }
+
+  bool optimizeOneHotMux(InstrRef instr) {
+    // hash to find duplicates
+    SmallDenseMap<DynObjRef, SmallVec<uint32_t, 2>, 16> map;
+    for (auto [sel, val] : Range{instr.others()}.pairwise()) {
+      // check if select is known
+      auto known = knownBits.getKnownBits(sel->as<HWValue>());
+      if (known.valueEquals(1)) {
+        // found a one entry, remove the instr
+        replaceUses(instr.def(0)->as<WireRef>(), val->as<HWValue>());
+        deleteMatchedInstr(instr);
+        return true;
+      } else if (known.valueEquals(0)) {
+        continue;
+      }
+
+      map[val->thin()].emplace_back(sel.getNum());
+    }
+    if (map.size() == instr.getNumOthers() / 2)
+      return false;
+
+    HWInstrBuilder build{ctx, instr};
+    SmallVec<std::pair<HWValue, HWValue>, 16> entries;
+
+    for (auto [val, selIdxs] : map) {
+      auto rng = Range{selIdxs}.transform([&](size_t, uint32_t idx) {
+        return instr.operand(idx)->as<HWValue>();
+      });
+      auto mergedSel = build.buildOr(rng);
+      entries.emplace_back(mergedSel, ctx.resolve(val));
+    }
+    auto newVal = build.buildOneHotMux(entries);
+    replaceUses(instr.def(0)->as<WireRef>(), newVal);
+    deleteMatchedInstr(instr);
+    return true;
   }
 
   bool reduceBitWidth(InstrRef instr) {
@@ -1326,6 +1363,12 @@ private:
 
     case *HW_MUX: {
       if (liftMUX(instr))
+        return true;
+      break;
+    }
+
+    case *HW_ONEHOT_MUX: {
+      if (optimizeOneHotMux(instr))
         return true;
       break;
     }

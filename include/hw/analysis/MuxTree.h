@@ -218,7 +218,7 @@ struct SmallBoolExprCNF {
     // this->dump();
 
     // find superset clauses
-    SmallVec<SmallDenseMap<uint32_t, uint32_t, 2>, 8> uses;
+    SmallVec<SmallDenseMap<uint32_t, uint32_t, 16>, 8> uses;
     uses.resize(numLiterals * 2);
     for (auto [clauseIdx, clause] : clauses().enumerate()) {
       if (clause.size() < 2 || !keepClause.getDyn(clauseIdx))
@@ -1110,7 +1110,7 @@ namespace dyno {
 
 class MuxtreeAnalysis {
 public:
-  SmallDenseMap<MuxTree::InputSignal, uint32_t, 2> conditionsDedupeMap;
+  SmallDenseMap<MuxTree::InputSignal, uint32_t, 16> conditionsDedupeMap;
 
   auto getCondIdx(MuxTree *muxtree, WireRef cond, uint32_t bit) {
     MuxTree::InputSignal val{cond, bit};
@@ -1289,7 +1289,7 @@ public:
   }
 
   void dedupeMuxTreeOutputs(MuxTree *tree) {
-    SmallDenseMap<DynObjRef, SmallVec<uint32_t, 2>, 2> dedupeMap;
+    SmallDenseMap<DynObjRef, SmallVec<uint32_t, 2>, 16> dedupeMap;
     for (auto [i, rule] : Range{tree->entries}.enumerate()) {
       dedupeMap[rule.output].emplace_back(i);
     }
@@ -1348,7 +1348,7 @@ public:
 
   bool simplifyNonOverlapping(Context &ctx, MuxTree *tree) {
 
-    SmallDenseMap<ObjRef<Wire>, Optional<uint32_t>, 4> map;
+    SmallDenseMap<ObjRef<Wire>, Optional<uint32_t>, 16> map;
 
     auto signalToICMP = [&](MuxTree::InputSignal sig) -> InstrRef {
       auto wire = ctx.getStore<Wire>().resolve(sig.wire);
@@ -1379,7 +1379,7 @@ public:
       }
     }
 
-    SmallDenseMap<MuxTree::InputSignal, uint32_t, 4> inputSigMap;
+    SmallDenseMap<MuxTree::InputSignal, uint32_t, 32> inputSigMap;
     for (auto [i, sig] : Range{tree->conditions}.enumerate())
       inputSigMap.insert(sig, i);
 

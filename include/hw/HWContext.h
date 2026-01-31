@@ -9,6 +9,7 @@
 #include "dyno/NewDeleteObjStore.h"
 #include "dyno/Obj.h"
 #include "hw/DebugInfo.h"
+#include "hw/HWValue.h"
 #include "hw/IDs.h"
 #include "hw/Module.h"
 #include "hw/Process.h"
