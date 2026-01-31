@@ -165,8 +165,12 @@ private:
     auto token = autoDebugInfo.addWithToken(instr);
     assert(numYieldValues == 0 || defaultIdx);
 
-    for (auto [j, caseInstr] :
-         Range{instr.block()}.as<CaseInstrRef>().enumerate()) {
+    size_t lastIdx = instr.block().size() - 1;
+
+    bool first = true;
+    size_t j = instr.block().size();
+    for (auto caseInstr : Range{instr.block()}.reverse().as<CaseInstrRef>()) {
+      j--;
       if (j == defaultIdx)
         continue;
 
@@ -189,15 +193,19 @@ private:
       build.setInsertPoint(endIter);
 
       for (unsigned i = 0; i < instr.getNumYieldValues(); i++) {
-        HWValue iter =
-            j == 0 ? yields[*defaultIdx * numYieldValues + i] : yields[i];
+        HWValue iter = first ? yields[*defaultIdx * numYieldValues + i]
+                             : yields[lastIdx * numYieldValues + i];
         HWValue newVal = yields[j * numYieldValues + i];
-        yields[i] = build.buildMux(selWire, newVal, iter);
+        yields[lastIdx * numYieldValues + i] =
+            build.buildMux(selWire, newVal, iter);
       }
+
+      first = false;
     }
 
     for (auto [i, yieldVal] : instr.yieldValues().enumerate()) {
-      yieldVal->as<WireRef>().replaceAllUsesWith(yields[i]);
+      yieldVal->as<WireRef>().replaceAllUsesWith(
+          yields[lastIdx * numYieldValues + i]);
     }
 
     build.destroyInstr(instr);
