@@ -1,6 +1,8 @@
 # Dyno-IR
 Dyno-IR is a toolkit for building high performance compiler IRs with powerful generic infrastructure, but swappable core data structures. This is a monorepo for all Dyno-IR applications.
 
+For the core ideas behind Dyno-IR, see the [IR design doc](docs/IRDesign.md).
+
 ## Building
 ```bash
 git clone --recursive git@github.com:dyno-ir/dyno.git
