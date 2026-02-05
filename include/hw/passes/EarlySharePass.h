@@ -355,13 +355,21 @@ private:
   }
 
 public:
-  auto make(Context &ctx) { return EarlySharePass(ctx); }
-  explicit EarlySharePass(Context &ctx) : ctx(ctx) {}
   void run() {
     for (auto mod : ctx.getCtx<HWDialectContext>().activeModules()) {
       runOnModule(mod.iref());
     }
   }
+  void runModule(ModuleIRef mod) { runOnModule(mod); }
+  void runProcess(ProcessIRef proc) { runOnProcess(proc); }
+  void runBlock(BlockRef block) { runOnBlock(block); }
+
+  static constexpr auto runFuncs =
+      std::make_tuple(&EarlySharePass::runModule, &EarlySharePass::runProcess,
+                      &EarlySharePass::runBlock, &EarlySharePass::run);
+
+  auto make(Context &ctx) { return EarlySharePass(ctx); }
+  explicit EarlySharePass(Context &ctx) : ctx(ctx) {}
 };
 
 }; // namespace dyno

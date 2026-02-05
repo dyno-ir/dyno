@@ -410,23 +410,34 @@ class AIGConstructPass : public Pass<AIGConstructPass> {
   }
 
 public:
-  void run() {
+  void runWrapper(auto &&runFunc) {
+    destroyMap.clear();
     destroyMap.resize(ctx.getStore<Instr>().numIDs());
-
     ctx.getStore<Instr>().createHooks.emplace_back(
         [&](InstrRef ref) { destroyMap.get_ensure(ref) = 0; });
 
-    for (auto mod : ctx.getCtx<HWDialectContext>().activeModules()) {
-      runOnModule(mod.iref());
-    }
-    ctx.getStore<Instr>().createHooks.pop_back();
+    runFunc();
 
+    ctx.getStore<Instr>().createHooks.pop_back();
     for (auto [obj, destroy] : destroyMap) {
       if (!destroy || !ctx.getStore<Instr>().exists(obj))
         continue;
       build.destroyInstr(ctx.getStore<Instr>().resolve(obj));
     }
   }
+  void run() {
+    runWrapper([&] {
+      for (auto mod : ctx.getCtx<HWDialectContext>().activeModules()) {
+        runOnModule(mod.iref());
+      }
+    });
+  }
+  void runModule(ModuleIRef mod) {
+    runWrapper([&] { runOnModule(mod); });
+  }
+
+  static constexpr auto runFuncs =
+      std::make_tuple(&AIGConstructPass::runModule, &AIGConstructPass::run);
 
   auto make(Context &ctx) { return AIGConstructPass(ctx); }
   explicit AIGConstructPass(Context &ctx) : ctx(ctx), build(ctx) {}

@@ -267,6 +267,10 @@ public:
       runOnModule(mod.iref());
     }
   }
+  void runModule(ModuleIRef mod) { runOnModule(mod); }
+
+  static constexpr auto runFuncs = std::make_tuple(
+      &FlipFlopInferencePass::runModule, &FlipFlopInferencePass::run);
 
   explicit FlipFlopInferencePass(Context &ctx)
       : ctx(ctx), build(ctx), cbuild(ctx.getStore<Constant>()) {}

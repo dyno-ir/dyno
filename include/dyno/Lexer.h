@@ -1,5 +1,6 @@
 #pragma once
 
+#include "dyno/DialectInfo.h"
 #include "dyno/IDImpl.h"
 #include "dyno/Opcode.h"
 #include "support/Lexer.h"
@@ -54,7 +55,7 @@ public:
   SymbolResolver<DialectType> genericTypeResolver;
 
   // these are used with qualified names.
-  Interfaces<NUM_DIALECTS, SymbolResolver<DialectType>,
+  Interfaces<MAX_NUM_DIALECTS, SymbolResolver<DialectType>,
              SymbolResolver<DialectOpcode>>
       dialectResolvers;
 

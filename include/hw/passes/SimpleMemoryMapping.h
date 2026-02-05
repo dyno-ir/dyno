@@ -7,6 +7,7 @@
 #include "hw/HWValue.h"
 #include "hw/IDs.h"
 #include "hw/LoadStore.h"
+#include "hw/Register.h"
 #include <cstdint>
 namespace dyno {
 
@@ -284,6 +285,13 @@ public:
       runOnModule(mod.iref());
     }
   }
+
+  void runModule(ModuleIRef mod) { runOnModule(mod); }
+  void runRegister(RegisterIRef reg) { runOnRegister(reg); }
+
+  static constexpr auto runFuncs = std::make_tuple(
+      &SimpleMemoryMappingPass::runRegister,
+      &SimpleMemoryMappingPass::runModule, &SimpleMemoryMappingPass::run);
 };
 
 }; // namespace dyno

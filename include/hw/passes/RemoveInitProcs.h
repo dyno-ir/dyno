@@ -4,6 +4,7 @@
 #include "dyno/Pass.h"
 #include "hw/HWAbstraction.h"
 #include "hw/HWContext.h"
+#include "hw/Module.h"
 namespace dyno {
 
 class RemoveInitProcsPass : public Pass<RemoveInitProcsPass> {
@@ -29,6 +30,10 @@ public:
       runOnModule(mod.iref());
     }
   }
+  void runModule(ModuleIRef mod) { runOnModule(mod); }
+
+  static constexpr auto runFuncs = std::make_tuple(
+      &RemoveInitProcsPass::runModule, &RemoveInitProcsPass::run);
 };
 
 }; // namespace dyno

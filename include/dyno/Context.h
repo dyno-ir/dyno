@@ -108,6 +108,7 @@ public:
   }
 
   CFG &getCFG() { return getCtx<CoreDialectContext>().cfg; }
+  template <> auto &getStore<Block>() { return getCFG().blocks; }
 };
 
 // ref type for easy reassigning

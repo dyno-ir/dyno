@@ -1,4 +1,5 @@
 #pragma once
+#include "dyno/Obj.h"
 #include "dyno/Opcode.h"
 #include "dyno/Parser.h"
 #include "dyno/Type.h"
@@ -81,6 +82,7 @@ CONFIG_STRUCT_TYPES(LAMBDA)
 #define GLUE_IMPL(x, y) x##y
 #define GLUE(x, y) GLUE_IMPL(x, y)
 
+// quote each element in list
 #define QUOTE_LIST(...) GLUE(QUOTE_, COUNT_ARGS(__VA_ARGS__))(__VA_ARGS__)
 
 #define CONFIG_EXPAND_ENUM_CALL(name, defaultV, ...)                           \
@@ -219,13 +221,13 @@ public:
     return new Derived(std::make_from_tuple<Derived>(std::move(argTuple)));
   }
 
-  static void typeErasedRun(void *self, ArrayRef<void *> args) {
-    using arg_tuple = function_args_t<decltype(&Derived::run)>;
+  static bool typeErasedRun(void *self, ArrayRef<void *> args) {
+    using arg_tuple = function_args_t<decltype(&Derived::runGenericPtr)>;
     constexpr auto sz = std::tuple_size_v<arg_tuple>;
     auto argTuple =
         createArgTuple<arg_tuple>(args, std::make_index_sequence<sz>{});
-    std::apply(&BindMethod<&Derived::run>::fv,
-               std::tuple_cat(std::make_tuple(self), argTuple));
+    return std::apply(&BindMethod<&Pass::runGenericPtr>::fv,
+                      std::tuple_cat(std::make_tuple(self), argTuple));
   }
 
   static void typeErasedDestroy(void *obj) {
@@ -266,6 +268,43 @@ public:
           });
     }
   }
+
+private:
+  template <typename T> bool tryRun(FatDynObjRef<> ref, T func) {
+    auto &self = *reinterpret_cast<Derived *>(this);
+
+    if constexpr (std::tuple_size_v<function_args_t<T>> == 0) {
+      if (ref)
+        return false;
+      (self.*func)();
+      return true;
+    } else {
+      static_assert(std::tuple_size_v<function_args_t<T>> == 1,
+                    "expected 0 or 1 arg function");
+      using arg_t = std::tuple_element_t<0, function_args_t<T>>;
+      if (auto conv = ref.dyn_as<arg_t>()) {
+        (self.*func)(conv);
+        return true;
+      }
+      return false;
+    }
+  }
+
+public:
+  bool runGeneric(FatDynObjRef<> ref) {
+    auto &self = *reinterpret_cast<Derived *>(this);
+    if constexpr (requires { self.runFuncs; }) {
+      return std::apply(
+          [&](auto &&...funcs) { return (tryRun(ref, funcs) || ...); },
+          self.runFuncs);
+    } else if (!ref) {
+      self.run();
+      return true;
+    }
+    return false;
+  }
+
+  bool runGenericPtr(FatDynObjRef<> *ref) { return runGeneric(*ref); }
 
   static constexpr std::string_view passName = getName();
 };

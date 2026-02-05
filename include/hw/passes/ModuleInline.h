@@ -107,6 +107,8 @@ public:
                      [&](ModuleRef mod) { build.destroyInstr(mod.iref()); });
   }
 
+  static constexpr auto runFuncs = std::make_tuple(&ModuleInlinePass::run);
+
 public:
   auto make(Context &ctx) { return ModuleInlinePass(ctx); }
   explicit ModuleInlinePass(Context &ctx) : ctx(ctx), copier(ctx) {}

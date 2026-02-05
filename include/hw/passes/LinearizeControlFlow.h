@@ -286,10 +286,10 @@ private:
       case *OP_WHILE:
       case *OP_DO_WHILE: {
         // run instcombine in and around the loop
-        instCombine.run2(HWInstrRef{instr}.parentBlock(ctx));
-        instCombine.run2(instr.def(0)->as<BlockRef>());
+        instCombine.runBlock(HWInstrRef{instr}.parentBlock(ctx));
+        instCombine.runBlock(instr.def(0)->as<BlockRef>());
         if (instr.isOpc(OP_WHILE))
-          instCombine.run2(instr.def(1)->as<BlockRef>());
+          instCombine.runBlock(instr.def(1)->as<BlockRef>());
         // we might be able to simplify loops now that we were unable to before.
         instr = loopSimplify.runOnLoop(instr);
         if (!instr /*|| !instr.isOpc(OP_FOR)*/)
@@ -317,6 +317,13 @@ public:
       runOnModule(module.iref());
     }
   }
+  void runModule(ModuleIRef mod) { runOnModule(mod); }
+  void runProcess(ProcessIRef proc) { runOnProcess(proc); }
+
+  static constexpr auto runFuncs = std::make_tuple(
+      &LinearizeControlFlowPass::runProcess,
+      &LinearizeControlFlowPass::runModule, &LinearizeControlFlowPass::run);
+
   explicit LinearizeControlFlowPass(Context &ctx)
       : ctx(ctx), copier(ctx), build(ctx), autoDebugInfo(ctx),
         loopSimplify(ctx), instCombine(ctx) {}

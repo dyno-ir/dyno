@@ -416,19 +416,35 @@ private:
   }
 
 public:
-  void run() {
+  void runWrapper(auto &&runFunc) {
     visitedMap.clear();
     visitedMap.resize(ctx.getStore<Instr>().numIDs());
 
     ctx.getStore<Instr>().createHooks.emplace_back(
         [&](InstrRef ref) { visitedMap.get_ensure(ref) = 1; });
 
-    for (auto mod : ctx.getCtx<HWDialectContext>().activeModules()) {
-      runOnModule(mod.iref());
-    }
+    runFunc();
 
+    ctx.getStore<Instr>().createHooks.pop_back();
     muxTreeAlloc.clear();
   }
+
+  void run() {
+    runWrapper([&] {
+      for (auto mod : ctx.getCtx<HWDialectContext>().activeModules())
+        runOnModule(mod.iref());
+    });
+  }
+  void runModule(ModuleIRef mod) {
+    runWrapper([&] { runOnModule(mod); });
+  }
+  void runProcess(ProcessIRef proc) {
+    runWrapper([&] { runOnProcess(proc); });
+  }
+
+  static constexpr auto runFuncs = std::make_tuple(
+      &MuxTreeOptimizationPass::runProcess,
+      &MuxTreeOptimizationPass::runModule, &MuxTreeOptimizationPass::run);
 
   auto make(Context &ctx) { return MuxTreeOptimizationPass(ctx); }
   explicit MuxTreeOptimizationPass(Context &ctx) : ctx(ctx), build(ctx) {}

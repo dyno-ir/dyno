@@ -323,7 +323,7 @@ public:
     // dumpDyno("pre_mux_opt.dyno");
     muxTreeOpt.config.dontCareMUXsOnly = true;
     muxTreeOpt.config.exploreConditions = false;
-    // runPass(muxTreeOpt);
+    runPass(muxTreeOpt);
     runPass(instCombine);
     // dumpDyno("postmux_opt.dyno");
 

@@ -16,7 +16,7 @@ namespace dyno {
 struct TypeErasedPass {
   using create_fn = void *(ArrayRef<void *>);
   using destroy_fn = void(void *);
-  using run_fn = void(void *, ArrayRef<void *>);
+  using run_fn = bool(void *, ArrayRef<void *>);
   using config_fn = void(void *, std::map<std::string, std::string> &,
                          DynoLexer &);
 
@@ -54,7 +54,7 @@ struct TypeErasedPassObj {
     o.obj = nullptr;
     return *this;
   }
-  void run(ArrayRef<void *> args) { fns->run(obj, args); }
+  bool run(ArrayRef<void *> args) { return fns->run(obj, args); }
 
   void config(std::map<std::string, std::string> &config, DynoLexer &lexer) {
     fns->config(obj, config, lexer);

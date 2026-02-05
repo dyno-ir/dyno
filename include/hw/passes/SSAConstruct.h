@@ -820,7 +820,7 @@ public:
     }
   }
 
-  void run() {
+  void runWrapper(auto &&runFunc) {
     isNewInstr.clear();
     isNewInstr.resize(ctx.getStore<Instr>().numIDs());
     auto &createHooks = ctx.getStore<Instr>().createHooks;
@@ -830,12 +830,27 @@ public:
       createHooks.emplace_back(
           [&](InstrRef ref) { isNewInstr.get_ensure(ref) = true; });
 
-    for (auto mod : ctx.getCtx<HWDialectContext>().activeModules()) {
-      runOnModule(mod.iref());
-    }
-
+    runFunc();
     createHooks.resize(hookSize);
   }
+
+  void run() {
+    runWrapper([&] {
+      for (auto mod : ctx.getCtx<HWDialectContext>().activeModules()) {
+        runOnModule(mod.iref());
+      }
+    });
+  }
+  void runModule(ModuleIRef mod) {
+    runWrapper([&] { runOnModule(mod); });
+  }
+  void runProcess(ProcessIRef proc) {
+    runWrapper([&] { runOnProc(HWInstrRef{proc}.parentMod(ctx), proc); });
+  }
+
+  static constexpr auto runFuncs =
+      std::make_tuple(&SSAConstructPass::runProcess,
+                      &SSAConstructPass::runModule, &SSAConstructPass::run);
 };
 
 }; // namespace dyno

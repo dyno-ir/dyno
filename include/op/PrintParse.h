@@ -3,6 +3,7 @@
 #include "dyno/InstrPrinter.h"
 #include "dyno/Obj.h"
 #include "dyno/Parser.h"
+#include "op/IDs.h"
 #include "op/MapObj.h"
 #include "op/OpContext.h"
 #include "support/Lexer.h"
@@ -33,6 +34,12 @@ public:
         first = false;
       }
       std::print(str, ")");
+      break;
+    }
+    case OP_STRING.type: {
+      auto asString = ref.as<StringObjRef>();
+      // todo: escapes and multiline string literal if this has illegal chars.
+      std::print(str, "string(\"{}\")", asString->data);
       break;
     }
 
@@ -70,6 +77,14 @@ public:
       }
       lexer.popEnsure(DynoLexer::op_rbrclose);
       return base->ctx.getStore<MapObj>().create(std::move(map));
+    }
+
+    case OP_STRING.type: {
+      lexer.popEnsure(DynoLexer::op_rbropen);
+      std::map<std::string, std::string> map;
+      std::string val{lexer.popEnsure(Token::STRING_LITERAL).strLit.value};
+      lexer.popEnsure(DynoLexer::op_rbrclose);
+      return base->ctx.getStore<StringObj>().create(std::move(val));
     }
 
     default:

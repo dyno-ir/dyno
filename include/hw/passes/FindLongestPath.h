@@ -108,6 +108,10 @@ public:
       runOnModule(mod.iref());
     }
   }
+  void runModule(ModuleIRef mod) { runOnModule(mod); }
+
+  static constexpr auto runFuncs = std::make_tuple(
+      &FindLongestPathPass::runModule, &FindLongestPathPass::run);
 
   auto make(Context &ctx) { return FindLongestPathPass(ctx); }
   explicit FindLongestPathPass(Context &ctx) : ctx(ctx) {}

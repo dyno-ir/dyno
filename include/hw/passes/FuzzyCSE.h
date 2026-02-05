@@ -15,6 +15,7 @@
 #include "support/Debug.h"
 #include "support/DynBitSet.h"
 #include <cassert>
+#include <tuple>
 
 namespace dyno {
 
@@ -501,12 +502,23 @@ public:
         autoDbgInfo(ctx) {}
   static auto make(Context &ctx) { return FuzzyCSEPass{ctx}; }
 
-  void run() {
+  void runWrapper(auto &&runFunc) {
     bitAlias.clearCache();
-    for (auto mod : ctx.getCtx<HWDialectContext>().activeModules()) {
-      runOnModule(mod.iref());
-    }
+    runFunc();
   }
+  void run() {
+    runWrapper([&] {
+      for (auto mod : ctx.getCtx<HWDialectContext>().activeModules()) {
+        runOnModule(mod.iref());
+      }
+    });
+  }
+  void runModule(ModuleIRef mod) {
+    runWrapper([&] { runOnModule(mod); });
+  }
+
+  static constexpr auto runFuncs =
+      std::make_tuple(&FuzzyCSEPass::runModule, &FuzzyCSEPass::run);
 };
 
 }; // namespace dyno

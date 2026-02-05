@@ -36,7 +36,7 @@ public:
   constexpr size_t size() const { return sz; }
   constexpr bool empty() const { return size() == 0; }
 
-  const_reference operator[](size_t i) {
+  const_reference operator[](size_t i) const {
     assert(i < sz);
     return ptr[i];
   }

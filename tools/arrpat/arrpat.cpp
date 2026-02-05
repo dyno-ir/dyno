@@ -1452,7 +1452,7 @@ struct CodeGen {
       }
     }
 
-    os << str.str();
+    os << std::move(str).str();
   }
 };
 
@@ -1576,7 +1576,7 @@ struct CPPBackend {
     auto operandPrefix = [](uint32_t opIdx) {
       std::stringstream str;
       std::print(str, "r{}", opIdx);
-      return str.str();
+      return std::move(str).str();
     };
     auto checkType = [&](uint32_t opIdx, uint32_t typeID) {
       std::print(os, "if ((*{})->as<FatDynObjRef<>>().getType() != {}) ",

@@ -1,0 +1,47 @@
+
+
+TEST_CASE :string("fuzzy-cse-basic"), :block, :block, :block {
+  MODULE_DEF :module("mod"), :block {
+    INPUT_REGISTER_DEF %in_a:register(32)
+    INPUT_REGISTER_DEF %in_b:register(32)
+    INPUT_REGISTER_DEF %in_c:register(32)
+    OUTPUT_REGISTER_DEF %out_a:register(32)
+    OUTPUT_REGISTER_DEF %out_b:register(32)
+
+    COMB_PROCESS_DEF :process, :block {
+      LOAD %a_v:wire(32), %in_a
+      LOAD %b_v:wire(32), %in_b
+      LOAD %c_v:wire(32), %in_c
+
+      ADD %abc:wire(32), %a_v, %b_v, %c_v
+      ADD %ac:wire(32), %a_v, %c_v
+
+      STORE %abc, %out_a
+      STORE %ac, %out_a
+    }
+  }
+}{
+  MODULE_DEF :module("mod"), :block {
+    INPUT_REGISTER_DEF %in_a:register(32)
+    INPUT_REGISTER_DEF %in_b:register(32)
+    INPUT_REGISTER_DEF %in_c:register(32)
+    OUTPUT_REGISTER_DEF %out_a:register(32)
+    OUTPUT_REGISTER_DEF %out_b:register(32)
+
+    COMB_PROCESS_DEF :process, :block {
+      LOAD %a_v:wire(32), %in_a
+      LOAD %c_v:wire(32), %in_c
+      ADD %ac:wire(32), %a_v, %c_v
+
+      LOAD %b_v:wire(32), %in_b
+      ADD %abc:wire(32), %b_v, %ac
+
+      STORE %abc, %out_a
+      STORE %ac, %out_a
+    }
+  }
+}{
+  meta.FUZZY_CSE_PASS
+  meta.ORDER_INSTRS_PASS
+  meta.INST_COMBINE_PASS
+}

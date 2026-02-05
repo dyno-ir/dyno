@@ -9,6 +9,7 @@
 #include "hw/HWValue.h"
 #include "hw/IDs.h"
 #include "hw/LoadStore.h"
+#include "hw/Register.h"
 #include "hw/analysis/BitAliasAnalysis.h"
 #include "hw/analysis/RegisterValue.h"
 #include "support/Utility.h"
@@ -151,12 +152,22 @@ class RegisterPartitionPass : public Pass<RegisterPartitionPass> {
   }
 
 public:
-  auto make(Context &ctx) { return RegisterPartitionPass(ctx); }
-  explicit RegisterPartitionPass(Context &ctx) : ctx(ctx), bitAlias(ctx) {}
   void run() {
     for (auto mod : ctx.getCtx<HWDialectContext>().activeModules()) {
       runOnModule(mod.iref());
     }
   }
+  void runModule(ModuleIRef mod) { runOnModule(mod); }
+  void runRegister(RegisterIRef reg) {
+    bitAlias.clearCache();
+    runOnRegister(reg);
+  }
+
+  static constexpr auto runFuncs = std::make_tuple(
+      &RegisterPartitionPass::runRegister, &RegisterPartitionPass::runModule,
+      &RegisterPartitionPass::run);
+
+  auto make(Context &ctx) { return RegisterPartitionPass(ctx); }
+  explicit RegisterPartitionPass(Context &ctx) : ctx(ctx), bitAlias(ctx) {}
 };
 }; // namespace dyno

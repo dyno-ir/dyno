@@ -1,8 +1,11 @@
 #pragma once
 #include "aig/AIG.h"
+#include "aig/AIGContext.h"
+#include "aig/IDs.h"
 #include "dyno/Constant.h"
 #include "dyno/Context.h"
 #include "dyno/DestroyMap.h"
+#include "dyno/Obj.h"
 #include "dyno/Pass.h"
 #include "hw/HWAbstraction.h"
 #include "hw/HWContext.h"
@@ -10,8 +13,11 @@
 #include "hw/IDs.h"
 #include "hw/Process.h"
 #include "support/ErrorRecovery.h"
+#include "support/TemplateUtil.h"
 #include "support/Utility.h"
 #include <fstream>
+#include <tuple>
+#include <type_traits>
 
 namespace dyno {
 
@@ -376,23 +382,44 @@ class ABCPass : public Pass<ABCPass> {
   }
 
 public:
-  struct Config {
-    std::string path;
-  };
+#define CONFIG_STRUCT_LAMBDA(FIELD, ENUM) FIELD(std::string, path, )
+  CONFIG_STRUCT(CONFIG_STRUCT_LAMBDA)
+#undef CONFIG_STRUCT_LAMBDA
   Config config;
-  void run() {
+
+  void runWrapper(auto &&runFunc) {
     destroyMap.clear();
     destroyMap.resize(ctx.getStore<Instr>().numIDs());
 
     auto tok = destroyMap.registerCreateHook(ctx.getStore<Instr>());
-    for (auto mod : ctx.getCtx<HWDialectContext>().activeModules()) {
-      runOnModule(mod.iref());
-    }
+
+    runFunc();
 
     destroyMap.apply(ctx.getStore<Instr>(), [&](InstrRef ref) {
       HWInstrBuilder{ctx}.destroyInstr(ref);
     });
   }
+
+  void run() {
+    for (auto mod : ctx.getCtx<HWDialectContext>().activeModules()) {
+      runOnModule(mod.iref());
+    }
+  }
+
+  void runModule(ModuleRef mod) {
+    runWrapper([&] { runOnModule(mod.iref()); });
+  }
+  void runProcess(ProcessIRef proc) {
+    runWrapper([&] { runOnProc(proc); });
+  }
+  void runAIG(AIGObjRef aig) {
+    runWrapper([&] { runOnAIG(aig->defUse.getSingleDef()->instr()); });
+  }
+
+  static constexpr auto runFuncs =
+      std::make_tuple(&ABCPass::runModule, &ABCPass::runProcess,
+                      &ABCPass::runAIG, &ABCPass::run);
+
   auto make(Context &ctx) { return ABCPass(ctx); }
   explicit ABCPass(Context &ctx) : ctx(ctx) {}
 };

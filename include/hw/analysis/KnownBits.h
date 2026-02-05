@@ -104,11 +104,6 @@ public:
     stack.emplace_back(rootVal, 0);
     while (!stack.empty()) {
 
-      if (retVal.val.getWords().data() != nullptr && retVal.val.getNumBits()) {
-        auto tst = retVal;
-        tst.val.normalize();
-        assert(tst.val == retVal.val);
-      }
 
       auto &frame = stack.back();
       if (auto asConst = frame.value.dyn_as<ConstantRef>()) {
@@ -249,8 +244,8 @@ public:
                              asInsert.getMemoryLen();
             BigInt::resizeOp4S(retVal.val, retVal.val,
                                asInsert.getLen() - oobLen);
-          BigInt::insertOp4S(frame.acc.val, frame.acc.val, retVal.val,
-                             asInsert.getBase());
+            BigInt::insertOp4S(frame.acc.val, frame.acc.val, retVal.val,
+                               asInsert.getBase());
           }
 
           retVal = std::move(frame.acc);

@@ -159,5 +159,6 @@ public:
       abort();
     }
   }
+  static constexpr auto runFuncs = std::make_tuple(&CheckPass::run);
 };
 }; // namespace dyno

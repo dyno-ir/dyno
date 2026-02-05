@@ -194,16 +194,34 @@ private:
   }
 
 public:
-  void run() {
+  void runWrapper(auto &&runFunc) {
     instrDestroy.resize(ctx.getStore<Instr>().numIDs());
-    for (auto mod : ctx.getCtx<HWDialectContext>().activeModules()) {
-      runOnModule(mod.iref());
-    }
+    runFunc();
     HWInstrBuilder build{ctx};
     instrDestroy.apply(ctx.getStore<Instr>(),
                        [&](InstrRef ref) { build.destroyInstr(ref); });
     instrDestroy.clear();
   }
+
+  void run() {
+    runWrapper([&] {
+      for (auto mod : ctx.getCtx<HWDialectContext>().activeModules()) {
+        runOnModule(mod.iref());
+      }
+    });
+  }
+  void runModule(ModuleIRef mod) {
+    runWrapper([&] { runOnModule(mod); });
+  }
+  void runProcess(ProcessIRef proc) {
+    runWrapper([&] { runOnProcess(proc); });
+  }
+
+  static constexpr auto runFuncs =
+      std::make_tuple(&CommonSubexpressionEliminationPass::runProcess,
+                      &CommonSubexpressionEliminationPass::runModule,
+                      &CommonSubexpressionEliminationPass::run);
+
   explicit CommonSubexpressionEliminationPass(Context &ctx)
       : ctx(ctx), map(ctx), controlFlowAnalysis(ctx) {}
   static auto make(Context &ctx) {

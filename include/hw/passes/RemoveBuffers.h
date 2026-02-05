@@ -84,16 +84,30 @@ public:
     }
   }
 
-  void run() {
+  void runWrapper(auto &&runFunc) {
     findBuffers();
     destroyMap.clear();
     destroyMap.resize(ctx.getStore<Instr>().numIDs());
-    for (auto mod : ctx.getCtx<HWDialectContext>().activeModules())
-      runOnModule(mod.iref());
+
+    runFunc();
+
     destroyMap.apply(ctx.getStore<Instr>(), [&](InstrRef ref) {
       HWInstrBuilder{ctx}.destroyInstr(ref);
     });
   }
+
+  void run() {
+    runWrapper([&] {
+      for (auto mod : ctx.getCtx<HWDialectContext>().activeModules())
+        runOnModule(mod.iref());
+    });
+  }
+  void runModule(ModuleIRef mod) {
+    runWrapper([&] { runOnModule(mod); });
+  }
+
+  static constexpr auto runFuncs =
+      std::make_tuple(&RemoveBuffersPass::runModule, &RemoveBuffersPass::run);
 };
 
 }; // namespace dyno

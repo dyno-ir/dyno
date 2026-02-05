@@ -432,16 +432,26 @@ public:
   }
 
   void runOnModule(ModuleIRef module) {
-    map.clear();
-    map.resize(ctx.getStore<Process>().numIDs());
     findDeps(module);
     linearize(module);
   }
+  void runWrapper(auto &&runFunc) {
+    map.resize(ctx.getStore<Process>().numIDs());
+    runFunc();
+    map.clear();
+  }
 
   void run() {
-    for (auto mod : ctx.getCtx<HWDialectContext>().activeModules()) {
-      runOnModule(ModuleRef{mod}.iref());
-    }
+    runWrapper([&] {
+      for (auto mod : ctx.getCtx<HWDialectContext>().activeModules()) {
+        runOnModule(ModuleRef{mod}.iref());
+      }
+    });
   }
+  void runModule(ModuleIRef mod) {
+    runWrapper([&] { runOnModule(mod); });
+  }
+  static constexpr auto runFuncs = std::make_tuple(
+      &ProcessLinearizePass::runModule, &ProcessLinearizePass::run);
 };
 }; // namespace dyno

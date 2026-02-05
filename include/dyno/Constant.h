@@ -179,7 +179,7 @@ public:
                                              bool unsized = false) {
     std::stringstream str;
     toStream(str, base, unsized);
-    return str.str();
+    return std::move(str).str();
   }
 
   template <BigIntAPI T>
@@ -276,7 +276,9 @@ public:
     if (self().getNumWords() > 1)
       return std::nullopt;
     if (self().getExtNumWords() > 1 &&
-        !(self().getExtend() == 0 ||
+        // fail if extend doesn't equal last explicitly stored bit
+        !((self().getExtend() == 0 &&
+           !(self().getWords()[0] & bit_mask_msb<uint32_t>())) ||
           (self().getExtend() == 0b11 &&
            self().getWords()[0] & bit_mask_msb<uint32_t>())))
       return std::nullopt;

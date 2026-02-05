@@ -2,6 +2,7 @@
 
 #include "dyno/Constant.h"
 #include "dyno/Context.h"
+#include "dyno/HierBlockIterator.h"
 #include "dyno/Obj.h"
 #include "dyno/Pass.h"
 #include "hw/AutoDebugInfo.h"
@@ -918,7 +919,7 @@ private:
   }
 
 public:
-  void run() {
+  void runOnProcess(ProcessIRef proc) {
     auto isLoweringInstr = [&](InstrRef instr) {
       if (instr.isOpc(OP_ADD))
         return config.lowerMultiInputAdd || config.lowerSimpleAdd;
@@ -965,7 +966,7 @@ public:
       destroyMap.get_ensure(ref) = 0;
     });
 
-    for (auto instr : ctx.getStore<Instr>()) {
+    for (auto instr : HierBlockRange{proc.block()}) {
       if (isLoweringInstr(instr))
         worklist.emplace_back(instr);
     }
@@ -983,6 +984,25 @@ public:
       build.destroyInstr(ctx.getStore<Instr>().resolve(obj));
     }
   }
+
+  void runOnModule(ModuleIRef module) {
+    for (auto proc : module.procs()) {
+      runOnProcess(proc);
+    }
+  }
+
+  void run() {
+    for (auto mod : ctx.getCtx<HWDialectContext>().activeModules()) {
+      runOnModule(mod.iref());
+    }
+  }
+  void runProcess(ProcessIRef proc) { runOnProcess(proc); }
+  void runModule(ModuleIRef mod) { runOnModule(mod); }
+
+  static constexpr auto runFuncs =
+      std::make_tuple(&LowerOpsPass::runProcess, &LowerOpsPass::runModule,
+                      &LowerOpsPass::run);
+
   static auto make(Context &ctx) { return LowerOpsPass(ctx); }
   explicit LowerOpsPass(Context &ctx)
       : ctx(ctx), build(ctx), cbuild(ctx.getStore<Constant>()),

@@ -5,6 +5,7 @@
 #include "dyno/Pass.h"
 #include "hw/HWContext.h"
 #include "hw/HWInstr.h"
+#include "hw/Process.h"
 #include "hw/Register.h"
 #include "hw/analysis/SCFTraversal.h"
 #include "op/IDs.h"
@@ -191,22 +192,42 @@ private:
     assert(block.size() == ordered.size());
   }
 
+  void runOnProcess(ProcessIRef proc) {
+    auto blocks = getSCFBlocksPreorder(proc.block());
+    for (auto block : blocks)
+      runOnBlock(block);
+  }
+
   void runOnModule(ModuleIRef mod) {
-    map.clear();
-    map.resize(ctx.getStore<Instr>().numIDs());
     for (auto proc : mod.procs()) {
-      auto blocks = getSCFBlocksPreorder(proc.block());
-      for (auto block : blocks)
-        runOnBlock(block);
+      runOnProcess(proc);
     }
   }
 
 public:
-  void run() {
-    for (auto mod : ctx.getCtx<HWDialectContext>().activeModules()) {
-      runOnModule(mod.iref());
-    }
+  void runWrapper(auto &&runFunc) {
+    map.resize(ctx.getStore<Instr>().numIDs());
+    runFunc();
+    map.clear();
   }
+  void run() {
+    runWrapper([&] {
+      for (auto mod : ctx.getCtx<HWDialectContext>().activeModules()) {
+        runOnModule(mod.iref());
+      }
+    });
+  }
+  void runModule(ModuleIRef mod) {
+    runWrapper([&] { runOnModule(mod); });
+  }
+  void runProcess(ProcessIRef proc) {
+    runWrapper([&] { runOnProcess(proc); });
+  }
+
+  static constexpr auto runFuncs =
+      std::make_tuple(&OrderInstrsPass::runProcess,
+                      &OrderInstrsPass::runModule, &OrderInstrsPass::run);
+
   auto make(Context &ctx) { return OrderInstrsPass(ctx); }
   explicit OrderInstrsPass(Context &ctx) : ctx(ctx) {}
 };

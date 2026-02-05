@@ -13,6 +13,7 @@
 #include "meta/MetaContext.h"
 #include "meta/MetaParser.h"
 #include "meta/MetaPassManager.h"
+#include "meta/PassPipelineInterpreter.h"
 #include "op/MapObj.h"
 #include "op/OpContext.h"
 #include "support/ArrayRef.h"
@@ -64,63 +65,6 @@ CmdLineArg<bool> argCheckAfterAll{'c', "check-after-all",
 #endif
 };
 
-class PassStorage {
-  Context &ctx;
-  VectorLUT<TypeErasedPassObj> passes;
-
-public:
-  TypeErasedPassObj &create(DialectOpcode passOpc, ArrayRef<void *> args) {
-    assert(passOpc.getDialectID() == DIALECT_META);
-    return passes.insert(passOpc.getOpcodeID(),
-                         ctx.getPassRegistry().constructPass(passOpc, args));
-  }
-  TypeErasedPassObj &findOrCreate(DialectOpcode passOpc,
-                                  ArrayRef<void *> args) {
-    assert(passOpc.getDialectID() == DIALECT_META);
-    if (auto &pass = passes.find(passOpc.getOpcodeID()))
-      return *pass;
-    return create(passOpc, args);
-  }
-
-  TypeErasedPassObj &insertExisting(DialectOpcode passOpc,
-                                    TypeErasedPassObj &&existing) {
-    return passes.insert(passOpc.getDialectID(), std::move(existing));
-  }
-
-  PassStorage(Context &ctx) : ctx(ctx) {}
-};
-
-class MetaPassPipelineInterpreter {
-  Context &ctx;
-  ArrayRef<void *> passCtorArgs;
-  PassStorage passes;
-
-public:
-  void interpretPassPipeline(BlockRef block) {
-    for (auto instr : block) {
-      if (instr.getDialect() != DIALECT_META)
-        report_fatal_error("expected meta dialect instruction");
-      auto opc = instr.getDialectOpcode();
-      auto &pass = passes.findOrCreate(opc, passCtorArgs);
-
-      if (instr.getNumOperands() != 0) {
-        if (instr.getNumOperands() != 1)
-          report_fatal_error("expected at most one operand (config)");
-        auto cfg = instr.operand(0)->dyn_as<MapRef>();
-        if (!cfg)
-          report_fatal_error("expected map object");
-        DynoLexer lexer{ctx.getDialectInfos(), ArrayRef<char>::emptyRef(),
-                        "<internal>"};
-        pass.config(cfg->data, lexer);
-      }
-      pass.run(ArrayRef<void *>::emptyRef());
-    }
-  }
-
-  MetaPassPipelineInterpreter(Context &ctx, ArrayRef<void *> passCtorArgs)
-      : ctx(ctx), passCtorArgs(passCtorArgs), passes(ctx) {}
-};
-
 int main(int argc, char **argv) {
   Context ctx;
   HWDialectContext hwContext;
@@ -166,10 +110,12 @@ int main(int argc, char **argv) {
   metaParser.parse(flowFile, flowFileName, flowBlock.end());
 
   SmallVec<void *, 1> passCtorArgs{reinterpret_cast<void *>(&ctx)};
+  FatDynObjRef<> arg = nullref;
+  SmallVec<void *, 1> passRunArgs{reinterpret_cast<void *>(&arg)};
 
   MetaPassPipelineInterpreter pipeline{ctx, passCtorArgs};
 
-  pipeline.interpretPassPipeline(flowBlock);
+  pipeline.interpretPassPipeline(flowBlock, passRunArgs);
 
   std::ofstream str{argOutFile->data()};
   HWPrinter{str}.printCtx(ctx);

@@ -4,6 +4,7 @@
 #include "dyno/Pass.h"
 #include "hw/HWAbstraction.h"
 #include "hw/HWContext.h"
+#include "hw/Process.h"
 #include "hw/analysis/RegisterValue.h"
 #include "support/Utility.h"
 namespace dyno {
@@ -94,6 +95,15 @@ public:
       runOnModule(mod.iref());
     }
   }
+  void runModule(ModuleIRef mod) { runOnModule(mod); }
+  void runProcess(ProcessIRef proc) {
+    runOnProcess(HWInstrRef{proc}.parentMod(ctx), proc);
+  }
+
+  static constexpr auto runFuncs =
+      std::make_tuple(&LoadCoalescePass::runProcess,
+                      &LoadCoalescePass::runModule, &LoadCoalescePass::run);
+
   auto make(Context &ctx) { return LoadCoalescePass(ctx); }
   explicit LoadCoalescePass(Context &ctx) : ctx(ctx) {}
 };

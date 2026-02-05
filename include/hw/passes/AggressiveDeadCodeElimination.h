@@ -21,6 +21,7 @@
 #include "op/StructuredControlFlow.h"
 #include "support/Debug.h"
 #include "support/Utility.h"
+#include <tuple>
 namespace dyno {
 
 // todo: function support
@@ -477,7 +478,7 @@ class AggressiveDeadCodeEliminationPass
     }
   }
 
-  void markLiveInstructions() {
+  void markLiveInstructions(ModuleIRef activeMod = nullref) {
     // find roots (not in CFG or in un-def'd blocks)
     for (auto instr : ctx.getStore<Instr>()) {
       if (!ctx.getCFG().contains(instr) ||
@@ -493,7 +494,8 @@ class AggressiveDeadCodeEliminationPass
 
       if (instr.isOpc(HW_MODULE_DEF, HW_STDCELL_DEF)) {
         // contents of non-ignored modules are DCEd, don't mark alive
-        if (!instr.as<ModuleIRef>().mod()->ignore)
+        if (instr.as<ModuleIRef>() == activeMod ||
+            !instr.as<ModuleIRef>().mod()->ignore)
           continue;
       }
 
@@ -522,7 +524,7 @@ class AggressiveDeadCodeEliminationPass
   }
 
 public:
-  void run() {
+  void runWrapper(auto &&runFunc) {
     instrMap.clear();
     wireMap.clear();
     constantMap.clear();
@@ -530,14 +532,34 @@ public:
     instrMap.resize(ctx.getStore<Instr>().numIDs());
     wireMap.resize(ctx.getStore<Wire>().numIDs());
     constantMap.resize(ctx.getStore<Constant>().numIDs());
-    markLiveInstructions();
-    for (auto mod : ctx.getCtx<HWDialectContext>().activeModules()) {
-      runOnModule(mod.iref());
-    }
+
+    runFunc();
+
     destroyDeadInstrs();
     destroyDeadWires();
     destroyDeadConstants();
   }
+
+  void run() {
+    runWrapper([&] {
+      markLiveInstructions();
+      for (auto mod : ctx.getCtx<HWDialectContext>().activeModules()) {
+        runOnModule(mod.iref());
+      }
+    });
+  }
+
+  void runModule(ModuleIRef mod) {
+    runWrapper([&] {
+      markLiveInstructions(mod);
+      runOnModule(mod);
+    });
+  }
+
+  static constexpr auto runFuncs =
+      std::make_tuple(&AggressiveDeadCodeEliminationPass::runModule,
+                      &AggressiveDeadCodeEliminationPass::run);
+
   auto make(Context &ctx) { return AggressiveDeadCodeEliminationPass(ctx); }
   explicit AggressiveDeadCodeEliminationPass(Context &ctx)
       : ctx(ctx), build(ctx) {}

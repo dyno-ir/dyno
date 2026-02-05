@@ -1,7 +1,9 @@
 #pragma once
 #include "dyno/Context.h"
 #include "dyno/RefUnion.h"
-#include "hw/HWContext.h"
+#include "hw/Module.h"
+#include "hw/Process.h"
+#include "op/Function.h"
 
 namespace dyno {
 

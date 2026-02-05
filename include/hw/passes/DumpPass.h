@@ -2,6 +2,7 @@
 
 #include "dyno/Context.h"
 #include "dyno/InstrPrinter.h"
+#include "dyno/Obj.h"
 #include "dyno/Pass.h"
 #include "hw/HWPrinter.h"
 #include <fstream>
@@ -22,6 +23,23 @@ public:
     HWPrinter print{str};
     print.printCtx(ctx);
   }
+  void runInstr(InstrRef instr) {
+    std::ofstream str{config.path};
+    // todo: generic printer
+    HWPrinter print{str};
+    print.printInstr(instr, ctx);
+  }
+  void runObject(FatDynObjRef<> obj) {
+    std::ofstream str{config.path};
+    // todo: generic printer
+    HWPrinter print{str};
+    print.printDef(obj);
+    str << "\n";
+  }
+
+  static constexpr auto runFuncs = std::make_tuple(
+      &DumpPass::runInstr, &DumpPass::runObject, &DumpPass::run);
+
   explicit DumpPass(Context &ctx) : ctx(ctx) {}
   static DumpPass make(Context &ctx) { return DumpPass(ctx); }
 };

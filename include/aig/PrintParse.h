@@ -36,7 +36,11 @@ public:
           if (node.invert())
             str << "!";
           if (node.isSpecial())
-            base->printRefOrUse(asAIG[node].nonInverted().as<FatAIGNodeRef>());
+            // don't print ref here for consistency. If we can get AIG obj info
+            // for FAT_AIG_NODE we can switch this back and make both print the
+            // obj ref.
+            str << "$fat" << node.idx() - AIGObjID::FAT_ID_START;
+          // base->printRefOrUse(asAIG[node].nonInverted().as<FatAIGNodeRef>());
           else
             str << "$" << node.idx();
         };
@@ -62,16 +66,32 @@ public:
         }
         if (node.invert())
           str << "!";
-        str << "$" << node.idx();
+        if (node.isSpecial())
+          str << "$fat" << node.idx() - AIGObjID::FAT_ID_START;
+        else
+          str << "$" << node.idx();
       };
 
-      str << "fat_node(";
-      printOperand(node.as<AIGNodeTRef>());
-      str << ", ";
-      printOperand(node->node.op[0]);
-      str << ", ";
-      printOperand(node->node.op[1]);
-      str << ")";
+      if (node->node.op[0] == ObjID::invalid() &&
+          node->node.op[1] == ObjID::invalid()) {
+        str << "fat_node(";
+        printOperand(node.as<AIGNodeTRef>());
+        str << ")";
+      } else if (node->node.op[0] == node->node.op[1]) {
+        str << "fat_node(";
+        printOperand(node.as<AIGNodeTRef>());
+        str << ", ";
+        printOperand(node->node.op[0]);
+        str << ")";
+      } else {
+        str << "fat_node(";
+        printOperand(node.as<AIGNodeTRef>());
+        str << ", ";
+        printOperand(node->node.op[0]);
+        str << ", ";
+        printOperand(node->node.op[1]);
+        str << ")";
+      }
       break;
     }
     default:

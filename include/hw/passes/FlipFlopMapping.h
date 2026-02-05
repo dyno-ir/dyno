@@ -659,26 +659,39 @@ public:
                  ffMap.size() - missing, ffMap.size());
     });
   }
-
-  void run() {
+  void runWrapper(auto &&runFunc) {
+    stdCellFFs.clear();
     findFlipFlopStdCells();
     precomputeFixups();
 
     ctx.getStore<Instr>().createHooks.emplace_back(
         [&](InstrRef ref) { destroyMap.ensureUnmarked(ref); });
-
     destroyMap.resize(ctx.getStore<Instr>().numIDs());
-    for (auto mod : ctx.getCtx<HWDialectContext>().activeModules()) {
-      if (mod.iref().isOpc(HW_MODULE_DEF))
-        runOnModule(mod.iref());
-    }
+
+    runFunc();
 
     ctx.getStore<Instr>().createHooks.pop_back();
-
     destroyMap.apply(ctx.getStore<Instr>(),
                      [&](InstrRef ref) { build.destroyInstr(ref); });
     destroyMap.clear();
   }
+  void run() {
+    runWrapper([&] {
+      for (auto mod : ctx.getCtx<HWDialectContext>().activeModules()) {
+        if (mod.iref().isOpc(HW_MODULE_DEF))
+          runOnModule(mod.iref());
+      }
+    });
+  }
+  void runModule(ModuleIRef mod) {
+    runWrapper([&] {
+      if (mod.isOpc(HW_MODULE_DEF))
+        runOnModule(mod);
+    });
+  }
+  static constexpr auto runFuncs = std::make_tuple(
+      &FlipFlopMappingPass::runModule, &FlipFlopMappingPass::run);
+
   auto make(Context &ctx) { return FlipFlopMappingPass(ctx); }
   explicit FlipFlopMappingPass(Context &ctx) : ctx(ctx), build(ctx) {}
 };

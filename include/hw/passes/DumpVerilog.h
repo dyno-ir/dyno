@@ -12,6 +12,7 @@
 #include "support/ErrorRecovery.h"
 #include "support/Utility.h"
 #include <print>
+#include <tuple>
 namespace dyno {
 
 class void_stream final : public std::ostream {
@@ -34,6 +35,11 @@ class DumpVerilogPass : public Pass<DumpVerilogPass> {
 
   void_stream voidStr;
   HWPrinter print;
+
+#define CONFIG_STRUCT_LAMBDA(FIELD, ENUM) FIELD(bool, dumpWiresLast, true)
+  CONFIG_STRUCT(CONFIG_STRUCT_LAMBDA)
+#undef CONFIG_STRUCT_LAMBDA
+  Config config;
 
   // Adapter for printer's regular IntroducedName, only overrides str()
   struct VerilogIntroducedName : public Printer::IntroducedName {
@@ -65,6 +71,17 @@ class DumpVerilogPass : public Pass<DumpVerilogPass> {
       wireMap[wire] = wireIdCnt;
       return wireIdCnt++;
     };
+
+    auto dumpWires = [&]() {
+      for (auto [obj, id] : wireMap) {
+        if (!id || !ctx.getStore<Wire>().exists(obj))
+          continue;
+        auto wire = ctx.getStore<Wire>().resolve(obj);
+        std::print(os, "wire[{}:0] _w{}_;\n", *wire.getNumBits() - 1, *id);
+      }
+    };
+    if (!config.dumpWiresLast)
+      dumpWires();
 
     uint32_t instanceIDCnt = 0;
 
@@ -208,12 +225,8 @@ class DumpVerilogPass : public Pass<DumpVerilogPass> {
       }
     }
 
-    for (auto [obj, id] : wireMap) {
-      if (!id || !ctx.getStore<Wire>().exists(obj))
-        continue;
-      auto wire = ctx.getStore<Wire>().resolve(obj);
-      std::print(os, "wire[{}:0] _w{}_;\n", *wire.getNumBits() - 1, *id);
-    }
+    if (config.dumpWiresLast)
+      dumpWires();
   }
 
   void dumpInstrModScope(InstrRef instr) {
@@ -282,13 +295,24 @@ class DumpVerilogPass : public Pass<DumpVerilogPass> {
 public:
   explicit DumpVerilogPass(Context &ctx, std::ostream &os)
       : ctx(ctx), os(os), print(voidStr) {}
-  void run() {
+  void runWrapper(auto &&runFunc) {
     print.reset();
     auto tok =
         print.regNames().bind(&ctx.getCtx<HWDialectContext>().regNameInfo);
-    for (auto mod : ctx.getCtx<HWDialectContext>().activeModules())
-      dumpModule(mod.iref());
+    runFunc();
   }
+  void run() {
+    runWrapper([&] {
+      for (auto mod : ctx.getCtx<HWDialectContext>().activeModules())
+        dumpModule(mod.iref());
+    });
+  }
+  void runModule(ModuleIRef mod) {
+    runWrapper([&] { dumpModule(mod); });
+  }
+
+  static constexpr auto runFuncs =
+      std::make_tuple(&DumpVerilogPass::runModule, &DumpVerilogPass::run);
 };
 
 }; // namespace dyno

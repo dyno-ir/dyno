@@ -65,12 +65,18 @@ struct DemandedBitsAnalysis {
     BigInt demanded;
 
     void merge(FatDynObjRef<> ref, const DemandedBitsAcc &other) {
+      if (this->isMostPessimistic()) {
+        return;
+      }
       if (other.isMostPessimistic()) {
         setMostPessimistic();
         return;
       }
       if (other.isMostOptimistic()) {
         return;
+      }
+      if (this->isMostOptimistic()) {
+        ensureSize(other.demanded.getNumBits());
       }
 
       demanded |= other.demanded;
@@ -96,6 +102,9 @@ struct DemandedBitsAnalysis {
 
       switch (*instr.getDialectOpcode()) {
       case *OP_TRUNC:
+        demanded.resizeOp(demanded, demanded,
+                          *instr.other(0)->as<HWValue>().getNumBits());
+        break;
       case *OP_SEXT:
       case *OP_ZEXT:
       case *OP_ANYEXT:
@@ -157,7 +166,11 @@ struct DemandedBitsAnalysis {
   }
   DownwardAnalysis<DemandedBitsAcc, demandedBitsNextFunc> base;
 
-  BigInt getDemandedBits(WireRef wire) { return base.get(wire).demanded; }
+  BigInt getDemandedBits(WireRef wire) {
+    auto val = base.get(wire);
+    val.ensureSize(*wire.getNumBits());
+    return std::move(val.demanded);
+  }
 };
 
 }; // namespace dyno

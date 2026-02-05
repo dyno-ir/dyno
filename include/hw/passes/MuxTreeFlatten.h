@@ -4,7 +4,9 @@
 #include "hw/HWAbstraction.h"
 #include "hw/HWContext.h"
 #include "hw/HWValue.h"
+#include "hw/Process.h"
 #include "hw/analysis/KnownBits.h"
+#include <tuple>
 namespace dyno {
 class MuxTreeFlattenPass : public Pass<MuxTreeFlattenPass> {
   Context &ctx;
@@ -96,14 +98,29 @@ class MuxTreeFlattenPass : public Pass<MuxTreeFlattenPass> {
   }
 
 public:
-  void run() {
+  void runWrapper(auto &&runFunc) {
     visitedMap.clear();
     visitedMap.resize(ctx.getStore<Instr>().numIDs());
     ctx.getStore<Instr>().createHooks.emplace_back(
         [&](InstrRef ref) { visitedMap.get_ensure(ref) = 1; });
-    for (auto mod : ctx.getCtx<HWDialectContext>().activeModules())
-      runOnModule(mod.iref());
+    runFunc();
+    ctx.getStore<Instr>().createHooks.pop_back();
   }
+  void run() {
+    runWrapper([&] {
+      for (auto mod : ctx.getCtx<HWDialectContext>().activeModules())
+        runOnModule(mod.iref());
+    });
+  }
+  void runModule(ModuleIRef mod) {
+    runWrapper([&] { runOnModule(mod); });
+  }
+  void runProcess(ProcessIRef proc) {
+    runWrapper([&] { runOnProcess(proc); });
+  }
+  static constexpr auto runFuncs = std::make_tuple(
+      &MuxTreeFlattenPass::runProcess, &MuxTreeFlattenPass::runModule,
+      &MuxTreeFlattenPass::run);
   explicit MuxTreeFlattenPass(Context &ctx) : ctx(ctx) {}
   MuxTreeFlattenPass make(Context &ctx) { return MuxTreeFlattenPass{ctx}; }
 };

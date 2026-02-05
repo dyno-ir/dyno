@@ -160,14 +160,29 @@ class ConstantMappingPass : public Pass<ConstantMappingPass> {
   }
 
 public:
+  void runWrapper(auto &&runFunc) {
+    findConstantModules();
+    runFunc();
+  }
+  void run() {
+    runWrapper([&] {
+      for (auto mod : ctx.getCtx<HWDialectContext>().activeModules())
+        runOnModule(mod.iref());
+    });
+  }
+  void runModule(ModuleIRef mod) {
+    runWrapper([&] { runOnModule(mod); });
+  }
+  void runProcess(ProcessIRef proc) {
+    runWrapper([&] { runOnProcess(proc); });
+  }
+
+  static constexpr auto runFuncs = std::make_tuple(
+      &ConstantMappingPass::runProcess, &ConstantMappingPass::runModule,
+      &ConstantMappingPass::run);
+
   auto make(Context &ctx) { return ConstantMappingPass(ctx); }
   explicit ConstantMappingPass(Context &ctx) : ctx(ctx), build(ctx) {}
-  void setup() { findConstantModules(); }
-  void run() {
-    setup();
-    for (auto mod : ctx.getCtx<HWDialectContext>().activeModules())
-      runOnModule(mod.iref());
-  }
 };
 
 }; // namespace dyno

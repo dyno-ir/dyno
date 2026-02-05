@@ -552,6 +552,12 @@ public:
       runOnModule(mod.iref());
     }
   }
+  void runProcess(ProcessIRef proc) { runOnProcess(proc); }
+  void runModule(ModuleIRef mod) { runOnModule(mod); }
+
+  static constexpr auto runFuncs =
+      std::make_tuple(&LoopSimplifyPass::runProcess,
+                      &LoopSimplifyPass::runModule, &LoopSimplifyPass::run);
 
   auto make(Context &ctx) { return LoopSimplifyPass(ctx); }
   explicit LoopSimplifyPass(Context &ctx) : ctx(ctx), loopSimplifier(ctx) {}

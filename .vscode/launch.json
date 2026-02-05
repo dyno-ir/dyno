@@ -76,6 +76,15 @@
     {
       "type": "lldb",
       "request": "launch",
+      "name": "dyno-test",
+      "program": "${workspaceFolder}/build/tools/dyno-test/dyno-test",
+      "args": [
+        "${workspaceFolder}/tools/dyno-test/dyno-ir/test.dyno",
+      ],
+    },
+    {
+      "type": "lldb",
+      "request": "launch",
       "name": "dyno-sv soomrv",
       "program": "${workspaceFolder}/build/tools/dyno-sv/dyno-sv",
       "args": [

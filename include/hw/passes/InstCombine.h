@@ -4,6 +4,7 @@
 #include "dyno/Context.h"
 #include "dyno/CustomInstr.h"
 #include "dyno/HierBlockIterator.h"
+#include "dyno/IDs.h"
 #include "dyno/Instr.h"
 #include "dyno/Obj.h"
 #include "dyno/Opcode.h"
@@ -32,6 +33,7 @@
 #include "support/SmallVec.h"
 #include "support/Utility.h"
 #include <algorithm>
+#include <tuple>
 
 namespace dyno {
 
@@ -154,6 +156,7 @@ private:
     SmallVec<BigInt, 4> bigInts;
 
     auto demanded = demandedBits.getDemandedBits(instr.def(0)->as<WireRef>());
+    assert(demanded.getNumBits() == originalBits);
     auto numNonDemanded = BigInt::leadingZeros(demanded);
     bool reduceViaOutputs = numNonDemanded != 0;
     bool reduceViaInputs = true;
@@ -1577,39 +1580,41 @@ private:
   }
 
 public:
+  void runWrapper(auto &&runFunc) {
+    for (auto instr : ctx.getStore<Instr>())
+      TaggedIRef{instr}.get() = 0;
+
+    ctx.getStore<Instr>().createHooks.emplace_back([&](InstrRef ref) {
+      TaggedIRef{ref}.get() = 0;
+      worklist.emplace_back(ref);
+    });
+
+    runFunc();
+
+    ctx.getStore<Instr>().createHooks.pop_back();
+    destroyMarkedInstrs();
+  }
+
   void run() {
-    for (auto instr : ctx.getStore<Instr>())
-      TaggedIRef{instr}.get() = 0;
-
-    ctx.getStore<Instr>().createHooks.emplace_back([&](InstrRef ref) {
-      TaggedIRef{ref}.get() = 0;
-      worklist.emplace_back(ref);
+    runWrapper([&]() {
+      for (auto mod : ctx.getCtx<HWDialectContext>().activeModules()) {
+        runOnModule(mod.iref());
+      }
     });
-
-    // ctx.getStore<Wire>().createHooks.emplace_back(
-    //     [&](WireRef wire) { knownBits.cache.clear(wire); });
-
-    for (auto mod : ctx.getCtx<HWDialectContext>().activeModules()) {
-      runOnModule(mod.iref());
-    }
-
-    ctx.getStore<Instr>().createHooks.pop_back();
-    // ctx.getStore<Wire>().createHooks.pop_back();
-
-    destroyMarkedInstrs();
+  }
+  void runModule(ModuleIRef mod) {
+    runWrapper([&]() { runOnModule(mod); });
+  }
+  void runInstr(InstrRef instr) {
+    runWrapper([&]() { runOnInstr(instr); });
+  }
+  void runBlock(BlockRef block) {
+    runWrapper([&]() { runOnBlock(block); });
   }
 
-  void run2(BlockRef block) {
-    for (auto instr : ctx.getStore<Instr>())
-      TaggedIRef{instr}.get() = 0;
-    ctx.getStore<Instr>().createHooks.emplace_back([&](InstrRef ref) {
-      TaggedIRef{ref}.get() = 0;
-      worklist.emplace_back(ref);
-    });
-    runOnBlock(block);
-    ctx.getStore<Instr>().createHooks.pop_back();
-    destroyMarkedInstrs();
-  }
+  static constexpr auto runFuncs =
+      std::make_tuple(&InstCombinePass::runModule, &InstCombinePass::runInstr,
+                      &InstCombinePass::runBlock, &InstCombinePass::run);
 
 public:
   explicit InstCombinePass(Context &ctx)

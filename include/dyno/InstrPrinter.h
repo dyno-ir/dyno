@@ -7,6 +7,7 @@
 #include "dyno/IDs.h"
 #include "dyno/Obj.h"
 #include "hw/DebugInfo.h"
+#include "hw/HWContext.h"
 #include "support/CallableRef.h"
 #include "support/DenseMap.h"
 #include "support/RTTI.h"
@@ -22,9 +23,22 @@
 
 namespace dyno {
 
+struct OStreamWrapper {
+  std::ostream *os = nullptr;
+
+  template <typename T> OStreamWrapper &operator<<(const T &t) {
+    *os << t;
+    return *this;
+  }
+
+  operator std::ostream &() { return *os; }
+  OStreamWrapper() = default;
+  OStreamWrapper(std::ostream &os) : os(&os) {};
+};
+
 class IndentPrinter {
 public:
-  std::ostream &str;
+  OStreamWrapper str;
 
   int indent = 0;
 
@@ -40,7 +54,7 @@ public:
       str << "  ";
   }
 
-  IndentPrinter(std::ostream &str) : str(str) {}
+  IndentPrinter(OStreamWrapper str) : str(str) {}
 };
 
 class PrinterBase {
@@ -84,7 +98,7 @@ private:
   DenseMap<DynObjRef, IntroducedName> introduced;
   uint32_t numericNameCnt = 0;
 
-  std::vector<bool> isDefault = std::vector<bool>(NUM_DIALECTS);
+  std::vector<bool> isDefault = std::vector<bool>(MAX_NUM_DIALECTS);
 
 protected:
   TempBindPtr<SourceLocInfo<Instr>> sourceLocInfo;
@@ -106,9 +120,9 @@ public:
       MemberRef<std::optional<IntroducedName>(void *, FatDynObjRef<>)>;
   Interfaces<NUM_DIALECTS, type::print_fn, opc::print_fn, name_fn> interfaces;
 
-  std::ostream &str;
+  OStreamWrapper str;
 
-  PrinterBase(std::ostream &str, Interface<DialectInfo> dialectI,
+  PrinterBase(OStreamWrapper str, Interface<DialectInfo> dialectI,
               Interface<TyInfo> tyI, Interface<OpcodeInfo> opcodeI)
       : indentPrint(str), dialectI(dialectI), tyI(tyI), opcodeI(opcodeI),
         str(str) {}
@@ -125,6 +139,12 @@ public:
       str << dialectI[ref.getDialect()]->name << ".";
     }
     str << opcodeI[ref].name;
+  }
+  void printOpcodeDefault(DialectOpcode opc) {
+    if (!isDefault[opc.getDialectID()]) {
+      str << dialectI[opc.getDialectID()]->name << ".";
+    }
+    str << opcodeI[opc.getDialectID()][opc.getOpcodeID()].name;
   }
 
   void setDefaultDialects(std::initializer_list<DialectID> dialects) {
@@ -247,7 +267,7 @@ public:
       str << "]";
   }
 
-  void printInstr(InstrRef instr) {
+  void printInstr(InstrRef instr, bool trailingNewline = true) {
     printOpcodeDefault(instr);
     str << ' ';
 
@@ -275,7 +295,26 @@ public:
     }
 
     tryPrintSrcLoc(instr);
-    str << '\n';
+
+    if (trailingNewline)
+      str << '\n';
+  }
+
+  std::string toString(InstrRef instr) {
+    auto backup = str;
+    std::stringstream stringstr;
+    str = stringstr;
+    printInstr(instr, false);
+    str = backup;
+    return std::move(stringstr).str();
+  }
+  std::string toString(DialectOpcode opc) {
+    auto backup = str;
+    std::stringstream stringstr;
+    str = stringstr;
+    printOpcodeDefault(opc);
+    str = backup;
+    return std::move(stringstr).str();
   }
 };
 
@@ -285,11 +324,29 @@ protected:
   using PrinterBase::type;
 
 public:
-  Printer(std::ostream &str, Interface<DialectInfo> dialectI,
+  Printer(OStreamWrapper str, Interface<DialectInfo> dialectI,
           Interface<TyInfo> tyI, Interface<OpcodeInfo> opcodeI)
       : PrinterBase(str, dialectI, tyI, opcodeI) {}
 };
 
+// with context, uses context's info (including dynamic)
+template <typename... Printers>
+class ContextPrinterWrapper : public PrinterBase {
+
+protected:
+  std::tuple<Printers...> printers;
+
+public:
+  ContextPrinterWrapper(Context &ctx, OStreamWrapper str)
+      : PrinterBase(
+            str,
+            Interface<DialectInfo>{ctx.getDialectInfos().dialectInfoArr.data()},
+            Interface<TyInfo>{ctx.getDialectInfos().typeInfoArr.data()},
+            Interface<OpcodeInfo>{ctx.getDialectInfos().opcodeInfoArr.data()}),
+        printers{(static_cast<void>(sizeof(Printers)), this)...} {}
+};
+
+// context-less, carries own info
 template <typename... Printers>
 class PrinterWrapper : private AutoDialectInfos<Printers::dialect...>,
                        public PrinterBase {
@@ -298,7 +355,7 @@ protected:
   std::tuple<Printers...> printers;
 
 public:
-  PrinterWrapper(std::ostream &str)
+  PrinterWrapper(OStreamWrapper str)
       : PrinterBase(str,
                     Interface<DialectInfo>{this->infos.dialectInfoArr.data()},
                     Interface<TyInfo>{this->infos.typeInfoArr.data()},
