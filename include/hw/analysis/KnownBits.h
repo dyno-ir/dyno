@@ -104,7 +104,6 @@ public:
     stack.emplace_back(rootVal, 0);
     while (!stack.empty()) {
 
-
       auto &frame = stack.back();
       if (auto asConst = frame.value.dyn_as<ConstantRef>()) {
         retVal = KnownBitsVal{asConst};
@@ -274,6 +273,33 @@ public:
           cache.insert(wire, retVal);
           stack.pop_back();
         }
+        break;
+      }
+
+      case *HW_ONEHOT_MUX: {
+        if (frame.idx != 0) {
+          if (frame.idx & 1) {
+            // retVal = retVal;
+            cache.insert(wire, retVal);
+            stack.pop_back();
+            break;
+          } else if (retVal.val.valueEquals(1)) {
+            assert(retVal.val.getNumBits() == 1);
+            frame.idx--;
+            stack.emplace_back(instr.other(frame.idx)->as<HWValue>());
+            break;
+          }
+        }
+        // skip values if not selected
+        frame.idx += 2;
+        if (frame.idx == instr.getNumOthers()) {
+          retVal.val =
+              PatBigInt::undef(*instr.def(0)->as<WireRef>().getNumBits());
+          cache.insert(wire, retVal);
+          stack.pop_back();
+          break;
+        }
+        stack.emplace_back(instr.other(frame.idx)->as<HWValue>());
         break;
       }
 
