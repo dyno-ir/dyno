@@ -74,3 +74,126 @@ TEST_CASE :string("fuzzy-cse-basic"), :block, :block, :block {
   meta.ORDER_INSTRS_PASS
   meta.INST_COMBINE_PASS
 }
+
+
+TEST_CASE :string("instcombine-onehot-mux-merge"), :block, :block, :block {
+  MODULE_DEF :module("mod"), :block {
+    INPUT_REGISTER_DEF %in_a:register(32)
+    INPUT_REGISTER_DEF %in_b:register(32)
+    INPUT_REGISTER_DEF %in_c:register(32)
+    INPUT_REGISTER_DEF %in_d:register(32)
+
+    INPUT_REGISTER_DEF %sel_a:register(1)
+    INPUT_REGISTER_DEF %sel_b:register(1)
+    INPUT_REGISTER_DEF %sel_c:register(1)
+    INPUT_REGISTER_DEF %sel_d:register(1)
+    INPUT_REGISTER_DEF %sel_ab:register(1)
+
+    OUTPUT_REGISTER_DEF %out_a:register(32)
+
+    COMB_PROCESS_DEF :process, :block {
+      LOAD %a_v:wire(32), %in_a
+      LOAD %b_v:wire(32), %in_b
+      LOAD %c_v:wire(32), %in_c
+      LOAD %d_v:wire(32), %in_d
+      LOAD %sa_v:wire(1), %sel_a
+      LOAD %sb_v:wire(1), %sel_b
+      LOAD %sc_v:wire(1), %sel_c
+      LOAD %sd_v:wire(1), %sel_d
+      LOAD %sab_v:wire(1), %sel_ab
+
+      ONEHOT_MUX %tmp:wire(32), %sa_v, %a_v, %sb_v, %b_v
+      ONEHOT_MUX %val:wire(32), %sab_v, %tmp, %sc_v, %c_v, %sd_v, %d_v
+      STORE %val, %out_a
+    }
+  }
+}{
+  hw.MODULE_DEF %mod:module("mod"), %14:core.block {
+    hw.INPUT_REGISTER_DEF %r0:register(32)
+    hw.INPUT_REGISTER_DEF %r1:register(32)
+    hw.INPUT_REGISTER_DEF %r2:register(32)
+    hw.INPUT_REGISTER_DEF %r3:register(32)
+    hw.INPUT_REGISTER_DEF %r4:register(1)
+    hw.INPUT_REGISTER_DEF %r5:register(1)
+    hw.INPUT_REGISTER_DEF %r6:register(1)
+    hw.INPUT_REGISTER_DEF %r7:register(1)
+    hw.INPUT_REGISTER_DEF %r8:register(1)
+    hw.OUTPUT_REGISTER_DEF %r9:register(32)
+    hw.COMB_PROCESS_DEF %15:process, %16:core.block {
+      hw.LOAD %w0:wire(32), %r0
+      hw.LOAD %w1:wire(32), %r1
+      hw.LOAD %w2:wire(32), %r2
+      hw.LOAD %w3:wire(32), %r3
+      hw.LOAD %w4:wire(1), %r4
+      hw.LOAD %w5:wire(1), %r5
+      hw.LOAD %w6:wire(1), %r6
+      hw.LOAD %w7:wire(1), %r7
+      hw.LOAD %w8:wire(1), %r8
+      op.AND %w23:wire(1), %w4, %w8
+      op.AND %w24:wire(1), %w5, %w8
+      hw.ONEHOT_MUX %w25:wire(32), %w23, %w0, %w24, %w1, %w6, %w2, %w7, %w3
+      hw.STORE %w25, %r9
+    }
+  }
+}{
+  meta.INST_COMBINE_PASS
+}
+
+TEST_CASE :string("instcombine-onehot-mux-merge2"), :block, :block, :block {
+  MODULE_DEF :module("mod"), :block {
+    INPUT_REGISTER_DEF %in_a:register(32)
+    INPUT_REGISTER_DEF %in_b:register(32)
+    INPUT_REGISTER_DEF %in_c:register(32)
+    INPUT_REGISTER_DEF %in_d:register(32)
+
+    INPUT_REGISTER_DEF %sel_a:register(1)
+    INPUT_REGISTER_DEF %sel_b:register(1)
+    INPUT_REGISTER_DEF %sel_c:register(1)
+    INPUT_REGISTER_DEF %sel_d:register(1)
+
+    OUTPUT_REGISTER_DEF %out_a:register(32)
+
+    COMB_PROCESS_DEF :process, :block {
+      LOAD %a_v:wire(32), %in_a
+      LOAD %b_v:wire(32), %in_b
+      LOAD %c_v:wire(32), %in_c
+      LOAD %d_v:wire(32), %in_d
+      LOAD %sa_v:wire(1), %sel_a
+      LOAD %sb_v:wire(1), %sel_b
+      LOAD %sc_v:wire(1), %sel_c
+      LOAD %sd_v:wire(1), %sel_d
+
+      ONEHOT_MUX %tmp:wire(32), %sa_v, %a_v, %sb_v, %b_v
+      // select is OR, so the ands generated should be optimized out
+      OR %ab:wire(1), %sa_v, %sb_v
+      ONEHOT_MUX %val:wire(32), %ab, %tmp, %sc_v, %c_v, %sd_v, %d_v
+      STORE %val, %out_a
+    }
+  }
+}{
+  hw.MODULE_DEF %mod:module("mod"), %4:core.block {
+    hw.INPUT_REGISTER_DEF %r0:register(32)
+    hw.INPUT_REGISTER_DEF %r1:register(32)
+    hw.INPUT_REGISTER_DEF %r2:register(32)
+    hw.INPUT_REGISTER_DEF %r3:register(32)
+    hw.INPUT_REGISTER_DEF %r4:register(1)
+    hw.INPUT_REGISTER_DEF %r5:register(1)
+    hw.INPUT_REGISTER_DEF %r6:register(1)
+    hw.INPUT_REGISTER_DEF %r7:register(1)
+    hw.OUTPUT_REGISTER_DEF %r8:register(32)
+    hw.COMB_PROCESS_DEF %5:process, %6:core.block {
+      hw.LOAD %w0:wire(32), %r0
+      hw.LOAD %w1:wire(32), %r1
+      hw.LOAD %w2:wire(32), %r2
+      hw.LOAD %w3:wire(32), %r3
+      hw.LOAD %w4:wire(1), %r4
+      hw.LOAD %w5:wire(1), %r5
+      hw.LOAD %w6:wire(1), %r6
+      hw.LOAD %w7:wire(1), %r7
+      hw.ONEHOT_MUX %w25:wire(32), %w4, %w0, %w5, %w1, %w6, %w2, %w7, %w3
+      hw.STORE %w25, %r8
+    }
+  }
+}{
+  meta.INST_COMBINE_PASS
+}

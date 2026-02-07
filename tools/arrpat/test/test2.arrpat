@@ -127,7 +127,32 @@ replace {
   OP_ADD $out, $x, $gated_mux, $others...
 }
 
+// x & (x | ...) -> x
+// We can't fully cover this due to arrpat limitations, these
+// 3 patterns cover all 2-operand cases and some with more.
+match {
+  OP_OR $t, $a, $b
+  OP_AND $out, $t, $a, $other...
+}
+replace {
+  OP_AND $out, $a, $other...
+}
 
+match {
+  OP_OR $t, $b, $a
+  OP_AND $out, $t, $a, $other...
+}
+replace {
+  OP_AND $out, $a, $other...
+}
+
+match {
+  OP_OR $t, anyorder($a, $b...)
+  OP_AND $out, $a, anyorder($t, $other...)
+}
+replace {
+  OP_AND $out, $a, $other...
+}
 
 // patterns like this would be dope
 // match {

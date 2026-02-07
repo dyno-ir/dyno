@@ -826,6 +826,12 @@ struct CodeGen {
             BytecodeOp{.opcode = BytecodeOp::CHECK_SIZE_LE,
                        .checkSizeLess = {uint(listsBase + i), *pack->max}});
       }
+      if (auto *asOperand = obj->dyn_as<MatchOperand>();
+          asOperand && asOperand->nameID)
+        checkName(*asOperand->nameID, iter);
+      else if (auto *asMacro = obj->dyn_as<MatchMacro>())
+        checkName(asMacro->nameID, iter);
+
       checkSimple(iter, pack ? pack->objects[0] : obj);
 
       ops.push_back(BytecodeOp{.opcode = BytecodeOp::APPEND_COPY,
@@ -862,6 +868,14 @@ struct CodeGen {
     }
 
     return iter;
+  }
+
+  void checkName(uint32_t nameID, uint32_t begin) {
+    auto it = vars.find(nameID);
+    if (it != vars.end()) {
+      ops.emplace_back(BytecodeOp{.opcode = BytecodeOp::CHECK_EQUAL,
+                                  .checkEqual = {begin, it.val().operand}});
+    }
   }
 
   void registerOrCheckName(uint32_t nameID, uint32_t begin, uint32_t end) {

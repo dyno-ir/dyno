@@ -303,16 +303,20 @@ public:
   std::string toString(InstrRef instr) {
     auto backup = str;
     std::stringstream stringstr;
+    indentPrint.str = stringstr;
     str = stringstr;
     printInstr(instr, false);
+    indentPrint.str = backup;
     str = backup;
     return std::move(stringstr).str();
   }
   std::string toString(DialectOpcode opc) {
     auto backup = str;
     std::stringstream stringstr;
+    indentPrint.str = stringstr;
     str = stringstr;
     printOpcodeDefault(opc);
+    indentPrint.str = backup;
     str = backup;
     return std::move(stringstr).str();
   }

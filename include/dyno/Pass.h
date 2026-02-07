@@ -190,7 +190,7 @@ template <typename Derived> class Pass {
       if (t.length() > 4 && t.ends_with("Pass"))
         return std::string_view(t);
     }
-    assert(0 && "pass class name must end with \"Pass\"");
+    dyno_unreachable("pass class name must end with \"Pass\"");
   }
 
   template <typename Out, typename In> static Out castArg(In in) {
@@ -199,7 +199,7 @@ template <typename Derived> class Pass {
     } else if constexpr (std::is_pointer_v<In> && std::is_reference_v<Out>) {
       return *reinterpret_cast<std::remove_reference_t<Out> *>(in);
     }
-    assert(0 && "no conversion");
+    dyno_unreachable("no conversion");
   }
 
   template <typename T, std::size_t... Is>

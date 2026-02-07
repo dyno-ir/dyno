@@ -177,8 +177,10 @@ public:
 
     if (auto diff = compare.compareBlocks(pre, post)) {
       std::print(os, "failed test: \"{}\"\n", name);
-      std::print(os, "actual  : {}\n", print.toString(diff->first));
-      std::print(os, "expected: {}\n\n", print.toString(diff->second));
+      std::print(os, "actual  : {}\n",
+                 diff->first ? print.toString(diff->first) : "<none>");
+      std::print(os, "expected: {}\n\n",
+                 diff->second ? print.toString(diff->second) : "<none>");
 
       return false;
     }

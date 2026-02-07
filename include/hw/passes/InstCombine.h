@@ -106,6 +106,46 @@ private:
     }
   }
 
+  bool mergeOneHotMux(InstrRef root) {
+    SmallVec<std::pair<InstrRef, HWValue>, 4> stack{{root, nullref}};
+    SmallVec<std::pair<HWValue, HWValue>, 32> cases;
+    auto oldDefW = root.def(0)->as<WireRef>();
+
+    HWInstrBuilder build{ctx, root};
+
+    bool change = false;
+    while (!stack.empty()) {
+      auto [instr, prefix] = stack.pop_back_val();
+
+      for (auto [sel, val] : instr.others().pairwise()) {
+        if (auto asWire = val->dyn_as<WireRef>()) {
+          auto defI = asWire.getSingleDef()->instr();
+          if (defI.isOpc(HW_ONEHOT_MUX) && asWire.hasSingleUse()) {
+            auto newPrefix = prefix ? build.buildAnd(prefix, sel->as<HWValue>())
+                                    : sel->as<HWValue>();
+            stack.emplace_back(defI, newPrefix);
+            deleteMatchedInstr(defI);
+            change = true;
+            continue;
+          }
+        }
+
+        auto selPrefixed = sel->as<HWValue>();
+        if (prefix)
+          selPrefixed = build.buildAnd(prefix, selPrefixed);
+        cases.emplace_back(selPrefixed, val->as<HWValue>());
+        continue;
+      }
+    }
+    if (!change)
+      return false;
+
+    auto newVal = build.buildOneHotMux(cases);
+    replaceUses(oldDefW, newVal);
+    deleteMatchedInstr(root);
+    return true;
+  }
+
   bool optimizeOneHotMux(InstrRef instr) {
     // hash to find duplicates
     SmallDenseMap<DynObjRef, SmallVec<uint32_t, 2>, 16> map;
@@ -1371,6 +1411,8 @@ private:
     }
 
     case *HW_ONEHOT_MUX: {
+      if (mergeOneHotMux(instr))
+        return true;
       if (optimizeOneHotMux(instr))
         return true;
       break;
