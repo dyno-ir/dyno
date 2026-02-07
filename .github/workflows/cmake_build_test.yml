@@ -32,6 +32,9 @@ jobs:
         sudo ./llvm.sh ${{ env.LLVM_VER }}
         sudo apt-get install -y libc++-${{ env.LLVM_VER }}-dev libc++abi-${{ env.LLVM_VER }}-dev
 
+    - name: Get submodules
+      run : git submodule update --init --recursive
+      
     - name: Configure CMake
       # We point explicitly to the versioned clang binaries
       run: >
@@ -40,14 +43,7 @@ jobs:
         -DCMAKE_CXX_COMPILER=clang++-${{ env.LLVM_VER }}
         -DCMAKE_CXX_FLAGS="-stdlib=libc++"
         -DCMAKE_EXE_LINKER_FLAGS="-stdlib=libc++"
-
-    - name: Get submodules
-      run : git submodule update --init --recursive
-
-    - name: Configure CMake
-      # Configure CMake in a 'build' subdirectory. `CMAKE_BUILD_TYPE` is only required if you are using a single-configuration generator such as make.
-      # See https://cmake.org/cmake/help/latest/variable/CMAKE_BUILD_TYPE.html?highlight=cmake_build_type
-      run: cmake -B ${{github.workspace}}/build -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}}
+        -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}}
 
     - name: Build
       # Build your program with the given configuration
