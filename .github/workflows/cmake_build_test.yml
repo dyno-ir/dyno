@@ -11,6 +11,7 @@ on:
 env:
   # Customize the CMake build type here (Release, Debug, RelWithDebInfo, etc.)
   BUILD_TYPE: Release
+  LLVM_VER: 21
 
 jobs:
   build:
@@ -22,21 +23,26 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
-    - name: Get submodules
-      run : git submodule update --init --recursive
-
-    - name: Install libc++
+    - name: Install Clang ${{ env.LLVM_VER }} and libc++
       run: |
-        sudo apt-get update
-        sudo apt-get install -y libc++-dev libc++abi-dev
+        # Download the official LLVM repo setup script
+        wget https://apt.llvm.org/llvm.sh
+        chmod +x llvm.sh
+        # Install Clang, then manually install the matching libc++ headers
+        sudo ./llvm.sh ${{ env.LLVM_VER }}
+        sudo apt-get install -y libc++-${{ env.LLVM_VER }}-dev libc++abi-${{ env.LLVM_VER }}-dev
 
     - name: Configure CMake
+      # We point explicitly to the versioned clang binaries
       run: >
         cmake -B ${{github.workspace}}/build 
-        -DCMAKE_C_COMPILER=clang
-        -DCMAKE_CXX_COMPILER=clang++
+        -DCMAKE_C_COMPILER=clang-${{ env.LLVM_VER }}
+        -DCMAKE_CXX_COMPILER=clang++-${{ env.LLVM_VER }}
         -DCMAKE_CXX_FLAGS="-stdlib=libc++"
         -DCMAKE_EXE_LINKER_FLAGS="-stdlib=libc++"
+
+    - name: Get submodules
+      run : git submodule update --init --recursive
 
     - name: Configure CMake
       # Configure CMake in a 'build' subdirectory. `CMAKE_BUILD_TYPE` is only required if you are using a single-configuration generator such as make.
