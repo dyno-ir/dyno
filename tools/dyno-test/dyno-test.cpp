@@ -180,10 +180,10 @@ public:
       std::print(os, "actual  : {}\n", print.toString(diff->first));
       std::print(os, "expected: {}\n\n", print.toString(diff->second));
 
-      return true;
+      return false;
     }
     std::print(os, "passed test: \"{}\"\n", name);
-    return false;
+    return true;
   }
 
   bool exec(InstrRef instr, bool verbose) {
