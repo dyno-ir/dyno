@@ -231,7 +231,7 @@ public:
   }
 
   static void typeErasedDestroy(void *obj) {
-    std::destroy_at(reinterpret_cast<Derived *>(obj));
+    delete reinterpret_cast<Derived *>(obj);
   }
 
   static void typeErasedConfig(void *selfPtr,
