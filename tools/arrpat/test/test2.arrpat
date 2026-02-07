@@ -666,3 +666,13 @@ replace {
   OP_ADD $out, $a, $ones, $zextVal
 }
 */
+
+
+match {
+  $op{OP_SDIV, OP_UDIV} $out, $any, #'0
+}
+with [{
+  FatDynObjRef<> undefStore = cbuild.undef(*((*$out.begin())->as<WireRef>().getNumBits())).get();
+  $undef = undefStore;
+}]
+replace $out -> $undef

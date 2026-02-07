@@ -7,19 +7,17 @@
 
 namespace dyno {
 
-class OpDialectContext {
-  NewDeleteObjStore<Function> functionObjs;
-  NewDeleteObjStore<MapObj> mapObjs;
-  NewDeleteObjStore<StringObj> stringObjs;
-
+class OpDialectContext : public ContextMixin<OpDialectContext> {
 public:
+  std::tuple<NewDeleteObjStore<Function>, NewDeleteObjStore<MapObj>,
+             NewDeleteObjStore<StringObj>>
+      stores;
+
   static constexpr DialectID dialect{DIALECT_OP};
-  auto &getFunctions() { return functionObjs; }
   template <typename T> auto &getStore();
-  auto &getMaps() { return mapObjs; }
-  template <> auto &getStore<Function>() { return functionObjs; }
-  template <> auto &getStore<MapObj>() { return mapObjs; }
-  template <> auto &getStore<StringObj>() { return stringObjs; }
+  template <> auto &getStore<Function>() { return std::get<0>(stores); }
+  template <> auto &getStore<MapObj>() { return std::get<1>(stores); }
+  template <> auto &getStore<StringObj>() { return std::get<2>(stores); }
 };
 template <> struct DialectContext<DialectID{DIALECT_OP}> {
   using t = OpDialectContext;

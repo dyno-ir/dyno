@@ -131,6 +131,8 @@ public:
   void *resolve(size_type idx) { return Base::operator[](idx); }
 
   size_type size() { return this->Base::size(); }
+
+  using Base::clear;
 };
 
 // slab allocator for mixed size objects. no longer supports fast indexing

@@ -22,7 +22,7 @@
 #include <array>
 namespace dyno {
 
-class HWDialectContext {
+class HWDialectContext : public ContextMixin<HWDialectContext> {
 public:
   template <typename T> struct StoreType {
     using t = NewDeleteObjStore<T>;
@@ -31,55 +31,31 @@ public:
 
   static constexpr DialectID dialect{DIALECT_HW};
 
-  StoreType_t<Wire> wires;
-  StoreType_t<Register> registers;
-  StoreType_t<Process> procs;
-  StoreType_t<Module> modules;
-  StoreType_t<Trigger> triggers;
-  StoreType_t<StdCellInfo> stdCellInfos;
+  std::tuple<StoreType_t<Wire>, StoreType_t<Register>, StoreType_t<Process>,
+             StoreType_t<Module>, StoreType_t<Trigger>,
+             StoreType_t<StdCellInfo>>
+      stores;
 
   ValueNameInfo<Register> regNameInfo;
+  template <typename T> T &get() { return std::get<T>(stores); }
 
-  template <typename T> T &get();
-
-  template <> StoreType_t<Module> &get<StoreType_t<Module>>() {
-    return modules;
-  }
-  template <> StoreType_t<Register> &get<StoreType_t<Register>>() {
-    return registers;
-  }
-  template <> StoreType_t<Wire> &get<StoreType_t<Wire>>() { return wires; }
-  template <> StoreType_t<Process> &get<StoreType_t<Process>>() {
-    return procs;
-  }
-  template <> StoreType_t<Trigger> &get<StoreType_t<Trigger>>() {
-    return triggers;
-  }
-  template <> StoreType_t<StdCellInfo> &get<StoreType_t<StdCellInfo>>() {
-    return stdCellInfos;
-  }
   template <typename T> StoreType_t<T> &getStore() {
     return get<StoreType_t<T>>();
   }
 
   auto activeModules() {
-    return Range{modules}.filter([](ModuleRef ref) { return !ref->ignore; });
+    return Range{getStore<Module>()}.filter(
+        [](ModuleRef ref) { return !ref->ignore; });
   }
 
-  // clang-format off
-  std::array<MemberRef<FatDynObjRef<>(void *, DynObjRef)>, 6> resolverMethods = {
-    MemberRef{&wires, BindMethod<&StoreType_t<Wire>::resolveGeneric>::fv},
-    MemberRef{&registers, BindMethod<&StoreType_t<Register>::resolveGeneric>::fv},
-    MemberRef{&modules, BindMethod<&StoreType_t<Process>::resolveGeneric>::fv},
-    MemberRef{&modules, BindMethod<&StoreType_t<Module>::resolveGeneric>::fv},
-    MemberRef{&triggers, BindMethod<&StoreType_t<Trigger>::resolveGeneric>::fv},
-    MemberRef{&stdCellInfos, BindMethod<&StoreType_t<StdCellInfo>::resolveGeneric>::fv},
-  };
-  // clang-format on
-
   HWDialectContext() {
-    registers.destroyHooks.emplace_back(
+    getStore<Register>().destroyHooks.emplace_back(
         [&](RegisterRef ref) { regNameInfo.clearNames(ref); });
+  }
+
+  void reset() {
+    ContextMixin::reset();
+    regNameInfo.reset();
   }
 };
 

@@ -6,14 +6,14 @@
 #include "dyno/IDImpl.h"
 namespace dyno {
 
-class AIGDialectContext {
-  NewDeleteObjStore<AIGObj> aigObjs;
-
+class AIGDialectContext : public ContextMixin<AIGDialectContext> {
 public:
+  std::tuple<NewDeleteObjStore<AIGObj>> stores;
+
   static constexpr DialectID dialect{DIALECT_AIG};
-  auto &getAIGs() { return aigObjs; }
+
   template <typename T> auto &getStore();
-  template <> auto &getStore<AIGObj>() { return aigObjs; }
+  template <> auto &getStore<AIGObj>() { return std::get<0>(stores); }
 };
 
 template <> struct DialectContext<DialectID{DIALECT_AIG}> {

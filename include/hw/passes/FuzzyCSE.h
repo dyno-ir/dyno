@@ -300,7 +300,7 @@ private:
     if (matchingPrefixes.size() == 0)
       return false;
 
-    DYNO_DBG("FuzzyCSE", {
+    DYNO_DBG(passName, {
       dbgs() << "matched instrs:\n";
       HWPrinter print{dbgs()};
       print.printInstr(lhsAbstr.ref, ctx);
@@ -358,7 +358,7 @@ private:
     auto newRHS =
         rebuildInstr(rhsAbstr, matchingPrefixes, rhsCovered, rhsIdxs, defW);
 
-    DYNO_DBG("FuzzyCSE", {
+    DYNO_DBG(passName, {
       dbgs() << "replaced with:\n";
       HWPrinter print{dbgs()};
       dbgs() << "shared: ";
@@ -452,9 +452,10 @@ private:
 
       if (!candidate.ref)
         continue;
-
-      dbgs() << "inspecting: ";
-      dumpInstr(candidate.ref, ctx);
+      DYNO_DBG(passName, {
+        dbgs() << "inspecting: ";
+        dumpInstr(candidate.ref, ctx);
+      });
 
       for (auto op : candidate.operands) {
         auto &arr = operandUses[op.second.id];

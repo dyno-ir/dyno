@@ -9,6 +9,9 @@
 #include "hw/DebugInfo.h"
 #include "meta/MetaPassManager.h"
 #include "support/CallableRef.h"
+#include "support/TemplateUtil.h"
+#include <tuple>
+#include <type_traits>
 namespace dyno {
 
 struct TypeErasedCtx {
@@ -28,6 +31,53 @@ template <> struct InterfaceTraits<TypeErasedCtx> {
 
 template <DialectID> struct DialectContext;
 template <DialectID ID> using DialectContextT = DialectContext<ID>::t;
+
+template <typename Derived> class ContextMixin {
+
+  auto &self() { return *static_cast<Derived *>(this); }
+  static constexpr size_t numStores =
+      std::tuple_size_v<decltype(std::declval<Derived>().stores)>;
+  auto makeResolverMethods() {
+    // find highest used type ID
+    auto maxID = []<std::size_t... Is>(std::index_sequence<Is...>) {
+      unsigned maxID = 0;
+      (
+          [&] {
+            using StoreT = std::remove_reference_t<std::tuple_element_t<
+                Is, decltype(std::declval<Derived>().stores)>>;
+            maxID = std::max(
+                maxID,
+                unsigned(
+                    ObjTraits<typename StoreT::value_type>::ty.getTypeID() &
+                    127));
+          }(),
+          ...);
+      return maxID;
+    }(std::make_index_sequence<numStores>{});
+
+    // create vector and assign elements
+    std::vector<MemberRef<FatDynObjRef<>(void *, DynObjRef)>> arr(maxID + 1);
+    [&]<std::size_t... Is>(std::index_sequence<Is...>) {
+      (
+          [&] {
+            auto &store = std::get<Is>(self().stores);
+            using StoreT = std::remove_reference_t<decltype(store)>;
+            arr[ObjTraits<typename StoreT::value_type>::ty.getTypeID() & 127] =
+                MemberRef{&store, BindMethod<&StoreT::resolveGeneric>::fv};
+          }(),
+          ...);
+    }(std::make_index_sequence<numStores>{});
+    return arr;
+  }
+
+public:
+  std::vector<MemberRef<FatDynObjRef<>(void *, DynObjRef)>> resolverMethods =
+      makeResolverMethods();
+
+  void reset() {
+    std::apply([](auto &...stores) { (stores.reset(), ...); }, self().stores);
+  }
+};
 
 class CoreDialectContext {
   using InstrStoreT = NewDeleteObjStore<Instr>;
@@ -59,6 +109,13 @@ public:
   CoreDialectContext() {
     instrs.destroyHooks.emplace_back(
         [&](InstrRef instr) { instrSourceLocInfo.resetDebugInfo(instr); });
+  }
+
+  void reset() {
+    instrs.reset();
+    cfg.blocks.reset();
+    constants.reset();
+    instrSourceLocInfo.reset();
   }
 };
 

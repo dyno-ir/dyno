@@ -163,7 +163,7 @@ public:
     std::tie(printAfterAll, debugType) = old;
 
     // todo properly
-    for (auto mod : ctx.getCtx<HWDialectContext>().modules)
+    for (auto mod : ctx.getStore<Module>())
       mod->ignore = !mod->ignore;
   }
 

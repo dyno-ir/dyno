@@ -2239,3 +2239,33 @@ deleteF(matched, ctx, r0);
 return true;
 }
 fail_47:;
+{
+InstrRef::iterator r1;
+InstrRef::iterator r2;
+InstrRef::iterator r3;
+InstrRef::iterator r4;
+InstrRef::iterator r5;
+FatDynObjRef<>* r6;
+FatDynObjRef<>* r7;
+if (!r0.isOpc(OP_SDIV)) goto cont_48_0;
+goto goto_48_0;
+cont_48_0:;
+if (!r0.isOpc(OP_UDIV)) goto fail_48;
+goto_48_0:;
+if (r0.getNumOperands() > 3) goto fail_48;
+if (r0.getNumOperands() < 3) goto fail_48;
+r1 = r0.begin();
+r2 = r0.end();
+r3 = std::next(r1);
+r4 = std::next(r3);
+if ((*r4)->as<FatDynObjRef<>>().getType() != CORE_CONSTANT) goto fail_48;
+if (!(*r4)->as<ConstantRef>().valueEqualsS("1'h0"_bv)) goto fail_48;
+r5 = std::next(r4);
+
+  FatDynObjRef<> undefStore = cbuild.undef(*((*RefRange{r1, r3}.begin())->as<WireRef>().getNumBits())).get();
+  RefRange{r6, r7} = undefStore;
+replaceAllUses(replaced, r1, r6);
+deleteF(matched, ctx, r0);
+return true;
+}
+fail_48:;

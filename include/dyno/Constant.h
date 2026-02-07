@@ -594,15 +594,17 @@ public:
       out.extend() = oldExtend & bit_mask_ones<uint8_t>(BigIntExtendBits);
 
     auto originalNumWords = lhs.getNumWords();
+    auto originalExtNumWords = lhs.getExtNumWords();
+    auto origRawSign = lhs.getRawSignBit();
+    auto origSign = lhs.getSignBit();
 
     if constexpr (Left)
       out.words.resize(
           std::min(originalNumWords + (round_up_div(rhs, WordBits)),
                    round_up_div(lhs.getRawNumBits(), WordBits)));
     else {
-      if (!Arith && out.extend() != 0) {
-        out.words.resize(round_up_div(lhs.getRawNumBits(), WordBits));
-        out.extend() = 0;
+      if (out.extend() != 0) {
+        out.words.resize(out.getExtNumWords());
       }
     }
 
@@ -614,6 +616,41 @@ public:
       upper = -1;
       step = -1;
     }
+
+    auto getOOBVal = [&](size_t idx) {
+      assert(idx >= originalNumWords);
+      if (idx < originalExtNumWords) {
+        auto rv = repeatExtend(oldExtend);
+        if (idx == originalExtNumWords - 1) {
+          auto mask = (lhs.getRawNumBits() % 32)
+                          ? (1 << (lhs.getRawNumBits() % 32)) - 1
+                          : ~0U;
+          if (!Arith) {
+            // shift in zeros
+            rv &= mask;
+          } else {
+            if (lhs.getIs4S()) {
+              // four state shifts in pairs of bits, do nothing
+              assert(rhs % 2 == 0);
+            } else {
+              rv &= mask;
+              if (origRawSign)
+                rv |= ~mask;
+            }
+          }
+        }
+        return rv;
+      } else {
+        if (!Arith) {
+          return 0U;
+        } else {
+          if (lhs.getIs4S())
+            return repeatExtend(origSign);
+          else
+            return origRawSign ? ~0U : 0;
+        }
+      }
+    };
 
     for (ssize_t i = lower; i != upper; i += step) {
       ssize_t idxHigh;
@@ -629,29 +666,17 @@ public:
       uint32_t low;
       if (idxLow < 0)
         low = 0;
-      else if (idxLow >= originalNumWords) {
-        low = repeatExtend(oldExtend);
-        if constexpr (!Left && !Arith) {
-          if (idxLow >= out.words.size())
-            low = 0;
-          else if (idxLow == out.words.size() - 1)
-            low &= ((1 << (lhs.getRawNumBits()) % 32)) - 1;
-        }
-      } else
+      else if (idxLow >= originalNumWords)
+        low = getOOBVal(idxLow);
+      else
         low = lhs.getWords()[idxLow];
 
       uint32_t high;
       if (idxHigh < 0)
         high = 0;
-      else if (idxHigh >= originalNumWords) {
-        high = repeatExtend(oldExtend);
-        if constexpr (!Left && !Arith) {
-          if (idxHigh >= out.words.size())
-            high = 0;
-          else if (idxHigh == out.words.size() - 1)
-            high &= (1 << (lhs.getRawNumBits() % 32)) - 1;
-        }
-      } else
+      else if (idxHigh >= originalNumWords)
+        high = getOOBVal(idxHigh);
+      else
         high = lhs.getWords()[idxHigh];
 
       if constexpr (Left) {
@@ -1857,10 +1882,8 @@ public:
   template <BigIntAPI T0, BigIntAPI T1>
   static auto sdivmodOp4S(const T0 &lhs, const T1 &rhs) {
     if (lhs.getIs4S() || rhs.getIs4S() || rhs.valueEquals(0)) {
-      BigIntBase outA;
-      BigIntBase outB;
-      outA.setRepeating(EXTX_MASK, lhs.getRawNumBits(), 1);
-      outB.setRepeating(EXTX_MASK, lhs.getRawNumBits(), 1);
+      BigIntBase outA = PatBigInt::undef(lhs.getNumBits());
+      BigIntBase outB = PatBigInt::undef(lhs.getNumBits());
       return std::make_pair(std::move(outA), std::move(outB));
     }
     auto [div, rem] = BigIntBase::sdivmodOp(lhs, rhs);
@@ -2426,7 +2449,7 @@ public:
       if (c >= 'a' && c <= 'f')
         return c - 'a' + 10;
       if (c >= 'A' && c <= 'F')
-        return c - 'a' + 10;
+        return c - 'A' + 10;
       return nullopt;
     };
     auto unkdigit = [](char c) -> bool {
@@ -2552,8 +2575,8 @@ public:
       extend() =
           (words.back() & bit_mask_ms_nbits<uint32_t>(BigIntExtendBits)) >>
           (bit_mask_sz<uint32_t> - BigIntExtendBits);
-      normalizeExtend();
       prune();
+      normalizeExtend();
     }
   }
 
@@ -2950,6 +2973,10 @@ public:
   FatDynObjRef<> resolveGeneric(DynObjRef ref) { return resolve(ref); }
   bool exists(ObjRef<Constant> ref) { return store.exists(ref); }
   auto numIDs() { return store.numIDs(); }
+  void reset() {
+    store.reset();
+    map.clear();
+  }
 };
 
 class GenericBigIntRef : public BigIntMixin<GenericBigIntRef> {

@@ -5,9 +5,11 @@
 #include "dyno/IDImpl.h"
 #include "dyno/Instr.h"
 #include "dyno/InstrPrinter.h"
+#include "dyno/Lexer.h"
 #include "dyno/Obj.h"
 #include "dyno/Parser.h"
 #include "hw/PrintParse.h"
+#include "hw/passes/HWDialectPasses.h"
 #include "meta/MetaContext.h"
 #include "meta/PassPipelineInterpreter.h"
 #include "op/OpContext.h"
@@ -31,14 +33,9 @@ CmdLineArg<bool> argDumpAfterAll{std::nullopt, "dump-after-all",
 CmdLineArg<bool> argPrintAfterAll{'p', "print-after-all",
                                   "Print IR after every pass.", 0, false};
 
-CmdLineArg<bool> argCheckAfterAll{'c', "check-after-all",
-                                  "Check IR after every pass.", 0,
-#ifdef DYNO_ENABLE_DEBUG
-                                  1
-#else
-                                  0
-#endif
-};
+CmdLineArg<bool> argDebug{
+    'd', "debug", "Run in debug mode (only has effect for debug builds).", 0,
+    false};
 
 constexpr DialectID DIALECT_TEST{7}; // fixme: dialect ID assignment
 
@@ -61,6 +58,9 @@ public:
 class TestDialectContext {
 public:
   static constexpr DialectID dialect{DIALECT_TEST};
+};
+template <> struct DialectContext<DialectID{DIALECT_TEST}> {
+  using t = TestDialectContext;
 };
 
 constexpr DialectOpcode TEST_TEST_CASE{DIALECT_TEST, 0};
@@ -182,30 +182,28 @@ public:
 
       return true;
     }
+    std::print(os, "passed test: \"{}\"\n", name);
     return false;
   }
 
-  bool exec(BlockRef block) {
-    bool allSuccess = true;
-    for (auto instr : block) {
-      switch (*instr.getDialectOpcode()) {
-      case *TEST_TEST_CASE: {
-        allSuccess &= execTestCase(instr, true);
-        break;
-      }
-
-      default: {
-        report_fatal_error("unknown test case: ",
-                           print.toString(instr.getDialectOpcode()));
-      }
-      }
+  bool exec(InstrRef instr, bool verbose) {
+    switch (*instr.getDialectOpcode()) {
+    case *TEST_TEST_CASE: {
+      return execTestCase(instr, verbose);
+      break;
     }
 
-    return allSuccess;
+    default: {
+      report_fatal_error("unknown test case: ",
+                         print.toString(instr.getDialectOpcode()));
+    }
+    }
   }
 
   DynoTestInterpreter(Context &ctx, std::ostream &os)
       : ctx(ctx), print(ctx, os), os(os) {}
+
+  void reset() { print.reset(); }
 };
 
 int main(int argc, char **argv) {
@@ -228,7 +226,7 @@ int main(int argc, char **argv) {
   cmdLineArgHandler.registerArg(argFileName);
   cmdLineArgHandler.registerArg(argDumpAfterAll);
   cmdLineArgHandler.registerArg(argPrintAfterAll);
-  cmdLineArgHandler.registerArg(argCheckAfterAll);
+  cmdLineArgHandler.registerArg(argDebug);
   cmdLineArgHandler.parse(argc, argv);
 
   DynoTestParser parser{ctx};
@@ -237,13 +235,25 @@ int main(int argc, char **argv) {
   MMap mmap{fileName};
   if (!mmap)
     report_fatal_error("failed to open file: {}", fileName);
-  parser.parse(mmap, fileName);
-
-  BlockRef block = ctx.getCtx<CoreDialectContext>().createBlock();
-  parser.parse(mmap, std::move(fileName), block.end());
 
   DynoTestInterpreter interp{ctx, std::cout};
-  auto res = interp.exec(block);
+  bool pass = true;
 
-  return res ? 0 : -1;
+  debugType = *argDebug;
+
+  DynoLexer::State state = {};
+  while (auto instr = parser.parseSingle(mmap, fileName, state)) {
+    pass &= interp.exec(instr, *argPrintAfterAll);
+
+    // Completely reset the context after a single pass. Otherwise previous'
+    // freeIDs will always affect current, which can affect operand ordering.
+    // (Other option would be more fuzzy comparison)
+    coreContext.reset();
+    hwContext.reset();
+    metaContext.reset();
+    opContext.reset();
+    aigContext.reset();
+    interp.reset();
+  }
+  return pass ? 0 : -1;
 }

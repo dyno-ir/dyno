@@ -70,6 +70,11 @@ public:
   const char *get(uint32_t idx) {
     return reinterpret_cast<char *>(strtab.resolve(idx));
   }
+
+  void clear() {
+    stringMap.clear();
+    strtab.clear();
+  }
 };
 
 template <typename InstrT> class SourceLocInfo {
@@ -120,6 +125,12 @@ public:
       vec.emplace_back(info);
     }
   }
+
+  void reset() {
+    srcLocDedupe.clear();
+    instrMap.clear();
+    strDedupe.clear();
+  }
 };
 
 template <typename ValueObj> class ValueNameInfo {
@@ -140,6 +151,11 @@ public:
   }
 
   auto clearNames(RefT ref) { return valueMap.get_ensure(ref).clear(); }
+
+  void reset() {
+    strDedupe.clear();
+    valueMap.clear();
+  }
 };
 
 }; // namespace dyno

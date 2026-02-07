@@ -65,7 +65,7 @@ class KnownBitsAnalysis : public CacheInvalidation<KnownBitsAnalysis> {
       frame.idx++;
       stack.emplace_back(instr.other(idx)->as<HWValue>(), 0);
     } else {
-      retVal = stack.back().acc;
+      retVal = std::move(stack.back().acc);
       assert(retVal.val.getNumBits() ==
              stack.back().value.as<WireRef>().getNumBits());
       cache.insert(stack.back().value.as<WireRef>(), retVal);

@@ -58,7 +58,8 @@ public:
   NewDeleteObjStore(NewDeleteObjStore &&) = default;
   NewDeleteObjStore &operator=(const NewDeleteObjStore &) = delete;
   NewDeleteObjStore &operator=(NewDeleteObjStore &&) = default;
-  ~NewDeleteObjStore() {
+
+  void destroyAll() {
     for (auto *ptr : map.elements) {
       if (!ptr)
         continue;
@@ -66,6 +67,7 @@ public:
       free(ptr);
     }
   }
+  ~NewDeleteObjStore() { destroyAll(); }
 
   template <typename... Args>
   FatRefT create(Args &&...args)
@@ -127,6 +129,14 @@ public:
   auto end() { return objs().end(); }
 
   ObjID::num_t numIDs() { return map.size(); }
+
+  void reset() {
+    destroyAll();
+    freeIds.clear();
+    map.clear();
+    createHooks.clear();
+    destroyHooks.clear();
+  }
 };
 
 } // namespace dyno
