@@ -20,3 +20,10 @@ find_package(PkgConfig REQUIRED)
 
 add_subdirectory(lib)
 add_subdirectory(tools)
+
+# tests
+enable_testing()
+add_test(
+    NAME run_dyno_test
+    COMMAND dyno-test "${CMAKE_SOURCE_DIR}/tools/dyno-test/dyno-ir/test.dyno"
+)
