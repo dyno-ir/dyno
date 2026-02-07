@@ -36,7 +36,11 @@ jobs:
       run : git submodule update --init --recursive
       
     - name: Configure CMake
-      # We point explicitly to the versioned clang binaries
+      env:
+        CC: clang-${{ env.LLVM_VER }}
+        CXX: clang++-${{ env.LLVM_VER }}
+        CXXFLAGS: -stdlib=libc++
+        LDFLAGS: -stdlib=libc++
       run: >
         cmake -B ${{github.workspace}}/build 
         -DCMAKE_C_COMPILER=clang-${{ env.LLVM_VER }}
