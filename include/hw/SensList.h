@@ -125,6 +125,8 @@ public:
   Trigger(DynObjRef) : sensModes(0), numModes(0) {}
   Trigger(DynObjRef, const Trigger &other)
       : sensModes(other.sensModes), numModes(other.numModes) {}
+  Trigger(DynObjRef, FatObjRef<Trigger> other)
+      : sensModes(other->sensModes), numModes(other->numModes) {}
 };
 
 class TriggerRef : public FatObjRef<Trigger> {

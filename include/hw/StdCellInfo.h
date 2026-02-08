@@ -10,6 +10,8 @@ public:
   std::optional<bool> isFlipFlop;
 
   StdCellInfo(ObjRef<StdCellInfo> ref) {}
+  StdCellInfo(DynObjRef, FatObjRef<StdCellInfo> other)
+      : area(other->area), isFlipFlop(other->isFlipFlop) {}
 };
 
 using StdCellInfoRef = FatObjRef<StdCellInfo>;

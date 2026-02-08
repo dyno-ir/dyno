@@ -11,6 +11,7 @@ public:
   std::map<std::string, std::string> data;
   MapObj(DynObjRef, std::map<std::string, std::string> &&data)
       : data(std::move(data)) {}
+  MapObj(DynObjRef, FatObjRef<MapObj> other) : data(other->data) {}
 };
 
 using MapRef = FatObjRef<MapObj>;

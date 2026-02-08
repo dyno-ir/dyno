@@ -37,7 +37,8 @@ template <typename Derived> class ContextMixin {
   auto &self() { return *static_cast<Derived *>(this); }
   static constexpr size_t numStores =
       std::tuple_size_v<decltype(std::declval<Derived>().stores)>;
-  auto makeResolverMethods() {
+
+  static unsigned getMaxTyID() {
     // find highest used type ID
     auto maxID = []<std::size_t... Is>(std::index_sequence<Is...>) {
       unsigned maxID = 0;
@@ -54,9 +55,12 @@ template <typename Derived> class ContextMixin {
           ...);
       return maxID;
     }(std::make_index_sequence<numStores>{});
-
+    return maxID;
+  }
+  auto makeResolverMethods() {
     // create vector and assign elements
-    std::vector<MemberRef<FatDynObjRef<>(void *, DynObjRef)>> arr(maxID + 1);
+    std::vector<MemberRef<FatDynObjRef<>(void *, DynObjRef)>> arr(getMaxTyID() +
+                                                                  1);
     [&]<std::size_t... Is>(std::index_sequence<Is...>) {
       (
           [&] {
@@ -69,10 +73,42 @@ template <typename Derived> class ContextMixin {
     }(std::make_index_sequence<numStores>{});
     return arr;
   }
+  // convert method that takes/returns static arg into one taking/returning
+  // dynamic arg
+  template <auto Func>
+  static FatDynObjRef<> castToSpecificRef(void *obj, FatDynObjRef<> ref) {
+    using ArgT = std::remove_reference_t<
+        std::tuple_element_t<1, function_args_t<decltype(Func)>>>;
+    return Func(obj, ref.as<ArgT>());
+  }
+  auto makeCopyMethods() {
+    // create vector and assign elements
+    std::vector<MemberRef<FatDynObjRef<>(void *, FatDynObjRef<>)>> arr(
+        getMaxTyID() + 1);
+    [&]<std::size_t... Is>(std::index_sequence<Is...>) {
+      (
+          [&] {
+            auto &store = std::get<Is>(self().stores);
+            using StoreT = std::remove_reference_t<decltype(store)>;
+            using SignT = ObjTraits<typename StoreT::value_type>::FatRefT (
+                StoreT::*)(FatObjRef<typename StoreT::value_type> &&);
+            if constexpr (requires { (SignT)(&StoreT::create); }) {
+              arr[ObjTraits<typename StoreT::value_type>::ty.getTypeID() &
+                  127] = MemberRef{
+                  &store,
+                  castToSpecificRef<BindMethod<(SignT)(&StoreT::create)>::fv>};
+            }
+          }(),
+          ...);
+    }(std::make_index_sequence<numStores>{});
+    return arr;
+  }
 
 public:
   std::vector<MemberRef<FatDynObjRef<>(void *, DynObjRef)>> resolverMethods =
       makeResolverMethods();
+  std::vector<MemberRef<FatDynObjRef<>(void *, FatDynObjRef<>)>> copyMethods =
+      makeCopyMethods();
 
   void reset() {
     std::apply([](auto &...stores) { (stores.reset(), ...); }, self().stores);
@@ -126,6 +162,7 @@ template <> struct DialectContext<DialectID{DIALECT_CORE}> {
 class Context {
   ArrayInterface<TypeErasedCtx> contexts;
   ArrayInterface<MemberRef<FatDynObjRef<>(void *, DynObjRef)>> resolvers;
+  ArrayInterface<MemberRef<FatDynObjRef<>(void *, FatDynObjRef<>)>> copiers;
 
   DialectInfos dialectInfos;
   PassRegistry passRegistry;
@@ -144,6 +181,11 @@ public:
   }
 
   FatDynObjRef<> resolve(DynObjRef ref) { return resolvers[ref](ref); }
+  FatDynObjRef<> copy(FatDynObjRef<> ref) {
+    if (auto fn = copiers[ref])
+      return fn(ref);
+    return nullref;
+  }
 
   template <typename T> void registerDialect(T &context) {
     // context pointer
@@ -161,6 +203,9 @@ public:
 
     if constexpr (requires { context.resolverMethods; }) {
       resolvers.registerDialect(T::dialect, ArrayRef{context.resolverMethods});
+    }
+    if constexpr (requires { context.copyMethods; }) {
+      copiers.registerDialect(T::dialect, ArrayRef{context.copyMethods});
     }
   }
 

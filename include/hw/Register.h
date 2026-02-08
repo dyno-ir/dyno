@@ -26,6 +26,7 @@ public:
 
   Register(DynObjRef, Optional<uint32_t> numBits = nullopt)
       : numBits(numBits) {}
+  Register(DynObjRef, FatObjRef<Register> other) : numBits(other->numBits) {}
 };
 
 class RegisterIRef;

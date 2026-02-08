@@ -10,6 +10,7 @@ class StringObj {
 public:
   std::string data;
   StringObj(DynObjRef, std::string &&data) : data(std::move(data)) {}
+  StringObj(DynObjRef, FatObjRef<StringObj> other) : data(other->data) {}
 };
 
 using StringObjRef = FatObjRef<StringObj>;

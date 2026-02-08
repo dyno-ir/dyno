@@ -7,9 +7,11 @@
 #include <cctype>
 #include <cstdio>
 #include <iostream>
+#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <unordered_map>
 
 struct Token {
@@ -82,16 +84,19 @@ public:
   }
   static Token makeStrLit(std::string_view value) {
     auto rv = Token{STRING_LITERAL};
+    std::construct_at(&rv.strLit);
     rv.strLit.value = value;
     return rv;
   }
   static Token makeInlineCodeLit(std::string_view value) {
     auto rv = Token{INLINE_CODE_LITERAL};
+    std::construct_at(&rv.inlineCodeLit);
     rv.inlineCodeLit.value = value;
     return rv;
   }
   static Token makeNumericLit(std::string_view value) {
     auto rv = Token{NUMERIC_LITERAL};
+    std::construct_at(&rv.numericLit);
     rv.numericLit.value = value;
     return rv;
   }
@@ -420,8 +425,7 @@ public:
     fprintf(stderr, "%s:%u:%u: %s\n", path.c_str(), error.lineNumber, col,
             error.message);
     unsigned pos;
-    fprintf(stderr, "%s:%u:%u: %n", path.c_str(), error.lineNumber, col,
-            &pos);
+    fprintf(stderr, "%s:%u:%u: %n", path.c_str(), error.lineNumber, col, &pos);
     std::cerr << line << "\n";
     pos += &src[error.start] - line.begin();
     for (unsigned i = 0; i < pos; i++)

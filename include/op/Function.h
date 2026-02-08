@@ -19,6 +19,7 @@ public:
   SmallVec<InstrRef, 4> params;
 
   Function(DynObjRef) {}
+  Function(DynObjRef, FatObjRef<Function> other) {}
 };
 
 class FunctionIRef;

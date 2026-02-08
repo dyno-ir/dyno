@@ -50,6 +50,7 @@ public:
   std::array<AIGObjID, 2> op;
 
   AIGNode(AIGObjID lhs, AIGObjID rhs) : op{lhs, rhs} {}
+  AIGNode(DynObjRef, FatObjRef<AIGNode> other) : op(other->op) {}
   AIGNode() = default;
 
   static constexpr uint32_t hash(AIGNode node) {
@@ -185,6 +186,7 @@ public:
 
   FatAIGNode(ObjRef<FatAIGNode>) {};
   FatAIGNode(DynObjRef, AIGObjID lhs, AIGObjID rhs) : node(lhs, rhs) {}
+  FatAIGNode(DynObjRef, FatObjRef<FatAIGNode> other) : node(other->node) {}
 };
 
 class FatAIGNodeRef : public FatObjRef<FatAIGNode>,
@@ -626,8 +628,8 @@ public:
   InstrDefUse defUse;
   AIG aig;
 
-  template <typename... Args>
-  AIGObj(ObjRef<AIGObj>, Args... args) : aig(std::forward<Args>(args)...) {}
+  AIGObj(ObjRef<AIGObj>) : aig() {}
+  AIGObj(ObjRef<AIGObj>, FatObjRef<AIGObj>) : aig() {}
 };
 
 using AIGObjRef = FatObjRef<AIGObj>;

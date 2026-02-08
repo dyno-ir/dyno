@@ -12,6 +12,7 @@ public:
   InstrDefUse defUse;
 
   Process(DynObjRef) {}
+  Process(DynObjRef, FatObjRef<Process> other) {}
 };
 
 class ProcessIRef;

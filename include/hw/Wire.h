@@ -12,6 +12,7 @@ public:
   InstrDefUse defUse;
   Optional<uint32_t> numBits;
   Wire(DynObjRef, Optional<uint32_t> numBits = nullopt) : numBits(numBits) {}
+  Wire(DynObjRef, FatObjRef<Wire> other) : numBits(other->numBits) {}
 
   static bool isInitialized(const Wire *wire) {
     return !(reinterpret_cast<const char *>(wire)[0] &&
