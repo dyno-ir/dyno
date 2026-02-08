@@ -290,8 +290,7 @@ public:
             break;
           }
         }
-        // skip values if not selected
-        frame.idx += 2;
+
         if (frame.idx == instr.getNumOthers()) {
           retVal.val =
               PatBigInt::undef(*instr.def(0)->as<WireRef>().getNumBits());
@@ -299,7 +298,10 @@ public:
           stack.pop_back();
           break;
         }
+
+        // skip values if not selected
         stack.emplace_back(instr.other(frame.idx)->as<HWValue>());
+        frame.idx += 2;
         break;
       }
 
