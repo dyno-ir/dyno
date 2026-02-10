@@ -7,7 +7,7 @@
 template <typename T, typename Container = std::vector<T>,
           auto HashFunc = [](const T &t) { return std::hash<T>()(t); }>
 class DedupeMap {
-  DenseMultimap<uint32_t, uint32_t> map;
+  DenseMultimap<Unhashed<uint32_t>, uint32_t> map;
 
 public:
   Container container;

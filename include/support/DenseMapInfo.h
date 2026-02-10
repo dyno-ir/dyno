@@ -33,3 +33,25 @@ template <std::integral T> struct DenseMapInfo<T> {
   static unsigned getHashValue(const T &k) { return std::hash<T>()(k); }
   static bool isEqual(const T &lhs, const T &rhs) { return lhs == rhs; }
 };
+
+template <std::integral T> struct Unhashed {
+  T val;
+  operator T() const { return val; }
+  Unhashed(T t) : val(t) {}
+  Unhashed() = default;
+};
+
+template <std::integral T> struct DenseMapInfo<Unhashed<T>> {
+  static constexpr T getEmptyKey() {
+    return std::numeric_limits<T>::is_signed ? std::numeric_limits<T>::min()
+                                             : std::numeric_limits<T>::max();
+  }
+  static constexpr T getTombstoneKey() {
+    return std::numeric_limits<T>::is_signed
+               ? std::numeric_limits<T>::min() + 1
+               : std::numeric_limits<T>::max() - 1;
+  }
+  // no hashing
+  static unsigned getHashValue(const T &k) { return k; }
+  static bool isEqual(const T &lhs, const T &rhs) { return lhs == rhs; }
+};

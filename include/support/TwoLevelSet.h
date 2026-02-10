@@ -4,7 +4,7 @@
 template <typename T, typename KeyT = uint32_t,
           auto HashFunc = [](const T &t) { return std::hash<T>()(t); }>
 class TwoLevelSet {
-  DenseMultimap<KeyT, T> map;
+  DenseMultimap<Unhashed<KeyT>, T> map;
 
 public:
   auto find(const T &t) {
@@ -30,7 +30,7 @@ public:
 template <typename K, typename T, typename KeyT = uint32_t,
           auto HashFunc = [](const T &t) { return std::hash<T>()(t); }>
 class TwoLevelMap {
-  DenseMultimap<KeyT, std::pair<K, T>> map;
+  DenseMultimap<Unhashed<KeyT>, std::pair<K, T>> map;
 
 public:
   auto find_raw(const K &k) {

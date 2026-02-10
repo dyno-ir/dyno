@@ -22,7 +22,7 @@ namespace dyno {
 
 class CSEDedupeMap {
   Context &ctx;
-  DenseMultimap<uint32_t, ObjRef<Instr>> instrDedupeMap;
+  DenseMultimap<Unhashed<uint32_t>, ObjRef<Instr>> instrDedupeMap;
 
   uint32_t hashOperand(OperandRef operand) {
     return DenseMapInfo<DynObjRef>::getHashValue(operand->thin());

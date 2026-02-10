@@ -2900,7 +2900,7 @@ class ConstantStore {
   // the full key compare part manually so that we can compare with BigInt
   // rather than Constant.
   // std::unordered_multimap<uint32_t, ObjRef<Constant>> map;
-  DenseMultimap<uint32_t, ObjRef<Constant>> map;
+  DenseMultimap<Unhashed<uint32_t>, ObjRef<Constant>> map;
 
 public:
   using value_type = Constant;
