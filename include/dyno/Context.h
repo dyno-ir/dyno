@@ -180,11 +180,17 @@ public:
         .template getStore<T>();
   }
 
+  // slow resolve
   FatDynObjRef<> resolve(DynObjRef ref) { return resolvers[ref](ref); }
+  // slow copy
   FatDynObjRef<> copy(FatDynObjRef<> ref) {
     if (auto fn = copiers[ref])
       return fn(ref);
     return nullref;
+  }
+
+  template <typename T> ObjTraits<T>::FatRefT resolve(ObjRef<T> ref) {
+    return getStore<T>().resolve(ref);
   }
 
   template <typename T> void registerDialect(T &context) {
