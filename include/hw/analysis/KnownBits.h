@@ -2,6 +2,7 @@
 
 #include "dyno/AnalysisCache.h"
 #include "dyno/Constant.h"
+#include "dyno/Context.h"
 #include "dyno/Instr.h"
 #include "dyno/Opcode.h"
 #include "hw/HWValue.h"
@@ -10,8 +11,10 @@
 #include "hw/Wire.h"
 #include "hw/analysis/CacheInvalidation.h"
 #include "op/IDs.h"
+#include "support/Bits.h"
 #include "support/Debug.h"
 #include "support/DenseMap.h"
+#include "support/Utility.h"
 #include <concepts>
 namespace dyno {
 
@@ -327,6 +330,118 @@ public:
     cache.clearAll();
     return rv;
   }
+};
+
+class DeriveBitsAnalysis {
+  Context &ctx;
+  SmallVec<std::pair<WireRef, BigInt *>, 64> stack;
+
+public:
+  DenseMap<ObjRef<Wire>, BigInt> map;
+  // returns false if the assignment is contradictory
+  bool propKnownValueUp(WireRef wire, BigInt &&value) {
+    auto &val = map.insert(wire, std::move(value)).val();
+    stack.emplace_back(wire, &val);
+
+    while (!stack.empty()) {
+      auto [obj, bigInt] = stack.pop_back_val();
+      auto curWire = ctx.resolve(obj);
+      auto instr = curWire.getDefI();
+
+      switch (*instr.getDialectOpcode()) {
+      case *OP_OR:
+      case *OP_AND: {
+        auto propState =
+            instr.getDialectOpcode().is(OP_AND) ? FourState::S1 : FourState::S0;
+        BigInt oneBits;
+        BigInt::bitsExactEqual4S(
+            oneBits, *bigInt,
+            PatBigInt::fromFourState(propState, bigInt->getNumBits()));
+        // nothing to do
+        if (oneBits.valueEquals(0))
+          break;
+        for (auto op : instr.others()) {
+          if (auto asConst = op->dyn_as<ConstantRef>()) {
+            // contradiction
+            if ((asConst & oneBits) != oneBits)
+              return false;
+            continue;
+          }
+          auto asWire = op->as<WireRef>();
+          auto &val =
+              map.findOrInsert(
+                     asWire,
+                     [&]() { return PatBigInt::undef(*asWire.getNumBits()); })
+                  .second.val();
+
+          // check for contradiction
+          BigInt zeroBits;
+          BigInt::bitsExactEqual4S(
+              zeroBits, val,
+              PatBigInt::fromFourState(!propState, val.getNumBits()));
+          if (!(zeroBits & oneBits).valueEquals(0))
+            return false;
+
+          if (instr.getDialectOpcode().is(OP_AND))
+            // 1 bits in output are one in all operands
+            val |= oneBits;
+          else
+            val &= ~oneBits;
+          stack.emplace_back(asWire, &val);
+        }
+        break;
+      }
+      case *OP_NOT: {
+        if (auto asConst = instr.other(0)->dyn_as<ConstantRef>()) {
+          BigInt rev;
+          BigInt::notOp4S(rev, *bigInt);
+          if (!BigInt::icmpOp4S(asConst, rev, BigInt::ICMP_CXEQ))
+            return false;
+        } else if (auto asWire = instr.other(0)->dyn_as<WireRef>()) {
+          auto &val =
+              map.findOrInsert(
+                     asWire,
+                     [&]() { return PatBigInt::undef(*asWire.getNumBits()); })
+                  .second.val();
+
+          static constexpr auto lambda = [](uint32_t lhs, uint32_t rhs) {
+            auto undef = rhs & BigInt::REP10;
+            auto mask = undef | (undef >> 1);
+            // keep what's undefined in rhs
+            lhs &= mask;
+            mask = ~mask;
+
+            // invert defined bits in rhs
+            auto defLow = mask & ~((mask & BigInt::REP01) << 1);
+            rhs ^= defLow;
+
+            // assign masked
+            lhs |= (rhs & mask);
+
+            return lhs;
+          };
+
+          BigInt newV;
+          BigInt::bitwiseOp4S<lambda,
+                              BigInt::bitwise2S4SAdapt<lambda, BigInt, BigInt>>(
+              newV, val, *bigInt);
+          if (!BigInt::icmpOp4S(newV, val, BigInt::ICMP_CXEQ))
+            return false;
+          val = std::move(newV);
+
+          stack.emplace_back(asWire, &val);
+        } else
+          dyno_unreachable("invalid operand type");
+        break;
+      }
+      }
+    }
+
+    return true;
+  }
+
+public:
+  explicit DeriveBitsAnalysis(Context &ctx) : ctx(ctx) {}
 };
 
 }; // namespace dyno

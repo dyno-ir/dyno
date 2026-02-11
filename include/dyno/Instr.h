@@ -381,6 +381,11 @@ public:
   void clearCustomStorage() {
     InlineStorageRef<uint64_t>{this->customStorage()}.emplace(0);
   }
+  InstrRef dyn_as_opc(DialectOpcode opc) {
+    if (this->getDialectOpcode() == opc)
+      return *this;
+    return nullref;
+  }
   // hack before we can do this properly
   void destroyOperands() {
     for (auto op : *this) {
@@ -394,7 +399,7 @@ public:
   }
 };
 
-//#define INSERT_ERASE_HOOK
+// #define INSERT_ERASE_HOOK
 
 class InstrDefUse {
   friend class Operand;
@@ -405,12 +410,12 @@ class InstrDefUse {
 
   uint16_t numDefs = 0;
   SmallVec<OperandRef, 4> refs;
-  #ifdef INSERT_ERASE_HOOK
+#ifdef INSERT_ERASE_HOOK
   // could move existence into a bit field, and store these after InstrDefUse
   // in the parent object.
   insert_hook_t insertHook = nullptr;
   erase_hook_t eraseHook = nullptr;
-  #endif
+#endif
 
 public:
   InstrDefUse() = default;
@@ -491,12 +496,12 @@ public:
     return replaceAllUsesWith(newRef, [](OperandRef) {});
   }
 
-  #ifdef INSERT_ERASE_HOOK
+#ifdef INSERT_ERASE_HOOK
   void setInsertHook(insert_hook_t insertHook) {
     this->insertHook = insertHook;
   }
   void setEraseHook(erase_hook_t eraseHook) { this->eraseHook = eraseHook; }
-  #endif
+#endif
 
   void manual_move(unsigned from, unsigned to) {
     if (to == from)
@@ -530,7 +535,7 @@ private:
   void insert(OperandRef opRef) {
     assert(opRef.hasDefUse());
     assert(!opRef->ref.isCustom());
-    #ifdef INSERT_ERASE_HOOK
+#ifdef INSERT_ERASE_HOOK
     if (insertHook) [[unlikely]] {
       if (insertHook(this, opRef)) {
         if (opRef.isDef())
@@ -538,7 +543,7 @@ private:
         return;
       }
     }
-    #endif
+#endif
     unsigned pos;
     if (opRef.isDef()) {
       pos = numDefs++;
@@ -557,13 +562,13 @@ private:
   void insertUse(OperandRef opRef) {
     assert(opRef.hasDefUse());
     assert(!opRef->ref.isCustom());
-    #ifdef INSERT_ERASE_HOOK
+#ifdef INSERT_ERASE_HOOK
     if (insertHook) [[unlikely]] {
       if (insertHook(this, opRef)) {
         return;
       }
     }
-    #endif
+#endif
     unsigned pos = refs.size();
     refs.emplace_back(opRef);
     opRef.setLinkIdx(pos);
@@ -573,7 +578,7 @@ private:
     unsigned pos = ref.getLinkIdx();
     assert(pos < refs.size());
     assert(refs.size() > 0);
-    #ifdef INSERT_ERASE_HOOK
+#ifdef INSERT_ERASE_HOOK
     if (eraseHook) [[unlikely]] {
       bool isDef = refs[pos].isDef();
       if (eraseHook(this, pos)) {
@@ -582,7 +587,7 @@ private:
         return;
       }
     }
-    #endif
+#endif
     if (refs[pos].isDef()) {
       if (numDefs > 1 && pos != numDefs - 1U) {
         refs[pos] = std::move(refs[numDefs - 1]);

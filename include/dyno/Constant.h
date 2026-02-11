@@ -533,6 +533,17 @@ public:
   constexpr static void negateOp(BigIntBase &out, const T &lhs) {
     subOp(out, PatBigInt(lhs.getRawNumBits(), 0), lhs);
   }
+  template <auto Func4S, typename T0, typename T1>
+  constexpr static void bitwise2S4SAdapt(BigIntBase &out, const T0 &lhs,
+                                         const T1 &rhs) {
+    return carryPropOp<[](unsigned lhs, unsigned rhs,
+                          [[maybe_unused]] unsigned cin,
+                          [[maybe_unused]] unsigned *cout) {
+      auto low = Func4S(unpack_bits(lhs), unpack_bits(rhs));
+      auto high = Func4S(unpack_bits(lhs >> 16), unpack_bits(rhs >> 16));
+      return (pack_bits(high) << 16) | pack_bits(low);
+    }>(out, lhs, rhs);
+  }
 
   constexpr void setRepeating(uint32_t val, unsigned bits,
                               uint8_t customVal = 0) {
@@ -1737,6 +1748,37 @@ public:
 
     out.normalize();
   }
+
+  template <typename T0, typename T1>
+  static void bitwiseOp4S(BigInt &out, const T0 &lhs, const T1 &rhs,
+                          uint32_t lut) {
+    constexpr auto lambda4s = [lut](uint32_t lhs, uint32_t rhs) {
+      uint32_t rv;
+      for (uint32_t i = 0; i < 32; i++) {
+        uint32_t lIdx = DynBitField{lhs, 2 * i, 2};
+        uint32_t rIdx = DynBitField{rhs, 2 * i, 2};
+        uint32_t out = DynBitField{lut, 2 * (rIdx | (lIdx << 2)), 2};
+        DynBitField{rv, 2 * i, 2} = out;
+      }
+      return rv;
+    };
+    constexpr auto lambda2s = [lut](unsigned lhs, unsigned rhs,
+                                    [[maybe_unused]] unsigned cin,
+                                    [[maybe_unused]] unsigned *cout) {
+      uint32_t rv;
+      for (uint32_t i = 0; i < 32; i++) {
+        uint32_t lIdx = DynBitField{lhs, i, 1};
+        uint32_t rIdx = DynBitField{rhs, i, 1};
+        uint32_t out = DynBitField{lut, 2 * (rIdx | (lIdx << 2)), 2};
+        assert((out == FourState::S0 || out == FourState::S1) &&
+               "4 state output unsupported");
+        DynBitField{rv, 1 * i, 1} = out;
+      }
+      return rv;
+    };
+    return bitwiseOp4S<lambda4s, carryPropOp<lambda2s>, T0, T1>(out, lhs, rhs);
+  }
+
   template <BigIntAPI T0, BigIntAPI T1>
   static void andOp4S(BigIntBase &out, const T0 &lhs, const T1 &rhs) {
     return bitwiseOp4S<and_4state, andOp<T0, T1>, T0, T1>(out, lhs, rhs);
@@ -1774,6 +1816,7 @@ public:
       uint32_t outV = n_equal_mask<2>(lhsV, rhsV) >> 1;
       out.words[i] = outV;
     }
+    // todo: construct as 2 state directly when out doesn't alias operands
     out.conv4To2State();
     out.normalize();
   }
@@ -2694,15 +2737,15 @@ SHIFT_OP_OPERATOR_INST(operator>>, operator>>=, lshrOp4S)
 
 template <BigIntAPI T0, BigIntAPI T1>
 inline BigInt operator*(const T0 &lhs, const T1 &rhs) {
-  return BigInt::mulOp<0>(lhs, rhs);
+  return BigInt::mulOp4S<0>(lhs, rhs);
 }
 template <BigIntAPI T0, BigIntAPI T1>
 inline BigInt operator/(const T0 &lhs, const T1 &rhs) {
-  return BigInt::udivmodOp(lhs, rhs).first;
+  return BigInt::udivmodOp4S(lhs, rhs).first;
 }
 template <BigIntAPI T0, BigIntAPI T1>
 inline BigInt operator%(const T0 &lhs, const T1 &rhs) {
-  return BigInt::udivmodOp(lhs, rhs).second;
+  return BigInt::udivmodOp4S(lhs, rhs).second;
 }
 
 #define OP_ASSIGN_TRIVIAL(identAssign, operator)                               \
@@ -2718,7 +2761,12 @@ OP_ASSIGN_TRIVIAL(operator%=, %)
 
 template <BigIntAPI T0> inline BigInt operator-(const T0 &val) {
   BigInt out;
-  BigInt::negateOp(out, val);
+  BigInt::negateOp4S(out, val);
+  return out;
+}
+template <BigIntAPI T0> inline BigInt operator~(const T0 &val) {
+  BigInt out;
+  BigInt::notOp4S(out, val);
   return out;
 }
 
