@@ -21,7 +21,21 @@ public:
       return;
     }
     auto len = st.st_size + 1;
-    auto *ptr = mmap(nullptr, len, PROT_READ | PROT_WRITE, MAP_PRIVATE, fd, 0);
+    void *ptr;
+    if (st.st_size % getpagesize() == 0) {
+      ptr = mmap(nullptr, len, PROT_READ | PROT_WRITE,
+                 MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+      if (ptr == MAP_FAILED) {
+        close(fd);
+        return;
+      }
+      ptr = mmap(ptr, st.st_size, PROT_READ | PROT_WRITE,
+                 MAP_PRIVATE | MAP_FIXED, fd, 0);
+    } else {
+      ptr =
+          mmap(nullptr, st.st_size, PROT_READ | PROT_WRITE, MAP_PRIVATE, fd, 0);
+    }
+
     close(fd);
     if (ptr == MAP_FAILED)
       return;
