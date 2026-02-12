@@ -197,3 +197,79 @@ TEST_CASE :string("instcombine-onehot-mux-merge2"), :block, :block, :block {
 }{
   meta.INST_COMBINE_PASS
 }
+
+TEST_CASE :string("bool-simplify"), :block, :block, :block {
+  MODULE_DEF :module("mod"), :block {
+    INPUT_REGISTER_DEF %in_a:register(1)
+    INPUT_REGISTER_DEF %in_b:register(1)
+    INPUT_REGISTER_DEF %in_c:register(1)
+    OUTPUT_REGISTER_DEF %out_a:register(1)
+    OUTPUT_REGISTER_DEF %out_b:register(1)
+
+    COMB_PROCESS_DEF :process, :block {
+      LOAD %a_v:wire(1), %in_a
+      LOAD %b_v:wire(1), %in_b
+      LOAD %c_v:wire(1), %in_c
+
+      // x implied by a_v
+      OR %x:wire(1), %a_v, %b_v
+      AND %o:wire(1), %a_v, %x, %c_v
+      STORE %o, %out_a
+
+      NOT %y:wire(1), %a_v
+      AND %o1:wire(1), %a_v, %y, %c_v
+      // contradiction
+      STORE %o1, %out_b
+    }
+  }
+}{
+  hw.MODULE_DEF %mod:module("mod"), %0:core.block {
+    hw.INPUT_REGISTER_DEF %r0:register(1)
+    hw.INPUT_REGISTER_DEF %r1:register(1)
+    hw.INPUT_REGISTER_DEF %r2:register(1)
+    hw.OUTPUT_REGISTER_DEF %r3:register(1)
+    hw.OUTPUT_REGISTER_DEF %r4:register(1)
+    hw.COMB_PROCESS_DEF %1:process, %2:core.block {
+      hw.LOAD %w0:wire(1), %r0
+      hw.LOAD %w2:wire(1), %r2
+      op.AND %w7:wire(1), %w0, %w2
+      hw.STORE %w7, %r3
+      hw.STORE #1'd0, %r4
+    }
+  }
+}{
+  meta.INST_COMBINE_PASS
+}
+
+TEST_CASE :string("bool-simplify2"), :block, :block, :block {
+  MODULE_DEF :module("mod"), :block {
+    INPUT_REGISTER_DEF %in_a:register(32)
+    OUTPUT_REGISTER_DEF %out_a:register(1)
+
+    COMB_PROCESS_DEF :process, :block {
+      LOAD %a_v:wire(32), %in_a
+
+      ICMP_EQ %x:wire(1), %a_v, #32'd42
+      ICMP_EQ %y:wire(1), %a_v, #32'd69
+      ICMP_EQ %z:wire(1), %a_v, #32'd1337
+
+      OR %yz:wire(1), %y, %z
+      NOT %nyz:wire(1), %yz
+      AND %o:wire(1), %x, %nyz
+      STORE %o, %out_a
+    }
+  }
+}{
+  hw.MODULE_DEF %mod:module("mod"), %0:core.block {
+    hw.INPUT_REGISTER_DEF %r0:register(32)
+    hw.OUTPUT_REGISTER_DEF %r1:register(1)
+    hw.COMB_PROCESS_DEF %1:process, %2:core.block {
+      hw.LOAD %w0:wire(32), %r0
+      op.ICMP_EQ %w1:wire(1), %w0, #32'd42
+      hw.STORE %w1, %r1
+    }
+  }
+}{
+  meta.INST_COMBINE_PASS
+}
+

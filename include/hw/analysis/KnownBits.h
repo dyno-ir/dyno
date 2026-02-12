@@ -341,7 +341,7 @@ class DeriveBitsAnalysis {
   };
 
 public:
-  KnownBitsAnalysis &knownBits;
+  KnownBitsAnalysis knownBits;
   // returns false if the assignment is contradictory
   bool propKnownValueUp(WireRef wire, BigInt &&value) {
     auto &ref = knownBits.cache.insertOrAssign(wire, std::move(value));
@@ -410,6 +410,9 @@ public:
           auto &val = knownBits.cache.findOrInsert(
               asWire, PatBigInt::undef(*asWire.getNumBits()));
 
+          if (!BigInt::icmpOp4S(~*bigInt, val, BigInt::ICMP_CXEQ))
+            return false;
+
           static constexpr auto lambda = [](uint32_t lhs, uint32_t rhs) {
             auto undef = rhs & BigInt::REP10;
             auto mask = undef | (undef >> 1);
@@ -431,9 +434,6 @@ public:
           BigInt::bitwiseOp4S<lambda,
                               BigInt::bitwise2S4SAdapt<lambda, BigInt, BigInt>>(
               newV, val, *bigInt);
-          if (!BigInt::icmpOp4S(newV, val, BigInt::ICMP_CXEQ))
-            return false;
-
           if (val != newV) {
             val = std::move(newV);
             stack.emplace_back(asWire, &val);
@@ -442,11 +442,49 @@ public:
           dyno_unreachable("invalid operand type");
         break;
       }
+      case *OP_ICMP_NE:
+      case *OP_ICMP_EQ: {
+        if (bigInt->valueEquals(instr.isOpc(OP_ICMP_EQ) ? 0 : 1))
+          break;
+        if (!instr.other(1)->is<ConstantRef>())
+          break;
+        auto constVal = instr.other(1)->as<ConstantRef>();
+        auto asWire = instr.other(0)->as<WireRef>();
+        auto &val = knownBits.cache.findOrInsert(
+            asWire, PatBigInt::undef(*asWire.getNumBits()));
+        if (!BigInt::icmpOp4S(val, constVal, BigInt::ICMP_CXEQ))
+          return false;
+
+        static constexpr auto lambda = [](uint32_t lhs, uint32_t rhs) {
+          auto undef = rhs & BigInt::REP10;
+          auto mask = undef | (undef >> 1);
+          // keep what's undefined in rhs
+          lhs &= mask;
+          mask = ~mask;
+
+          // assign masked
+          lhs |= (rhs & mask);
+
+          return lhs;
+        };
+
+        BigInt newV;
+        BigInt::bitwiseOp4S<lambda,
+                            BigInt::bitwise2S4SAdapt<lambda, BigInt, BigInt>>(
+            newV, val, constVal);
+        if (val != newV) {
+          val = std::move(newV);
+          stack.emplace_back(asWire, &val);
+        }
+        break;
+      }
       }
     }
 
     return true;
   }
+
+  void clearCache() { knownBits.clearCache(); }
 
 public:
   explicit DeriveBitsAnalysis(Context &ctx, KnownBitsAnalysis &knownBits)

@@ -113,9 +113,7 @@ private:
   bool boolExprSimplify(InstrRef instr) {
     if (!config.boolExprSimplify)
       return false;
-    // for (auto [k, v] : knownBits.cache.raw()) {
-    //   std::print(std::cout, "-w{}: {}\n", k.getObjID().num, v.toString());
-    // }
+
     HWInstrBuilder build{ctx, instr};
     assert(instr.isOpc(OP_AND, OP_OR) &&
            instr.def(0)->as<WireRef>().getNumBits() == 1);
@@ -125,37 +123,7 @@ private:
 
     auto trueV = instr.isOpc(OP_AND) ? true : false;
 
-    SmallVec<std::pair<ObjRef<Wire>, BigInt>, 2> changelog;
-    // hook into known bits cache to undo speculative changes
-    auto hook = [&](decltype(knownBits.cache) &cache, ObjRef<Wire> ref) {
-      auto it = cache.raw().find(ref);
-      changelog.emplace_back(
-          ref, it != cache.raw().end()
-                   ? it.val()
-                   : PatBigInt::undef(*ctx.resolve(ref).getNumBits()));
-    };
-    auto rollback = [&]() {
-      for (auto change : Range{changelog}.reverse()) {
-        if (change.second.allBitsUndef()) {
-          auto it = knownBits.cache.raw().find(change.first);
-          if (it)
-            knownBits.cache.raw().erase(it);
-        } else
-          knownBits.cache.raw().find(change.first).val() =
-              std::move(change.second);
-      }
-      changelog.clear();
-      // for (auto [k, v] : knownBits.cache.raw()) {
-      //   std::print(std::cout, "-w{}: {}\n", k.getObjID().num, v.toString());
-      // }
-    };
-
-    knownBits.cache.hooks.emplace_back(
-        CallableRef<void(decltype(knownBits.cache) &, ObjRef<Wire>)>{hook});
-
     for (auto op : instr.others()) {
-      // set all other operands to 1 or 0 (rollback could be optimized a bit w/
-      // prefixes)
       bool contradiction = false;
       for (auto other : instr.others()) {
         if (other.getNum() == op.getNum())
@@ -164,20 +132,15 @@ private:
             other->as<WireRef>(), ConstantRef::fromBool(trueV));
         if (contradiction)
           break;
-        // for (auto [k, _] : changelog) {
-        //   std::print(std::cout, "w{}: {}\n", k.getObjID().num,
-        //              knownBits.cache.raw()[k].toString());
-        // }
       }
 
-      auto known = knownBits.getKnownBits(op->as<HWValue>());
+      auto known = deriveBits.knownBits.getKnownBits(op->as<HWValue>());
       // contradiction setting all other operands, or operand is known and short
       // circuits -> whole instr is known
       if (contradiction || known.valueEquals(!trueV)) {
         replaceUses(instr.def(0)->as<WireRef>(), ConstantRef::fromBool(!trueV));
         deleteMatchedInstr(instr);
-        rollback();
-        knownBits.cache.hooks.pop_back();
+        deriveBits.clearCache();
         return true;
       } //  operand is known but not short circuit -> delete
       else if (known.valueEquals(trueV)) {
@@ -189,14 +152,12 @@ private:
                 .as<HWValue>());
         replaceUses(instr.def(0)->as<WireRef>(), newV);
         deleteMatchedInstr(instr);
-        rollback();
-        knownBits.cache.hooks.pop_back();
+        deriveBits.clearCache();
         return true;
       }
 
-      rollback();
+      deriveBits.clearCache();
     }
-    knownBits.cache.hooks.pop_back();
     return false;
   }
 
