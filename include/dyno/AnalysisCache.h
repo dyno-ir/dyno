@@ -1,5 +1,6 @@
 #pragma once
 #include "Instr.h"
+#include "support/CallableRef.h"
 #include "support/DenseMap.h"
 
 namespace dyno {
@@ -8,6 +9,7 @@ template <typename Ref, typename Result> class AnalysisCache {
   DenseMap<Ref, Result> map;
 
 public:
+  SmallVec<CallableRef<void(AnalysisCache &, Ref)>, 1> hooks;
   void clearAll() { map.clear(); }
 
   Result *find(Ref ref) {
@@ -17,7 +19,29 @@ public:
     return &it.val();
   }
 
-  void insert(Ref ref, Result result) { map.insert(ref, std::move(result)); }
+  auto &insert(Ref ref, const Result &result) {
+    return insert(ref, Result{result});
+  }
+  auto &insert(Ref ref, Result &&result) {
+    for (auto hook : hooks)
+      hook(*this, ref);
+    return map.insert(ref, std::move(result)).val();
+  }
+  auto &insertOrAssign(Ref ref, const Result &result) {
+    return insertOrAssign(ref, Result{result});
+  }
+  auto &insertOrAssign(Ref ref, Result &&result) {
+    for (auto hook : hooks)
+      hook(*this, ref);
+    return map.insertOrAssign(ref, std::move(result)).val();
+  }
+
+  auto &findOrInsert(Ref ref, const Result &result) {
+    for (auto hook : hooks)
+      hook(*this, ref);
+    return map.findOrInsert(ref, result).second.val();
+  }
+
   void clear(Ref ref) {
     auto it = map.find(ref);
     if (it)

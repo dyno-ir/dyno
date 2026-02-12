@@ -355,10 +355,10 @@ public:
 template <typename T, typename FilterT> class filter_iterator {
   T it;
   T itEnd;
-  FilterT filterF;
+  std::optional<FilterT> filterF;
 
   void prime() {
-    while (it != itEnd && !filterF(*it)) {
+    while (it != itEnd && !(*filterF)(*it)) {
       ++it;
     }
   }

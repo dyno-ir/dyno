@@ -258,6 +258,11 @@ public:
       dyno_unreachable("invalid opcode");
     }
   }
+  template <typename T>
+  HWValue buildCommutative(DialectOpcode opc, Range<T> operands) {
+    SmallVec<HWValue, 8> vec{operands};
+    return buildCommutative(opc, MutArrayRef{vec});
+  }
 
   // template <IsAnyHWValue... Ts> HWInstrRef buildAdd2(Ts... operands) {
 

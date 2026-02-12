@@ -70,9 +70,9 @@ public:
 
   explicit operator bool() const { return static_cast<bool>(obj); }
 
-  DialectID getDialectID() { return Traits::dialect; }
-  TyID getTyID() { return Traits::ty; }
-  ObjID getObjID() { return obj; }
+  DialectID getDialectID() const { return Traits::dialect; }
+  TyID getTyID() const { return Traits::ty; }
+  ObjID getObjID() const { return obj; }
 
   static bool is_impl(const DynObjRef &Ref);
 

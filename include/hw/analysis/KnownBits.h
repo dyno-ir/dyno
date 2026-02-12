@@ -71,7 +71,7 @@ class KnownBitsAnalysis : public CacheInvalidation<KnownBitsAnalysis> {
       retVal = std::move(stack.back().acc);
       assert(retVal.val.getNumBits() ==
              stack.back().value.as<WireRef>().getNumBits());
-      cache.insert(stack.back().value.as<WireRef>(), retVal);
+      cache.insert(stack.back().value.as<WireRef>(), retVal.val);
       stack.pop_back();
     }
   }
@@ -100,7 +100,7 @@ class KnownBitsAnalysis : public CacheInvalidation<KnownBitsAnalysis> {
   }
 
 public:
-  AnalysisCache<ObjRef<Wire>, KnownBitsVal> cache;
+  AnalysisCache<ObjRef<Wire>, BigInt> cache;
 
   BigInt getKnownBits(HWValue rootVal) {
     retVal.val = BigInt{};
@@ -156,7 +156,7 @@ public:
         } else {
           BigInt::notOp4S(retVal.val, retVal.val);
           assert(retVal.val.getNumBits() == wire.getNumBits());
-          cache.insert(wire, retVal);
+          cache.insert(wire, retVal.val);
           stack.pop_back();
         }
         break;
@@ -169,7 +169,7 @@ public:
         } else {
           BigInt::resizeOp4S(retVal.val, retVal.val, *wire.getNumBits());
           assert(retVal.val.getNumBits() == wire.getNumBits());
-          cache.insert(wire, retVal);
+          cache.insert(wire, retVal.val);
           stack.pop_back();
         }
         break;
@@ -187,7 +187,7 @@ public:
                               : PatBigInt::fromSign(retVal.val, delta);
           BigInt::concatOp4S(retVal.val, lhs, retVal.val);
           assert(retVal.val.getNumBits() == wire.getNumBits());
-          cache.insert(wire, retVal);
+          cache.insert(wire, retVal.val);
           stack.pop_back();
         }
         break;
@@ -219,7 +219,7 @@ public:
                                     len);
           }
           assert(retVal.val.getNumBits() == wire.getNumBits());
-          cache.insert(wire, retVal);
+          cache.insert(wire, retVal.val);
           stack.pop_back();
         }
         break;
@@ -251,7 +251,7 @@ public:
           }
 
           retVal = std::move(frame.acc);
-          cache.insert(wire, retVal);
+          cache.insert(wire, retVal.val);
           stack.pop_back();
         }
         break;
@@ -273,7 +273,7 @@ public:
           }
         } else {
           // retVal = retVal;
-          cache.insert(wire, retVal);
+          cache.insert(wire, retVal.val);
           stack.pop_back();
         }
         break;
@@ -283,7 +283,7 @@ public:
         if (frame.idx != 0) {
           if (frame.idx & 1) {
             // retVal = retVal;
-            cache.insert(wire, retVal);
+            cache.insert(wire, retVal.val);
             stack.pop_back();
             break;
           } else if (retVal.val.valueEquals(1)) {
@@ -297,7 +297,7 @@ public:
         if (frame.idx == instr.getNumOthers()) {
           retVal.val =
               PatBigInt::undef(*instr.def(0)->as<WireRef>().getNumBits());
-          cache.insert(wire, retVal);
+          cache.insert(wire, retVal.val);
           stack.pop_back();
           break;
         }
@@ -310,7 +310,7 @@ public:
 
       default:
         retVal = KnownBitsVal{PatBigInt::undef(*wire.getNumBits())};
-        cache.insert(wire, retVal);
+        cache.insert(wire, retVal.val);
         stack.pop_back();
         break;
       }
@@ -325,7 +325,7 @@ public:
                         ArrayRef<std::pair<ObjRef<Wire>, BigInt>> assignments) {
     cache.clearAll();
     for (auto [wire, val] : assignments)
-      cache.insert(wire, KnownBitsVal{val});
+      cache.insert(wire, val);
     auto rv = getKnownBits(val);
     cache.clearAll();
     return rv;
@@ -335,13 +335,17 @@ public:
 class DeriveBitsAnalysis {
   Context &ctx;
   SmallVec<std::pair<WireRef, BigInt *>, 64> stack;
+  struct Change {
+    BigInt bigInt;
+    ObjRef<Wire> wire;
+  };
 
 public:
-  DenseMap<ObjRef<Wire>, BigInt> map;
+  KnownBitsAnalysis &knownBits;
   // returns false if the assignment is contradictory
   bool propKnownValueUp(WireRef wire, BigInt &&value) {
-    auto &val = map.insert(wire, std::move(value)).val();
-    stack.emplace_back(wire, &val);
+    auto &ref = knownBits.cache.insertOrAssign(wire, std::move(value));
+    stack.emplace_back(wire, &ref);
 
     while (!stack.empty()) {
       auto [obj, bigInt] = stack.pop_back_val();
@@ -368,11 +372,10 @@ public:
             continue;
           }
           auto asWire = op->as<WireRef>();
-          auto &val =
-              map.findOrInsert(
-                     asWire,
-                     [&]() { return PatBigInt::undef(*asWire.getNumBits()); })
-                  .second.val();
+          auto &val = knownBits.cache.findOrInsert(
+              asWire, PatBigInt::undef(*asWire.getNumBits()));
+
+          auto oldV = val;
 
           // check for contradiction
           BigInt zeroBits;
@@ -387,7 +390,13 @@ public:
             val |= oneBits;
           else
             val &= ~oneBits;
-          stack.emplace_back(asWire, &val);
+
+          assert(val.getNumBits() == wire.getNumBits());
+
+          if (val != oldV) {
+            stack.emplace_back(asWire, &val);
+            // todo: recompute uses, but without pessimizing other results...
+          }
         }
         break;
       }
@@ -398,11 +407,8 @@ public:
           if (!BigInt::icmpOp4S(asConst, rev, BigInt::ICMP_CXEQ))
             return false;
         } else if (auto asWire = instr.other(0)->dyn_as<WireRef>()) {
-          auto &val =
-              map.findOrInsert(
-                     asWire,
-                     [&]() { return PatBigInt::undef(*asWire.getNumBits()); })
-                  .second.val();
+          auto &val = knownBits.cache.findOrInsert(
+              asWire, PatBigInt::undef(*asWire.getNumBits()));
 
           static constexpr auto lambda = [](uint32_t lhs, uint32_t rhs) {
             auto undef = rhs & BigInt::REP10;
@@ -427,9 +433,11 @@ public:
               newV, val, *bigInt);
           if (!BigInt::icmpOp4S(newV, val, BigInt::ICMP_CXEQ))
             return false;
-          val = std::move(newV);
 
-          stack.emplace_back(asWire, &val);
+          if (val != newV) {
+            val = std::move(newV);
+            stack.emplace_back(asWire, &val);
+          }
         } else
           dyno_unreachable("invalid operand type");
         break;
@@ -441,7 +449,8 @@ public:
   }
 
 public:
-  explicit DeriveBitsAnalysis(Context &ctx) : ctx(ctx) {}
+  explicit DeriveBitsAnalysis(Context &ctx, KnownBitsAnalysis &knownBits)
+      : ctx(ctx), knownBits(knownBits) {}
 };
 
 }; // namespace dyno

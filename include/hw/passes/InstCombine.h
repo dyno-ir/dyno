@@ -51,6 +51,7 @@ class InstCombinePass : public Pass<InstCombinePass> {
   KnownBitsAnalysis knownBits;
   DemandedBitsAnalysis demandedBits;
   BitAliasAnalysis bitAlias;
+  DeriveBitsAnalysis deriveBits;
 
 public:
   using TaggedIRef = CustomInstrRef<InstrRef, uint64_t>;
@@ -64,7 +65,8 @@ public:
 #define CONFIG_STRUCT_LAMBDA(FIELD, ENUM)                                      \
   FIELD(bool, fuseCommutative, true)                                           \
   FIELD(bool, liftMUX, false)                                                  \
-  FIELD(bool, simplifyDeMorgan, true)
+  FIELD(bool, simplifyDeMorgan, true)                                          \
+  FIELD(bool, boolExprSimplify, true)
   CONFIG_STRUCT(CONFIG_STRUCT_LAMBDA)
 #undef CONFIG_STRUCT_LAMBDA
   Config config;
@@ -104,6 +106,98 @@ private:
         bitAlias.recomputeAt(def->as<HWValue>());
       }
     }
+  }
+
+  // Optimize and/or operands under assumption all other operands are 1/0
+  // respectively.
+  bool boolExprSimplify(InstrRef instr) {
+    if (!config.boolExprSimplify)
+      return false;
+    // for (auto [k, v] : knownBits.cache.raw()) {
+    //   std::print(std::cout, "-w{}: {}\n", k.getObjID().num, v.toString());
+    // }
+    HWInstrBuilder build{ctx, instr};
+    assert(instr.isOpc(OP_AND, OP_OR) &&
+           instr.def(0)->as<WireRef>().getNumBits() == 1);
+
+    if (instr.getNumOperands() > 16)
+      return false;
+
+    auto trueV = instr.isOpc(OP_AND) ? true : false;
+
+    SmallVec<std::pair<ObjRef<Wire>, BigInt>, 2> changelog;
+    // hook into known bits cache to undo speculative changes
+    auto hook = [&](decltype(knownBits.cache) &cache, ObjRef<Wire> ref) {
+      auto it = cache.raw().find(ref);
+      changelog.emplace_back(
+          ref, it != cache.raw().end()
+                   ? it.val()
+                   : PatBigInt::undef(*ctx.resolve(ref).getNumBits()));
+    };
+    auto rollback = [&]() {
+      for (auto change : Range{changelog}.reverse()) {
+        if (change.second.allBitsUndef()) {
+          auto it = knownBits.cache.raw().find(change.first);
+          if (it)
+            knownBits.cache.raw().erase(it);
+        } else
+          knownBits.cache.raw().find(change.first).val() =
+              std::move(change.second);
+      }
+      changelog.clear();
+      // for (auto [k, v] : knownBits.cache.raw()) {
+      //   std::print(std::cout, "-w{}: {}\n", k.getObjID().num, v.toString());
+      // }
+    };
+
+    knownBits.cache.hooks.emplace_back(
+        CallableRef<void(decltype(knownBits.cache) &, ObjRef<Wire>)>{hook});
+
+    for (auto op : instr.others()) {
+      // set all other operands to 1 or 0 (rollback could be optimized a bit w/
+      // prefixes)
+      bool contradiction = false;
+      for (auto other : instr.others()) {
+        if (other.getNum() == op.getNum())
+          continue;
+        contradiction |= !deriveBits.propKnownValueUp(
+            other->as<WireRef>(), ConstantRef::fromBool(trueV));
+        if (contradiction)
+          break;
+        // for (auto [k, _] : changelog) {
+        //   std::print(std::cout, "w{}: {}\n", k.getObjID().num,
+        //              knownBits.cache.raw()[k].toString());
+        // }
+      }
+
+      auto known = knownBits.getKnownBits(op->as<HWValue>());
+      // contradiction setting all other operands, or operand is known and short
+      // circuits -> whole instr is known
+      if (contradiction || known.valueEquals(!trueV)) {
+        replaceUses(instr.def(0)->as<WireRef>(), ConstantRef::fromBool(!trueV));
+        deleteMatchedInstr(instr);
+        rollback();
+        knownBits.cache.hooks.pop_back();
+        return true;
+      } //  operand is known but not short circuit -> delete
+      else if (known.valueEquals(trueV)) {
+        auto newV = build.buildCommutative(
+            instr.getDialectOpcode(),
+            instr.others()
+                .filter([&](auto x) { return x.getNum() != op.getNum(); })
+                .deref()
+                .as<HWValue>());
+        replaceUses(instr.def(0)->as<WireRef>(), newV);
+        deleteMatchedInstr(instr);
+        rollback();
+        knownBits.cache.hooks.pop_back();
+        return true;
+      }
+
+      rollback();
+    }
+    knownBits.cache.hooks.pop_back();
+    return false;
   }
 
   bool mergeOneHotMux(InstrRef root) {
@@ -1429,9 +1523,14 @@ private:
         return true;
     }
 
-    if (instr.isOpc(OP_AND, OP_OR))
+    if (instr.isOpc(OP_AND, OP_OR)) {
       if (simplifyDeMorgan(instr))
         return true;
+
+      if (instr.def(0)->as<WireRef>().getNumBits() == 1)
+        if (boolExprSimplify(instr))
+          return true;
+    }
 
     if (instr.isOpc(OP_ICMP_EQ, OP_ICMP_NE, /*OP_ICMP_CEQ, OP_ICMP_CNE,
                     OP_ICMP_WEQ, OP_ICMP_WNE, OP_ICMP_CZEQ, OP_ICMP_CZNE,
@@ -1663,7 +1762,7 @@ public:
 public:
   explicit InstCombinePass(Context &ctx)
       : ctx(ctx), cbuild(ConstantBuilder{ctx.getStore<Constant>()}),
-        bitAlias(ctx) {}
+        bitAlias(ctx), deriveBits(ctx, knownBits) {}
   static InstCombinePass make(Context &ctx) { return InstCombinePass{ctx}; }
 };
 
