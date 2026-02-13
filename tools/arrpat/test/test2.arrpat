@@ -132,7 +132,7 @@ replace {
 // 3 patterns cover all 2-operand cases and some with more.
 match {
   OP_OR $t, $a, $b
-  OP_AND $out, $t, $a, $other...
+  OP_AND $out, $t:HW_WIRE, $a, $other...
 }
 replace {
   OP_AND $out, $a, $other...
@@ -140,7 +140,7 @@ replace {
 
 match {
   OP_OR $t, $b, $a
-  OP_AND $out, $t, $a, $other...
+  OP_AND $out, $t:HW_WIRE, $a, $other...
 }
 replace {
   OP_AND $out, $a, $other...
@@ -148,7 +148,7 @@ replace {
 
 match {
   OP_OR $t, anyorder($a, $b...)
-  OP_AND $out, $a, anyorder($t, $other...)
+  OP_AND $out, $a, anyorder($t:HW_WIRE, $other...)
 }
 replace {
   OP_AND $out, $a, $other...

@@ -193,7 +193,7 @@ private:
       abstr.idx = candidates.size() - 1;
       abstr.ref = instr;
       for (auto [opIdx, op] : instr.others().enumerate()) {
-        auto w = op->as<WireRef>();
+        auto w = op->dyn_as<WireRef>();
         if (!w)
           continue;
         convertToAbstractOperand(w, opIdx, abstr);

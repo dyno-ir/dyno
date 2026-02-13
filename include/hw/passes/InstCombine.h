@@ -219,6 +219,8 @@ private:
         sumLeading += newLeading;
         auto fullBits = (instr.getNumOthers() * originalBits);
         minLeading = originalBits - (fullBits - sumLeading);
+        if (originalBits < (fullBits - sumLeading))
+          minLeading = 0;
         break;
       }
       case *OP_AND:
