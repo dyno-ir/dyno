@@ -47,6 +47,7 @@ public:
 #define CONFIG_STRUCT_LAMBDA(FIELD, ENUM)                                      \
   FIELD(uint32_t, minSharedBitsForMerge, 4)                                    \
   FIELD(uint32_t, maxSharedBitsForMerge, 0xFFFFFFFF)                           \
+  FIELD(uint32_t, minSharedConstantBits, 6)                                    \
   FIELD(DialectOpcode, opToShare, OP_ADD)
   CONFIG_STRUCT(CONFIG_STRUCT_LAMBDA)
 #undef CONFIG_STRUCT_LAMBDA
@@ -121,13 +122,20 @@ private:
     if (matchingBits == 0)
       return 0;
 
+    // if the shared range makes for constant/identity, don't share
+    BigInt::rangeSelectOp4S(diff, lhsLast, 0, matchingBits);
+    if (diff.valueEqualsS(0))
+      return 0;
+    if (config.opToShare.is(OP_AND, OP_OR) && diff.valueEqualsS(-1))
+      return 0;
+
     return matchingBits;
   }
 
   auto rebuildInstr(AbstractInstr &instr,
                     ArrayRef<RegisterValue> matchingPrefixes,
                     const DynSymbSet<SmallVec<uint64_t, 1>, 1> &covered,
-                    IsRange auto matchedIdxs, WireRef sharedSum) {
+                    IsRange auto matchedIdxs, HWValue sharedSum) {
     // Rebuild the two instructions, with (1) adding the shared sum as an
     // additional operand and (2) replacing all matched operand fragments with
     // neutral element.
@@ -207,6 +215,7 @@ private:
   bool tryCombineInstrs(AbstractInstr &lhsAbstr, AbstractInstr &rhsAbstr) {
     assert(&lhsAbstr != &rhsAbstr);
     assert(lhsAbstr.ref != rhsAbstr.ref);
+    auto opc = lhsAbstr.ref.getDialectOpcode();
 
     // we call this based on heuristic match of one operand.
     SmallVec<std::pair<uint16_t, uint16_t>, 4> intersectOps;
@@ -215,7 +224,8 @@ private:
     auto matchingConstBits = intersectConstants(lhsAbstr.ref, rhsAbstr.ref);
 
     assert(intersectOps.size() != 0 && "heuristic not working?");
-    if ((intersectOps.size() + !!matchingConstBits) < 2)
+    if ((intersectOps.size() +
+         (matchingConstBits >= config.minSharedConstantBits)) < 2)
       return false;
 
     DynSymbSet<SmallVec<uint64_t, 1>, 1> lhsCovered, rhsCovered;
@@ -277,17 +287,19 @@ private:
 
     assert(matchingPrefixes.size() == intersectOps.size());
 
-    if (matchingConstBits != 0) {
+    if (matchingConstBits >= config.minSharedConstantBits) {
       // constants are always last in operands
       auto lhsLastOpIdx = lhsAbstr.ref.getNumOthers() - 1;
       auto rhsLastOpIdx = rhsAbstr.ref.getNumOthers() - 1;
       lhsCovered[lhsLastOpIdx] = 1;
       rhsCovered[rhsLastOpIdx] = 1;
-      intersectOps.emplace_back(lhsLastOpIdx, rhsLastOpIdx);
       auto constVal = lhsAbstr.ref.other(lhsLastOpIdx)->as<ConstantRef>();
       ConstantRef truncVal =
           ConstantBuilder{ctx.getStore<Constant>()}.val(constVal).resize(
               matchingConstBits);
+      assert(!truncVal.valueEquals(0));
+      assert(!config.opToShare.is(OP_AND, OP_OR) || !truncVal.valueEqualsS(-1));
+      intersectOps.emplace_back(lhsLastOpIdx, rhsLastOpIdx);
       matchingPrefixes.emplace_back(
           RegisterValue{truncVal, truncVal.getNumBits(), 0, 0, nullopt});
       maxPrefixSize = std::max(maxPrefixSize, matchingConstBits);
@@ -314,22 +326,28 @@ private:
         HWInstrRef{lhsAbstr.ref}.parentBlock(ctx),
         HWInstrRef{rhsAbstr.ref}.parentBlock(ctx));
     build.setInsertPoint(parentBlock.begin());
-    auto ib = build.buildInstrRaw(lhsAbstr.ref.getDialectOpcode(),
-                                  1 + matchingPrefixes.size());
-    auto defW = ctx.getStore<Wire>().create(sharedInstSize);
-    ib.addRef(defW).other();
 
-    build.setInsertPoint(ib.instr());
-
-    assert(Range{candidates}.find_if([&](AbstractInstr &abstr) {
-      return abstr.ref == ib.instr();
-    }) == candidates.end());
+    SmallVec<HWValue, 8> sharedOperands;
     AbstractInstr newInstrAbstr;
-    newInstrAbstr.ref = ib.instr();
     newInstrAbstr.idx = candidates.size();
     for (auto [idx, prefix] : Range{matchingPrefixes}.enumerate()) {
       auto val = prefix.get(build, false);
-      ib.addRef(build.buildZExt(sharedInstSize, val));
+      sharedOperands.emplace_back(build.buildZExt(sharedInstSize, val));
+    }
+    auto defW = build.buildCommutative(opc, sharedOperands).as<WireRef>();
+    newInstrAbstr.ref = defW.getDefI();
+
+    if (!newInstrAbstr.ref.isOpc(opc) ||
+        // todo: more efficient
+        Range{candidates}.find_if([&](auto &cand) {
+          return cand.ref == newInstrAbstr.ref;
+        }) != candidates.end()) {
+      DYNO_DBG(passName, { dbgs() << "builder folded, bailing\n"; })
+      // we may have created a couple of zexts, leave these for DCE to clean up
+      return false;
+    }
+
+    for (auto [idx, prefix] : Range{matchingPrefixes}.enumerate()) {
       auto ref = prefix.frags.front().ref;
       if (ref.is<ObjRef<Wire>>()) {
         auto it = operands.find(ref);
@@ -338,6 +356,7 @@ private:
         uses.emplace_back(newInstrAbstr.idx);
       }
     }
+
     // do we need to re-sort?
     Range{newInstrAbstr.operands}.sort(
         [](auto lhs, auto rhs) { return lhs.second < rhs.second; });
@@ -362,7 +381,7 @@ private:
       dbgs() << "replaced with:\n";
       HWPrinter print{dbgs()};
       dbgs() << "shared: ";
-      print.printInstr(ib.instr(), ctx);
+      print.printInstr(newInstrAbstr.ref, ctx);
       dbgs() << "new lhs: ";
       if (auto w = newLHS.as<WireRef>())
         print.printInstr(w.getDefI(), ctx);
@@ -471,7 +490,8 @@ private:
           assert(other.ref);
 
           auto score = numIntersect(candidate.operands, other.operands) +
-                       intersectConstants(candidate.ref, other.ref);
+                       (intersectConstants(candidate.ref, other.ref) >
+                        config.minSharedConstantBits);
           if (score > 1)
             subCandidates.emplace_back(otherUseIdx, score);
         }
