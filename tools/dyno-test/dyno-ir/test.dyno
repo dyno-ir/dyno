@@ -273,3 +273,155 @@ TEST_CASE :string("bool-simplify2"), :block, :block, :block {
   meta.INST_COMBINE_PASS
 }
 
+TEST_CASE :string("bool-simplify3"), :block, :block, :block {
+  MODULE_DEF :module("mod"), :block {
+    INPUT_REGISTER_DEF %in_a:register(32)
+    INPUT_REGISTER_DEF %in_b:register(1)
+    OUTPUT_REGISTER_DEF %out_a:register(1)
+
+    COMB_PROCESS_DEF :process, :block {
+      LOAD %a_v:wire(32), %in_a
+      LOAD %b_v:wire(1), %in_b
+
+      ICMP_EQ %x:wire(1), %a_v, #32'd42
+      ICMP_EQ %z:wire(1), %a_v, #32'd1337
+
+      OR %yz:wire(1), %b_v, %z
+      NOT %nyz:wire(1), %yz
+      AND %o:wire(1), %x, %nyz
+      STORE %o, %out_a
+    }
+  }
+}{
+  hw.MODULE_DEF %mod:module("mod"), %0:core.block {
+    hw.INPUT_REGISTER_DEF %r0:register(32)
+    hw.INPUT_REGISTER_DEF %r1:register(1)
+    hw.OUTPUT_REGISTER_DEF %r2:register(1)
+    hw.COMB_PROCESS_DEF %1:process, %2:core.block {
+      hw.LOAD %w0:wire(32), %r0
+      hw.LOAD %w1:wire(1), %r1
+      op.ICMP_EQ %w2:wire(1), %w0, #32'd42
+      op.NOT %w5:wire(1), %w1
+      op.AND %w6:wire(1), %w2, %w5
+      hw.STORE %w6, %r2
+    }
+  }
+}{
+  meta.INST_COMBINE_PASS
+}
+
+TEST_CASE :string("instcombine-onehot-mux-assume"), :block, :block, :block {
+  MODULE_DEF :module("mod"), :block {
+    INPUT_REGISTER_DEF %in_a:register(32)
+    INPUT_REGISTER_DEF %in_b:register(32)
+    INPUT_REGISTER_DEF %in_c:register(32)
+
+    INPUT_REGISTER_DEF %sel_a:register(1)
+    INPUT_REGISTER_DEF %sel_b:register(1)
+    INPUT_REGISTER_DEF %sel_c:register(1)
+    INPUT_REGISTER_DEF %sel_d:register(1)
+
+    OUTPUT_REGISTER_DEF %out_a:register(32)
+
+    COMB_PROCESS_DEF :process, :block {
+      LOAD %a_v:wire(32), %in_a
+      LOAD %b_v:wire(32), %in_b
+      LOAD %c_v:wire(32), %in_c
+      LOAD %sa_v:wire(1), %sel_a
+      LOAD %sb_v:wire(1), %sel_b
+      LOAD %sc_v:wire(1), %sel_c
+      LOAD %sd_v:wire(1), %sel_d
+
+      NOT %n_sc_v:wire(1), %sc_v
+      AND %prio:wire(1), %sa_v, %n_sc_v
+
+      ONEHOT_MUX %val:wire(32), %prio, %a_v, %sb_v, %b_v, %sc_v, #32'hxxxxxxxx, %sd_v, %c_v
+      STORE %val, %out_a
+    }
+  }
+}{
+  hw.MODULE_DEF %mod:module("mod"), %0:core.block {
+    hw.INPUT_REGISTER_DEF %r0:register(32)
+    hw.INPUT_REGISTER_DEF %r1:register(32)
+    hw.INPUT_REGISTER_DEF %r2:register(32)
+    hw.INPUT_REGISTER_DEF %r3:register(1)
+    hw.INPUT_REGISTER_DEF %r4:register(1)
+    hw.INPUT_REGISTER_DEF %r5:register(1)
+    hw.INPUT_REGISTER_DEF %r6:register(1)
+    hw.OUTPUT_REGISTER_DEF %r7:register(32)
+    hw.COMB_PROCESS_DEF %1:process, %2:core.block {
+      hw.LOAD %w0:wire(32), %r0
+      hw.LOAD %w1:wire(32), %r1
+      hw.LOAD %w2:wire(32), %r2
+      hw.LOAD %w3:wire(1), %r3
+      hw.LOAD %w4:wire(1), %r4
+      hw.LOAD %w5:wire(1), %r5
+      hw.LOAD %w6:wire(1), %r6
+      op.NOT %w10:wire(1), %w5
+      hw.ASSUME %w11:wire(1), %w3, %w10
+      hw.ASSUME %w12:wire(1), %w4, %w10
+      hw.ASSUME %w13:wire(1), %w6, %w10
+      hw.ONEHOT_MUX %w14:wire(32), %w11, %w0, %w12, %w1, %w13, %w2
+      hw.STORE %w14, %r7
+    }
+  }
+}{
+  meta.INST_COMBINE_PASS
+}
+
+
+TEST_CASE :string("flip-flop-inference-rst-clk-en"), :block, :block, :block {
+  MODULE_DEF :module("mod"), :block {
+    INPUT_REGISTER_DEF %clk:register(1)
+    INPUT_REGISTER_DEF %rst:register(1)
+    INPUT_REGISTER_DEF %in_a:register(32)
+    INPUT_REGISTER_DEF %in_en:register(1)
+    OUTPUT_REGISTER_DEF %out_a:register(32)
+
+    TRIGGER_DEF %trig:trigger(pos, pos), %clk, %rst
+
+    COMB_PROCESS_DEF :process, :block {
+      LOAD %a_v:wire(32), %in_a
+      LOAD %en_v:wire(1), %in_en
+      LOAD %rst_v:wire(1), %rst
+      LOAD %old_a_v:wire(32), %out_a
+
+      NOT %not_en:wire(1), %en_v
+      NOT %not_rst:wire(1), %rst_v
+
+      AND %en_gated:wire(1), %en_v, %not_rst
+      AND %not_en_gated:wire(1), %not_en, %not_rst
+
+      ONEHOT_MUX %d:wire(32), %en_gated, %a_v, %not_en_gated, %old_a_v, %rst_v, #32'h0
+      STORE_DEFER %d, %out_a, %trig
+    }
+  }
+}{
+  hw.MODULE_DEF %mod:module("mod"), %0:core.block {
+    hw.INPUT_REGISTER_DEF %clk:register(1)
+    hw.INPUT_REGISTER_DEF %rst:register(1)
+    hw.INPUT_REGISTER_DEF %in_a:register(32)
+    hw.INPUT_REGISTER_DEF %in_en:register(1)
+    hw.OUTPUT_REGISTER_DEF %out_a:register(32)
+    hw.REGISTER_DEF %r5:register(1)
+    hw.REGISTER_DEF %r6:register(32)
+    hw.FLIP_FLOP %clk, #1'd1, %r6, %out_a, %r5, #1'd0, %rst, #1'd1, #32'd0
+    hw.TRIGGER_DEF %1:trigger(pos, pos), %clk, %rst
+    hw.COMB_PROCESS_DEF %2:process, %3:core.block {
+      hw.LOAD %w0:wire(32), %in_a
+      hw.LOAD %w1:wire(1), %in_en
+      hw.LOAD %w2:wire(1), %rst
+      op.NOT %w4:wire(1), %w1
+      op.NOT %w5:wire(1), %w2
+      hw.ASSUME %w11:wire(1), %w4, %w5
+      hw.STORE %w11, %r5
+      op.AND %w17:wire(1), %w1, %w5
+      hw.ASSUME %w14:wire(32), %w0, %w17
+      hw.STORE %w14, %r6
+    }
+  }
+}{
+  meta.FLIP_FLOP_INFERENCE_PASS
+  meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS
+  meta.INST_COMBINE_PASS
+}

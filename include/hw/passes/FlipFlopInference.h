@@ -121,6 +121,23 @@ class FlipFlopInferencePass : public Pass<FlipFlopInferencePass> {
     }
     return nullopt;
   }
+  HWValue findClockEnable2(RegisterIRef q, StoreIRef store) {
+    if (isQLoad(q, store.value().as<HWValue>()))
+      return ConstantRef::fromU32(1);
+    if (store.value().is<ConstantRef>())
+      return nullref;
+    auto wire = store.value().as<WireRef>();
+    if (wire.getNumUses() != 1)
+      return nullref;
+
+    if (auto asMux = wire.getDefI().dyn_as_opc(HW_ONEHOT_MUX)) {
+      for (auto [sel, val] : asMux.others().deref().as<HWValue>().pairwise()) {
+        if (isQLoad(q, val))
+          return sel;
+      }
+    }
+    return nullref;
+  }
 
   std::optional<MuxTree> getMuxTree(StoreIRef store) {
     std::optional<MuxTree> muxTree = std::nullopt;
@@ -181,34 +198,16 @@ class FlipFlopInferencePass : public Pass<FlipFlopInferencePass> {
               trigger->getMode(i) == SensMode::POSEDGE};
     };
 
-    auto muxTree = getMuxTree(storeI);
-    if (!muxTree) {
-      DYNO_DBG("FlipFlopInference", {
-        dbgs() << "could not get mux tree, skipping enable inference for: ";
-        dumpInstr(reg, ctx);
-        dbgs() << "store value:\n";
-        dumpInstr(storeI, ctx);
-      })
-    }
-    auto *muxTreePtr = muxTree ? &*muxTree : nullptr;
+    HWValue clkEnVal = findClockEnable2(storeI.reg().iref(), storeI);
+    RegisterRef clkEnReg;
+    if (clkEnVal)
+      clkEnReg = build.buildRegister(1);
 
-    HWValue undef = cbuild.undef(*dValue.getNumBits()).get();
-
-    RegisterRef clkEn = nullref;
-    if (auto clkEnIdx =
-            findClockEnable(storeI.reg().iref(), storeI, muxTreePtr)) {
-      clkEn = build.buildRegister(1);
-      build.pushInsertPoint(storeI);
-      auto val = MuxTreeOptimizationPass::getExprVal(
-          build, muxTreePtr, muxTreePtr->entries[*clkEnIdx].expr);
-      build.buildStore(clkEn, val);
-      dValue = build.buildMux(val, undef, dValue);
-      build.popInsertPoint();
-    }
+    build.pushInsertPoint(storeI);
+    HWValue rstInactive;
 
     if (hasReset) {
       SmallVec<std::pair<RegisterRef, bool>, 2> resetCandidates;
-
       if (hasIFF) {
         resetCandidates = {get(2)};
       } else {
@@ -221,25 +220,37 @@ class FlipFlopInferencePass : public Pass<FlipFlopInferencePass> {
       rstReg = resetCandidates[resetIndex];
       clkReg = hasIFF ? resetCandidates[0] : (resetCandidates[1 - resetIndex]);
 
-      build.pushInsertPoint(storeI);
-      dValue = build.buildMux(build.buildLoad(rstReg.first),
-                              rstReg.second ? undef : dValue,
-                              !rstReg.second ? undef : dValue);
-      build.popInsertPoint();
+      rstInactive = build.buildLoad(rstReg.first);
+      if (rstReg.second)
+        rstInactive = build.buildNot(rstInactive);
+    }
+
+    if (clkEnVal) {
+      if (hasReset)
+        build.buildStore(clkEnReg, build.buildAssume(clkEnVal, rstInactive));
+      else
+        build.buildStore(clkEnReg, clkEnVal);
+
+      dValue = build.buildAssume(dValue, build.buildNot(clkEnVal));
+    }
+
+    if (hasReset) {
+      dValue = build.buildAssume(dValue, rstInactive);
     } else
       clkReg = get(0);
 
+    build.popInsertPoint();
     auto dReg = build.buildRegister(reg.getNumBits());
 
-    // ignore clk en for now.
-    auto ib = build.buildInstrRaw(HW_FLIP_FLOP, 4 + !!clkEn * 2 + hasReset * 3);
+    auto ib =
+        build.buildInstrRaw(HW_FLIP_FLOP, 4 + !!clkEnVal * 2 + hasReset * 3);
     ib.other()
         .addRef(clkReg.first)
         .addRef(ConstantRef::fromBool(clkReg.second))
         .addRef(dReg)
         .addRef(reg.oref());
-    if (clkEn)
-      ib.addRef(clkEn).addRef(ConstantRef::fromBool(0));
+    if (clkEnVal)
+      ib.addRef(clkEnReg).addRef(ConstantRef::fromBool(0));
     if (hasReset)
       ib.addRef(rstReg.first)
           .addRef(ConstantRef::fromBool(rstReg.second))

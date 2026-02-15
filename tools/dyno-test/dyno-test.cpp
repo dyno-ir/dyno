@@ -1,5 +1,6 @@
 #include "aig/AIGContext.h"
 #include "aig/PrintParse.h"
+#include "dyno/BlockUpdate.h"
 #include "dyno/Context.h"
 #include "dyno/DialectInfo.h"
 #include "dyno/IDImpl.h"
@@ -8,6 +9,8 @@
 #include "dyno/Lexer.h"
 #include "dyno/Obj.h"
 #include "dyno/Parser.h"
+#include "hw/HWContext.h"
+#include "hw/HWPrinter.h"
 #include "hw/PrintParse.h"
 #include "hw/passes/HWDialectPasses.h"
 #include "meta/MetaContext.h"
@@ -83,7 +86,10 @@ class DynoTestPrinter
                                    AIGDialectPrinter, TestDialectPrinter> {
 public:
   DynoTestPrinter(Context &ctx, std::ostream &os)
-      : ContextPrinterWrapper(ctx, os) {}
+      : ContextPrinterWrapper(ctx, os) {
+    std::get<HWDialectPrinter>(this->printers).regNames =
+        &ctx.getCtx<HWDialectContext>().regNameInfo;
+  }
 };
 
 class BlockCompare {

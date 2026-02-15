@@ -219,6 +219,15 @@ public:
       operands = MutArrayRef{operands.data(), index};                          \
       operands.back() = cbuild.get();                                          \
     }                                                                          \
+    if (auto asConst = operands.back().dyn_as<ConstantRef>()) {                \
+      if constexpr (opcode == OP_AND) {                                        \
+        if (asConst.valueEqualsS(-1))                                          \
+          operands = operands.drop_back();                                     \
+      } else {                                                                 \
+        if (asConst.valueEquals(0))                                            \
+          operands = operands.drop_back();                                     \
+      }                                                                        \
+    }                                                                          \
                                                                                \
     if (operands.size() == 1)                                                  \
       return operands[0];                                                      \
@@ -1300,6 +1309,11 @@ public:
     if (deferTrigger)
       return buildInstr(HW_ASSERT_DEFER, false, value, deferTrigger.oref());
     return buildInstr(OP_ASSERT, false, value);
+  }
+  auto buildAssume(HWValue x, HWValue under) {
+    auto w = buildInstr(HW_ASSUME, true, x, under).def()->as<WireRef>();
+    w->numBits = x.getNumBits();
+    return w;
   }
 
   auto buildFuncParam(Optional<uint32_t> numBits = nullopt) {

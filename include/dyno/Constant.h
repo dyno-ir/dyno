@@ -2026,32 +2026,49 @@ public:
 
   void shrinkLenToCLog2() {
     auto truncBits = getNumBits() - BigIntBase::leadingZeros4SExact(*this);
-    BigIntBase::resizeOp(*this, *this, truncBits);
+    BigIntBase::resizeOp4S(*this, *this, truncBits);
   }
 
   // String Ops
   constexpr static std::optional<BigIntBase>
   parseHex(ArrayRef<const char> digits) {
     auto separators = std::count(digits.begin(), digits.end(), '_');
-    BigIntBase out = BigIntBase::ofLen((digits.size() - separators) * 4);
+    bool fourState = Range{digits}.any(
+        [](char c) { return c == 'x' || c == 'X' || c == 'z' || c == 'Z'; });
+    BigIntBase out = BigIntBase::ofLen((digits.size() - separators) * 4 *
+                                       (fourState ? 2 : 1));
 
     size_t i = digits.size() - separators - 1;
     for (const char digit : digits) {
       if (digit == '_')
         continue;
       unsigned val;
-      if (digit >= '0' && digit <= '9')
+      if (digit >= '0' && digit <= '9') {
         val = digit - '0';
-      else if (digit >= 'a' && digit <= 'f')
+        if (fourState)
+          val = unpack_bits(val);
+      } else if (digit >= 'a' && digit <= 'f') {
         val = digit - 'a' + 10;
-      else if (digit >= 'A' && digit <= 'F')
+        if (fourState)
+          val = unpack_bits(val);
+      } else if (digit >= 'A' && digit <= 'F') {
         val = digit - 'A' + 10;
-      else
-        return std::nullopt;
+        if (fourState)
+          val = unpack_bits(val);
+      } else if (digit == 'x' || digit == 'X') {
+        val = (uint8_t)EXTX_MASK;
+      } else if (digit == 'z' || digit == 'Z') {
+        val = (uint8_t)EXTZ_MASK;
+      }
 
-      out.words[i / 8] |= (val << (i % 8) * 4);
+      if (fourState) {
+        out.words[i / 4] |= (val << (i % 4) * 8);
+      } else
+        out.words[i / 8] |= (val << (i % 8) * 4);
+
       i--;
     }
+    out.setCustom(fourState);
     out.normalize();
     return out;
   }
@@ -2505,7 +2522,7 @@ public:
       auto *digitsEnd = ptr;
       while (digitsEnd != end) {
         if (unkdigit(*digitsEnd)) {
-          if (base == 2) {
+          if (base == 2 || base == 16) {
             ++digitsEnd;
             continue;
           }
@@ -3140,6 +3157,10 @@ public:
 
   template <BigIntAPI U> ConstantBuilderBase &val(const U &val) {
     cur = val;
+    return *this;
+  }
+  ConstantBuilderBase &val(BigInt &&val) {
+    cur = std::move(val);
     return *this;
   }
   ConstantBuilderBase &undef(unsigned bits) {

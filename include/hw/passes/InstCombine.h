@@ -107,6 +107,50 @@ private:
       }
     }
   }
+  void replaceUse(OperandRef ref, HWValue newVal) {
+    assert(newVal.getNumBits() == ref->as<WireRef>().getNumBits());
+    knownBits.replaceAt(ref->as<WireRef>(), newVal);
+    bitAlias.replaceAt(ref->as<WireRef>(), newVal);
+
+    ref.replace(newVal);
+    currentReplaced.emplace_back(ref);
+
+    auto instr = currentReplaced.back().instr();
+    for (auto def : instr.defs()) {
+      if (!def->is<HWValue>())
+        continue;
+      knownBits.recomputeAt(def->as<HWValue>());
+      bitAlias.recomputeAt(def->as<HWValue>());
+    }
+  }
+
+  bool boolExprSimplifySub(OperandRef root) {
+    SmallVec<OperandRef, 16> stack{root};
+    bool change = false;
+    while (!stack.empty()) {
+      auto ref = stack.pop_back_val();
+      auto wire = ref->as<WireRef>();
+
+      auto known = deriveBits.knownBits.get(wire);
+      assert(known.getNumBits() == wire.getNumBits());
+      if (!known.getIs4S()) {
+        replaceUse(ref, ConstantBuilder{ctx.getStore<Constant>()}
+                            .val(std::move(known))
+                            .get());
+        change = true;
+      }
+
+      if (wire.getNumUses() != 1)
+        continue;
+
+      auto instr = wire.getDefI();
+      for (auto op : instr.others()) {
+        if (op->is<WireRef>())
+          stack.emplace_back(op);
+      }
+    }
+    return change;
+  }
 
   // Optimize and/or operands under assumption all other operands are 1/0
   // respectively.
@@ -122,6 +166,8 @@ private:
       return false;
 
     auto trueV = instr.isOpc(OP_AND) ? true : false;
+
+    bool change = false;
 
     for (auto op : instr.others()) {
       bool contradiction = false;
@@ -154,11 +200,61 @@ private:
         deleteMatchedInstr(instr);
         deriveBits.clearCache();
         return true;
+      } else {
+        change |= boolExprSimplifySub(op);
       }
 
       deriveBits.clearCache();
     }
+    return change;
+  }
+
+  bool simplifyAssume(InstrRef instr) {
+    if (!instr.other(0)->is<WireRef>() || !instr.other(1)->is<WireRef>())
+      return false;
+    auto given = instr.other(1)->as<WireRef>();
+    assert(given.getNumBits() == 1);
+    auto contradict =
+        !deriveBits.propKnownValueUp(given, BigInt::fromU64(1, 1));
+    assert(!contradict && "contradicting assume");
+
+    auto rv = boolExprSimplifySub(instr.other(0));
+    deriveBits.clearCache();
+    return rv;
+  }
+
+  bool optimizeOneHotMuxUndef(InstrRef instr) {
+    uint32_t idx;
+    for (auto [sel, val] : Range{instr.others()}.pairwise()) {
+      if (auto asConst = val->dyn_as<ConstantRef>()) {
+        if (asConst.allBitsUndef()) {
+          idx = sel.getNum();
+          goto found;
+        }
+      }
+    }
     return false;
+  found:;
+
+    HWInstrBuilder build{ctx, instr};
+    auto val = build.buildNot(instr.operand(idx)->as<HWValue>());
+
+    auto range =
+        instr.others()
+            .pairwise()
+            .filter([&](auto pair) { return pair.first.getNum() != idx; })
+            .transform([&](size_t, auto pair) {
+              auto newCond =
+                  build.buildAssume(pair.first->template as<HWValue>(), val);
+              return std::make_pair(newCond,
+                                    pair.second->template as<HWValue>());
+            });
+    SmallVec<std::pair<HWValue, HWValue>, 32> cases;
+    cases.reserve(instr.getNumOthers() / 2 - 1);
+    cases.push_back_range(range);
+    replaceUses(instr.def()->as<WireRef>(), build.buildOneHotMux(cases));
+    deleteMatchedInstr(instr);
+    return true;
   }
 
   bool mergeOneHotMux(InstrRef root) {
@@ -1472,7 +1568,14 @@ private:
         return true;
       if (optimizeOneHotMux(instr))
         return true;
+      if (optimizeOneHotMuxUndef(instr))
+        return true;
       break;
+    }
+
+    case *HW_ASSUME: {
+      if (simplifyAssume(instr))
+        return true;
     }
 
     default:
