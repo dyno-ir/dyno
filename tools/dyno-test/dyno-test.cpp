@@ -1,6 +1,5 @@
 #include "aig/AIGContext.h"
 #include "aig/PrintParse.h"
-#include "dyno/BlockUpdate.h"
 #include "dyno/Context.h"
 #include "dyno/DialectInfo.h"
 #include "dyno/IDImpl.h"
