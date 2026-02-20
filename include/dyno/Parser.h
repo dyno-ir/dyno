@@ -31,7 +31,7 @@ protected:
 public:
   TempBindVal<DynoLexer> lexer;
   using obj_parse_fn =
-      MemberRef<FatDynObjRef<>(void *, DialectType type, ArrayRef<char> name)>;
+      CallableRef<FatDynObjRef<>(DialectType type, ArrayRef<char> name)>;
   Interfaces<NUM_DIALECTS, obj_parse_fn> interfaces;
   Context &ctx;
 
@@ -316,7 +316,7 @@ public:
   CoreDialectParser(ParserBase *base) : base(*base) {
     base->interfaces.template registerVal<typename ParserBase::obj_parse_fn>(
         DIALECT_CORE,
-        MemberRef{this, BindMethod<&CoreDialectParser::parseCore>::fv});
+        CallableRef{this, BindMethod<&CoreDialectParser::parseCore>::fv});
   }
 
   FatDynObjRef<> parseCore(DialectType type, ArrayRef<char> name) {

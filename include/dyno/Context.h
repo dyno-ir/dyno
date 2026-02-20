@@ -59,7 +59,7 @@ template <typename Derived> class ContextMixin {
   }
   auto makeResolverMethods() {
     // create vector and assign elements
-    std::vector<MemberRef<FatDynObjRef<>(void *, DynObjRef)>> arr(getMaxTyID() +
+    std::vector<CallableRef<FatDynObjRef<>(DynObjRef)>> arr(getMaxTyID() +
                                                                   1);
     [&]<std::size_t... Is>(std::index_sequence<Is...>) {
       (
@@ -67,7 +67,7 @@ template <typename Derived> class ContextMixin {
             auto &store = std::get<Is>(self().stores);
             using StoreT = std::remove_reference_t<decltype(store)>;
             arr[ObjTraits<typename StoreT::value_type>::ty.getTypeID() & 127] =
-                MemberRef{&store, BindMethod<&StoreT::resolveGeneric>::fv};
+                CallableRef{&store, BindMethod<&StoreT::resolveGeneric>::fv};
           }(),
           ...);
     }(std::make_index_sequence<numStores>{});
@@ -83,7 +83,7 @@ template <typename Derived> class ContextMixin {
   }
   auto makeCopyMethods() {
     // create vector and assign elements
-    std::vector<MemberRef<FatDynObjRef<>(void *, FatDynObjRef<>)>> arr(
+    std::vector<CallableRef<FatDynObjRef<>(FatDynObjRef<>)>> arr(
         getMaxTyID() + 1);
     [&]<std::size_t... Is>(std::index_sequence<Is...>) {
       (
@@ -94,7 +94,7 @@ template <typename Derived> class ContextMixin {
                 StoreT::*)(FatObjRef<typename StoreT::value_type> &&);
             if constexpr (requires { (SignT)(&StoreT::create); }) {
               arr[ObjTraits<typename StoreT::value_type>::ty.getTypeID() &
-                  127] = MemberRef{
+                  127] = CallableRef{
                   &store,
                   castToSpecificRef<BindMethod<(SignT)(&StoreT::create)>::fv>};
             }
@@ -105,9 +105,9 @@ template <typename Derived> class ContextMixin {
   }
 
 public:
-  std::vector<MemberRef<FatDynObjRef<>(void *, DynObjRef)>> resolverMethods =
+  std::vector<CallableRef<FatDynObjRef<>(DynObjRef)>> resolverMethods =
       makeResolverMethods();
-  std::vector<MemberRef<FatDynObjRef<>(void *, FatDynObjRef<>)>> copyMethods =
+  std::vector<CallableRef<FatDynObjRef<>(FatDynObjRef<>)>> copyMethods =
       makeCopyMethods();
 
   void reset() {
@@ -133,12 +133,12 @@ public:
   BlockRef createBlock() { return cfg.blocks.create(cfg); };
 
   // clang-format off
-  std::array<MemberRef<FatDynObjRef<>(void *, DynObjRef)>, 4> resolverMethods = {
+  std::array<CallableRef<FatDynObjRef<>(DynObjRef)>, 4> resolverMethods = {
     // zeroth element is invalid in core dialect, forward to instr resolver which will assert
-    MemberRef{&instrs, BindMethod<&InstrStoreT::resolveGeneric>::fv},
-    MemberRef{&instrs, BindMethod<&InstrStoreT::resolveGeneric>::fv},
-    MemberRef{&constants, BindMethod<&ConstantStoreT::resolveGeneric>::fv},
-    MemberRef{&cfg.blocks, BindMethod<&decltype(cfg.blocks)::resolveGeneric>::fv},
+    CallableRef{&instrs, BindMethod<&InstrStoreT::resolveGeneric>::fv},
+    CallableRef{&instrs, BindMethod<&InstrStoreT::resolveGeneric>::fv},
+    CallableRef{&constants, BindMethod<&ConstantStoreT::resolveGeneric>::fv},
+    CallableRef{&cfg.blocks, BindMethod<&decltype(cfg.blocks)::resolveGeneric>::fv},
   };
   // clang-format on
 
@@ -161,13 +161,17 @@ template <> struct DialectContext<DialectID{DIALECT_CORE}> {
 
 class Context {
   ArrayInterface<TypeErasedCtx> contexts;
-  ArrayInterface<MemberRef<FatDynObjRef<>(void *, DynObjRef)>> resolvers;
-  ArrayInterface<MemberRef<FatDynObjRef<>(void *, FatDynObjRef<>)>> copiers;
+  ArrayInterface<CallableRef<FatDynObjRef<>(DynObjRef)>> resolvers;
+  ArrayInterface<CallableRef<FatDynObjRef<>(FatDynObjRef<>)>> copiers;
 
   DialectInfos dialectInfos;
   PassRegistry passRegistry;
 
 public:
+  Interface<DialectInfo> dialectInfosIF{dialectInfos.dialectInfoArr.data()};
+  Interface<OpcodeInfo> opcodeInfosIF{dialectInfos.opcodeInfoArr.data()};
+  Interface<TyInfo> typeInfosIF{dialectInfos.typeInfoArr.data()};
+
   DialectInfos &getDialectInfos() { return dialectInfos; }
   PassRegistry &getPassRegistry() { return passRegistry; }
 
@@ -181,7 +185,9 @@ public:
   }
 
   // slow resolve
-  FatDynObjRef<> resolve(DynObjRef ref) { return resolvers[ref](ref); }
+  FatDynObjRef<> resolve(DynObjRef ref) __attribute__((pure)) {
+    return resolvers[ref](ref);
+  }
   // slow copy
   FatDynObjRef<> copy(FatDynObjRef<> ref) {
     if (auto fn = copiers[ref])

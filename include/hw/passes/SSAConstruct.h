@@ -159,7 +159,7 @@ public:
         vals[val.depth - startDepth - 1] = &val;
         allUntouched &= val.untouched;
       }
-      if (i >= 0)
+      if (i >= 0 && regState.stack[i].depth == startDepth)
         vals.back() = &regState.stack[i];
 
       if (allUntouched) {

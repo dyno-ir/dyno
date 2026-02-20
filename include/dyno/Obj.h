@@ -226,6 +226,8 @@ public:
     return a.custom == b.custom && a.obj == b.obj;
   }
 
+  ObjRef<T> thin() const { return *this; }
+
   uint64_t rawNoPtr() const {
     return uint64_t(special) << 48 | uint64_t(custom) << 32 | this->obj.num;
   }
@@ -314,7 +316,7 @@ public:
     return U{*this};
   }
 #endif
-
+  DynObjRef thin() const { return *this; }
   static bool is_impl(FatDynObjRef<>) { return true; }
 };
 

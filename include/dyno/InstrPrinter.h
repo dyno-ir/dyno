@@ -111,13 +111,13 @@ public:
 
 public:
   struct type {
-    using print_fn = MemberRef<bool(void *, FatDynObjRef<>, bool)>;
+    using print_fn = CallableRef<bool(FatDynObjRef<>, bool)>;
   };
   struct opc {
-    using print_fn = MemberRef<bool(void *, FatDynObjRef<>, bool)>;
+    using print_fn = CallableRef<bool(FatDynObjRef<>, bool)>;
   };
   using name_fn =
-      MemberRef<std::optional<IntroducedName>(void *, FatDynObjRef<>)>;
+      CallableRef<std::optional<IntroducedName>(FatDynObjRef<>)>;
   Interfaces<NUM_DIALECTS, type::print_fn, opc::print_fn, name_fn> interfaces;
 
   OStreamWrapper str;
@@ -376,7 +376,7 @@ public:
   CoreDialectPrinter(PrinterBase *base) : base(*base) {
     base->interfaces.registerVal<PrinterBase::type::print_fn>(
         DIALECT_CORE,
-        MemberRef{this, &BindMethod<&CoreDialectPrinter::printTypeCore>::fv});
+        CallableRef{this, &BindMethod<&CoreDialectPrinter::printTypeCore>::fv});
   }
 
   bool printTypeCore(FatDynObjRef<> ref, bool def) {

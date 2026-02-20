@@ -401,9 +401,11 @@ public:
   }
 
   void run() {
-    for (auto mod : ctx.getCtx<HWDialectContext>().activeModules()) {
-      runOnModule(mod.iref());
-    }
+    runWrapper([&] {
+      for (auto mod : ctx.getCtx<HWDialectContext>().activeModules()) {
+        runOnModule(mod.iref());
+      }
+    });
   }
 
   void runModule(ModuleRef mod) {

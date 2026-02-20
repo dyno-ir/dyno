@@ -336,7 +336,9 @@ public:
   }
 
   template <typename It> void push_back_range(Range<It> range) {
-    for (auto item : range) {
+    if constexpr (requires { range.size(); })
+      reserve(size() + range.size());
+    for (const auto &item : range) {
       emplace_back(item);
     }
   }

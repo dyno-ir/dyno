@@ -1,8 +1,8 @@
 #pragma once
-
 #include "dyno/Obj.h"
 #include "dyno/Opcode.h"
 #include "dyno/Type.h"
+#include "support/MacroUtil.h"
 #include "support/Utility.h"
 #include <cstdint>
 #include <dyno/DialectInfo.h>
@@ -28,12 +28,12 @@ TYPES(CEXPR_EXPAND)
 #undef CEXPR_EXPAND
 
 #define HEADER enum class OpOpcID : uint16_t {
-#define ADD_OP(x) OP_##x,
+#define ADD_OP(x, ...) OP_##x,
 #include "OpInstrs.inc"
 
 #define HEADER
 #define FOOTER
-#define ADD_OP(x) constexpr OpOpcode OP_##x{uint16_t(OpOpcID::OP_##x)};
+#define ADD_OP(x, ...) constexpr OpOpcode OP_##x{uint16_t(OpOpcID::OP_##x)};
 #include "OpInstrs.inc"
 
 template <> struct DialectTraits<DIALECT_OP> {
@@ -46,7 +46,9 @@ template <> struct DialectTraits<DIALECT_OP> {
   constexpr static OpcodeInfo opcInfo[] = {
 #define HEADER
 #define FOOTER
-#define ADD_OP(x) {#x},
+#define _ADD_OP_1(x) {#x},
+#define _ADD_OP_2(x, flags) {#x, {flags}},
+#define ADD_OP(...) DYNO_VA_MACRO(_ADD_OP, __VA_ARGS__)
 #include "OpInstrs.inc"
   };
 };

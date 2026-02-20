@@ -1,6 +1,7 @@
 #pragma once
 #include "Interface.h"
 #include "Obj.h"
+#include "support/Bits.h"
 #include <cstdint>
 #include <string_view>
 
@@ -23,8 +24,27 @@ struct TyInfo {
       : name(name), isDefUse(isDefUse) {}
 };
 
+struct OpcodeFlagsConfig {
+  bool noCSE;
+};
+struct OpcodeFlags {
+  uint64_t raw{0};
+
+  constexpr auto noCSE() { return BitField<uint64_t, 1, 1>{raw}; }
+  constexpr auto noCSE() const { return BitField<const uint64_t, 1, 1>{raw}; }
+
+  constexpr OpcodeFlags() = default;
+  constexpr OpcodeFlags(OpcodeFlagsConfig cfg) { noCSE() = cfg.noCSE; }
+};
+
 struct OpcodeInfo {
   std::string_view name;
+  OpcodeFlags flags;
+
+  constexpr OpcodeInfo() = default;
+  constexpr OpcodeInfo(std::string_view name) : name(name) {}
+  constexpr OpcodeInfo(std::string_view name, OpcodeFlags flags)
+      : name(name), flags(flags) {}
 };
 
 template <uint8_t> struct DialectTraits {

@@ -16,7 +16,7 @@ public:
   PrinterBase *base;
   OpDialectPrinter(PrinterBase *base) : base(base) {
     base->interfaces.registerVal<PrinterBase::type::print_fn>(
-        dialect, MemberRef{this, BindMethod<&OpDialectPrinter::printType>::fv});
+        dialect, CallableRef{this, BindMethod<&OpDialectPrinter::printType>::fv});
   }
 
   bool printType(FatDynObjRef<> ref, bool def) {
@@ -57,7 +57,7 @@ public:
   static constexpr DialectID dialect{DIALECT_OP};
   OpDialectParser(ParserBase *base) : base(base) {
     base->interfaces.template registerVal<typename ParserBase::obj_parse_fn>(
-        dialect, MemberRef{this, BindMethod<&OpDialectParser::parseObj>::fv});
+        dialect, CallableRef{this, BindMethod<&OpDialectParser::parseObj>::fv});
   }
 
   FatDynObjRef<> parseObj(DialectType type, ArrayRef<char> name) {

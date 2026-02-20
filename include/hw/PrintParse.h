@@ -27,11 +27,11 @@ public:
 
     base->interfaces.registerVal<PrinterBase::type::print_fn>(
         DIALECT_HW,
-        MemberRef{this, BindMethod<&HWDialectPrinter::printHWType>::fv});
+        CallableRef{this, BindMethod<&HWDialectPrinter::printHWType>::fv});
 
     base->interfaces.registerVal<PrinterBase::name_fn>(
         DIALECT_HW,
-        MemberRef{this, BindMethod<&HWDialectPrinter::getObjectName>::fv});
+        CallableRef{this, BindMethod<&HWDialectPrinter::getObjectName>::fv});
   }
 
   bool printHWType(FatDynObjRef<> ref, bool def) {
@@ -118,7 +118,7 @@ public:
 
   explicit HWDialectParser(ParserBase *base) : base(*base) {
     base->interfaces.template registerVal<typename ParserBase::obj_parse_fn>(
-        DIALECT_HW, MemberRef{this, BindMethod<&HWDialectParser::parseHW>::fv});
+        DIALECT_HW, CallableRef{this, BindMethod<&HWDialectParser::parseHW>::fv});
   }
 
   FatDynObjRef<> parseHW(DialectType type, ArrayRef<char> name) {

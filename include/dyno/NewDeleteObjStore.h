@@ -5,6 +5,7 @@
 #include <cassert>
 #include <dyno/Obj.h>
 #include <dyno/ObjMap.h>
+#include <memory>
 #include <optional>
 #include <support/Ranges.h>
 #include <utility>
@@ -87,29 +88,70 @@ public:
   FatRefT create(size_t sz, Args &&...args)
     requires TrailingObj<T>
   {
+    auto rv = _create_no_hook(sz, std::forward<Args>(args)...);
+    _call_create_hooks(rv);
+    return rv;
+  }
+
+  // For resizable allocs. Caller must call _call_create_hooks once resizing
+  // completed.
+  template <typename... Args>
+  FatRefT _create_no_hook(size_t sz, Args &&...args)
+    requires TrailingObj<T>
+  {
     auto ref = createRef();
     void *alloc = malloc(T::getAllocSize(sz));
     T *ptr = new (alloc) T(ref, sz, std::forward<Args>(args)...);
     map[ref] = ptr;
     FatRefT rv{ref, *ptr};
+    return rv;
+  }
+
+  void _call_create_hooks(FatRefT ref) {
     for (auto hook : createHooks)
-      hook(rv);
+      hook(ref);
+  }
+
+  template <typename TrailingType>
+  FatRefT realloc(FatRefT old, size_t sz)
+    requires TrailingObj<T>
+  {
+    T *ptr;
+
+    void *alloc = malloc(T::getAllocSize(sz));
+    ptr =
+        std::construct_at<T>(reinterpret_cast<T *>(alloc), std::move(*old), sz);
+    auto ntrailing = (old->getAllocSize() - sizeof(T)) / sizeof(TrailingType);
+    std::uninitialized_move_n(reinterpret_cast<TrailingType *>(&*old + 1),
+                              std::min(ntrailing, sz),
+                              reinterpret_cast<TrailingType *>(ptr + 1));
+
+    map[old] = ptr;
+    FatRefT rv{old.thin(), ptr};
     return rv;
   }
 
   T &operator[](ObjRef<T> ref) { return *map[ref]; }
 
-  void destroy(FatObjRef<T> ref) {
+  void _destroy_no_hook(FatRefT ref) {
     assert(map[ref] && "Invalid ref");
-    for (auto hook : destroyHooks)
-      hook(FatRefT{ref});
     freeIds.push_back(ref.getObjID());
     map[ref] = nullptr;
     ref.getPtr()->~T();
     free(ref.getPtr());
   }
 
-  void destroyIfExists(FatObjRef<T> ref) {
+  void _call_destroy_hooks(FatRefT ref) {
+    for (auto hook : destroyHooks)
+      hook(ref);
+  }
+
+  void destroy(FatRefT ref) {
+    _call_destroy_hooks(ref);
+    _destroy_no_hook(ref);
+  }
+
+  void destroyIfExists(FatRefT ref) {
     if (!map[ref])
       return;
     destroy(ref);

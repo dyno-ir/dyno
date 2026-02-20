@@ -1,6 +1,7 @@
 #pragma once
 
 #include <algorithm>
+#include <cassert>
 #include <initializer_list>
 #include <iterator>
 #include <numeric>
@@ -77,6 +78,41 @@ public:
   }
 
   friend bool operator!=(const deref_iterator &a, const deref_iterator &b) {
+    return a.it != b.it;
+  }
+};
+
+template <typename T> class no_deref_iterator {
+  T it;
+
+public:
+  using iterator_category = std::forward_iterator_tag;
+  using value_type = T;
+  using difference_type = std::iterator_traits<T>::difference_type;
+
+  no_deref_iterator() = default;
+  no_deref_iterator(T it) : it(it) {}
+
+  value_type operator*() { return it; }
+
+  no_deref_iterator &operator++() {
+    ++it;
+    return *this;
+  }
+
+  no_deref_iterator operator++(int) {
+    deref_iterator tmp(*this);
+    ++(*this);
+    return tmp;
+  }
+
+  friend bool operator==(const no_deref_iterator &a,
+                         const no_deref_iterator &b) {
+    return a.it == b.it;
+  }
+
+  friend bool operator!=(const no_deref_iterator &a,
+                         const no_deref_iterator &b) {
     return a.it != b.it;
   }
 };
@@ -449,20 +485,115 @@ public:
   }
 };
 
+// Iterator boilerplate
+// Forward: in base implement operator++(), operator==
+// Bidir:   in base implement operator++(), operator--(), operator==
+// Random:  in base implement operator+=(), operator-(), operator<=>
+template <typename derived, typename difference_type, typename reference>
+class base_iterator {
+private:
+  static constexpr bool isRandom =
+      std::is_same_v<typename derived::iterator_category,
+                     std::random_access_iterator_tag>;
+  static constexpr bool isBidir =
+      std::is_same_v<typename derived::iterator_category,
+                     std::bidirectional_iterator_tag> ||
+      isRandom;
+
+  derived &self() { return *static_cast<derived *>(this); }
+  const derived &cself() const { return *static_cast<derived *>(this); }
+
+public:
+  derived &operator++()
+    requires(isRandom)
+  {
+    self() += 1;
+    return self();
+  }
+
+  derived operator++(int) {
+    derived tmp(self());
+    ++(self());
+    return tmp;
+  }
+
+  derived &operator--()
+    requires(isRandom)
+  {
+    (self()) -= 1;
+    return self();
+  }
+
+  derived operator--(int)
+    requires(isBidir)
+  {
+    derived tmp(self());
+    --(self());
+    return tmp;
+  }
+
+  derived &operator-=(difference_type n)
+    requires(isRandom)
+  {
+    self().it += -n;
+    return self();
+  }
+
+  friend derived operator+(derived a, difference_type n)
+    requires(isRandom)
+  {
+    a += n;
+    return a;
+  }
+
+  friend derived operator+(difference_type n, derived a)
+    requires(isRandom)
+  {
+    a += n;
+    return a;
+  }
+
+  friend derived operator-(derived a, difference_type n)
+    requires(isRandom)
+  {
+    a -= n;
+    return a;
+  }
+
+  reference operator[](difference_type n) const
+    requires(isRandom)
+  {
+    auto tmp(self());
+    tmp += n;
+    return *tmp;
+  }
+
+  friend bool operator!=(const derived &a, const derived &b) {
+    return a.it != b.it;
+  }
+};
+
 template <typename T> class pairwise_iterator {
   T it;
 
 public:
-  using iterator_category = std::forward_iterator_tag;
-  using value_type = std::pair<decltype(*it), decltype(*it)>;
-  using pointer = value_type *;
-  using reference = value_type &;
+  using iterator_category = std::iterator_traits<T>::iterator_category;
+  using underlying_value_type = std::iterator_traits<T>::value_type;
+  using underlying_reference = std::iterator_traits<T>::reference;
+  using underlying_pointer = std::iterator_traits<T>::pointer;
+
+  using value_type = std::pair<underlying_value_type, underlying_value_type>;
+  using reference = std::pair<underlying_reference, underlying_reference>;
+
+  using pointer = underlying_pointer;
   using difference_type = std::iterator_traits<T>::difference_type;
 
   pairwise_iterator() = default;
-  pairwise_iterator(T it) : it(it) {}
+  explicit pairwise_iterator(T it) : it(it) {}
 
-  value_type operator*() { return {*it, *std::next(it)}; }
+  std::pair<decltype(*it), decltype(*it)> operator*() {
+    return {*it, *std::next(it)};
+  }
 
   pairwise_iterator &operator++() {
     std::advance(it, 2);
@@ -470,7 +601,7 @@ public:
   }
 
   pairwise_iterator operator++(int) {
-    enumerate_iterator tmp(*this);
+    pairwise_iterator tmp(*this);
     ++(*this);
     return tmp;
   }
@@ -484,6 +615,142 @@ public:
                          const pairwise_iterator &b) {
     return a.it != b.it;
   }
+
+  static constexpr bool isBidir =
+      std::is_same_v<iterator_category, std::bidirectional_iterator_tag> ||
+      std::is_same_v<iterator_category, std::random_access_iterator_tag>;
+
+  pairwise_iterator &operator--()
+    requires(isBidir)
+  {
+    std::advance(it, -2);
+    return *this;
+  }
+
+  pairwise_iterator operator--(int)
+    requires(isBidir)
+  {
+    pairwise_iterator tmp(*this);
+    --(*this);
+    return tmp;
+  }
+
+  static constexpr bool isRandom =
+      std::is_same_v<iterator_category, std::random_access_iterator_tag>;
+
+  pairwise_iterator &operator+=(difference_type n)
+    requires(isRandom)
+  {
+    it += n * 2;
+    return *this;
+  }
+
+  pairwise_iterator &operator-=(difference_type n)
+    requires(isRandom)
+  {
+    it -= n * 2;
+    return *this;
+  }
+
+  friend pairwise_iterator operator+(pairwise_iterator a, difference_type n)
+    requires(isRandom)
+  {
+    a += n;
+    return a;
+  }
+
+  friend pairwise_iterator operator+(difference_type n, pairwise_iterator a)
+    requires(isRandom)
+  {
+    a += n;
+    return a;
+  }
+
+  friend pairwise_iterator operator-(pairwise_iterator a, difference_type n)
+    requires(isRandom)
+  {
+    a -= n;
+    return a;
+  }
+
+  friend difference_type operator-(const pairwise_iterator &a,
+                                   const pairwise_iterator &b)
+    requires(isRandom)
+  {
+    return (b.it - a.it) / 2;
+  }
+
+  reference operator[](difference_type n) const
+    requires(isRandom)
+  {
+    return *(*this + n);
+  }
+
+  friend auto operator<=>(const pairwise_iterator &a,
+                          const pairwise_iterator &b)
+    requires(isRandom)
+  {
+    return a.it <=> b.it;
+  }
+};
+
+template <typename T>
+class step_iterator
+    : public base_iterator<step_iterator<T>,
+                           typename std::iterator_traits<T>::difference_type,
+                           typename std::iterator_traits<T>::reference> {
+  T it;
+  unsigned n;
+
+public:
+  using iterator_category = std::iterator_traits<T>::iterator_category;
+  using value_type = std::iterator_traits<T>::value_type;
+  using pointer = value_type *;
+  using reference = value_type &;
+  using difference_type = std::iterator_traits<T>::difference_type;
+
+private:
+  static constexpr bool isRandom =
+      std::is_same_v<iterator_category, std::random_access_iterator_tag>;
+  static constexpr bool isBidir =
+      std::is_same_v<iterator_category, std::bidirectional_iterator_tag> ||
+      isRandom;
+
+public:
+  step_iterator() = default;
+  step_iterator(T it, unsigned n) : it(it), n(n) {}
+
+  value_type operator*() { return *it; }
+
+  step_iterator &operator+=(difference_type d)
+    requires(isRandom)
+  {
+    it += n * d;
+    return *this;
+  }
+
+  step_iterator &operator++() {
+    std::advance(it, n);
+    return *this;
+  }
+
+  difference_type operator-(step_iterator other)
+    requires(isRandom)
+  {
+    assert(n == other.n);
+    return (it - other.it) / n;
+  }
+
+  friend bool operator==(const step_iterator &a, const step_iterator &b) {
+    assert(a.n == b.n);
+    return a.it == b.it;
+  }
+
+  friend bool operator<=>(const step_iterator &a, const step_iterator &b)
+    requires(isRandom)
+  {
+    return a.it <=> b.it;
+  }
 };
 
 template <typename It> class Range {
@@ -494,6 +761,7 @@ public:
   template <typename U> Range(U &u) : Range(u.begin(), u.end()) {}
 
   Range(It beginIt, It endIt) : beginIt(beginIt), endIt(endIt) {}
+  Range() = default;
 
   It begin() const { return beginIt; }
   It end() const { return endIt; }
@@ -504,6 +772,10 @@ public:
 
   auto deref() {
     return ::Range{deref_iterator{beginIt}, deref_iterator{endIt}};
+  }
+
+  auto no_deref() {
+    return ::Range{no_deref_iterator{beginIt}, no_deref_iterator{endIt}};
   }
 
   auto enumerate() {
@@ -582,8 +854,21 @@ public:
   template <typename T> auto count_if(T func) {
     return std::count_if(begin(), end(), func);
   }
-  template <typename T> void for_each(T func) {
-    std::for_each(begin(), end(), func);
+  template <typename T> T for_each(T func) {
+    return std::for_each(begin(), end(), func);
+  }
+  template <typename T> bool equals(Range<T> other) {
+    if constexpr (requires() {
+                    this->size();
+                    other.size();
+                  })
+      if (this->size() != other.size())
+        return false;
+    for (auto [a, b] : (*this).zip(other)) {
+      if (a != b)
+        return false;
+    }
+    return true;
   }
 
   template <typename T> auto zip(const T &other) {
@@ -601,6 +886,13 @@ public:
     return ::Range{pairwise_iterator{beginIt}, pairwise_iterator{endIt}};
   }
 
+  auto step(unsigned n) {
+    if constexpr (requires { endIt - beginIt; }) {
+      assert((endIt - beginIt) % n == 0);
+    }
+    return ::Range{step_iterator{beginIt, n}, step_iterator{endIt, n}};
+  }
+
   template <typename T> auto sorted_intersect(T &other) {
     return ::Range{
         sorted_intersect_iterator{begin(), end(), other.begin(), other.end()},
@@ -609,6 +901,12 @@ public:
   }
 
   bool empty() const { return begin() == end(); }
+
+  auto size() const
+    requires(requires(It a, It b) { b - a; })
+  {
+    return end() - begin();
+  }
 
 private:
   It beginIt, endIt;

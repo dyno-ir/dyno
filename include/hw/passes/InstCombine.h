@@ -6,6 +6,7 @@
 #include "dyno/HierBlockIterator.h"
 #include "dyno/IDs.h"
 #include "dyno/Instr.h"
+#include "dyno/MutInstr.h"
 #include "dyno/Obj.h"
 #include "dyno/Opcode.h"
 #include "dyno/Pass.h"
@@ -30,11 +31,11 @@
 #include "support/DenseMap.h"
 #include "support/DynBitSet.h"
 #include "support/ErrorRecovery.h"
+#include "support/Ranges.h"
 #include "support/SmallVec.h"
 #include "support/Utility.h"
 #include <algorithm>
 #include <tuple>
-
 namespace dyno {
 
 bool generated(Context &ctx, SmallVecImpl<InstrRef> &matched,
@@ -66,7 +67,8 @@ public:
   FIELD(bool, fuseCommutative, true)                                           \
   FIELD(bool, liftMUX, false)                                                  \
   FIELD(bool, simplifyDeMorgan, true)                                          \
-  FIELD(bool, boolExprSimplify, true)
+  FIELD(bool, boolExprSimplify, true)                                          \
+  FIELD(bool, removeAssumes, false)
   CONFIG_STRUCT(CONFIG_STRUCT_LAMBDA)
 #undef CONFIG_STRUCT_LAMBDA
   Config config;
@@ -131,6 +133,8 @@ private:
       auto ref = stack.pop_back_val();
       auto wire = ref->as<WireRef>();
 
+      bool singleUse = wire.getNumUses() == 1;
+
       auto known = deriveBits.knownBits.get(wire);
       assert(known.getNumBits() == wire.getNumBits());
       if (!known.getIs4S()) {
@@ -140,7 +144,7 @@ private:
         change = true;
       }
 
-      if (wire.getNumUses() != 1)
+      if (!singleUse)
         continue;
 
       auto instr = wire.getDefI();
@@ -206,10 +210,17 @@ private:
 
       deriveBits.clearCache();
     }
+    currentMatched.emplace_back(instr);
     return change;
   }
 
   bool simplifyAssume(InstrRef instr) {
+    if (config.removeAssumes) {
+      replaceUses(instr.def()->as<WireRef>(), instr.other(0)->as<HWValue>());
+      deleteMatchedInstr(instr);
+      return true;
+    }
+
     if (!instr.other(0)->is<WireRef>() || !instr.other(1)->is<WireRef>())
       return false;
     auto given = instr.other(1)->as<WireRef>();
@@ -220,6 +231,8 @@ private:
 
     auto rv = boolExprSimplifySub(instr.other(0));
     deriveBits.clearCache();
+    if (rv)
+      currentMatched.emplace_back(instr);
     return rv;
   }
 
@@ -425,19 +438,13 @@ private:
 
     bool sign = false;
 
-    WireRef intermWire = ctx.getStore<Wire>().create(activeBits);
-
     HWInstrBuilder build{ctx};
     build.setInsertPoint(instr);
-    auto ibAdd =
-        build.buildInstrRaw(instr.getDialectOpcode(), instr.getNumOperands());
-    ibAdd.addRef(intermWire).other();
-
-    build.setInsertPoint(ibAdd.instr());
-
-    for (auto op : instr.others()) {
-      ibAdd.addRef(build.buildTrunc(activeBits, op->as<HWValue>()));
-    }
+    auto newVal = build.buildCommutative(
+        instr.getDialectOpcode(),
+        instr.others().transform([&](size_t, OperandRef ref) {
+          return build.buildTrunc(activeBits, ref->as<HWValue>());
+        }));
 
     build.setInsertPoint(instr);
 
@@ -465,16 +472,15 @@ private:
           .addRef(outWire)
           .other()
           .addRef(cbuild.val(bigInts[0]).get())
-          .addRef(ibAdd.instr().def(0)->as<WireRef>());
+          .addRef(newVal);
     } else {
       DialectOpcode opc;
       if (reduceViaInputs)
         opc = sign ? OP_SEXT : OP_ZEXT;
       else
         opc = OP_ANYEXT;
-      auto tempW = ibAdd.instr().def(0)->as<WireRef>();
-      assert(*outWire->numBits >= *tempW.getNumBits());
-      build.buildInstrRaw(opc, 2).addRef(outWire).other().addRef(tempW);
+      assert(*outWire->numBits >= *newVal.getNumBits());
+      build.buildInstrRaw(opc, 2).addRef(outWire).other().addRef(newVal);
     }
 
     // instr.def(0).replace(FatDynObjRef<>{nullref});
@@ -516,6 +522,61 @@ private:
     auto handle = [&](uint32_t addr, uint32_t len) {
       auto fragV = build.buildMux(selV, trueRepr.get(build, addr, len, false),
                                   falseRepr.get(build, addr, len, false));
+      outFrags.emplace_back(fragV);
+    };
+
+    uint32_t last = 0;
+    for (auto seam : Range{seams}.drop_front()) {
+      auto len = seam - last;
+      assert(len != 0);
+      handle(last, len);
+      last = seam;
+      // auto fragV = build.buildMux(
+      //     selV, trueRepr.get(build, diff.addr(), diff.len(), false),
+      //     falseRepr.get(build, diff.addr(), diff.len(), false));
+      // outFrags.emplace_back(fragV);
+      // last = diff.addr() + diff.len();
+    }
+    if (auto len = bits - last)
+      handle(last, len);
+
+    std::reverse(outFrags.begin(), outFrags.end());
+    auto out = build.buildConcat(outFrags);
+    replaceUses(instr.def(0)->as<WireRef>(), out);
+    deleteMatchedInstr(instr);
+    return true;
+  }
+
+  bool liftOneHotMUX(InstrRef instr) {
+    if (!config.liftMUX)
+      return false;
+
+    // todo: remove when regular MUX version retired
+    SmallVec<RegisterValue *, 16> reprsPtrs;
+    SmallVec<RegisterValue, 16> reprs;
+    for (auto [sel, val] : instr.others().deref().as<HWValue>().pairwise()) {
+      reprsPtrs.emplace_back(
+          &reprs.emplace_back(bitAlias.getReprAliases(val).first));
+    }
+
+    auto bits = *instr.other(1)->as<HWValue>().getNumBits();
+
+    SmallVec<HWValue, 8> outFrags;
+    HWInstrBuilder build{ctx, instr};
+
+    auto seams = regValueFindCommonSeams(reprsPtrs);
+    assert(seams.size() >= 2);
+    if (seams.size() == 2)
+      return false;
+
+    auto handle = [&](uint32_t addr, uint32_t len) {
+      SmallVec<std::pair<HWValue, HWValue>, 16> vals;
+      vals.reserve(reprs.size());
+      for (auto [i, repr] : Range{reprs}.enumerate()) {
+        vals.emplace_back(instr.other(2 * i)->as<HWValue>(),
+                          repr.get(build, addr, len, false));
+      }
+      auto fragV = build.buildOneHotMux(vals);
       outFrags.emplace_back(fragV);
     };
 
@@ -625,6 +686,94 @@ private:
     return true;
   }
 
+  bool sinkOneHotMUX(InstrRef instr) {
+    if (config.liftMUX)
+      return false;
+    assert(instr.isOpc(HW_CONCAT));
+
+    SmallVec<std::pair<uint32_t, uint32_t>, 4> ranges;
+    size_t lastI = 0;
+    Range<step_iterator<dyno::InstrRef::iterator>> lastSel;
+
+    bool active = false;
+
+    auto commit = [&](size_t i) {
+      if (!active || i == lastI)
+        return;
+      active = false;
+      if (i - lastI >= 2)
+        ranges.emplace_back(lastI, i - lastI);
+      lastI = i;
+    };
+
+    constexpr bool allowEmptyRegions = true;
+
+    for (auto [i, op] : Range{instr.others()}.enumerate()) {
+      if (auto wire = op->dyn_as<WireRef>();
+          wire && wire.getDefI().isOpc(HW_ONEHOT_MUX) &&
+          wire.getDefI().def(0)->as<WireRef>().hasSingleUse()) {
+        auto mux = wire.getDefI();
+        auto sel = mux.others().step(2);
+        if (active &&
+            !sel.as<FatDynObjRef<>>().equals(lastSel.as<FatDynObjRef<>>()))
+          commit(i);
+        if (!active) {
+          lastI = i;
+          lastSel = sel;
+        }
+        active = true;
+      } else
+        commit(i);
+    }
+    commit(instr.getNumOthers());
+
+    if (ranges.empty() || (!allowEmptyRegions && ranges.size() != 1))
+      return false;
+
+    HWInstrBuilder build{ctx, instr};
+
+    OtherVec<HWValue> vals{ctx};
+    uint32_t lastEnd = 0;
+    for (auto range : ranges) {
+      if (range.first != lastEnd) {
+        vals.push_back_range(Range{instr.other_begin() + lastEnd,
+                                   instr.other_begin() + range.first}
+                                 .as<HWValue>());
+      }
+
+      auto ops = Range{instr.other_begin() + range.first,
+                       instr.other_begin() + range.first + range.second};
+      auto headMux = instr.other(range.first)->as<WireRef>().getDefI();
+
+      OtherVec<HWValue> muxOperands{ctx, 1, headMux.getNumOthers()};
+
+      for (unsigned i = 0; i < headMux.getNumOthers() / 2; i++) {
+        OtherVec<HWValue> concatOperands{ctx, 1, range.second - range.first};
+        for (auto op : ops) {
+          auto subMux = op->as<WireRef>().getDefI();
+          concatOperands.emplace_back(subMux.other(2 * i + 1)->as<HWValue>());
+        }
+        // select signal
+        muxOperands.emplace_back(headMux.other(2 * i)->as<HWValue>());
+        muxOperands.emplace_back(build.buildConcat(std::move(concatOperands)));
+      }
+
+      vals.emplace_back(build.buildOneHotMux(std::move(muxOperands)));
+      lastEnd = range.first + range.second;
+    }
+    if (instr.getNumOthers() != lastEnd) {
+      vals.push_back_range(Range{instr.other_begin() + lastEnd,
+                                 instr.other_begin() + instr.getNumOthers()}
+                               .deref()
+                               .as<HWValue>());
+    }
+
+    auto val = build.buildConcat(std::move(vals));
+    replaceUses(instr.def(0)->as<WireRef>(), val);
+    deleteMatchedInstr(instr);
+    return true;
+  }
+
   bool fuseInserts(InsertIRef insert) {
     // todo: directly fuse all in chain instead of just two
     auto inWire = insert.in()->dyn_as<WireRef>();
@@ -681,8 +830,18 @@ private:
       if (op->is<WireRef>() && op->as<WireRef>().getDefI().isOpc(OP_NOT))
         inverted++;
     }
+    // todo: check output inverted free?, operand inversions free?
     if (inverted <= round_up_div(instr.getNumOthers(), 2u))
       return false;
+
+    // if (instr.getNumOthers() & 1) {
+    //   if (inverted <= instr.getNumOthers() / 2U)
+    //     return false;
+    // } else if (!(instr.getNumOthers() & 1)) {
+    //   if (instr.isOpc(OP_AND) ? (inverted <= instr.getNumOthers() / 2U)
+    //                           : (inverted < instr.getNumOthers() / 2U))
+    //     return false;
+    // }
 
     HWInstrBuilder build{ctx, instr};
     SmallVec<HWValue, 8> ops;
@@ -1570,6 +1729,8 @@ private:
         return true;
       if (optimizeOneHotMuxUndef(instr))
         return true;
+      if (liftOneHotMUX(instr))
+        return true;
       break;
     }
 
@@ -1609,9 +1770,12 @@ private:
       if (coalesceConcatOfLoads(instr))
         return true;
 
-    if (instr.isOpc(HW_CONCAT))
+    if (instr.isOpc(HW_CONCAT)) {
       if (sinkMUX(instr))
         return true;
+      if (sinkOneHotMUX(instr))
+        return true;
+    }
 
     if (instr.isOpc(HW_INSERT))
       if (fuseInserts(instr.as<InsertIRef>()))

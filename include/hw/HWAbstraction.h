@@ -6,6 +6,7 @@
 #include "dyno/Context.h"
 #include "dyno/IDs.h"
 #include "dyno/Instr.h"
+#include "dyno/MutInstr.h"
 #include "dyno/Obj.h"
 #include "dyno/Opcode.h"
 #include "hw/BitRange.h"
@@ -112,6 +113,12 @@ public:
         }(),
         ...);
     return size;
+  }
+
+  template <IsFatDynObjRef T> HWValue build(MutInstr<T> &&mut) {
+    auto rv = mut.build();
+    insertInstr(rv);
+    return rv.def()->template as<HWValue>();
   }
 
   // does not place in CFG
@@ -819,6 +826,37 @@ public:
     return rv;
   }
 
+  HWValue buildConcat(OperandVec<HWValue> &&templ) {
+    assert(templ.getNumDefs() == 1);
+
+    if (templ[0] == nullref)
+      templ[0] = ctx.getStore<Wire>().create();
+
+    bool allConstant = true;
+    uint32_t bits = 0;
+    for (auto op : templ.others().as<HWValue>()) {
+      bits += *op.getNumBits();
+      allConstant &= op.is<ConstantRef>();
+    }
+
+    if (allConstant) {
+      auto cbuild = ConstantBuilder{ctx.getStore<Constant>()};
+      if (templ.getNumOperands() == 0)
+        return cbuild.val(0, 0).get();
+      for (auto val : templ.others().as<ConstantRef>())
+        cbuild.concatLHS(val);
+
+      return cbuild.get();
+    }
+
+    auto wire = templ.def()->as<WireRef>();
+    wire->numBits = bits;
+
+    insertInstr(templ.build(HW_CONCAT));
+
+    return wire;
+  }
+
   HWValue buildRepeat(HWValue value, unsigned count) {
     if (value.is<ConstantRef>()) {
       return ConstantBuilder{ctx.getStore<Constant>()}
@@ -1394,6 +1432,21 @@ public:
     for (auto [sel, val] : cases)
       ib.addRef(sel).addRef(val);
     return defW;
+  }
+  HWValue buildOneHotMux(OperandVec<HWValue> &&templ) {
+    assert(templ.getNumDefs() == 1);
+
+    if (!templ[0])
+      templ[0] = ctx.getStore<Wire>().create();
+
+    templ.others().pairwise().sort([](auto lhs, auto rhs) {
+      return commutativeOpOperandOrder(lhs.second, rhs.second);
+    });
+
+    auto val = templ.def(0)->as<WireRef>();
+    val->numBits = templ.other(1)->getNumBits();
+    insertInstr(templ.build(HW_ONEHOT_MUX));
+    return val;
   }
 
   void destroyObj(FatDynObjRef<> obj) {

@@ -19,6 +19,7 @@
 #include <limits>
 #include <support/InlineStorage.h>
 #include <support/Ranges.h>
+#include <type_traits>
 #include <utility>
 
 namespace dyno {
@@ -29,6 +30,7 @@ class InstrRef;
 class OperandRef;
 class InstrDefUse;
 class InsrBuilder;
+template <IsFatDynObjRef T> class MutInstr;
 
 class Operand : public ByValueRTTIUtilMixin<Operand>, ByValueRTTITag2 {
   friend class Instr;
@@ -44,6 +46,7 @@ class Operand : public ByValueRTTIUtilMixin<Operand>, ByValueRTTITag2 {
     auto ptr = custom.as<T *>();
     return {ref, *ptr};
   }
+  Operand() = default;
 
 public:
   static inline bool isDefUseOperand(DynObjRef ref) {
@@ -103,6 +106,7 @@ class Instr : public TrailingObjArr<Instr, Operand> {
   friend class InstrRef;
   friend class OperandRef;
   friend class InstrBuilder;
+  template <IsFatDynObjRef T> friend class MutInstr;
 
   OpcodeID opc;
   DialectID dialect;
@@ -127,6 +131,13 @@ public:
   Instr &operator=(Instr &&) = delete;
 
   ~Instr() = default;
+
+  Instr(Instr &&old, size_t numOperands)
+      : opc(old.opc), dialect(old.dialect), _unused(old._unused),
+        numOperands(numOperands), numDefs(old.numDefs),
+        customStorage(old.customStorage) {
+    assert(numOperands <= 0x1000);
+  }
 
 private:
   iterator begin() { return trailing(); }
@@ -236,6 +247,8 @@ public:
   Operand *operator->() const { return &instrRef->operand(getNum()); }
   Operand &operator[](int index) const { return *((*this) + index); }
   explicit operator Operand &() const { return instrRef->operand(getNum()); }
+
+  template <typename T> T as() const { return (*this)->as<T>(); }
 
   template <typename T> void replace(FatObjRef<T> newRef) {
     return replace(newRef.template as<FatDynObjRef<>>());
@@ -397,6 +410,27 @@ public:
       op.destroy();
     }
   }
+};
+
+template <typename T>
+concept IsInstrRef = requires(T ref) {
+  // todo: more specific
+  ref.begin();
+  ref.end();
+  ref.def_begin();
+  ref.def_end();
+  ref.other_begin();
+  ref.other_end();
+  ref.defs();
+  ref.others();
+  ref.getDialectOpcode();
+};
+
+template <typename T>
+concept IsThinOperandRef = requires(T ref) { ref->thin(); };
+template <typename T>
+concept IsFatOperandRef = IsThinOperandRef<T> && requires(T ref) {
+  ref->template as<FatDynObjRef<>>();
 };
 
 // #define INSERT_ERASE_HOOK
@@ -668,6 +702,7 @@ public:
     return *this;
   }*/
   InstrBuilder &addRef(FatDynObjRef<> ref) {
+    new (&*op) Operand{};
     op->emplace(ref);
     if (op.hasDefUse()) {
       op.addToDefUse();

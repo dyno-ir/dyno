@@ -1,5 +1,6 @@
 #pragma once
 
+#include <type_traits>
 #include <utility>
 
 template <typename Fn> class CallableRef;
@@ -15,6 +16,10 @@ template <typename Ret, typename... Params> class CallableRef<Ret(Params...)> {
 
 public:
   CallableRef() = default;
+  CallableRef(const CallableRef &) = default;
+  CallableRef(CallableRef &&) = default;
+  CallableRef &operator=(const CallableRef &) = default;
+  CallableRef &operator=(CallableRef &&) = default;
 
   Ret operator()(Params... params) const {
     assert(*this && "called uninitialized CallableRef");
@@ -22,9 +27,15 @@ public:
   }
 
   template <typename Callable>
+    requires(!std::is_same_v<std::remove_cvref_t<Callable>, CallableRef>)
   CallableRef(Callable &&callable)
       : callback(callOnObject<std::remove_reference_t<Callable>>),
         callable(reinterpret_cast<void *>(&callable)) {}
+
+  // for use with BindMethod<>
+  template <typename Obj>
+  CallableRef(Obj *callable, Ret (*callback)(void *, Params...))
+      : callback(callback), callable(reinterpret_cast<void *>(callable)) {}
 
   explicit operator bool() const { return callback; }
   bool operator==(const CallableRef<Ret(Params...)> &Other) const {
@@ -32,30 +43,5 @@ public:
   }
 };
 
-// directly refer to a member method bound with BindMethod<Obj::Member>.
-// The difference from CallableRef is essentially that the this-pointer
-// is part of (First, Params...) here while it is not for CallableRef.
-template <typename Fn> class MemberRef;
-template <typename Ret, typename First, typename... Params>
-class MemberRef<Ret(First, Params...)> {
-  Ret (*callback)(First, Params... params) = nullptr;
-  void *callable;
-
-public:
-  MemberRef() = default;
-  MemberRef(void *callable, Ret (*callback)(First, Params...))
-      : callback(callback), callable(callable) {}
-
-  Ret operator()(Params... params) const {
-    assert(*this && "called uninitialized MemberRef");
-    return callback(callable, std::forward<decltype(params)>(params)...);
-  }
-
-  explicit operator bool() const { return callback; }
-  bool operator==(const MemberRef<Ret(First, Params...)> &Other) const {
-    return callable == Other.callable;
-  }
-};
-
-template <typename Obj, typename Fn>
-MemberRef(Obj *obj, Fn *fn) -> MemberRef<Fn>;
+template <typename Obj, typename R, typename... Args>
+CallableRef(Obj *obj, R (*fn)(void *, Args...)) -> CallableRef<R(Args...)>;

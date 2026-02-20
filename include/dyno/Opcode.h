@@ -1,5 +1,5 @@
 #pragma once
-#include "dyno/IDs.h"
+#include "dyno/Interface.h"
 #include "support/Bits.h"
 #include "support/DenseMapInfo.h"
 

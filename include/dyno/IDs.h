@@ -1,12 +1,14 @@
 #pragma once
 
 #include "DialectInfo.h"
+#include "dyno/Opcode.h"
 #include "dyno/Type.h"
 #include <cstdint>
 #include <support/Bits.h>
 
 namespace dyno {
 using CoreType = SpecificDialectType<DialectID{DIALECT_CORE}>;
+using CoreOpc = SpecificDialectOpcode<DialectID{DIALECT_CORE}>;
 
 // clang-format off
 #define TYPES(x) \
@@ -27,6 +29,8 @@ enum class CoreTyID : uint8_t { TYPES(ENUM_EXPAND) };
 TYPES(CEXPR_EXPAND)
 #undef CEXPR_EXPAND
 
+static constexpr CoreOpc _CORE_INVALID_OPC{0};
+
 template <> struct DialectTraits<DIALECT_CORE> {
   constexpr static DialectInfo info{"core"};
   constexpr static TyInfo tyInfo[] = {
@@ -34,7 +38,7 @@ template <> struct DialectTraits<DIALECT_CORE> {
       TYPES(TYINFO_EXPAND)
 #undef TYINFO_EXPAND
   };
-  constexpr static OpcodeInfo opcInfo[] = {{"block_instr"}};
+  constexpr static OpcodeInfo opcInfo[] = {{"INVALID"}};
 };
 
 #undef TYPES

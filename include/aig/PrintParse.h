@@ -17,7 +17,7 @@ public:
   AIGDialectPrinter(PrinterBase *base) : base(base) {
     base->interfaces.registerVal<PrinterBase::type::print_fn>(
         DIALECT_AIG,
-        MemberRef{this, BindMethod<&AIGDialectPrinter::printAIGType>::fv});
+        CallableRef{this, BindMethod<&AIGDialectPrinter::printAIGType>::fv});
   }
 
   bool printAIGType(FatDynObjRef<> ref, bool def) {
