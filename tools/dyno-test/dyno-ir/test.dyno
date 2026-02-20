@@ -425,3 +425,61 @@ TEST_CASE :string("flip-flop-inference-rst-clk-en"), :block, :block, :block {
   meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS
   meta.INST_COMBINE_PASS
 }
+
+
+TEST_CASE :string("instcombine-mux-lift"), :block, :block, :block {
+  MODULE_DEF :module("mod"), :block {
+    INPUT_REGISTER_DEF %clk:register(1)
+    INPUT_REGISTER_DEF %rst:register(1)
+    INPUT_REGISTER_DEF %in_a:register(32)
+    INPUT_REGISTER_DEF %in_b:register(32)
+    INPUT_REGISTER_DEF %in_a2:register(32)
+    INPUT_REGISTER_DEF %in_b2:register(32)
+    INPUT_REGISTER_DEF %in_sel:register(1)
+    OUTPUT_REGISTER_DEF %out_a:register(96)
+
+    TRIGGER_DEF %trig:trigger(pos, pos), %clk, %rst
+
+    COMB_PROCESS_DEF :process, :block {
+      LOAD %a_v:wire(32), %in_a
+      LOAD %b_v:wire(32), %in_b
+      LOAD %a2_v:wire(32), %in_a2
+      LOAD %b2_v:wire(32), %in_b2
+      LOAD %sel_v:wire(1), %in_sel
+      NOT %nsel:wire(1), %sel_v
+
+      ONEHOT_MUX %first:wire(32), %sel_v, %a_v, %nsel, %b_v
+      ONEHOT_MUX %second:wire(32), %sel_v, %a2_v, %nsel, %b2_v
+
+      CONCAT %v:wire(96), %first, %second, #32'h0
+      STORE %v, %out_a
+    }
+  }
+}{
+  hw.MODULE_DEF %mod:module("mod"), %4:core.block {
+    hw.INPUT_REGISTER_DEF %clk:register(1)
+    hw.INPUT_REGISTER_DEF %rst:register(1)
+    hw.INPUT_REGISTER_DEF %in_a:register(32)
+    hw.INPUT_REGISTER_DEF %in_b:register(32)
+    hw.INPUT_REGISTER_DEF %in_a2:register(32)
+    hw.INPUT_REGISTER_DEF %in_b2:register(32)
+    hw.INPUT_REGISTER_DEF %in_sel:register(1)
+    hw.OUTPUT_REGISTER_DEF %out_a:register(96)
+    hw.TRIGGER_DEF %5:trigger(pos, pos), %clk, %rst
+    hw.COMB_PROCESS_DEF %6:process, %7:core.block {
+      hw.LOAD %w0:wire(32), %in_a
+      hw.LOAD %w1:wire(32), %in_b
+      hw.LOAD %w2:wire(32), %in_a2
+      hw.LOAD %w3:wire(32), %in_b2
+      hw.LOAD %w4:wire(1), %in_sel
+      op.NOT %w5:wire(1), %w4
+      hw.CONCAT %w9:wire(64), %w0, %w2
+      hw.CONCAT %w10:wire(64), %w1, %w3
+      hw.ONEHOT_MUX %w11:wire(64), %w4, %w9, %w5, %w10
+      hw.CONCAT %w12:wire(96), %w11, #32'd0
+      hw.STORE %w12, %out_a
+    }
+  }
+}{
+  meta.INST_COMBINE_PASS
+}
