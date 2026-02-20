@@ -5,6 +5,7 @@
 #include <initializer_list>
 #include <iterator>
 #include <numeric>
+#include <optional>
 #include <type_traits>
 
 template <typename It> class Range;
@@ -60,6 +61,7 @@ public:
   deref_iterator() = default;
   deref_iterator(T it) : it(it) {}
 
+  reference operator*() const { return **it; }
   reference operator*() { return **it; }
 
   deref_iterator &operator++() {
@@ -140,6 +142,7 @@ public:
   transform_iterator(T it, TransformT transformF)
       : it(it), i(0), transformF(transformF) {}
 
+  auto operator*() const { return transformF(i, *it); }
   auto operator*() { return transformF(i, *it); }
 
   transform_iterator &operator++() {
@@ -591,7 +594,7 @@ public:
   pairwise_iterator() = default;
   explicit pairwise_iterator(T it) : it(it) {}
 
-  std::pair<decltype(*it), decltype(*it)> operator*() {
+  std::pair<decltype(*it), decltype(*it)> operator*() const {
     return {*it, *std::next(it)};
   }
 
