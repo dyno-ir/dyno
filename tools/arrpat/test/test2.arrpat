@@ -65,6 +65,14 @@ with [{
 }]
 replace $out -> $in
 
+match {
+  HW_REPEAT $tmp, $in
+  OP_NOT $out, $tmp:HW_WIRE
+}
+replace {
+  OP_NOT $x:wire_like($in), $in
+  HW_REPEAT $out, $x
+}
 
 match {
   OP_XOR $out, $in, #'1
@@ -692,6 +700,27 @@ replace {
 }
 */
 
+match {
+  HW_ASSUME $x, $a, #1'b1
+}
+replace $x -> $a
+
+match {
+  HW_ASSUME $x, $a, $cond_0
+  HW_ASSUME $y, $x:HW_WIRE, $cond_1
+}
+replace {
+  OP_AND $both:wire_like($cond_0), $cond_0, $cond_1
+  HW_ASSUME $y, $a, $both
+}
+
+match {
+  HW_ONEHOT_MUX $out, $sel, $val
+}
+//replace $out -> $val
+replace {
+  HW_ASSUME $out, $val, $sel
+}
 
 match {
   $op{OP_SDIV, OP_UDIV} $out, $any, #'0

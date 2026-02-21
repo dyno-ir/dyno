@@ -3,6 +3,7 @@
 #include "dyno/Constant.h"
 #include "dyno/Context.h"
 #include "dyno/HierBlockIterator.h"
+#include "dyno/MutInstr.h"
 #include "dyno/Obj.h"
 #include "dyno/Pass.h"
 #include "hw/AutoDebugInfo.h"
@@ -45,7 +46,8 @@ public:
   FIELD(bool, lowerOrderingICMP, true)                                         \
   FIELD(bool, lowerShift, true)                                                \
   FIELD(bool, lowerInsert, true)                                               \
-  FIELD(bool, lowerExtract, true)
+  FIELD(bool, lowerExtract, true)                                              \
+  FIELD(bool, lowerOneHotMux, true)
   CONFIG_STRUCT(CONFIG_STRUCT_LAMBDA)
 #undef CONFIG_STRUCT_LAMBDA
   Config config;
@@ -849,6 +851,25 @@ private:
     destroyMap[insert] = 1;
   }
 
+  void lowerOneHotMux(InstrRef instr) {
+    auto numCases = instr.getNumOthers() / 2;
+    auto defW = instr.def()->as<WireRef>();
+    auto bits = *defW.getNumBits();
+    OperandVec<HWValue> orOperands{ctx, 1, numCases};
+    orOperands.emplace_back(defW);
+    build.setInsertPoint(instr);
+
+    for (auto [sel, val] : instr.others().as<HWValue>().pairwise()) {
+      assert(sel.getNumBits() == 1);
+      auto gated = build.buildAnd(build.buildRepeat(sel, bits), val);
+      orOperands.emplace_back(gated);
+    }
+
+    build.buildOr(std::move(orOperands));
+    instr.def().replace(FatDynObjRef{nullref});
+    destroyMap[instr] = 1;
+  }
+
   void runOnInstr(InstrRef instr) {
     auto token = autoDebugInfo.addWithToken(instr);
 
@@ -915,6 +936,10 @@ private:
     case *HW_INSERT:
       lowerNonConstInsert(instr);
       break;
+
+    case *HW_ONEHOT_MUX:
+      lowerOneHotMux(instr);
+      break;
     }
   }
 
@@ -954,6 +979,9 @@ public:
 
       if (instr.isOpc(HW_INSERT))
         return config.lowerInsert;
+
+      if (instr.isOpc(HW_ONEHOT_MUX))
+        return config.lowerOneHotMux;
 
       return false;
     };
@@ -999,9 +1027,8 @@ public:
   void runProcess(ProcessIRef proc) { runOnProcess(proc); }
   void runModule(ModuleIRef mod) { runOnModule(mod); }
 
-  static constexpr auto runFuncs =
-      std::make_tuple(&LowerOpsPass::runProcess, &LowerOpsPass::runModule,
-                      &LowerOpsPass::run);
+  static constexpr auto runFuncs = std::make_tuple(
+      &LowerOpsPass::runProcess, &LowerOpsPass::runModule, &LowerOpsPass::run);
 
   static auto make(Context &ctx) { return LowerOpsPass(ctx); }
   explicit LowerOpsPass(Context &ctx)

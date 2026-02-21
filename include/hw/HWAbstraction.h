@@ -249,6 +249,10 @@ public:
   template <typename T> HWValue ident(Range<T> range) {                        \
     SmallVec<HWValue, 8> vec{range};                                           \
     return ident(MutArrayRef{vec});                                            \
+  }                                                                            \
+  HWValue ident(OperandVec<HWValue> &&vec) {                                   \
+    vec.setOpcode(opcode);                                                     \
+    return buildCommutative(std::move(vec));                                   \
   }
 
   static bool commutativeOpWireOrder(WireRef lhs, WireRef rhs) {
@@ -262,6 +266,59 @@ public:
   }
 
   FOR_HW_COMM_OPS(COMM_OP)
+
+  HWValue buildCommutative(MutInstr<HWValue> &&templ) {
+    assert(templ.getNumDefs() == 1);
+    templ.others().sort(commutativeOpOperandOrder);
+    bool multipleConstants = templ.size() >= 3 &&
+                             templ.end()[-1].is<ConstantRef>() &&
+                             templ.end()[-2].is<ConstantRef>();
+
+    auto bits = *templ.other(0).getNumBits();
+    assert(templ.others().drop_front().all(
+        [&](HWValue val) { return val.getNumBits() == bits; }));
+
+    if (multipleConstants) {
+      auto cbuild = ConstantBuilder{ctx.getStore<Constant>()};
+      cbuild.val(bits, 0);
+
+      unsigned cnt = 0;
+      for (auto val : templ.others().reverse()) {
+        auto constant = val.as<ConstantRef>();
+        if (!constant)
+          break;
+        switch (*templ.getDialectOpcode()) {
+        case *OP_ADD:
+          cbuild.add(constant);
+          break;
+        case *OP_MUL:
+          cbuild.mul(constant);
+          break;
+        case *OP_AND:
+          cbuild.bitAND(constant);
+          break;
+        case *OP_OR:
+          cbuild.bitOR(constant);
+          break;
+        case *OP_XOR:
+          cbuild.bitXOR(constant);
+          break;
+        }
+        cnt++;
+      }
+      templ.resize(templ.size() - cnt);
+    }
+
+    if (templ.getNumOthers() == 1)
+      return templ.other(0);
+
+    if (!templ.def())
+      templ.def() = ctx.getStore<Wire>().create(bits);
+
+    auto ref = templ.build();
+    insertInstr(ref);
+    return ref.def()->as<HWValue>();
+  }
 
   HWValue buildCommutative(DialectOpcode opc, MutArrayRef<HWValue> operands) {
     switch (*opc) {
@@ -849,7 +906,7 @@ public:
       return cbuild.get();
     }
 
-    auto wire = templ.def()->as<WireRef>();
+    auto wire = templ.def().as<WireRef>();
     wire->numBits = bits;
 
     insertInstr(templ.build(HW_CONCAT));
@@ -1443,8 +1500,8 @@ public:
       return commutativeOpOperandOrder(lhs.second, rhs.second);
     });
 
-    auto val = templ.def(0)->as<WireRef>();
-    val->numBits = templ.other(1)->getNumBits();
+    auto val = templ.def(0).as<WireRef>();
+    val->numBits = templ.other(1).getNumBits();
     insertInstr(templ.build(HW_ONEHOT_MUX));
     return val;
   }

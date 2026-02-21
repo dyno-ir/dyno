@@ -29,6 +29,32 @@ TEST_CASE :string("instcombine-constants"), :block, :block, :block {
   meta.INST_COMBINE_PASS
 }
 
+TEST_CASE :string("instcombine-repeat-not"), :block, :block, :block {
+  MODULE_DEF :module("mod"), :block {
+    INPUT_REGISTER_DEF %in_a:register(1)
+    OUTPUT_REGISTER_DEF %out_a:register(100)
+    hw.COMB_PROCESS_DEF :process, :block {
+      LOAD %a:wire(1), %in_a
+      REPEAT %aa:wire(100), %a
+      NOT %n:wire(100), %aa
+      STORE %n, %out_a
+    }
+  }
+}{
+  hw.MODULE_DEF %mod:module("mod"), %108:core.block {
+    hw.INPUT_REGISTER_DEF %in_a:register(1)
+    hw.OUTPUT_REGISTER_DEF %out_a:register(100)
+    hw.COMB_PROCESS_DEF %109:process, %110:core.block {
+      hw.LOAD %w0:wire(1), %in_a
+      op.NOT %w3:wire(1), %w0
+      hw.REPEAT %w2:wire(100), %w3
+      hw.STORE %w2, %out_a
+    }
+  }
+}{
+  meta.INST_COMBINE_PASS
+}
+
 TEST_CASE :string("fuzzy-cse-basic"), :block, :block, :block {
   MODULE_DEF :module("mod"), :block {
     INPUT_REGISTER_DEF %in_a:register(32)

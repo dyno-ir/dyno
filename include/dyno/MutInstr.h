@@ -58,7 +58,7 @@ public:
   auto defs() { return Range{def_begin(), def_end()}; }
   auto def(unsigned i = 0) {
     assert(i < instr->numDefs);
-    return &def_begin()[i];
+    return def_begin()[i];
   }
 
   T *other_begin() {
@@ -68,7 +68,7 @@ public:
   auto others() { return Range{other_begin(), other_end()}; }
   auto other(unsigned i) {
     assert(i < sz - instr->numDefs);
-    return &other_begin()[i];
+    return other_begin()[i];
   }
 
   T &operator[](size_t i) { return begin()[i]; }
