@@ -23,6 +23,7 @@
 #include "hw/passes/LoopSimplify.h"
 #include "hw/passes/LowerOps.h"
 #include "hw/passes/ModuleInline.h"
+#include "hw/passes/MuxTreeFlatten.h"
 #include "hw/passes/MuxTreeOptimization.h"
 #include "hw/passes/OrderInstrs.h"
 #include "hw/passes/ParseLiberty.h"
@@ -34,6 +35,7 @@
 #include "hw/passes/SeqToComb.h"
 #include "hw/passes/SimpleMemoryMapping.h"
 #include "hw/passes/TriggerDedupe.h"
+#include "op/IDs.h"
 #include "support/Debug.h"
 
 namespace dyno {
@@ -56,7 +58,7 @@ class PassPipeline {
   ABCPass abc{ctx};
   ParseLibertyPass parseLiberty{ctx};
   FlipFlopInferencePass flipFlopInference{ctx};
-  MuxTreeOptimizationPass muxTreeOpt{ctx};
+  MuxTreeFlattenPass muxTreeFlatten{ctx};
   CommonSubexpressionEliminationPass cse{ctx};
   FlipFlopMappingPass ffMap{ctx};
   RemoveBuffersPass removeBufs{ctx};
@@ -211,6 +213,7 @@ public:
         .lowerShift = false,
         .lowerInsert = false,
         .lowerExtract = false,
+        .lowerOneHotMux = false,
     };
 
     runPass(lowerOps);
@@ -267,8 +270,10 @@ public:
     runPass(instCombine);
     runPass(aggressiveDCE);
 
-    // muxTreeOpt.config.exploreConditions = true;
-    // runPass(muxTreeOpt);
+    runPass(muxTreeFlatten);
+    fuzzyCse.config.opToShare = OP_AND;
+    runPass(fuzzyCse, true);
+    runPass(orderInstrs);
     runPass(cse);
     runPass(instCombine);
 
@@ -290,6 +295,7 @@ public:
         .lowerShift = true,
         .lowerInsert = true,
         .lowerExtract = true,
+        .lowerOneHotMux = false,
     };
     // dumpDyno("pre_lower.dyno");
     runPass(lowerOps);
@@ -319,14 +325,6 @@ public:
     runPass(cse);
     runPass(instCombine);
 
-    // re-run mux tree opt to remove loopback MUXs after ff inference
-    // dumpDyno("pre_mux_opt.dyno");
-    muxTreeOpt.config.dontCareMUXsOnly = true;
-    muxTreeOpt.config.exploreConditions = false;
-    runPass(muxTreeOpt);
-    runPass(instCombine);
-    // dumpDyno("postmux_opt.dyno");
-
     runLibertyPipeline();
     // todo: don't re-order after fmap or canonicalize cylic deps in
     // orderInstrs. otherwise we get a break at random point in the cycle.
@@ -355,9 +353,11 @@ public:
         .lowerShift = true,
         .lowerInsert = true,
         .lowerExtract = true,
+        .lowerOneHotMux = true,
     };
     runPass(lowerOps);
     instCombine.config.fuseCommutative = false;
+    instCombine.config.removeAssumes = true;
     runPass(instCombine);
     runPass(aggressiveDCE);
 
