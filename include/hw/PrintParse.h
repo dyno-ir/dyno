@@ -176,6 +176,9 @@ public:
       lexer->popEnsure(DynoLexer::op_rbrclose);
       return trigger;
     }
+    case *HW_MEM_PORT: {
+      return ctx->getStore<MemoryPort>().create();
+    }
     }
 
     return nullref;

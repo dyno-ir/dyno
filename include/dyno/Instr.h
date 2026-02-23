@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Obj.h"
+#include "dyno/IDImpl.h"
 #include "dyno/IDs.h"
 #include "dyno/Opcode.h"
 #include "dyno/Type.h"
@@ -260,7 +261,6 @@ public:
 private:
   void addToDefUse() const;
 };
-
 class InstrRef : public FatObjRef<Instr> {
   friend class InstrDefUse;
 
@@ -915,3 +915,17 @@ inline uint32_t OperandRef::getLinkIdx() {
 }
 
 } // namespace dyno
+
+template <> struct DenseMapInfo<dyno::OperandRef> {
+  static dyno::OperandRef getEmptyKey() {
+    return dyno::OperandRef{
+        dyno::FatObjRef<dyno::Instr>{dyno::ObjID::invalid(), nullptr, 0}};
+  }
+  // optional only
+  static dyno::OperandRef getTombstoneKey() = delete;
+  static unsigned getHashValue(const dyno::OperandRef &k) = delete;
+  static bool isEqual(const dyno::OperandRef &lhs,
+                      const dyno::OperandRef &rhs) {
+    return lhs.instr() == rhs.instr();
+  }
+};

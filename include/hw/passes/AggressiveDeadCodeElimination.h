@@ -15,6 +15,7 @@
 #include "hw/HWValue.h"
 #include "hw/IDs.h"
 #include "hw/LoadStore.h"
+#include "hw/Memory.h"
 #include "hw/Register.h"
 #include "hw/SensList.h"
 #include "op/IDs.h"
@@ -69,6 +70,17 @@ class AggressiveDeadCodeEliminationPass
         if (use - instr.begin() != 3)
           break;
         worklist.emplace_back(instr);
+        break;
+      }
+
+      case *HW_WRITE_PORT_DEF:
+        break;
+
+      case *HW_READ_PORT_DEF: {
+        auto asPort = instr.as<MemoryPortIRef>();
+        if (use != asPort.data())
+          break;
+        worklist.emplace_back(ctx.getCFG()[instr].blockRef().def()->instr());
         break;
       }
 
@@ -351,6 +363,23 @@ class AggressiveDeadCodeEliminationPass
       for (unsigned i = 0; i < asFF.numRsts(); i++) {
         pushInstr(asFF.rst(i).iref());
         visitHWValue(asFF.rstVal(i));
+      }
+      break;
+    }
+
+    case *HW_MEMORY_DEF: {
+      if (instrMap[instr])
+        break;
+      auto asMem = instr.as<MemoryInstrRef>();
+      for (auto port : asMem.ports()) {
+        instrMap[port] = 1;
+        pushInstr(port.data()->as<RegisterRef>().iref());
+        if (port.hasClock())
+          pushInstr(port.clock()->as<RegisterRef>().iref());
+        if (port.hasEn())
+          pushInstr(port.en()->as<RegisterRef>().iref());
+        for (auto term : port.terms())
+          pushInstr(term.getIdx().iref());
       }
       break;
     }

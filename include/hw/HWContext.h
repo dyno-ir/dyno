@@ -11,6 +11,7 @@
 #include "hw/DebugInfo.h"
 #include "hw/HWValue.h"
 #include "hw/IDs.h"
+#include "hw/MemoryPort.h"
 #include "hw/Module.h"
 #include "hw/Process.h"
 #include "hw/SensList.h"
@@ -33,7 +34,7 @@ public:
 
   std::tuple<StoreType_t<Wire>, StoreType_t<Register>, StoreType_t<Process>,
              StoreType_t<Module>, StoreType_t<Trigger>,
-             StoreType_t<StdCellInfo>>
+             StoreType_t<StdCellInfo>, StoreType_t<MemoryPort>>
       stores;
 
   ValueNameInfo<Register> regNameInfo;

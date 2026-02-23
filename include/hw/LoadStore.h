@@ -13,12 +13,13 @@ template <typename Derived> struct AddressGenTermMixin {
 public:
 };
 
-class AddressGenTermOperand
-    : public AddressGenTermMixin<AddressGenTermOperand> {
+template <typename IdxT>
+class AddressGenTermOperandBase
+    : public AddressGenTermMixin<AddressGenTermOperandBase<IdxT>> {
   OperandRef base;
 
 public:
-  HWValue getIdx() const { return base[0].as<HWValue>(); }
+  IdxT getIdx() const { return base[0].as<IdxT>(); }
   uint32_t getFact() const { return base[1].as<ConstantRef>().getExactVal(); }
   Optional<uint32_t> getMax() const {
     auto val = base[2].as<ConstantRef>().getExactVal();
@@ -29,8 +30,9 @@ public:
 
   OperandRef getUnderlyingOperand() const { return base; }
 
-  AddressGenTermOperand(OperandRef base) : base(base) {}
+  AddressGenTermOperandBase(OperandRef base) : base(base) {}
 };
+using AddressGenTermOperand = AddressGenTermOperandBase<HWValue>;
 
 class AddressGenTerm : public AddressGenTermMixin<AddressGenTerm> {
   HWValue idx;

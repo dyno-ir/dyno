@@ -10,6 +10,97 @@
 
 template <typename It> class Range;
 
+// Iterator boilerplate
+// - Forward: in base implement operator++(), operator==
+// - Bidir:   in base implement operator++(), operator--(), operator==
+// - Random:  in base implement operator+=(), operator-(), operator<=>
+template <typename derived, typename iterator_category,
+          typename difference_type>
+class base_iterator {
+private:
+  static constexpr bool isRandom =
+      std::is_same_v<iterator_category, std::random_access_iterator_tag>;
+  static constexpr bool isBidir =
+      std::is_same_v<iterator_category, std::bidirectional_iterator_tag> ||
+      isRandom;
+
+  derived &self() { return *static_cast<derived *>(this); }
+  const derived &cself() const { return *static_cast<const derived *>(this); }
+
+  struct Empty {};
+  using difference_type_safe =
+      std::conditional_t<isRandom, difference_type, Empty>;
+
+public:
+  derived &operator++()
+    requires(isRandom)
+  {
+    self() += 1;
+    return self();
+  }
+
+  derived operator++(int) {
+    derived tmp(self());
+    ++(self());
+    return tmp;
+  }
+
+  derived &operator--()
+    requires(isRandom)
+  {
+    (self()) -= 1;
+    return self();
+  }
+
+  derived operator--(int)
+    requires(isBidir)
+  {
+    derived tmp(self());
+    --(self());
+    return tmp;
+  }
+
+  derived &operator-=(difference_type_safe n)
+    requires(isRandom)
+  {
+    self().it += -n;
+    return self();
+  }
+
+  friend derived operator+(derived a, difference_type_safe n)
+    requires(isRandom)
+  {
+    -a += n;
+    return a;
+  }
+
+  friend derived operator+(difference_type_safe n, derived a)
+    requires(isRandom)
+  {
+    a += n;
+    return a;
+  }
+
+  friend derived operator-(derived a, difference_type_safe n)
+    requires(isRandom)
+  {
+    a -= n;
+    return a;
+  }
+
+  decltype(auto) operator[](difference_type_safe n) const
+    requires(isRandom)
+  {
+    derived tmp(cself());
+    tmp += n;
+    return *tmp;
+  }
+
+  friend bool operator!=(const derived &a, const derived &b) {
+    return !(a == b);
+  }
+};
+
 template <typename T> class earlyincr_iterator {
 public:
   using iterator_category = std::forward_iterator_tag;
@@ -119,18 +210,30 @@ public:
   }
 };
 
-template <typename T, typename TransformT> class transform_iterator {
+template <typename T, typename TransformT>
+class transform_iterator
+    : public base_iterator<transform_iterator<T, TransformT>,
+                           typename std::iterator_traits<T>::iterator_category,
+                           typename std::iterator_traits<T>::difference_type> {
   T it;
   size_t i;
   TransformT transformF;
 
 public:
-  using iterator_category = std::forward_iterator_tag;
+  using iterator_category = std::iterator_traits<T>::iterator_category;
   using value_type = decltype(transformF(i, *it));
   using pointer = value_type *;
   using reference = value_type &;
   using difference_type = std::iterator_traits<T>::difference_type;
 
+private:
+  static constexpr bool isRandom =
+      std::is_same_v<iterator_category, std::random_access_iterator_tag>;
+  static constexpr bool isBidir =
+      std::is_same_v<iterator_category, std::bidirectional_iterator_tag> ||
+      isRandom;
+
+public:
   transform_iterator()
     requires std::is_default_constructible_v<TransformT>
   = default;
@@ -150,21 +253,37 @@ public:
     ++i;
     return *this;
   }
+  transform_iterator &operator--()
+    requires(isBidir)
+  {
+    --it;
+    --i;
+    return *this;
+  }
+  transform_iterator &
+  operator+=(std::conditional_t<isRandom, difference_type, int> n)
+    requires(isRandom)
+  {
+    it += n;
+    i += n;
+    return *this;
+  }
 
-  transform_iterator operator++(int) {
-    transform_iterator tmp(*this);
-    ++(*this);
-    return tmp;
+  difference_type operator-(const transform_iterator &o)
+    requires(isRandom)
+  {
+    return it - o.it;
   }
 
   friend bool operator==(const transform_iterator &a,
                          const transform_iterator &b) {
     return a.it == b.it;
   }
-
-  friend bool operator!=(const transform_iterator &a,
-                         const transform_iterator &b) {
-    return a.it != b.it;
+  friend auto operator<=>(const transform_iterator &a,
+                          const transform_iterator &b)
+    requires(isRandom)
+  {
+    return a.it <=> b.it;
   }
 };
 
@@ -488,94 +607,6 @@ public:
   }
 };
 
-// Iterator boilerplate
-// Forward: in base implement operator++(), operator==
-// Bidir:   in base implement operator++(), operator--(), operator==
-// Random:  in base implement operator+=(), operator-(), operator<=>
-template <typename derived, typename difference_type, typename reference>
-class base_iterator {
-private:
-  static constexpr bool isRandom =
-      std::is_same_v<typename derived::iterator_category,
-                     std::random_access_iterator_tag>;
-  static constexpr bool isBidir =
-      std::is_same_v<typename derived::iterator_category,
-                     std::bidirectional_iterator_tag> ||
-      isRandom;
-
-  derived &self() { return *static_cast<derived *>(this); }
-  const derived &cself() const { return *static_cast<derived *>(this); }
-
-public:
-  derived &operator++()
-    requires(isRandom)
-  {
-    self() += 1;
-    return self();
-  }
-
-  derived operator++(int) {
-    derived tmp(self());
-    ++(self());
-    return tmp;
-  }
-
-  derived &operator--()
-    requires(isRandom)
-  {
-    (self()) -= 1;
-    return self();
-  }
-
-  derived operator--(int)
-    requires(isBidir)
-  {
-    derived tmp(self());
-    --(self());
-    return tmp;
-  }
-
-  derived &operator-=(difference_type n)
-    requires(isRandom)
-  {
-    self().it += -n;
-    return self();
-  }
-
-  friend derived operator+(derived a, difference_type n)
-    requires(isRandom)
-  {
-    a += n;
-    return a;
-  }
-
-  friend derived operator+(difference_type n, derived a)
-    requires(isRandom)
-  {
-    a += n;
-    return a;
-  }
-
-  friend derived operator-(derived a, difference_type n)
-    requires(isRandom)
-  {
-    a -= n;
-    return a;
-  }
-
-  reference operator[](difference_type n) const
-    requires(isRandom)
-  {
-    auto tmp(self());
-    tmp += n;
-    return *tmp;
-  }
-
-  friend bool operator!=(const derived &a, const derived &b) {
-    return a.it != b.it;
-  }
-};
-
 template <typename T> class pairwise_iterator {
   T it;
 
@@ -700,8 +731,8 @@ public:
 template <typename T>
 class step_iterator
     : public base_iterator<step_iterator<T>,
-                           typename std::iterator_traits<T>::difference_type,
-                           typename std::iterator_traits<T>::reference> {
+                           typename std::iterator_traits<T>::iterator_category,
+                           typename std::iterator_traits<T>::difference_type> {
   T it;
   unsigned n;
 

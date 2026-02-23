@@ -14,17 +14,18 @@ class Optional {
   T val;
 
 public:
-  static constexpr auto Invalid = InvalidF();
   constexpr Optional() : val(InvalidF()) {}
-  constexpr Optional(const T &val) : val(val) { assert(val != Invalid); }
-  constexpr Optional(T &&val) : val(std::move(val)) { assert(val != Invalid); }
+  constexpr Optional(const T &val) : val(val) { assert(val != InvalidF()); }
+  constexpr Optional(T &&val) : val(std::move(val)) {
+    assert(val != InvalidF());
+  }
   constexpr Optional &operator=(const T &rhs) {
-    assert(rhs != Invalid);
+    assert(rhs != InvalidF());
     val = rhs;
     return *this;
   }
   constexpr Optional &operator=(T &&rhs) {
-    assert(rhs != Invalid);
+    assert(rhs != InvalidF());
     val = std::move(rhs);
     return *this;
   };
@@ -36,7 +37,7 @@ public:
 
   constexpr Optional(nullopt_t) : Optional() {}
   constexpr Optional &operator=(nullopt_t) {
-    val = Invalid;
+    val = InvalidF();
     return *this;
   }
 
@@ -47,7 +48,7 @@ public:
     return lhs.val == rhs.val;
   }
 
-  explicit operator bool() const { return val != Invalid; }
+  explicit operator bool() const { return val != InvalidF(); }
 
   template <typename U = T>
     requires(!std::is_same_v<U, bool>)
@@ -69,6 +70,14 @@ public:
   constexpr const T &operator*() const {
     assert(*this);
     return val;
+  }
+  constexpr T *operator->() {
+    assert(*this);
+    return &val;
+  }
+  constexpr const T *operator->() const {
+    assert(*this);
+    return &val;
   }
 
   bool has() const { return bool(*this); }

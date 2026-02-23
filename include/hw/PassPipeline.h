@@ -270,15 +270,14 @@ public:
     runPass(instCombine);
     runPass(aggressiveDCE);
 
+    runPass(simpleMemMap);
+    runPass(aggressiveDCE);
+    runPass(instCombine);
+
     runPass(muxTreeFlatten);
     fuzzyCse.config.opToShare = OP_AND;
     runPass(fuzzyCse, true);
     runPass(orderInstrs);
-    runPass(cse);
-    runPass(instCombine);
-
-    instCombine.config.liftMUX = true;
-    runPass(instCombine);
     runPass(cse);
     runPass(instCombine);
 

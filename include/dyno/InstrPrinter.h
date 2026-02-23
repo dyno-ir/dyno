@@ -55,6 +55,7 @@ public:
   }
 
   IndentPrinter(OStreamWrapper str) : str(str) {}
+  IndentPrinter() : str() {}
 };
 
 class PrinterBase {
@@ -116,8 +117,7 @@ public:
   struct opc {
     using print_fn = CallableRef<bool(FatDynObjRef<>, bool)>;
   };
-  using name_fn =
-      CallableRef<std::optional<IntroducedName>(FatDynObjRef<>)>;
+  using name_fn = CallableRef<std::optional<IntroducedName>(FatDynObjRef<>)>;
   Interfaces<NUM_DIALECTS, type::print_fn, opc::print_fn, name_fn> interfaces;
 
   OStreamWrapper str;
@@ -126,6 +126,9 @@ public:
               Interface<TyInfo> tyI, Interface<OpcodeInfo> opcodeI)
       : indentPrint(str), dialectI(dialectI), tyI(tyI), opcodeI(opcodeI),
         str(str) {}
+  PrinterBase(Interface<DialectInfo> dialectI, Interface<TyInfo> tyI,
+              Interface<OpcodeInfo> opcodeI)
+      : indentPrint(), dialectI(dialectI), tyI(tyI), opcodeI(opcodeI), str() {}
 
   void printTypeDefault(DynObjRef ref) {
     if (!isDefault[ref.getDialectID()]) {
@@ -344,6 +347,13 @@ public:
   ContextPrinterWrapper(Context &ctx, OStreamWrapper str)
       : PrinterBase(
             str,
+            Interface<DialectInfo>{ctx.getDialectInfos().dialectInfoArr.data()},
+            Interface<TyInfo>{ctx.getDialectInfos().typeInfoArr.data()},
+            Interface<OpcodeInfo>{ctx.getDialectInfos().opcodeInfoArr.data()}),
+        printers{(static_cast<void>(sizeof(Printers)), this)...} {}
+
+  ContextPrinterWrapper(Context &ctx)
+      : PrinterBase(
             Interface<DialectInfo>{ctx.getDialectInfos().dialectInfoArr.data()},
             Interface<TyInfo>{ctx.getDialectInfos().typeInfoArr.data()},
             Interface<OpcodeInfo>{ctx.getDialectInfos().opcodeInfoArr.data()}),
