@@ -366,6 +366,15 @@ public:
     }
     return cnt;
   }
+
+  size_t ctz() const {
+    size_t rv = 0;
+    size_t i = 0;
+    while (storage[i] == 0 && i < storage.size())
+      rv += WordBits;
+    rv += !!storage[i] ? std::countr_zero(storage[i]) : 0;
+    return rv;
+  }
 };
 
 class DynBitSet {

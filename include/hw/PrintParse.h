@@ -2,13 +2,18 @@
 #include "dyno/Context.h"
 #include "dyno/DialectInfo.h"
 #include "dyno/InstrPrinter.h"
+#include "dyno/Lexer.h"
 #include "dyno/Obj.h"
 #include "dyno/Parser.h"
 #include "hw/HWContext.h"
+#include "hw/IDs.h"
+#include "hw/MemoryPort.h"
 #include "hw/Module.h"
 #include "support/CallableRef.h"
+#include "support/Lexer.h"
 #include "support/TemplateUtil.h"
 #include <cctype>
+#include <charconv>
 
 namespace dyno {
 class HWDialectPrinter {
@@ -79,6 +84,18 @@ public:
       }
       break;
     }
+    case HW_MEM_PORT.type: {
+      auto asPort = ref.as<MemoryPortRef>();
+      str << "mem_port(";
+      str << asPort->delay;
+
+      for (auto &meta : asPort->writeForwardMeta) {
+        std::print(str, ", ({}, {})", meta.oldTime, meta.unkTime);
+      }
+
+      str << ")";
+      break;
+    }
     default:
       return false;
     }
@@ -118,7 +135,8 @@ public:
 
   explicit HWDialectParser(ParserBase *base) : base(*base) {
     base->interfaces.template registerVal<typename ParserBase::obj_parse_fn>(
-        DIALECT_HW, CallableRef{this, BindMethod<&HWDialectParser::parseHW>::fv});
+        DIALECT_HW,
+        CallableRef{this, BindMethod<&HWDialectParser::parseHW>::fv});
   }
 
   FatDynObjRef<> parseHW(DialectType type, ArrayRef<char> name) {
@@ -177,7 +195,27 @@ public:
       return trigger;
     }
     case *HW_MEM_PORT: {
-      return ctx->getStore<MemoryPort>().create();
+      auto ref = ctx->getStore<MemoryPort>().create();
+      lexer->popEnsure(DynoLexer::op_rbropen);
+      ref->delay = lexer->popEnsure(Token::INT_LITERAL).intLit.value;
+      if (lexer->popIf(DynoLexer::op_comma)) {
+        while (!lexer->peekIs(DynoLexer::op_rbrclose)) {
+          lexer->popEnsure(DynoLexer::op_rbropen);
+          auto a = lexer->popEnsure(Token::INT_LITERAL).intLit.value;
+          lexer->popEnsure(DynoLexer::op_comma);
+          auto b = lexer->popEnsure(Token::INT_LITERAL).intLit.value;
+          lexer->popEnsure(DynoLexer::op_rbrclose);
+          ref->writeForwardMeta.emplace_back(a, b);
+
+          if (!lexer->popIf(DynoLexer::op_comma))
+            break;
+        }
+      }
+      lexer->popEnsure(DynoLexer::op_rbrclose);
+      return ref;
+    }
+    case *HW_POINTER: {
+      return ctx->getStore<Pointer>().create();
     }
     }
 

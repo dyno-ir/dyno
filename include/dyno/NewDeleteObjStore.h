@@ -125,6 +125,7 @@ public:
     std::uninitialized_move_n(reinterpret_cast<TrailingType *>(&*old + 1),
                               std::min(ntrailing, sz),
                               reinterpret_cast<TrailingType *>(ptr + 1));
+    free(reinterpret_cast<void*>(old.getPtr()));
 
     map[old] = ptr;
     FatRefT rv{old.thin(), ptr};

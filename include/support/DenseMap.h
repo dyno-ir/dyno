@@ -357,7 +357,7 @@ public:
     return std::make_pair(false, iter);
   }
 
-  auto findOrInsert(const K &k, const V &&newVal) {
+  auto findOrInsert(const K &k, V &&newVal) {
     return findOrInsert(k, [&] { return std::move(newVal); });
   }
 
@@ -675,7 +675,6 @@ public:
   }
 
   ~LargeSetMap() {
-    this->Base::clearDelete();
     ::operator delete[](buckets, std::align_val_t(alignof(Bucket)));
   }
 };
@@ -771,6 +770,8 @@ class DenseMap : public LargeSetMap<
   using Base =
       LargeSetMap<DenseMapBase<DenseMap<K, V>, K, V, DenseMapBucket<K, V>>>;
   using Base::Base;
+public:
+  ~DenseMap() { this->Base::clearDelete(); }
 };
 
 template <typename K, typename V,

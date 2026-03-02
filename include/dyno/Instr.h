@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Obj.h"
+#include "dyno/Obj.h"
 #include "dyno/IDImpl.h"
 #include "dyno/IDs.h"
 #include "dyno/Opcode.h"

@@ -321,8 +321,10 @@ public:
     }
     size_t pos = it - begin();
     grow(sz + 1);
-    std::construct_at(begin() + sz);
-    std::move_backward(begin() + pos, end(), begin() + sz + 1);
+
+    std::construct_at(end(), *(end() - 1));
+    std::move_backward(begin() + pos, end() - 1, end());
+
     arr[pos] = std::move(val);
     ++sz;
     return begin() + pos;
@@ -338,7 +340,7 @@ public:
   template <typename It> void push_back_range(Range<It> range) {
     if constexpr (requires { range.size(); })
       reserve(size() + range.size());
-    for (const auto &item : range) {
+    for (auto &&item : range) {
       emplace_back(item);
     }
   }

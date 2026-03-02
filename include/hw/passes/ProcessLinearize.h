@@ -105,6 +105,16 @@ public:
           break;
         }
 
+        case HW_MEM_STORE.raw(): {
+          auto asStore = instr.as<MemStoreIRef>();
+          auto parentProc = instr.parentProc(ctx);
+          if (ignoredKind(parentProc))
+            continue;
+          auto [addr, len] = asStore.getConstAccessRange();
+          writeRegions.addRegion(parentProc.proc().getObjID(), addr, len);
+          break;
+        }
+
         case HW_INSTANCE.raw(): {
           auto other = instr.other(0)->as<ModuleRef>();
           bool isInputFromInst = other->ports[access.getNum() - 1].portType.is(
@@ -120,6 +130,9 @@ public:
         }
 
         case HW_LOAD.raw():
+          break;
+
+        case HW_MEM_LOAD.raw():
           break;
 
         case HW_STORE_DEFER.raw():

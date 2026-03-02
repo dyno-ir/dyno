@@ -714,16 +714,6 @@ private:
     return cur;
   }
 
-  static bool compareTerms(AddressGenTermOperand lhs,
-                           AddressGenTermOperand rhs) {
-    if (!lhs.getMax() && rhs.getMax())
-      return true;
-    if (lhs.getMax() && !rhs.getMax())
-      return false;
-    if (lhs.getMax() == rhs.getMax())
-      return *lhs.getMax() > *rhs.getMax();
-    return lhs.getFact() > rhs.getFact();
-  }
   void lowerNonConstSplice(SpliceIRef splice) {
     if (splice.isConstantOffs())
       return;
@@ -740,7 +730,8 @@ private:
       terms.emplace_back(term);
     }
 
-    Range{terms}.sort(compareTerms);
+    Range{terms}.sort(
+        HWInstrBuilder::addressGenTermOperandOrder<AddressGenTermOperand>);
 
     constexpr bool LowerFlat = false;
 
@@ -813,7 +804,8 @@ private:
     for (auto term : insert.terms()) {
       terms.emplace_back(term);
     }
-    Range{terms}.sort(compareTerms);
+    Range{terms}.sort(
+        HWInstrBuilder::addressGenTermOperandOrder<AddressGenTermOperand>);
 
     SmallVec<uint32_t, 4> idxs(terms.size() - 1);
 

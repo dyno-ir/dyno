@@ -22,6 +22,7 @@
 #include "hw/passes/LoadCoalesce.h"
 #include "hw/passes/LoopSimplify.h"
 #include "hw/passes/LowerOps.h"
+#include "hw/passes/MemoryMapping.h"
 #include "hw/passes/ModuleInline.h"
 #include "hw/passes/MuxTreeFlatten.h"
 #include "hw/passes/MuxTreeOptimization.h"
@@ -33,7 +34,7 @@
 #include "hw/passes/RemoveInitProcs.h"
 #include "hw/passes/SSAConstruct.h"
 #include "hw/passes/SeqToComb.h"
-#include "hw/passes/SimpleMemoryMapping.h"
+#include "hw/passes/SimpleMemoryInference.h"
 #include "hw/passes/TriggerDedupe.h"
 #include "op/IDs.h"
 #include "support/Debug.h"
@@ -69,9 +70,10 @@ class PassPipeline {
   RegisterPartitionPass regPartition{ctx};
   FuzzyCSEPass fuzzyCse{ctx};
   EarlySharePass earlyShare{ctx};
-  SimpleMemoryMappingPass simpleMemMap{ctx};
+  SimpleMemoryInferencePass simpleMemMap{ctx};
   LoadCoalescePass loadCoalesce{ctx};
   RemoveInitProcsPass removeInit{ctx};
+  MemoryMappingPass memoryMapping{ctx};
 
 public:
   bool printAfterAll = true;
@@ -273,6 +275,7 @@ public:
     runPass(simpleMemMap);
     runPass(aggressiveDCE);
     runPass(instCombine);
+    runPass(memoryMapping);
 
     runPass(muxTreeFlatten);
     fuzzyCse.config.opToShare = OP_AND;

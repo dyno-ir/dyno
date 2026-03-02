@@ -57,9 +57,11 @@ template <typename T> constexpr unsigned clog2(T val) {
   if (val == 1)
     return 1;
   return std::bit_width(val - 1);
-  // if (val == 0 || val == 1)
-  //   return 0;
-  // return bit_mask_sz<T> - std::countl_zero(val - 1);
+}
+template <typename T> constexpr unsigned flog2(T val) {
+  if (val == 0)
+    return 0;
+  return std::bit_width(val) - 1;
 }
 
 template <typename T> constexpr T round_up_div(T dividend, T divisor) {

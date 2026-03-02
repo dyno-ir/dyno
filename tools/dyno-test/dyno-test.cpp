@@ -50,11 +50,10 @@ public:
 };
 
 class TestDialectParser {
-  ParserBase *base;
 
 public:
   static constexpr DialectID dialect{DIALECT_TEST};
-  explicit TestDialectParser(ParserBase *base) : base(base) {}
+  explicit TestDialectParser(ParserBase *) {}
 };
 
 class TestDialectContext {

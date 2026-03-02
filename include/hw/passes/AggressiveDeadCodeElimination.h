@@ -16,6 +16,7 @@
 #include "hw/IDs.h"
 #include "hw/LoadStore.h"
 #include "hw/Memory.h"
+#include "hw/Pointer.h"
 #include "hw/Register.h"
 #include "hw/SensList.h"
 #include "op/IDs.h"
@@ -46,6 +47,8 @@ class AggressiveDeadCodeEliminationPass
         continue;
 
       switch (*instr.getDialectOpcode()) {
+
+      case *HW_MEM_STORE:
       case *HW_STORE_DEFER:
       case *HW_STORE:
         worklist.emplace_back(instr);
@@ -60,6 +63,7 @@ class AggressiveDeadCodeEliminationPass
         break;
       }
 
+      case *HW_MEM_LOAD:
       case *HW_LOAD:
         break;
 
@@ -70,17 +74,6 @@ class AggressiveDeadCodeEliminationPass
         if (use - instr.begin() != 3)
           break;
         worklist.emplace_back(instr);
-        break;
-      }
-
-      case *HW_WRITE_PORT_DEF:
-        break;
-
-      case *HW_READ_PORT_DEF: {
-        auto asPort = instr.as<MemoryPortIRef>();
-        if (use != asPort.data())
-          break;
-        worklist.emplace_back(ctx.getCFG()[instr].blockRef().def()->instr());
         break;
       }
 
@@ -102,6 +95,17 @@ class AggressiveDeadCodeEliminationPass
         worklist.emplace_back(def.instr());
       }
       wireMap[asWire] = 1;
+    }
+  }
+  void visitHWAddr(HWAddress addr) {
+    assert(addr);
+    if (auto asConst = addr.dyn_as<ConstantRef>()) {
+      assert(asConst.isInline());
+    } else {
+      auto asPtr = addr.as<PointerRef>();
+      for (auto def : asPtr.defs()) {
+        worklist.emplace_back(def.instr());
+      }
     }
   }
 
@@ -268,11 +272,39 @@ class AggressiveDeadCodeEliminationPass
       auto asStore = instr.as<StoreIRef>();
       visitHWValue(asStore.value());
       auto reg = asStore.reg().iref();
-      if (!instrMap[reg])
-        pushInstr(reg);
+      assert(instrMap[reg]);
       for (auto term : asStore.terms()) {
         visitHWValue(term.getIdx());
       }
+      break;
+    }
+
+    case *HW_MEM_LOAD: {
+      if (instrMap[instr])
+        break;
+      auto asLoad = instr.as<MemLoadIRef>();
+      auto reg = asLoad.reg().iref();
+      if (!instrMap[reg])
+        pushInstr(reg);
+      if (asLoad.hasEn())
+        visitHWValue(asLoad.en());
+      if (auto addr = asLoad.addr())
+        visitHWAddr(addr);
+
+      break;
+    }
+
+    case *HW_MEM_STORE: {
+      if (instrMap[instr])
+        break;
+      auto asStore = instr.as<MemStoreIRef>();
+      auto reg = asStore.reg().iref();
+      assert(instrMap[reg]);
+      visitHWValue(asStore.value());
+      if (asStore.hasEn())
+        visitHWValue(asStore.en());
+      if (auto addr = asStore.addr())
+        visitHWAddr(addr);
       break;
     }
 

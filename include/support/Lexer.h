@@ -447,8 +447,9 @@ public:
   }
 
   ParseError makeErrorOnNextToken(const char *error) {
-    assert(peekToken);
-    return ParseError{error, state.i, state.i, state.lineNumber};
+    if (!peekToken)
+      Peek();
+    return ParseError{error, state.lastI, state.i, state.lineNumber};
   }
 
   template <typename... Ts> Token peekEnsure(Ts... types) {

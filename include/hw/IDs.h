@@ -24,6 +24,7 @@ using HWOpcode = SpecificDialectOpcode<DialectID{DIALECT_HW}>;
   x("trigger",      HW_TRIGGER,      5 | TY_DEF_USE_START) \
   x("stdcell_info", HW_STDCELL_INFO, 6) \
   x("mem_port",     HW_MEM_PORT,     7 | TY_DEF_USE_START) \
+  x("ptr",          HW_POINTER,      8 | TY_DEF_USE_START) \
 // clang-format on
 
 #define ENUM_EXPAND(name, ident, idx) ident = idx,

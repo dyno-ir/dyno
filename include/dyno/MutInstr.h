@@ -56,7 +56,7 @@ public:
     return reinterpret_cast<T *>(&**instr.begin()) + instr->numDefs;
   }
   auto defs() { return Range{def_begin(), def_end()}; }
-  auto def(unsigned i = 0) {
+  auto &def(unsigned i = 0) {
     assert(i < instr->numDefs);
     return def_begin()[i];
   }
@@ -66,7 +66,7 @@ public:
   }
   T *other_end() { return reinterpret_cast<T *>(&**instr.begin()) + sz; }
   auto others() { return Range{other_begin(), other_end()}; }
-  auto other(unsigned i) {
+  auto &other(unsigned i) {
     assert(i < sz - instr->numDefs);
     return other_begin()[i];
   }

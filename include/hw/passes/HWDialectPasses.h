@@ -19,6 +19,7 @@
 #include "hw/passes/LoadCoalesce.h"
 #include "hw/passes/LoopSimplify.h"
 #include "hw/passes/LowerOps.h"
+#include "hw/passes/MemoryMapping.h"
 #include "hw/passes/ModuleInline.h"
 #include "hw/passes/MuxTreeFlatten.h"
 #include "hw/passes/OrderInstrs.h"
@@ -29,7 +30,7 @@
 #include "hw/passes/RemoveInitProcs.h"
 #include "hw/passes/SSAConstruct.h"
 #include "hw/passes/SeqToComb.h"
-#include "hw/passes/SimpleMemoryMapping.h"
+#include "hw/passes/SimpleMemoryInference.h"
 #include "hw/passes/TriggerDedupe.h"
 #include "meta/MetaPassManager.h"
 
@@ -63,10 +64,11 @@ registerDialectPasses<DialectID{DIALECT_HW}>(PassRegistry &passRegistry) {
   passRegistry.registerPass<RegisterPartitionPass>();
   passRegistry.registerPass<FuzzyCSEPass>();
   passRegistry.registerPass<EarlySharePass>();
-  passRegistry.registerPass<SimpleMemoryMappingPass>();
+  passRegistry.registerPass<SimpleMemoryInferencePass>();
   passRegistry.registerPass<LoadCoalescePass>();
   passRegistry.registerPass<RemoveInitProcsPass>();
   passRegistry.registerPass<MuxTreeFlattenPass>();
   passRegistry.registerPass<DumpPass>();
+  passRegistry.registerPass<MemoryMappingPass>();
 }
 }; // namespace dyno

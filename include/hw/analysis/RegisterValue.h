@@ -977,7 +977,7 @@ template <typename Frag, size_t NumInline = 4> struct GenericPartitions {
     }
 
     size_t outIdx = 0;
-    for (auto frag : frags) {
+    for (auto &frag : frags) {
       if (frag.len != 0) {
         if (outIdx != 0 && frags[outIdx - 1].abstractEquals(frag)) {
           frags[outIdx - 1].len += frag.len;
@@ -1003,6 +1003,9 @@ template <typename Frag, size_t NumInline = 4> struct GenericPartitions {
   template <typename... Args>
   GenericPartitions(uint32_t len, Args... args)
       : frags{{0, len, std::forward<Args>(args)...}} {}
+
+  GenericPartitions() = default;
+  explicit operator bool() { return !!frags.size(); }
 };
 
 }; // namespace dyno

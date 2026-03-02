@@ -101,6 +101,9 @@ public:
   auto ports() {
     return Range{block().begin(), ports_end()}.as<RegisterIRef>();
   }
+  auto internal_regs() {
+    return Range{ports_end(), regs_end()}.as<RegisterIRef>();
+  }
 
   auto procs() {
     return Range{regs_end(), block().end()}

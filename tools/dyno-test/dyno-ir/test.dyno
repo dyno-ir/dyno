@@ -508,4 +508,191 @@ TEST_CASE :string("instcombine-mux-lift"), :block, :block, :block {
   }
 }{
   meta.INST_COMBINE_PASS
+
+TEST_CASE :string("test-mem-map"), :block, :block, :block, {
+  // 2 bit async read sync write memory
+
+  STDCELL_DEF %Test:module("ram_mod"), %8:block {
+    INPUT_REGISTER_DEF %clk:register(1)
+    INPUT_REGISTER_DEF %IN_waddr:register(4)
+    INPUT_REGISTER_DEF %IN_wdata:register(16)
+    INPUT_REGISTER_DEF %IN_wmask:register(1)
+    INPUT_REGISTER_DEF %IN_raddr:register(4)
+    OUTPUT_REGISTER_DEF %OUT_rdata:register(16)
+    REGISTER_DEF %r7:register(256)
+    TRIGGER_DEF %9:trigger(pos), %clk
+    COMB_PROCESS_DEF %10:process, %11:block {
+      LOAD %w9:wire(4), %IN_raddr  ["test/tools/dyno-sv/testMemSmol.sv:19:15-28"]
+      ZEXT %w6:wire(32), %w9  ["test/tools/dyno-sv/testMemSmol.sv:19:15-28"]
+      GEP %12:ptr, #32'd0, %w6, #32'd16, #32'd16
+      MEM_LOAD %w13:wire(16), %13:mem_port(0), %r7, %12
+      LOAD %w5:wire(1), %IN_wmask  ["test/tools/dyno-sv/testMemSmol.sv:15.3-16.31"]
+      LOAD %w12:wire(4), %IN_waddr  ["test/tools/dyno-sv/testMemSmol.sv:16:5-18"]
+      ZEXT %w7:wire(32), %w12  ["test/tools/dyno-sv/testMemSmol.sv:16:5-18"]
+      LOAD %w0:wire(16), %IN_wdata  ["test/tools/dyno-sv/testMemSmol.sv:16:5-30"]
+      GEP %14:ptr, #32'd0, %w7, #32'd16, #32'd16
+      MEM_STORE %15:mem_port(1), %w0, %r7, %w5, %9, %14
+      STORE %w13, %OUT_rdata
+    }
+  }
+
+  MODULE_DEF %Test:module("Test"), %0:block {
+    INPUT_REGISTER_DEF %clk:register(1)
+    INPUT_REGISTER_DEF %IN_waddr:register(32)
+    INPUT_REGISTER_DEF %IN_wdata:register(8)
+    INPUT_REGISTER_DEF %IN_raddr:register(32)
+    OUTPUT_REGISTER_DEF %OUT_rdata:register(8)
+    REGISTER_DEF %r7:register(128)
+    TRIGGER_DEF %1:trigger(pos), %clk
+    COMB_PROCESS_DEF %2:process, %3:block {
+      LOAD %w9:wire(4), %IN_waddr  ["test/tools/dyno-sv/testMem.sv:20:3-23"]
+      ZEXT %w3:wire(32), %w9  ["test/tools/dyno-sv/testMem.sv:20:3-23"]
+      LOAD %w10:wire(8), %IN_wdata  ["test/tools/dyno-sv/testMem.sv:20:3-34"]
+      GEP %4:ptr, #32'd0, %w3, #32'd8, #32'd16
+      MEM_STORE %5:mem_port(1), %w10, %r7, %1, %4
+      LOAD %w5:wire(4), %IN_raddr  ["test/tools/dyno-sv/testMem.sv:24:16-36"]
+      ZEXT %w7:wire(32), %w5  ["test/tools/dyno-sv/testMem.sv:24:16-36"]
+      GEP %6:ptr, #32'd0, %w7, #32'd8, #32'd16
+      MEM_LOAD %w1:wire(8), %7:mem_port(0), %r7, %6
+      STORE_DEFER %w1, %OUT_rdata, %1
+    }
+  }
+}{
+
+}{
+  meta.MEMORY_MAPPING_PASS
 }
+
+/*
+TEST_CASE :string("test-mem-map-2bit-wr-8bit-rd"), :block, :block, :block, {
+  // 2 bit async read sync write memory
+
+  STDCELL_DEF %Test:module("ram_mod"), %0:block {
+    INPUT_REGISTER_DEF %clk:register(1)
+    INPUT_REGISTER_DEF %IN_waddr:register(4)
+    INPUT_REGISTER_DEF %IN_wdata:register(2)
+    INPUT_REGISTER_DEF %IN_wmask:register(1)
+    INPUT_REGISTER_DEF %IN_raddr:register(4)
+    OUTPUT_REGISTER_DEF %OUT_rdata:register(2)
+    INPUT_REGISTER_DEF %IN_raddr2:register(4)
+    OUTPUT_REGISTER_DEF %OUT_rdata2:register(2)
+    INPUT_REGISTER_DEF %IN_raddr3:register(4)
+    OUTPUT_REGISTER_DEF %OUT_rdata3:register(2)
+    REGISTER_DEF %r11:register(32)
+    TRIGGER_DEF %1:trigger(pos), %clk
+    COMB_PROCESS_DEF %2:process, %3:block {
+      LOAD %w15:wire(4), %IN_raddr  ["test/tools/dyno-sv/testMemSmol3R.sv:23:25-38"]
+      ZEXT %w12:wire(32), %w15  ["test/tools/dyno-sv/testMemSmol3R.sv:23:25-38"]
+      GEP %4:ptr, #32'd0, %w12, #32'd2, #32'd16
+      MEM_LOAD %w21:wire(2), %5:mem_port(0), %r11, %4
+      LOAD %w11:wire(4), %IN_raddr2  ["test/tools/dyno-sv/testMemSmol3R.sv:24:26-40"]
+      ZEXT %w5:wire(32), %w11  ["test/tools/dyno-sv/testMemSmol3R.sv:24:26-40"]
+      GEP %6:ptr, #32'd0, %w5, #32'd2, #32'd16
+      MEM_LOAD %w2:wire(2), %7:mem_port(0), %r11, %6
+      LOAD %w9:wire(4), %IN_raddr3  ["test/tools/dyno-sv/testMemSmol3R.sv:25:26-40"]
+      ZEXT %w8:wire(32), %w9  ["test/tools/dyno-sv/testMemSmol3R.sv:25:26-40"]
+      GEP %8:ptr, #32'd0, %w8, #32'd2, #32'd16
+      MEM_LOAD %w22:wire(2), %9:mem_port(0), %r11, %8
+      LOAD %w6:wire(1), %IN_wmask  ["test/tools/dyno-sv/testMemSmol3R.sv:20.3-21.31"]
+      LOAD %w1:wire(4), %IN_waddr  ["test/tools/dyno-sv/testMemSmol3R.sv:21:5-18"]
+      ZEXT %w13:wire(32), %w1  ["test/tools/dyno-sv/testMemSmol3R.sv:21:5-18"]
+      LOAD %w4:wire(2), %IN_wdata  ["test/tools/dyno-sv/testMemSmol3R.sv:21:5-30"]
+      GEP %10:ptr, #32'd0, %w13, #32'd2, #32'd16
+      MEM_STORE %11:mem_port(1), %w4, %r11, %w6, %1, %10
+      STORE %w21, %OUT_rdata
+      STORE %w2, %OUT_rdata2
+      STORE %w22, %OUT_rdata3
+    }
+  }
+
+  MODULE_DEF %Test:module("Test"), %0:block {
+    INPUT_REGISTER_DEF %clk:register(1)
+    INPUT_REGISTER_DEF %IN_waddr:register(32)
+    INPUT_REGISTER_DEF %IN_wdata:register(2)
+    INPUT_REGISTER_DEF %IN_raddr:register(32)
+    OUTPUT_REGISTER_DEF %OUT_rdata:register(8)
+    REGISTER_DEF %r7:register(128)
+    TRIGGER_DEF %1:trigger(pos), %clk
+    COMB_PROCESS_DEF %2:process, %3:block {
+      LOAD %w9:wire(4), %IN_waddr  ["test/tools/dyno-sv/testMem.sv:20:3-23"]
+      ZEXT %w3:wire(32), %w9  ["test/tools/dyno-sv/testMem.sv:20:3-23"]
+      LOAD %w10:wire(2), %IN_wdata  ["test/tools/dyno-sv/testMem.sv:20:3-34"]
+      GEP %4:ptr, #32'd0, %w3, #32'd2, #32'd64
+      MEM_STORE %5:mem_port(1), %w10, %r7, %1, %4
+      LOAD %w5:wire(4), %IN_raddr  ["test/tools/dyno-sv/testMem.sv:24:16-36"]
+      ZEXT %w7:wire(32), %w5  ["test/tools/dyno-sv/testMem.sv:24:16-36"]
+      GEP %6:ptr, #32'd0, %w7, #32'd8, #32'd16
+      MEM_LOAD %w1:wire(8), %7:mem_port(0), %r7, %6
+      STORE_DEFER %w1, %OUT_rdata, %1
+    }
+  }
+}{
+
+}{
+  meta.MEMORY_MAPPING_PASS
+}
+*/
+
+/*
+TEST_CASE :string("test-mem-map-2w"), :block, :block, :block, {
+  // 2 bit async read, 2x sync write memory
+  STDCELL_DEF %Test:module("Test"), %0:block {
+    INPUT_REGISTER_DEF %clk:register(1)
+    INPUT_REGISTER_DEF %IN_waddr:register(4)
+    INPUT_REGISTER_DEF %IN_wdata:register(2)
+    INPUT_REGISTER_DEF %IN_waddr2:register(4)
+    INPUT_REGISTER_DEF %IN_wdata2:register(2)
+    INPUT_REGISTER_DEF %IN_wmask:register(2)
+    INPUT_REGISTER_DEF %IN_raddr:register(4)
+    OUTPUT_REGISTER_DEF %OUT_rdata:register(2)
+    REGISTER_DEF %r9:register(32)
+    TRIGGER_DEF %1:trigger(pos), %clk
+    COMB_PROCESS_DEF %2:process, %3:block {
+      LOAD %w12:wire(4), %IN_raddr  ["test/tools/dyno-sv/testMemSmol2W.sv:26:15-28"]
+      ZEXT %w1:wire(32), %w12  ["test/tools/dyno-sv/testMemSmol2W.sv:26:15-28"]
+      GEP %4:ptr, #32'd0, %w1, #32'd2, #32'd16
+      MEM_LOAD %w5:wire(2), %5:mem_port(0, (0, 0)), %r9, %4, %6:?mem_port(1)
+      LOAD %w13:wire(2), %IN_wmask
+      TRUNC %w19:wire(1), %w13
+      SPLICE %w20:wire(1), %w13, #32'd1
+      LOAD %w10:wire(4), %IN_waddr  ["test/tools/dyno-sv/testMemSmol2W.sv:19:5-18"]
+      ZEXT %w14:wire(32), %w10  ["test/tools/dyno-sv/testMemSmol2W.sv:19:5-18"]
+      LOAD %w7:wire(2), %IN_wdata  ["test/tools/dyno-sv/testMemSmol2W.sv:19:5-30"]
+      GEP %7:ptr, #32'd0, %w14, #32'd2, #32'd16
+      MEM_STORE %6:mem_port(1), %w7, %r9, %w19, %1, %7
+      LOAD %w21:wire(4), %IN_waddr2  ["test/tools/dyno-sv/testMemSmol2W.sv:23:5-19"]
+      ZEXT %w9:wire(32), %w21  ["test/tools/dyno-sv/testMemSmol2W.sv:23:5-19"]
+      LOAD %w18:wire(2), %IN_wdata2  ["test/tools/dyno-sv/testMemSmol2W.sv:23:5-32"]
+      GEP %8:ptr, #32'd0, %w9, #32'd2, #32'd16
+      MEM_STORE %9:mem_port(1), %w18, %r9, %w20, %1, %8
+      STORE %w5, %OUT_rdata
+    }
+  }
+
+  MODULE_DEF %Test:module("Test"), %0:block {
+    INPUT_REGISTER_DEF %clk:register(1)
+    INPUT_REGISTER_DEF %IN_waddr:register(32)
+    INPUT_REGISTER_DEF %IN_wdata:register(8)
+    INPUT_REGISTER_DEF %IN_raddr:register(32)
+    OUTPUT_REGISTER_DEF %OUT_rdata:register(8)
+    REGISTER_DEF %r7:register(128)
+    TRIGGER_DEF %1:trigger(pos), %clk
+    COMB_PROCESS_DEF %2:process, %3:block {
+      LOAD %w9:wire(4), %IN_waddr  ["test/tools/dyno-sv/testMem.sv:20:3-23"]
+      ZEXT %w3:wire(32), %w9  ["test/tools/dyno-sv/testMem.sv:20:3-23"]
+      LOAD %w10:wire(8), %IN_wdata  ["test/tools/dyno-sv/testMem.sv:20:3-34"]
+      GEP %4:ptr, #32'd0, %w3, #32'd8, #32'd16
+      MEM_STORE %5:mem_port(1), %w10, %r7, %1, %4
+      LOAD %w5:wire(4), %IN_raddr  ["test/tools/dyno-sv/testMem.sv:24:16-36"]
+      ZEXT %w7:wire(32), %w5  ["test/tools/dyno-sv/testMem.sv:24:16-36"]
+      GEP %6:ptr, #32'd0, %w7, #32'd8, #32'd16
+      MEM_LOAD %w1:wire(8), %7:mem_port(0), %r7, %6
+      STORE_DEFER %w1, %OUT_rdata, %1
+    }
+  }
+}{
+
+}{
+  meta.MEMORY_MAPPING_PASS
+}
+*/

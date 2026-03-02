@@ -1658,6 +1658,9 @@ private:
     if (instr.isOpc(HW_STORE, HW_STORE_DEFER))
       if (simplifyAddressing(instr.as<StoreIRef>()))
         return true;
+    if (instr.isOpc(HW_GEP))
+      if (simplifyAddressing(instr.as<GEPIRef>()))
+        return true;
 
     switch (*instr.getDialectOpcode()) {
 #define LAMBDA(opc, ib, cb, bib) case *opc:

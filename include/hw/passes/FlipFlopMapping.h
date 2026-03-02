@@ -11,8 +11,8 @@
 #include "hw/HWInstr.h"
 #include "hw/HWValue.h"
 #include "hw/IDs.h"
-#include "hw/LoadStore.h"
 #include "hw/Register.h"
+#include "hw/analysis/WireVariable.h"
 #include "support/Bits.h"
 #include "support/Debug.h"
 #include "support/ErrorRecovery.h"
@@ -335,57 +335,6 @@ class FlipFlopMappingPass : public Pass<FlipFlopMappingPass> {
   }
 
 public:
-  RegisterIRef checkIsPort(HWValue val, DialectOpcode opc) {
-    if (!val.is<WireRef>())
-      return nullref;
-    auto wire = val.as<WireRef>();
-    auto instr = wire.getDefI();
-    if (opc == HW_INPUT_REGISTER_DEF && instr.isOpc(HW_LOAD)) {
-      auto load = instr.as<LoadIRef>();
-      if (!load.isFullReg())
-        return nullref;
-      auto reg = load.reg().iref();
-      if (!reg.isOpc(HW_INPUT_REGISTER_DEF))
-        return nullref;
-      return reg;
-    }
-    if (opc == HW_OUTPUT_REGISTER_DEF && instr.isOpc(HW_STORE)) {
-      auto store = instr.as<StoreIRef>();
-      if (!store.isFullReg())
-        return nullref;
-      auto reg = store.reg().iref();
-      if (!reg.isOpc(HW_OUTPUT_REGISTER_DEF))
-        return nullref;
-      return reg;
-    }
-    return nullref;
-  }
-
-  RegisterIRef checkIsReg(HWValue val) {
-    if (!val.is<WireRef>())
-      return nullref;
-    auto wire = val.as<WireRef>();
-    auto defI = wire.getDefI();
-    if (defI.isOpc(HW_LOAD)) {
-      auto load = defI.as<LoadIRef>();
-      if (!load.isFullReg())
-        return nullref;
-      auto reg = load.reg().iref();
-      return reg;
-    }
-    if (!wire.hasSingleUse())
-      return nullref;
-    auto useI = wire.getSingleUse()->instr();
-    if (useI.isOpc(HW_STORE)) {
-      auto store = useI.as<StoreIRef>();
-      if (!store.isFullReg())
-        return nullref;
-      auto reg = store.reg().iref();
-      return reg;
-    }
-    return nullref;
-  }
-
   bool classifyInput(RegisterIRef port, FatFF &ff) {
     auto use = port.oref().getSingleUse();
     if (!use)
@@ -449,7 +398,8 @@ public:
       auto trueV = mux.other(1);
       auto falseV = mux.other(2);
 
-      auto selPort = checkIsPort(sel->as<HWValue>(), HW_INPUT_REGISTER_DEF);
+      auto selPort =
+          WireVariable::checkIsPort(sel->as<HWValue>(), HW_INPUT_REGISTER_DEF);
       if (!selPort)
         return false;
 
@@ -460,18 +410,21 @@ public:
       if (!it->isOpc(HW_FLIP_FLOP))
         return false;
       auto ffInstr = it->as<FlipFlopIRef>();
-      if (ffInstr.d().iref() != checkIsReg(mux.def(0)->as<HWValue>()))
+      if (ffInstr.d().iref() !=
+          WireVariable::checkIsReg(mux.def(0)->as<HWValue>()))
         return false;
 
-      auto falseVPort =
-          checkIsPort(falseV->as<HWValue>(), HW_INPUT_REGISTER_DEF);
-      auto trueVPort = checkIsPort(trueV->as<HWValue>(), HW_INPUT_REGISTER_DEF);
+      auto falseVPort = WireVariable::checkIsPort(falseV->as<HWValue>(),
+                                                  HW_INPUT_REGISTER_DEF);
+      auto trueVPort = WireVariable::checkIsPort(trueV->as<HWValue>(),
+                                                 HW_INPUT_REGISTER_DEF);
 
       if (!!trueVPort == !!falseVPort)
         return false;
 
-      if (checkIsReg(falseVPort ? trueV->as<HWValue>()
-                                : falseV->as<HWValue>()) != ffInstr.q().iref())
+      if (WireVariable::checkIsReg(falseVPort ? trueV->as<HWValue>()
+                                              : falseV->as<HWValue>()) !=
+          ffInstr.q().iref())
         return false;
 
       if (port == selPort) {

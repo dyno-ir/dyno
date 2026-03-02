@@ -29,7 +29,7 @@ public:
   using FatObjRef<Wire>::FatObjRef;
   WireRef(FatObjRef<Wire> ref) : FatObjRef<Wire>(ref) {}
 
-  Optional<uint32_t> getNumBits() { return ptr->numBits; }
+  Optional<uint32_t> getNumBits() const { return ptr->numBits; }
 
   auto getDefI() { return getDef().instr(); }
 };

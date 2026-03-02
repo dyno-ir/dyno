@@ -16,6 +16,7 @@
 #include "hw/IDs.h"
 #include "hw/LoadStore.h"
 #include "hw/Module.h"
+#include "hw/Pointer.h"
 #include "hw/Process.h"
 #include "hw/Register.h"
 #include "hw/SensList.h"
@@ -56,21 +57,23 @@ protected:
   // Compile-time edge cases for adding special types like BitRange
   // todo: rename this and put this in new HWInstrBuilder deriving from instr
   // build
-  template <typename T> void addSpecialRef(InstrBuilder &build, const T &ref) {
-    if constexpr (std::is_same_v<BitRange, T>) {
+  template <typename T> void addSpecialRef(InstrBuilder &build, T &&ref) {
+    if constexpr (std::is_same_v<BitRange, std::remove_cvref_t<T>>) {
       build.addRef(ref.getAddr());
       build.addRef(ref.getLen());
-    } else if constexpr (std::is_same_v<AddressGenTerm, T>) {
+    } else if constexpr (std::is_same_v<AddressGenTerm,
+                                        std::remove_cvref_t<T>>) {
       build.addRef(ref.getIdx());
       build.addRef(ConstantRef::fromU32(ref.getFact()));
       build.addRef(ConstantRef::fromU32(ref.getMax().value_or(~0u)));
-    } else if constexpr (std::is_same_v<AddressGenTermOperand, T>) {
+    } else if constexpr (std::is_same_v<AddressGenTermOperand,
+                                        std::remove_cvref_t<T>>) {
       build.addRef(ref.getIdx());
       build.addRef(ConstantRef::fromU32(ref.getFact()));
       build.addRef(ConstantRef::fromU32(ref.getMax().value_or(~0u)));
     } else if constexpr (IsArrayRef<std::decay_t<T>> ||
                          IsRange<std::decay_t<T>>) {
-      for (auto elem : ref)
+      for (auto &&elem : ref)
         addSpecialRef(build, elem);
     } else {
       build.addRef(ref);
@@ -263,6 +266,16 @@ public:
     if (lhs.is<WireRef>() && rhs.is<WireRef>())
       return commutativeOpWireOrder(lhs.as<WireRef>(), rhs.as<WireRef>());
     return lhs.is<WireRef>();
+  }
+  template <typename Ref>
+  static bool addressGenTermOperandOrder(Ref lhs, Ref rhs) {
+    if (!lhs.getMax() && rhs.getMax())
+      return true;
+    if (lhs.getMax() && !rhs.getMax())
+      return false;
+    if (lhs.getMax() == rhs.getMax())
+      return *lhs.getMax() > *rhs.getMax();
+    return lhs.getFact() > rhs.getFact();
   }
 
   FOR_HW_COMM_OPS(COMM_OP)
@@ -492,9 +505,9 @@ public:
     auto wire = value.as<WireRef>();
     if (wire.getNumBits() == newSize)
       return wire;
-    else if (wire.getDefI().isOpc(OP_TRUNC)) {
+    else if (wire.hasSingleDef() && wire.getDefI().isOpc(OP_TRUNC)) {
       return buildTrunc(newSize, wire.getDefI().other(0)->as<HWValue>());
-    } else if (wire.getDefI().isOpc(OP_ZEXT, OP_SEXT)) {
+    } else if (wire.hasSingleDef() && wire.getDefI().isOpc(OP_ZEXT, OP_SEXT)) {
       auto src = wire.getDefI().other(0)->as<HWValue>();
       if (*src.getNumBits() >= newSize)
         return buildTrunc(newSize, src);
@@ -886,6 +899,12 @@ public:
   HWValue buildConcat(OperandVec<HWValue> &&templ) {
     assert(templ.getNumDefs() == 1);
 
+    if (templ.getNumOthers() == 1) {
+      if (templ[0])
+        templ[0].as<WireRef>().replaceAllUsesWith(templ.other(0));
+      return templ.other(0).as<HWValue>();
+    }
+
     if (templ[0] == nullref)
       templ[0] = ctx.getStore<Wire>().create();
 
@@ -987,10 +1006,95 @@ public:
     return ref.defW();
   }
 
+  WireRef buildMemLoad(RegisterRef reg, uint32_t numBits, HWValue en,
+                       uint32_t delay, TriggerIRef trigger, HWAddress addr,
+                       IsRange auto forwards) {
+    assert(!trigger == (delay == 0));
+    auto wire = ctx.getStore<Wire>().create(numBits);
+    auto port = ctx.getStore<MemoryPort>().create(delay);
+
+    auto instr = ctx.getStore<Instr>().create(
+        3 + !!en + !!trigger + !!addr + forwards.size(), HW_MEM_LOAD);
+    auto ib = InstrBuilder{instr};
+
+    ib.addRef(wire).addRef(port);
+    ib.other();
+    ib.addRef(reg);
+    if (!!en)
+      ib.addRef(en);
+    if (!!trigger)
+      ib.addRef(trigger.oref());
+    if (!!addr)
+      ib.addRef(addr);
+    for (auto &&forward : forwards) {
+      ib.addRef(forward.port);
+      port->writeForwardMeta.emplace_back(forward.oldTime, forward.unkTime);
+    }
+    insertInstr(instr);
+    return wire;
+  }
+
+  MemStoreIRef buildMemStore(RegisterRef reg, HWValue val, HWValue en,
+                             uint32_t delay, TriggerIRef trigger,
+                             HWAddress addr) {
+    assert(!trigger == (delay == 0));
+    auto port = ctx.getStore<MemoryPort>().create(delay);
+
+    auto instr = ctx.getStore<Instr>().create(3 + !!en + !!trigger + !!addr,
+                                              HW_MEM_STORE);
+    auto ib = InstrBuilder{instr};
+
+    ib.addRef(port);
+    ib.other();
+    ib.addRef(val);
+    ib.addRef(reg);
+    if (!!en)
+      ib.addRef(en);
+    if (!!trigger)
+      ib.addRef(trigger.oref());
+    if (!!addr)
+      ib.addRef(addr);
+    insertInstr(instr);
+    return instr;
+  }
+
+  template <typename T> HWAddress buildGEP(uint32_t base, Range<T> terms) {
+    if (terms.empty()) {
+      // for use with buildLoad/buildStore, these drop the addr operand if it's
+      // nullref
+      if (base == 0)
+        return nullref;
+      return ConstantRef::fromU32(base);
+    }
+
+    MutInstr<FatDynObjRef<>> instr{ctx, HW_GEP, 2U + terms.size()};
+    instr.emplace_back(ctx.getStore<Pointer>().create());
+    instr.defsDone();
+
+    instr.emplace_back(ConstantRef::fromU32(base));
+
+    for (auto &&term : terms) {
+      instr.emplace_back(term.getIdx());
+      instr.emplace_back(ConstantRef::fromU32(term.getFact()));
+      instr.emplace_back(
+          ConstantRef::fromU32(term.getMax() ? *term.getMax() : 0));
+    }
+
+    instr.others().drop_front().tuple<3>().sort([](auto &&a, auto &&b) {
+      return addressGenTermOperandOrder(AddressGenTermRef{&std::get<0>(a)},
+                                        AddressGenTermRef{&std::get<0>(b)});
+    });
+
+    auto ref = instr.build();
+    insertInstr(ref);
+
+    return ref.def().as<PointerRef>();
+  }
+
   template <typename... Ts>
-  HWInstrRef buildStore(RegisterRef reg, HWValue value, bool defer = false,
-                        TriggerIRef trigger = nullref, uint32_t baseAddr = 0,
-                        Ts... addressGenTerms) {
+  StoreIRef buildStore(RegisterRef reg, HWValue value, bool defer = false,
+                       TriggerIRef trigger = nullref, uint32_t baseAddr = 0,
+                       Ts... addressGenTerms) {
     assert(!(!defer && trigger) && "trigger on non-deferred store");
     auto opc = defer ? HW_STORE_DEFER : HW_STORE;
     if (sizeof...(addressGenTerms) > 0 || baseAddr != 0) {

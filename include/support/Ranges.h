@@ -1,12 +1,15 @@
 #pragma once
 
+#include "support/ArrayRef.h"
 #include <algorithm>
 #include <cassert>
 #include <initializer_list>
 #include <iterator>
 #include <numeric>
 #include <optional>
+#include <tuple>
 #include <type_traits>
+#include <utility>
 
 template <typename It> class Range;
 
@@ -63,14 +66,14 @@ public:
   derived &operator-=(difference_type_safe n)
     requires(isRandom)
   {
-    self().it += -n;
+    self() += -n;
     return self();
   }
 
   friend derived operator+(derived a, difference_type_safe n)
     requires(isRandom)
   {
-    -a += n;
+    a += n;
     return a;
   }
 
@@ -780,7 +783,78 @@ public:
     return a.it == b.it;
   }
 
-  friend bool operator<=>(const step_iterator &a, const step_iterator &b)
+  friend auto operator<=>(const step_iterator &a, const step_iterator &b)
+    requires(isRandom)
+  {
+    return a.it <=> b.it;
+  }
+};
+
+template <typename T, typename Seq> struct tuple_n_helper;
+template <typename T, std::size_t... Is>
+struct tuple_n_helper<T, std::index_sequence<Is...>> {
+  template <std::size_t> using wrap = T;
+  using type = std::tuple<wrap<Is>...>;
+};
+template <typename T, std::size_t N>
+using tuple_n_t = typename tuple_n_helper<T, std::make_index_sequence<N>>::type;
+
+template <unsigned N, typename T>
+class tuple_iterator
+    : public base_iterator<tuple_iterator<N, T>,
+                           typename std::iterator_traits<T>::iterator_category,
+                           typename std::iterator_traits<T>::difference_type> {
+  T it;
+
+public:
+  using iterator_category = std::iterator_traits<T>::iterator_category;
+  using value_type = tuple_n_t<typename std::iterator_traits<T>::reference, N>;
+  using pointer = value_type *;
+  using reference = value_type &;
+  using difference_type = std::iterator_traits<T>::difference_type;
+
+private:
+  static constexpr bool isRandom =
+      std::is_same_v<iterator_category, std::random_access_iterator_tag>;
+  static constexpr bool isBidir =
+      std::is_same_v<iterator_category, std::bidirectional_iterator_tag> ||
+      isRandom;
+
+public:
+  tuple_iterator() = default;
+  tuple_iterator(T it) : it(it) {}
+
+  value_type operator*() {
+    return [this]<std::size_t... Is>(std::index_sequence<Is...>) {
+      std::array<T, N> its;
+      ((its[Is] = it++), ...);
+      return value_type(*its[Is]...);
+    }(std::make_index_sequence<N>());
+  }
+
+  tuple_iterator &operator+=(difference_type d)
+    requires(isRandom)
+  {
+    it += N * d;
+    return *this;
+  }
+
+  tuple_iterator &operator++() {
+    std::advance(it, N);
+    return *this;
+  }
+
+  difference_type operator-(tuple_iterator other)
+    requires(isRandom)
+  {
+    return (it - other.it) / N;
+  }
+
+  friend bool operator==(const tuple_iterator &a, const tuple_iterator &b) {
+    return a.it == b.it;
+  }
+
+  friend auto operator<=>(const tuple_iterator &a, const tuple_iterator &b)
     requires(isRandom)
   {
     return a.it <=> b.it;
@@ -872,13 +946,19 @@ public:
   template <typename T> void stable_sort(T func) {
     std::stable_sort(begin(), end(), func);
   }
-  template <typename T> It find(const T &val) {
+  template <typename T> It find(T &&val) {
     return std::find(begin(), end(), val);
+  }
+  template <typename T> std::optional<size_t> find_idx(T &&val) {
+    for (auto [i, elem] : (*this).enumerate()) {
+      if (elem == val)
+        return i;
+    }
+    return std::nullopt;
   }
   template <typename T> It find_if(T func) {
     return std::find_if(begin(), end(), func);
   }
-
   template <typename T> bool all(T func) {
     return std::all_of(begin(), end(), func);
   }
@@ -891,6 +971,16 @@ public:
   template <typename T> T for_each(T func) {
     return std::for_each(begin(), end(), func);
   }
+  template <typename T> T is_sorted(T func) {
+    return std::is_sorted(begin(), end(), func);
+  }
+  template <typename T> auto max(T func) {
+    return std::max_element(begin(), end(), func);
+  }
+  template <typename T> auto min(T func) {
+    return std::min_element(begin(), end(), func);
+  }
+  auto sum() { return std::reduce(begin(), end()); }
   template <typename T> bool equals(Range<T> other) {
     if constexpr (requires() {
                     this->size();
@@ -927,6 +1017,14 @@ public:
     return ::Range{step_iterator{beginIt, n}, step_iterator{endIt, n}};
   }
 
+  template <unsigned N> auto tuple() {
+    if constexpr (requires { endIt - beginIt; }) {
+      assert((endIt - beginIt) % N == 0);
+    }
+    return ::Range{tuple_iterator<N, It>{beginIt},
+                   tuple_iterator<N, It>{endIt}};
+  }
+
   template <typename T> auto sorted_intersect(T &other) {
     return ::Range{
         sorted_intersect_iterator{begin(), end(), other.begin(), other.end()},
@@ -935,11 +1033,42 @@ public:
   }
 
   bool empty() const { return begin() == end(); }
+  static Range emptyRange() { return Range(); }
 
   auto size() const
     requires(requires(It a, It b) { b - a; })
   {
     return end() - begin();
+  }
+  decltype(auto) operator[](size_t i) const
+    requires(requires(It a) { a[i]; })
+  {
+    if constexpr (requires { size(); })
+      assert(i < size());
+    return beginIt[i];
+  }
+
+  operator ArrayRef<std::remove_cvref_t<decltype(*std::declval<It>())>>()
+    requires(std::is_reference_v<decltype(*std::declval<It>())>)
+  {
+    return ArrayRef{&*beginIt, &*endIt};
+  }
+  operator MutArrayRef<std::remove_cvref_t<decltype(*std::declval<It>())>>()
+    requires(std::is_reference_v<decltype(*std::declval<It>())> &&
+             !std::is_const_v<decltype(*std::declval<It>())>)
+  {
+    return MutArrayRef{&*beginIt, &*endIt};
+  }
+
+  decltype(auto) front() {
+    assert(!empty());
+    return *beginIt;
+  }
+  decltype(auto) back()
+    requires(requires(It it) { std::prev(it); })
+  {
+    assert(!empty());
+    return *std::prev(endIt);
   }
 
 private:

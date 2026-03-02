@@ -2,6 +2,7 @@
 
 #include "dyno/Constant.h"
 #include "dyno/Context.h"
+#include "dyno/Instr.h"
 #include "dyno/Pass.h"
 #include "hw/HWAbstraction.h"
 #include "hw/HWContext.h"
@@ -11,13 +12,14 @@
 #include "hw/IDs.h"
 #include "hw/LoadStore.h"
 #include "hw/Memory.h"
+#include "hw/MemoryPort.h"
 #include "hw/Register.h"
 #include "hw/SensList.h"
 #include "support/Any.h"
 #include <cstdint>
 namespace dyno {
 
-class SimpleMemoryMappingPass : public Pass<SimpleMemoryMappingPass> {
+class SimpleMemoryInferencePass : public Pass<SimpleMemoryInferencePass> {
 
   struct InputRegister {
     StoreIRef store;
@@ -279,7 +281,7 @@ class SimpleMemoryMappingPass : public Pass<SimpleMemoryMappingPass> {
 
   struct ReadPort2 {
     InstrRef instr; // splice/trunc
-    SmallVec<WritePort2 *, 4> fwdWrites;
+    SmallVec<unsigned, 4> fwdWrites;
     uint32_t dly;
   };
 
@@ -325,12 +327,20 @@ class SimpleMemoryMappingPass : public Pass<SimpleMemoryMappingPass> {
           auto asSplice = instr.as<SpliceIRef>();
           if (op != asSplice.in())
             return std::unexpected("expected splice in");
-          memory.reads.emplace_back(ReadPort2{instr, {}, 0});
+          memory.reads.emplace_back(
+              ReadPort2{instr,
+                        {Range{memory.writes}.transform(
+                            [](size_t i, auto) { return i; })},
+                        0});
           break;
         }
 
         case *OP_TRUNC: {
-          memory.reads.emplace_back(ReadPort2{instr, {}, 0});
+          memory.reads.emplace_back(
+              ReadPort2{instr,
+                        {Range{memory.writes}.transform(
+                            [](size_t i, auto) { return i; })},
+                        0});
           break;
         }
 
@@ -355,7 +365,7 @@ class SimpleMemoryMappingPass : public Pass<SimpleMemoryMappingPass> {
 
             nextVal = mux.def(0)->as<WireRef>();
             auto sel = mux.other(0)->as<HWValue>();
-            bool selPol = use->getNum() == 1;
+            bool selPol = use->getNum() == 2;
 
             memory.writes.emplace_back(
                 WritePort2{instr, {{sel, selPol}}, 0, nullref});
@@ -513,12 +523,46 @@ class SimpleMemoryMappingPass : public Pass<SimpleMemoryMappingPass> {
     }
 
     rbuild.insertInstr(memI);
-
-    int a;
-    func(a);
   }
 
-  template <typename T> void func(T &&) {}
+  void buildMemory2(ModuleIRef mod, RegisterIRef reg, Memory &&memory) {
+    HWInstrBuilder build{ctx, mod.regs_end()};
+    auto newReg = build.buildRegister(reg.getNumBits());
+
+    for (auto &wr : memory.writes) {
+      build.setInsertPoint(wr.instr);
+      auto asInsert = wr.instr.as<InsertIRef>();
+      HWValue en = nullref;
+      if (!wr.enables.empty()) {
+        en = build.buildAnd(
+            Range{wr.enables}.transform([&build](size_t, auto pair) {
+              if (pair.second)
+                return pair.first;
+              return build.buildNot(pair.first);
+            }));
+      }
+
+      auto ref = build.buildMemStore(
+          newReg, asInsert.val()->as<HWValue>(), en, wr.dly, wr.trigger,
+          build.buildGEP(asInsert.getBase(), asInsert.terms()));
+      wr.instr = ref;
+    }
+
+    for (auto &rd : memory.reads) {
+      build.setInsertPoint(rd.instr);
+      if (auto asSplice = rd.instr.as<SpliceIRef>()) {
+        auto val = build.buildMemLoad(
+            newReg, asSplice.getLen(), nullref, 0, nullref,
+            build.buildGEP(asSplice.getBase(), asSplice.terms()),
+            Range{rd.fwdWrites}.transform([&](size_t, unsigned i) {
+              return MemoryWriteForward{
+                  memory.writes[i].instr.as<MemStoreIRef>().port(), 0, 0};
+            }));
+        asSplice.def()->as<WireRef>().replaceAllUsesWith(val);
+      } else
+        assert(0);
+    }
+  }
 
   void runOnRegister(RegisterIRef reg) {
     if (*reg.getNumBits() < 16)
@@ -557,7 +601,7 @@ class SimpleMemoryMappingPass : public Pass<SimpleMemoryMappingPass> {
     })
 
     if (res)
-      buildMemory(reg, std::move(*res));
+      buildMemory2(HWInstrRef{reg}.parentMod(ctx), reg, std::move(*res));
   }
 
   void runOnModule(ModuleIRef mod) {
@@ -568,8 +612,8 @@ class SimpleMemoryMappingPass : public Pass<SimpleMemoryMappingPass> {
   }
 
 public:
-  auto make(Context &ctx) { return SimpleMemoryMappingPass(ctx); }
-  explicit SimpleMemoryMappingPass(Context &ctx) : ctx(ctx) {}
+  auto make(Context &ctx) { return SimpleMemoryInferencePass(ctx); }
+  explicit SimpleMemoryInferencePass(Context &ctx) : ctx(ctx) {}
   void run() {
     for (auto mod : ctx.getCtx<HWDialectContext>().activeModules()) {
       runOnModule(mod.iref());
@@ -580,8 +624,8 @@ public:
   void runRegister(RegisterIRef reg) { runOnRegister(reg); }
 
   static constexpr auto runFuncs = std::make_tuple(
-      &SimpleMemoryMappingPass::runRegister,
-      &SimpleMemoryMappingPass::runModule, &SimpleMemoryMappingPass::run);
+      &SimpleMemoryInferencePass::runRegister,
+      &SimpleMemoryInferencePass::runModule, &SimpleMemoryInferencePass::run);
 };
 
 }; // namespace dyno
