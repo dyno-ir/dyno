@@ -1,6 +1,7 @@
 #pragma once
 
 #include "dyno/CFG.h"
+#include "dyno/Constant.h"
 #include "dyno/Context.h"
 #include "dyno/MutInstr.h"
 #include "dyno/Obj.h"
@@ -19,35 +20,15 @@
 #include "support/DynBitSet.h"
 #include "support/ErrorRecovery.h"
 #include "support/ResultUnwrap.h"
+#include "support/SmallVec.h"
 #include <algorithm>
+#include <bit>
 #include <cstdint>
 
 namespace dyno {
 
 class MemoryMappingPass : public Pass<MemoryMappingPass> {
   Context &ctx;
-
-  // uint32_t getAddressMultiple(RegisterIRef memory) {
-  //   for (auto use : memory.oref().uses()) {
-  //     auto instr = use.instr();
-  //     switch (*instr.getDialectOpcode()) {
-  //       case *HW_MEM_LOAD: {
-  //         auto asLd = instr.as<MemLoadIRef>();
-  //         auto addr = asLd.addr();
-  //         if (auto ptr = addr.dyn_as<PointerRef>()) {
-  //           auto gep = ptr.getDef().instr().as<GEPIRef>();
-  //           for (auto term : gep.terms()) {
-  //             term.getFact()
-  //           }
-  //         }
-  //       }
-  //       break;
-  //     }
-  //   }
-  // }
-
-  // you scale width and all factors by repeating the model memory
-  // -> look for the same factors between factors
 
   struct StoreLowering {
     uint32_t widthRepeats;
@@ -136,7 +117,7 @@ class MemoryMappingPass : public Pass<MemoryMappingPass> {
     RegisterIRef actual;
     RegisterIRef model;
     uint32_t modelPortWidth, actualStoresWidth, modelStoresWidth,
-        actualLoadsWidth, modelLoadsWidth;
+        actualLoadsWidth, modelLoadsWidth, actualPortsLCM;
 
     // for convenience, actual/model store port arrays
     SmallVec<MemStoreIRef, 4> actualStores;
@@ -156,7 +137,7 @@ class MemoryMappingPass : public Pass<MemoryMappingPass> {
               actual.oref().uses().filter(filterLoad).transform(getInstr)),
           modelLoads(
               model.oref().uses().filter(filterLoad).transform(getInstr)),
-          mapping{{}, {modelStores.size()}, {modelLoads.size()}, 0} {
+          mapping{{}, (actualStores.size()), (actualLoads.size()), 0} {
       modelPortWidth = modelStores[0].getLen();
       assert(Range{modelStores}.all(
           [&](auto st) { return st.getLen() == modelPortWidth; }));
@@ -180,6 +161,16 @@ class MemoryMappingPass : public Pass<MemoryMappingPass> {
               .transform([](size_t, MemLoadIRef ld) { return ld.getLen(); })
               .sum();
 
+      auto storesLCM =
+          Range{actualStores}
+              .transform([](size_t, MemStoreIRef st) { return st.getLen(); })
+              .lcm();
+      auto loadsLCM =
+          Range{actualLoads}
+              .transform([](size_t, MemLoadIRef ld) { return ld.getLen(); })
+              .lcm();
+      actualPortsLCM = std::lcm(storesLCM, loadsLCM);
+
       // this is repeats to get the required bandwidth - may be limited by loads
       // or stores.
       mapping.repeatCount =
@@ -187,17 +178,25 @@ class MemoryMappingPass : public Pass<MemoryMappingPass> {
                    round_up_div(actualLoadsWidth, modelLoadsWidth));
     }
 
-    bool mapStores() {
-      UnsizedBitSet<SmallVec<uint64_t, 4>> usedModelStore;
-      usedModelStore.resizeBits(modelStores.size() * mapping.repeatCount);
+    template <typename RefT>
+    bool mapPorts(SmallVecImpl<PortPartition> &partitions,
+                  SmallVecImpl<RefT> &actualPorts,
+                  SmallVecImpl<RefT> &modelPorts, uint32_t minPortSize) {
+      UnsizedBitSet<SmallVec<uint64_t, 4>> usedModelPort;
+      usedModelPort.resizeBits(actualPorts.size() * mapping.repeatCount);
 
-      for (auto [actStIdx, actSt] : Range{actualStores}.enumerate()) {
-        PortPartition &part = mapping.storePartitions[actStIdx];
-        part = PortPartition{actSt.getLen()};
+      for (auto [actStIdx, actSt] : Range{actualPorts}.enumerate()) {
+        PortPartition &part = partitions[actStIdx];
+        auto adjPortLen = actSt.getLen();
+        // every port needs access to the full memory array. If a port is too
+        // narrow, artifically widen it - we then later add MUXs to reduce it.
+        if (adjPortLen < minPortSize)
+          adjPortLen = minPortSize;
+        part = PortPartition{adjPortLen};
 
         // operate on conceptual duplicated model stores. one
         // actualStore might need to be covered by multiple modelStores
-        for (auto [modStIdx, modSt] : Range{modelStores}.enumerate()) {
+        for (auto [modStIdx, modSt] : Range{modelPorts}.enumerate()) {
           for (unsigned repIdx = 0; repIdx < mapping.repeatCount; repIdx++) {
 
             // base address of duplicates is shifted.
@@ -207,12 +206,12 @@ class MemoryMappingPass : public Pass<MemoryMappingPass> {
             unsigned globIdx = modStIdx * mapping.repeatCount + repIdx;
 
             // store's already been used (we do very inefficient matching)
-            if (usedModelStore[globIdx])
+            if (usedModelPort[globIdx])
               continue;
             // constant stuff - we can probably just define no const addr for
             // model mems
-            assert(!modSt.addr().is<ConstantRef>() &&
-                   !actSt.addr().is<ConstantRef>());
+            assert(!modSt.addr().template is<ConstantRef>() &&
+                   !actSt.addr().template is<ConstantRef>());
 
             // If already covered attempt to move forward and cover more via idx
             // offset. (in general not good, wastes alignment)
@@ -226,8 +225,8 @@ class MemoryMappingPass : public Pass<MemoryMappingPass> {
             if (cov)
               continue;
 
-            auto modPtr = modSt.addr().as<ObjRef<Pointer>>();
-            auto actPtr = actSt.addr().as<ObjRef<Pointer>>();
+            auto modPtr = modSt.addr().template as<ObjRef<Pointer>>();
+            auto actPtr = actSt.addr().template as<ObjRef<Pointer>>();
 
             auto &p =
                 mapping.boundPorts
@@ -256,76 +255,86 @@ class MemoryMappingPass : public Pass<MemoryMappingPass> {
       return true;
     }
 
-    bool mapLoads() {
-      UnsizedBitSet<SmallVec<uint64_t, 4>> usedModelLoad;
-      usedModelLoad.resizeBits(modelStores.size() * mapping.repeatCount);
+    template <typename RefT>
+    void applyPort(Context &ctx, RefT actLoad, PortPartition &part,
+                   uint32_t factor, auto &&connect, auto &&connectReverse,
+                   OtherVec<HWValue> *outWires, HWValue &outSubIdx) {
+      HWInstrBuilder build{ctx, actLoad};
 
-      for (auto [actLdIdx, actLd] : Range{actualLoads}.enumerate()) {
-        PortPartition &part = mapping.loadPartitions[actLdIdx];
-        part = PortPartition{actLd.getLen()};
+      HWValue subIdx = nullref;
+      if (factor != 1)
+        subIdx = build.buildUMod(actLoad.terms().front().getIdx(),
+                                 ConstantRef::fromU32(factor));
 
-        // operate on conceptual duplicated model stores. one
-        // actualStore might need to be covered by multiple modelStores
-        for (auto [modLdIdx, modLd] : Range{modelLoads}.enumerate()) {
+      for (auto &frag : part.frags) {
+        auto idx = frag.set.ctz();
+        auto repIdx = idx % mapping.repeatCount;
+        RefT modLoad;
+        if constexpr (std::is_same_v<RefT, MemLoadIRef>)
+          modLoad = modelLoads[idx / mapping.repeatCount];
+        else
+          modLoad = modelStores[idx / mapping.repeatCount];
+        auto &binding =
+            mapping
+                .boundPorts[modLoad.addr().template as<PointerRef>()][repIdx];
 
-          // can't make loads faster, skip
-          if (modLd.port()->delay > actLd.port()->delay)
-            continue;
-
-          for (unsigned repIdx = 0; repIdx < mapping.repeatCount; repIdx++) {
-
-            // base address of duplicates is shifted.
-            // their factor is implicitly multiplied by repIdx.
-            const auto baseAddr = modLd.base() + modelPortWidth * repIdx;
-            auto adjAddr = baseAddr;
-            unsigned globIdx = modLdIdx * mapping.repeatCount + repIdx;
-
-            // store's already been used (we do very inefficient matching)
-            if (usedModelLoad[globIdx])
-              continue;
-            // constant stuff - we can probably just define no const addr for
-            // model mems
-            assert(!modLd.addr().is<ConstantRef>() &&
-                   !actLd.addr().is<ConstantRef>());
-
-            // If already covered attempt to move forward and cover more via idx
-            // offset. (in general not good, wastes alignment)
-            bool cov;
-            while ((cov = part.isCovered(adjAddr, modLd.getLen())) &&
-                   (adjAddr - baseAddr) < modelPortWidth) {
-              assert(modLd.terms().front().getFact() == modLd.getLen());
-              adjAddr += modLd.getLen() * mapping.repeatCount;
-            }
-            // can't cover anything new, port is wasted (also not good)
-            if (cov)
-              continue;
-
-            auto modPtr = modLd.addr().as<ObjRef<Pointer>>();
-            auto actPtr = actLd.addr().as<ObjRef<Pointer>>();
-
-            auto &p =
-                mapping.boundPorts
-                    .findOrInsert(modPtr,
-                                  SmallVec<BoundPort, 4>(mapping.repeatCount))
-                    .second.val();
-            // address object is already bound to something else.
-            if (p[repIdx].addr != Any{actPtr, nullref})
-              continue;
-            p[repIdx].addr = actPtr;
-
-            p[repIdx].idxOffs =
-                (adjAddr - baseAddr) / modLd.terms().front().getFact();
-
-            part.writeSingle(adjAddr,
-                             std::min(part.getLen() - adjAddr, modLd.getLen()),
-                             unsigned(globIdx));
+        // find port
+        if (modLoad.en()) {
+          HWValue en = ConstantRef::fromU32(1);
+          if (actLoad.en())
+            en = actLoad.en();
+          if (subIdx) {
+            auto idx = frag.dstAddr / actLoad.getLen();
+            assert(idx == ((frag.dstAddr + frag.len - 1) / actLoad.getLen()) &&
+                   "frag overlaps multiple boundary?"); // this might be
+                                                        // unavoidable...
+            en = build.buildAnd(en, build.buildICmp(subIdx,
+                                                    ConstantRef::fromU32(idx),
+                                                    BigInt::ICMP_EQ));
           }
+
+          connect(en, modLoad.en(), repIdx);
         }
 
-        if (!part.isCovered(0, part.getLen()))
-          return false;
+        // shift in the address (could also do non pow2 but likely too slow)
+        int32_t addrShamt = -std::bit_width(factor - 1);
+        uint32_t len = part.getLen(); // actLoad.getLen(); // TODO mismatch
+
+        // length of the model port with repeats. this assumes repeats do the
+        // same thing which might be broken.
+        uint32_t repLen = (mapping.repeatCount * modelPortWidth);
+        if (len < repLen)
+          ; // too long, simply truncate, wasting capacity. we can add MUXs
+            // here at some point
+        else if (len > repLen) {
+          addrShamt += flog2(len / repLen);
+          // TODO: case where we hit this branch but also shrink port size
+          // back down bc of adjSize
+        }
+
+        // todo: more than one term
+        auto addr = actLoad.terms().front().getIdx();
+        if (addrShamt >= 0)
+          addr = build.buildSLL(addr, ConstantRef::fromU32(addrShamt));
+        else
+          addr = build.buildSRL(addr, ConstantRef::fromU32(-addrShamt));
+        addr = build.buildAdd(addr, ConstantRef::fromU32(binding.idxOffs));
+        connect(addr, modLoad.terms().front().getIdx().template as<WireRef>(),
+                repIdx);
+
+        if constexpr (std::is_same_v<RefT, MemLoadIRef>) {
+          HWValue rdval = connectReverse(modLoad.value(), repIdx);
+          rdval = build.buildTrunc(frag.len, rdval);
+          (*outWires).emplace_back(rdval);
+        } else {
+          HWValue wrval = actLoad.value();
+          wrval = build.buildRepeat(wrval, factor);
+          wrval = build.buildSplice(wrval, frag.len, frag.dstAddr);
+          connect(wrval, modLoad.value(), repIdx);
+        }
       }
-      return true;
+
+      outSubIdx = subIdx;
     }
 
     void apply(Context &ctx) {
@@ -381,46 +390,37 @@ class MemoryMappingPass : public Pass<MemoryMappingPass> {
            Range{mapping.loadPartitions}.zip(actualLoads)) {
         build.setInsertPoint(actLoad);
 
-        OperandVec<HWValue> wires{ctx, 1, part.frags.size()};
-        wires.emplace_back(actLoad.value());
+        OtherVec<HWValue> wires{ctx, 1, part.frags.size()};
+        assert(part.getLen() % actLoad.getLen() == 0);
+        uint32_t factor = part.getLen() / actLoad.getLen();
+        assert(std::popcount(factor) == 1 && "expected pow2 factor");
 
-        for (auto &frag : part.frags) {
-          auto idx = frag.set.ctz();
-          auto repIdx = idx % mapping.repeatCount;
-          auto modLoad = modelLoads[idx / mapping.repeatCount];
-          auto &binding =
-              mapping.boundPorts[modLoad.addr().as<PointerRef>()][repIdx];
+        HWValue subIdx;
+        applyPort(ctx, actLoad, part, factor, connect, connectReverse, &wires,
+                  subIdx);
 
-          // find port
-          if (actLoad.en())
-            connect(actLoad.en(), modLoad.en(), repIdx);
-          else if (modLoad.en())
-            connect(ConstantRef::fromU32(1), modLoad.en(), repIdx);
+        auto val = build.buildConcat(std::move(wires));
 
-          // shift in the address (could also do non pow2 but likely too slow)
-          uint32_t addrShamt = 0;
-          // length of the model port with repeats. this assumes repeats do the
-          // same thing which might be broken.
-          uint32_t repLen = (mapping.repeatCount * modelPortWidth);
-          if (actLoad.getLen() < repLen)
-            ; // too long, simply truncate, wasting capacity. we can add MUXs
-              // here at some point
-          else if (actLoad.getLen() > repLen) {
-            addrShamt = flog2(actLoad.getLen() / repLen);
-          }
-
-          auto addr = actLoad.terms().front().getIdx();
-          addr = build.buildAdd(
-              build.buildSLL(addr, ConstantRef::fromU32(addrShamt)),
-              ConstantRef::fromU32(binding.idxOffs));
-          connect(addr, modLoad.terms().front().getIdx().as<WireRef>(), repIdx);
-
-          HWValue rdval = connectReverse(modLoad.value(), repIdx);
-          rdval = build.buildTrunc(frag.len, rdval);
-          wires.emplace_back(rdval);
+        if (factor != 1) {
+          val = build.buildSplice(
+              val, actLoad.getLen(), 0,
+              AddressGenTerm{subIdx, actLoad.getLen(), factor});
         }
-        build.buildConcat(std::move(wires));
-        actLoad.def().replace(FatDynObjRef{nullref});
+
+        actLoad.def()->as<WireRef>().replaceAllUsesWith(val);
+      }
+
+      for (auto [part, actStore] :
+           Range{mapping.storePartitions}.zip(actualStores)) {
+        build.setInsertPoint(actStore);
+
+        assert(part.getLen() % actStore.getLen() == 0);
+        uint32_t factor = part.getLen() / actStore.getLen();
+        assert(std::popcount(factor) == 1 && "expected pow2 factor");
+
+        HWValue subIdx;
+        applyPort(ctx, actStore, part, factor, connect, connectReverse, nullptr,
+                  subIdx);
       }
 
       // build
@@ -446,99 +446,22 @@ class MemoryMappingPass : public Pass<MemoryMappingPass> {
     auto modelSize = model.getNumBits();
 
     MemoryMapper mapper{actual, model};
-    if (!mapper.mapStores())
-      return false;
-    if (!mapper.mapLoads())
-      return false;
-
+    auto origRepCnt = mapper.mapping.repeatCount;
+    auto maxRepCnt = origRepCnt * 2;
+    do {
+      if (!mapper.mapPorts(mapper.mapping.storePartitions, mapper.actualStores,
+                           mapper.modelStores, mapper.actualPortsLCM))
+        continue;
+      if (!mapper.mapPorts(mapper.mapping.loadPartitions, mapper.actualLoads,
+                           mapper.modelLoads, mapper.actualPortsLCM))
+        continue;
+      goto success;
+    } while (mapper.mapping.boundPorts.clear(),
+             ++mapper.mapping.repeatCount <= maxRepCnt);
+    return false;
+  success:
     mapper.apply(ctx);
-
     return true;
-
-    // constexpr auto filterStore = [](OperandRef op) {
-    //   return op.instr().isOpc(HW_MEM_STORE);
-    // };
-    // constexpr auto filterLoad = [](OperandRef op) {
-    //   return op.instr().isOpc(HW_MEM_STORE);
-    // };
-    // constexpr auto getInstr = [](size_t, auto op) { return op.instr(); };
-    // SmallVec<MemStoreIRef, 4> actualStores(
-    //     actual.oref().uses().filter(filterStore).transform(getInstr));
-    // SmallVec<MemStoreIRef, 4> modelStores(
-    //     model.oref().uses().filter(filterStore).transform(getInstr));
-    // assert(actualStores.size() <= modelStores.size() && "too few stores");
-    // SmallVec<MemStoreIRef, 4> actualLoads(
-    //     actual.oref().uses().filter(filterLoad).transform(getInstr));
-    // SmallVec<MemStoreIRef, 4> modelLoads(
-    //     model.oref().uses().filter(filterLoad).transform(getInstr));
-
-    // uint32_t actualStoresWidth =
-    //     Range{actualStores}
-    //         .transform([](size_t, MemStoreIRef st) { return st.getLen(); })
-    //         .sum();
-    // uint32_t modelStoresWidth =
-    //     Range{modelStores}
-    //         .transform([](size_t, MemStoreIRef st) { return st.getLen(); })
-    //         .sum();
-
-    // // for now we assume all model ports are the same width
-    // uint32_t modelPortWidth = modelStores[0].getLen();
-    // assert(Range{modelStores}.all(
-    //     [=](auto st) { return st.getLen() == modelPortWidth; }));
-    // assert(Range{modelLoads}.all(
-    //     [=](auto st) { return st.getLen() == modelPortWidth; }));
-    // // we also assume there's one term to address the entire memory, with
-    // factor
-    // // equal modelPortWidth.
-
-    // uint32_t repeatCount = round_up_div(actualStoresWidth, modelStoresWidth);
-
-    // (conceptually) split memory to legalize.
-    // modelStores/loads factors all multiplied, bases
-    // become +0, +len, +2len...
-
-    /*
-    Legalization options:
-      - increase width
-        - remaps addresses over multiple memories. be careful if ports have
-    different sizes
-      - increase depth
-      -
-
-    */
-
-    // Duplicate for more store bandwidth -> do get more read bandwidth
-
-    // Loads:
-    //  - partly just same sort of covering
-    //  - but: can also make more load ports by duplicating everything done up
-    //  to now
-    //
-
-    // assume canonicalized to remove useless base.
-    // assume canon'd to all bits covered
-    // assume canon'd factor is multiple of size
-    // assume canon'd power of 2 factors into concat (x * 16 + y[3:0])
-    // assume all loads in model same size
-
-    // smallest base first, most factors first, biggest factors first
-    // constexpr auto sort = [](MemStoreIRef a, MemStoreIRef b) {
-    //   if (a.base() != b.base())
-    //     return a.base() < b.base();
-
-    //   auto aT = a.terms();
-    //   auto bT = b.terms();
-    //   if (aT.size() == bT.size()) {
-    //     if (aT.empty())
-    //       return false;
-    //     if (aT.front().getFact() > bT.front().getFact())
-    //       return aT.front().getFact() > bT.front().getFact();
-    //   }
-    //   return aT.size() > bT.size();
-    // };
-
-    // Range{actualStores}.sort(sort);
-    // Range{modelStores}.sort(sort);
   }
   SmallVec<RegisterIRef, 16> memStdCells;
 

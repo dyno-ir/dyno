@@ -981,6 +981,22 @@ public:
     return std::min_element(begin(), end(), func);
   }
   auto sum() { return std::reduce(begin(), end()); }
+  auto lcm() {
+    if (empty())
+      return typename It::value_type(0);
+    typename It::value_type val = front();
+    for (auto &&e : drop_front())
+      val = std::lcm(val, e);
+    return val;
+  }
+  auto gcd() {
+    if (empty())
+      return typename It::value_type(0);
+    typename It::value_type val = front();
+    for (auto &&e : drop_front())
+      val = std::gcd(val, e);
+    return val;
+  }
   template <typename T> bool equals(Range<T> other) {
     if constexpr (requires() {
                     this->size();
