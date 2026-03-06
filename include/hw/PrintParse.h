@@ -9,11 +9,18 @@
 #include "hw/IDs.h"
 #include "hw/MemoryPort.h"
 #include "hw/Module.h"
+#include "hw/StdCellInfo.h"
 #include "support/CallableRef.h"
 #include "support/Lexer.h"
+#include "support/Ranges.h"
 #include "support/TemplateUtil.h"
+#include <array>
 #include <cctype>
 #include <charconv>
+
+#define FOR_STDCELL_INFO_ELEMENTS(FUNC) FUNC(area), FUNC(isFlipFlop)
+#define EXPAND_MEMBERS(nm) asInfo->nm
+#define EXPAND_NAMES(nm) #nm
 
 namespace dyno {
 class HWDialectPrinter {
@@ -93,6 +100,33 @@ public:
         std::print(str, ", ({}, {})", meta.oldTime, meta.unkTime);
       }
 
+      str << ")";
+      break;
+    }
+    case HW_STDCELL_INFO.type: {
+      auto asInfo = ref.as<StdCellInfoRef>();
+      str << "stdcell_info(";
+
+      auto list = std::make_tuple(FOR_STDCELL_INFO_ELEMENTS(EXPAND_MEMBERS));
+      auto names = std::to_array({FOR_STDCELL_INFO_ELEMENTS(EXPAND_NAMES)});
+      std::apply(
+          [&](auto &...args) {
+            size_t i = 0;
+            bool any = false;
+            (
+                [&] {
+                  if (args) {
+                    if (any)
+                      str << ", ";
+                    // fixme: floating point in parser.
+                    std::print(str, "\"{}\": {}", names[i], unsigned(*args));
+                    i++;
+                    any = true;
+                  }
+                }(),
+                ...);
+          },
+          list);
       str << ")";
       break;
     }
@@ -217,6 +251,37 @@ public:
     case *HW_POINTER: {
       return ctx->getStore<Pointer>().create();
     }
+    case *HW_STDCELL_INFO: {
+      auto asInfo = ctx->getStore<StdCellInfo>().create();
+      lexer->popEnsure(DynoLexer::op_rbropen);
+
+      auto list = std::make_tuple(FOR_STDCELL_INFO_ELEMENTS(EXPAND_MEMBERS));
+      auto names = std::to_array({FOR_STDCELL_INFO_ELEMENTS(EXPAND_NAMES)});
+
+      while (lexer->peekIs(Token::STRING_LITERAL)) {
+        auto tok = lexer->popEnsure(Token::STRING_LITERAL).strLit.value;
+        auto res = std::apply(
+            [&](auto &...args) {
+              unsigned i = 0;
+              return ([&] {
+                if (names[i++] == tok) {
+                  lexer->popEnsure(DynoLexer::op_colon);
+                  // todo: non int
+                  args = lexer->popEnsure(Token::INT_LITERAL).intLit.value;
+                  return true;
+                }
+                return false;
+              }() || ...);
+            },
+            list);
+        if (!res)
+          return nullref;
+        if (!lexer->popIf(DynoLexer::op_comma))
+          break;
+      }
+      lexer->popEnsure(DynoLexer::op_rbrclose);
+      return asInfo;
+    }
     }
 
     return nullref;
@@ -224,3 +289,7 @@ public:
 };
 
 }; // namespace dyno
+
+#undef FOR_STDCELL_INFO_ELEMENTS
+#undef EXPAND_MEMBERS
+#undef EXPAND_NAMES

@@ -59,8 +59,7 @@ template <typename Derived> class ContextMixin {
   }
   auto makeResolverMethods() {
     // create vector and assign elements
-    std::vector<CallableRef<FatDynObjRef<>(DynObjRef)>> arr(getMaxTyID() +
-                                                                  1);
+    std::vector<CallableRef<FatDynObjRef<>(DynObjRef)>> arr(getMaxTyID() + 1);
     [&]<std::size_t... Is>(std::index_sequence<Is...>) {
       (
           [&] {
@@ -83,8 +82,8 @@ template <typename Derived> class ContextMixin {
   }
   auto makeCopyMethods() {
     // create vector and assign elements
-    std::vector<CallableRef<FatDynObjRef<>(FatDynObjRef<>)>> arr(
-        getMaxTyID() + 1);
+    std::vector<CallableRef<FatDynObjRef<>(FatDynObjRef<>)>> arr(getMaxTyID() +
+                                                                 1);
     [&]<std::size_t... Is>(std::index_sequence<Is...>) {
       (
           [&] {
@@ -209,6 +208,9 @@ public:
     dyno::registerDialect<T::dialect>(this, dialectInfos.dialectInfoArr.data(),
                                       dialectInfos.typeInfoArr.data(),
                                       dialectInfos.opcodeInfoArr.data());
+    assert(dialectInfos.dialectInfoArr[T::dialect] &&
+           "no dialect registered? registerDialect template specialization "
+           "header included?");
 
     // last thing: passes
     registerDialectPasses<T::dialect>(passRegistry);

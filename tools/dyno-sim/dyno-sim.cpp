@@ -172,7 +172,7 @@ int main(int argc, char **argv) {
   print.printCtx(ctx);
 
   auto mod = *ctx.getStore<Module>().begin();
-  mod.iref().rebuildSignature();
+  mod.iref().rebuildCache();
   auto topInstance = createTopInstance(ctx, mod.iref());
 
   HWInterpreter interpreter{ctx, mod.iref(), std::cout, std::cerr};

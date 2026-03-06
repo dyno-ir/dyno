@@ -87,9 +87,9 @@ constexpr inline void registerDialect(Context *,
 }
 
 struct DialectInfos {
-  std::array<const DialectInfo *, MAX_NUM_DIALECTS> dialectInfoArr;
-  std::array<ArrayRef<TyInfo>, MAX_NUM_DIALECTS> typeInfoArr;
-  std::array<ArrayRef<OpcodeInfo>, MAX_NUM_DIALECTS> opcodeInfoArr;
+  std::array<const DialectInfo *, MAX_NUM_DIALECTS> dialectInfoArr = {};
+  std::array<ArrayRef<TyInfo>, MAX_NUM_DIALECTS> typeInfoArr = {};
+  std::array<ArrayRef<OpcodeInfo>, MAX_NUM_DIALECTS> opcodeInfoArr = {};
 };
 
 template <DialectID... Dialects> struct AutoDialectInfos {

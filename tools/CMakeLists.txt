@@ -10,6 +10,9 @@ target_link_libraries(rttitest PRIVATE hw)
 add_executable(biginttest BigIntTest.cpp)
 target_link_libraries(biginttest PRIVATE hw)
 
+add_executable(dyno-liberty dyno-liberty.cpp)
+target_link_libraries(dyno-liberty PRIVATE hw)
+
 add_subdirectory(dyno-sv)
 add_subdirectory(dyno-sim)
 add_subdirectory(dyno-opt)

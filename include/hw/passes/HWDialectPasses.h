@@ -8,6 +8,7 @@
 #include "hw/passes/CommonSubexpressionElimination.h"
 #include "hw/passes/ConstantMapping.h"
 #include "hw/passes/DumpPass.h"
+#include "hw/passes/DumpVerilog.h"
 #include "hw/passes/EarlySharePass.h"
 #include "hw/passes/FindLongestPath.h"
 #include "hw/passes/FlipFlopInference.h"
@@ -23,8 +24,10 @@
 #include "hw/passes/ModuleInline.h"
 #include "hw/passes/MuxTreeFlatten.h"
 #include "hw/passes/OrderInstrs.h"
+#include "hw/passes/ParseDyno.h"
 #include "hw/passes/ParseLiberty.h"
 #include "hw/passes/ProcessLinearize.h"
+#include "hw/passes/RebuildCache.h"
 #include "hw/passes/RegisterPartition.h"
 #include "hw/passes/RemoveBuffers.h"
 #include "hw/passes/RemoveInitProcs.h"
@@ -70,5 +73,8 @@ registerDialectPasses<DialectID{DIALECT_HW}>(PassRegistry &passRegistry) {
   passRegistry.registerPass<MuxTreeFlattenPass>();
   passRegistry.registerPass<DumpPass>();
   passRegistry.registerPass<MemoryMappingPass>();
+  passRegistry.registerPass<ParseDynoPass>();
+  passRegistry.registerPass<DumpVerilogPass>();
+  passRegistry.registerPass<PopulateInlineCachesPass>();
 }
 }; // namespace dyno

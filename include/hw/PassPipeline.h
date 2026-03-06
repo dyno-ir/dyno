@@ -278,6 +278,7 @@ public:
     runPass(memoryMapping);
 
     runPass(muxTreeFlatten);
+    runPass(cse);
     fuzzyCse.config.opToShare = OP_AND;
     runPass(fuzzyCse, true);
     runPass(orderInstrs);
@@ -385,8 +386,9 @@ public:
     runPass(longestPath);
   }
 
-  void dumpVerilog(std::ostream &os) {
-    DumpVerilogPass dumpVerilog{ctx, os};
+  void dumpVerilog(std::string name) {
+    DumpVerilogPass dumpVerilog{ctx};
+    dumpVerilog.config.fileName = std::move(name);
     dumpVerilog.run();
   }
 

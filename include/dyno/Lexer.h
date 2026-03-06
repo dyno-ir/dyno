@@ -28,7 +28,7 @@ class DynoLexer : public Lexer<false, false, true, true> {
 public:
   constexpr static std::array<const char *, 0> Keywords;
   constexpr static auto Operators = std::to_array(
-      {".", ":", ",", "[", "]", "?", "#", "(", ")", "{", "}", ";"});
+      {".", ":", ",", "[", "]", "?", "#", "(", ")", "{", "}", ";", "="});
   enum OperatorEnum {
     _op_start = Lexer::TOK_OPS_START - 1,
     op_dot,
@@ -42,7 +42,8 @@ public:
     op_rbrclose,
     op_cbropen,
     op_cbrclose,
-    op_semicolon
+    op_semicolon,
+    op_equals
   };
 
   DialectInfos &infos;

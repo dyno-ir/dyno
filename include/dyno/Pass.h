@@ -91,9 +91,8 @@ CONFIG_STRUCT_TYPES(LAMBDA)
 
 #define CONFIG_STRUCT(lambda)                                                  \
   struct Config {                                                              \
-    lambda(CONFIG_EXPAND_MEMBER,                                               \
-           CONFIG_EXPAND_ENUM_MEMBER) void for_fields(auto &&Func,             \
-                                                      auto &&EnumFunc) {       \
+    lambda(CONFIG_EXPAND_MEMBER, CONFIG_EXPAND_ENUM_MEMBER) void for_fields(   \
+        auto &&Func [[maybe_unused]], auto &&EnumFunc [[maybe_unused]]) {      \
       lambda(CONFIG_EXPAND_CALL, CONFIG_EXPAND_ENUM_CALL)                      \
     }                                                                          \
   };

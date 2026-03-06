@@ -8,6 +8,7 @@ class StdCellInfo {
 public:
   std::optional<double> area;
   std::optional<bool> isFlipFlop;
+  // also add elements to FOR_STDCELL_INFO_ELEMENTS in hw/PrintParse.h
 
   StdCellInfo(ObjRef<StdCellInfo> ref) {}
   StdCellInfo(DynObjRef, FatObjRef<StdCellInfo> other)

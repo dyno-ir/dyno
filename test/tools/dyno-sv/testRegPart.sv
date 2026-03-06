@@ -1,5 +1,6 @@
 module TestRegPart#(parameter N=4)(
   input wire clk,
+  input wire rst,
 
   input wire[N-1:0] IN_a,
   input wire[N-1:0] IN_b,
@@ -21,15 +22,19 @@ module TestRegPart#(parameter N=4)(
 
 logic[4*N-1:0] dat;
 
-always_ff@(posedge clk) begin
-  if (IN_sel_a)
-    dat[0+:4] <= IN_a;
-  if (IN_sel_b)
-    dat[4+:4] <= IN_b;
-  if (IN_sel_c)
-    dat[8+:4] <= IN_c;
-  if (IN_sel_d)
-    dat[12+:4] <= IN_d;
+always_ff@(posedge clk, negedge rst) begin
+  if (!rst)
+    dat <= '0;
+  else begin
+    if (IN_sel_a)
+      dat[0+:4] <= IN_a;
+    if (IN_sel_b)
+      dat[4+:4] <= IN_b;
+    if (IN_sel_c)
+      dat[8+:4] <= IN_c;
+    if (IN_sel_d)
+      dat[12+:4] <= IN_d;
+  end
 end
 
 // assign {OUT_a, OUT_b, OUT_c, OUT_d} = dat;

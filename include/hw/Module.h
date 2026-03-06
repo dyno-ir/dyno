@@ -149,7 +149,7 @@ public:
   }
 
   // todo: signature caching should be more explicit
-  void rebuildSignature() {
+  void rebuildCache() {
     mod()->ports.clear();
     for (auto port : ports()) {
       mod()->ports.emplace_back(port.as<RegisterIRef>().oref(),

@@ -54,6 +54,7 @@ meta.LOWER_OPS_PASS map(
   "lowerShift"             : "0",
   "lowerInsert"            : "0",
   "lowerExtract"           : "0",
+  "lowerOneHotMux"         : "0",
 )
 meta.INST_COMBINE_PASS
 meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS
@@ -106,3 +107,98 @@ meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS
 meta.FUZZY_CSE_PASS map("minSharedBitsForMerge": "1", "maxSharedBitsForMerge": "1", "opToShare": "op.AND")
 meta.ORDER_INSTRS_PASS map("assertNoCircularDeps": "1", "moveStoresBeforeLoads": "1")
 meta.INST_COMBINE_PASS
+
+// lower insert/extract
+meta.LOWER_OPS_PASS map(
+  "lowerMultiInputAdd"     : "1",
+  "lowerAddCompress"       : "0",
+  "lowerSimpleAdd"         : "0",
+  "lowerSub"               : "1",
+  "lowerConstantMul"       : "1",
+  "lowerMultiInputBitwise" : "0",
+  "lowerEqualityICMP"      : "1",
+  "lowerOrderingICMP"      : "1",
+  "lowerShift"             : "1",
+  "lowerInsert"            : "1",
+  "lowerExtract"           : "1",
+  "lowerOneHotMux"         : "0",
+)
+
+// lift MUXs up the dep chain for reg partition
+// (s.t. regs with e.g. concat input can be split)
+meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS
+meta.INST_COMBINE_PASS map("liftMUX" : "1")
+meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS
+meta.INST_COMBINE_PASS map("liftMUX" : "1")
+meta.REGISTER_PARTITION_PASS
+meta.INST_COMBINE_PASS map("liftMUX" : "1")
+
+meta.PROCESS_LINEARIZE_PASS
+meta.INST_COMBINE_PASS
+meta.SSA_CONSTRUCT_PASS
+meta.INST_COMBINE_PASS
+meta.AGGRESSIVE_DEAD_CODE_ELIMINATION_PASS
+
+// flip flop inference
+meta.INST_COMBINE_PASS
+meta.FLIP_FLOP_INFERENCE_PASS
+meta.TRIGGER_DEDUPE_PASS
+meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS
+meta.INST_COMBINE_PASS
+meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS
+meta.INST_COMBINE_PASS
+
+// load pre-parsed liberty
+meta.PARSE_DYNO_PASS map("fileName" : "sky130_fd_sc_hd.dyno", "newModulesActive" : "0")
+meta.POPULATE_INLINE_CACHES_PASS
+
+// map flip flops
+meta.FLIP_FLOP_MAPPING_PASS
+meta.INST_COMBINE_PASS
+meta.PROCESS_LINEARIZE_PASS
+meta.ORDER_INSTRS_PASS
+meta.INST_COMBINE_PASS
+meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS
+meta.SSA_CONSTRUCT_PASS
+meta.INST_COMBINE_PASS
+meta.AGGRESSIVE_DEAD_CODE_ELIMINATION_PASS
+
+// lower everything
+meta.LOWER_OPS_PASS map(
+  "lowerMultiInputAdd"     : "1",
+  "lowerAddCompress"       : "1",
+  "lowerSimpleAdd"         : "1",
+  "lowerSub"               : "1",
+  "lowerConstantMul"       : "1",
+  "lowerMultiInputBitwise" : "1",
+  "lowerEqualityICMP"      : "1",
+  "lowerOrderingICMP"      : "1",
+  "lowerShift"             : "1",
+  "lowerInsert"            : "1",
+  "lowerExtract"           : "1",
+  "lowerOneHotMux"         : "1",
+)
+
+meta.INST_COMBINE_PASS map("fuseCommutative": "0", "removeAssumes": "1")
+meta.AGGRESSIVE_DEAD_CODE_ELIMINATION_PASS
+
+// AIG opt & techmap
+meta.AIG_CONSTRUCT_PASS
+meta.AGGRESSIVE_DEAD_CODE_ELIMINATION_PASS
+meta.ABC_PASS map("path": "sky130_fd_sc_hd__tt_025C_1v80.lib")
+meta.AGGRESSIVE_DEAD_CODE_ELIMINATION_PASS
+meta.REMOVE_BUFFERS_PASS
+
+meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS
+meta.INST_COMBINE_PASS
+meta.AGGRESSIVE_DEAD_CODE_ELIMINATION_PASS
+
+meta.CONSTANT_MAPPING_PASS
+meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS
+meta.INST_COMBINE_PASS
+meta.AGGRESSIVE_DEAD_CODE_ELIMINATION_PASS
+
+meta.ORDER_INSTRS_PASS map("assertNoCircularDeps": "false")
+meta.FIND_LONGEST_PATH_PASS
+
+meta.DUMP_VERILOG_PASS map("fileName": "dump.v")
