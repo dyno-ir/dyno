@@ -345,6 +345,13 @@ macro chk_wire $self, $len [{
     goto $fail;
 }]
 
+macro chk_constant_unsized $self, $len [{
+  if (!$self.begin()->is<ConstantRef>())
+    goto $fail;
+  if (!$len.valueEquals($self.begin()->as<ConstantRef>()))
+    goto $fail;
+}]
+
 macro chk_wire_constant $self, $len [{
   if (!(*$self.begin())->is<WireRef>())
     goto $fail;
@@ -616,6 +623,42 @@ with [{
   $constTrunc = temp;
 }]
 replace $out -> $constTrunc
+
+match {
+  OP_UMOD $out, $x, $n:CORE_CONSTANT
+}
+with [{
+  auto c = $n.begin()->as<ConstantRef>();
+  if (c.getIs4S())
+    goto $fail;
+  if (BigInt::countBitsExact(c, 1) != 1)
+    goto $fail;
+  auto shift = BigInt::trailingZeros(c);
+  FatDynObjRef<> mask = cbuild.val(c.getNumBits(), 1).shl(shift).sub(1).get();
+  $maskR = mask;
+}]
+replace {
+  OP_AND $out, $x, $maskR
+}
+
+match {
+  $opc{OP_SLL, OP_SRL, OP_SRA, OP_SUB} $out, $x, #'0
+}
+replace $out -> $x
+
+match {
+  $opc{OP_SMOD, OP_UMOD} $out, $x, chk_constant_unsized(#1'b1)
+}
+with [{
+  FatDynObjRef<> zero = cbuild.zero(*$out.begin()->as<WireRef>().getNumBits());
+  $zeroR = zero;
+}]
+replace $out -> $zeroR
+
+match {
+  $opc{OP_SDIV, OP_UDIV} $out, $x, chk_constant_unsized(#1'b1)
+}
+replace $out -> $x
 
 
 // fuse padding into insert instructions

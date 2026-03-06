@@ -14,6 +14,7 @@
 #include <iterator>
 #include <memory>
 #include <new>
+#include <type_traits>
 #include <utility>
 
 template <typename Derived, typename K, typename Bucket, typename Iterator>
@@ -212,8 +213,8 @@ public:
     return tmp;
   }
 
-  friend bool operator==(const DenseSetMapIteratorBase &lhs,
-                         const DenseSetMapIteratorBase &rhs) {
+  bool operator==(const DenseSetMapIteratorBase &rhs) const {
+    auto &lhs = *this;
     if (lhs.bucket != rhs.bucket)
       return false;
     assert(lhs.rem == rhs.rem);
@@ -324,6 +325,11 @@ public:
     return iter;
   }
   iterator insert(const K &k, const V &v) { return insert(k, V{v}); }
+  template <typename It> void insert(Range<It> arr) {
+    for (auto [k, v] : arr) {
+      insert(k, v);
+    }
+  }
 
   iterator insertOrAssign(const K &k, V &&v) {
     auto [found, iter] = Base::findImpl(k);
@@ -673,6 +679,28 @@ public:
     std::construct_at(this, std::move(other));
     return *this;
   }
+  LargeSetMap(size_t cap)
+      : Base(round_up_div(ceil_to_pow2(std::max(cap, 1ZU)),
+                          size_t(Bucket::entriesPerBucket)),
+             0) {
+    buckets = (Bucket *)::operator new[](sizeof(Bucket) * this->cap,
+                                         std::align_val_t(alignof(Bucket)));
+    std::uninitialized_default_construct_n(buckets, this->cap);
+  }
+  template <typename T>
+  LargeSetMap(Range<T> range)
+    requires(std::is_same_v<typename Range<T>::iterator_category,
+                            std::random_access_iterator_tag>)
+      : LargeSetMap(range.size()) {
+    this->Base::insert(range);
+  }
+  template <typename T>
+  LargeSetMap(Range<T> range)
+    requires(!std::is_same_v<typename Range<T>::iterator_category,
+                             std::random_access_iterator_tag>)
+      : LargeSetMap() {
+    this->Base::insert(range);
+  }
 
   ~LargeSetMap() {
     ::operator delete[](buckets, std::align_val_t(alignof(Bucket)));
@@ -755,6 +783,34 @@ public:
     other.cap = 0;
     return *this;
   }
+  SmallSetMap(size_t cap)
+      : Base(round_up_div(
+                 ceil_to_pow2(std::max(
+                     cap, InlineBuckets * size_t(Bucket::entriesPerBucket))),
+                 size_t(Bucket::entriesPerBucket)),
+             0) {
+    if (this->cap > InlineBuckets) {
+      buckets = (Bucket *)::operator new[](sizeof(Bucket) * this->cap,
+                                           std::align_val_t(alignof(Bucket)));
+    } else {
+      buckets = *arr;
+    }
+    std::uninitialized_default_construct_n(buckets, this->cap);
+  }
+  template <typename T>
+  SmallSetMap(Range<T> range)
+    requires(std::is_same_v<typename Range<T>::iterator_category,
+                            std::random_access_iterator_tag>)
+      : SmallSetMap(range.size()) {
+    this->Base::insert(range);
+  }
+  template <typename T>
+  SmallSetMap(Range<T> range)
+    requires(!std::is_same_v<typename Range<T>::iterator_category,
+                             std::random_access_iterator_tag>)
+      : SmallSetMap() {
+    this->Base::insert(range);
+  }
 
   ~SmallSetMap() {
     if (isSmall())
@@ -770,6 +826,7 @@ class DenseMap : public LargeSetMap<
   using Base =
       LargeSetMap<DenseMapBase<DenseMap<K, V>, K, V, DenseMapBucket<K, V>>>;
   using Base::Base;
+
 public:
   ~DenseMap() { this->Base::clearDelete(); }
 };

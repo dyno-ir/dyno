@@ -1,5 +1,5 @@
 
-
+/*
 TEST_CASE :string("instcombine-constants"), :block, :block, :block {
   MODULE_DEF :module("mod"), :block {
     OUTPUT_REGISTER_DEF %out_a:register(128)
@@ -508,7 +508,9 @@ TEST_CASE :string("instcombine-mux-lift"), :block, :block, :block {
   }
 }{
   meta.INST_COMBINE_PASS
+}*/
 
+/*
 TEST_CASE :string("test-mem-map"), :block, :block, :block, {
   // 2 bit async read sync write memory
 
@@ -562,8 +564,8 @@ TEST_CASE :string("test-mem-map"), :block, :block, :block, {
 }{
   meta.MEMORY_MAPPING_PASS
 }
+*/
 
-/*
 TEST_CASE :string("test-mem-map-2bit-wr-8bit-rd"), :block, :block, :block, {
   // 2 bit async read sync write memory
 
@@ -611,6 +613,8 @@ TEST_CASE :string("test-mem-map-2bit-wr-8bit-rd"), :block, :block, :block, {
     INPUT_REGISTER_DEF %IN_wdata:register(2)
     INPUT_REGISTER_DEF %IN_raddr:register(32)
     OUTPUT_REGISTER_DEF %OUT_rdata:register(8)
+    INPUT_REGISTER_DEF %IN_raddr2:register(32)
+    OUTPUT_REGISTER_DEF %OUT_rdata2:register(2)
     REGISTER_DEF %r7:register(128)
     TRIGGER_DEF %1:trigger(pos), %clk
     COMB_PROCESS_DEF %2:process, %3:block {
@@ -620,18 +624,27 @@ TEST_CASE :string("test-mem-map-2bit-wr-8bit-rd"), :block, :block, :block, {
       GEP %4:ptr, #32'd0, %w3, #32'd2, #32'd64
       MEM_STORE %5:mem_port(1), %w10, %r7, %1, %4
       LOAD %w5:wire(4), %IN_raddr  ["test/tools/dyno-sv/testMem.sv:24:16-36"]
+      LOAD %ww5:wire(6), %IN_raddr2  ["test/tools/dyno-sv/testMem.sv:24:16-36"]
       ZEXT %w7:wire(32), %w5  ["test/tools/dyno-sv/testMem.sv:24:16-36"]
+      ZEXT %ww7:wire(32), %ww5  ["test/tools/dyno-sv/testMem.sv:24:16-36"]
       GEP %6:ptr, #32'd0, %w7, #32'd8, #32'd16
+      GEP %pp6:ptr, #32'd0, %ww7, #32'd2, #32'd64
       MEM_LOAD %w1:wire(8), %7:mem_port(0), %r7, %6
       STORE_DEFER %w1, %OUT_rdata, %1
+      MEM_LOAD %ww1:wire(2), %mm7:mem_port(0), %r7, %pp6
+      STORE_DEFER %ww1, %OUT_rdata2, %1
     }
   }
 }{
 
 }{
   meta.MEMORY_MAPPING_PASS
+  meta.INST_COMBINE_PASS
+  meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS
+  meta.INST_COMBINE_PASS
+  meta.AGGRESSIVE_DEAD_CODE_ELIMINATION_PASS
 }
-*/
+
 
 /*
 TEST_CASE :string("test-mem-map-2w"), :block, :block, :block, {

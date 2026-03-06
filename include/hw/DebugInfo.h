@@ -8,6 +8,8 @@
 #include "support/Bits.h"
 #include "support/DedupeMap.h"
 #include "support/SlabAllocator.h"
+#include "support/StringRef.h"
+#include "support/TwoLevelSet.h"
 #include <cstdint>
 #include <unordered_map>
 namespace dyno {
@@ -45,7 +47,7 @@ struct DebugSourceLoc {
 };
 
 class StringDedupeMap {
-  std::unordered_map<std::string_view, uint32_t> stringMap;
+  TwoLevelMap<SSOStringRef, uint32_t> stringMap;
   MixedSizeSlabAllocator<> strtab{sizeof(char)};
 
 public:

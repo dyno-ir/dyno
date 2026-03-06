@@ -555,8 +555,8 @@ class AggressiveDeadCodeEliminationPass
 
       if (instr.isOpc(HW_MODULE_DEF, HW_STDCELL_DEF)) {
         // contents of non-ignored modules are DCEd, don't mark alive
-        if (instr.as<ModuleIRef>() == activeMod ||
-            !instr.as<ModuleIRef>().mod()->ignore)
+        if (activeMod ? instr.as<ModuleIRef>() == activeMod
+                      : !instr.as<ModuleIRef>().mod()->ignore)
           continue;
       }
 

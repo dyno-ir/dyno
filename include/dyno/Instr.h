@@ -1,8 +1,8 @@
 #pragma once
 
-#include "dyno/Obj.h"
 #include "dyno/IDImpl.h"
 #include "dyno/IDs.h"
+#include "dyno/Obj.h"
 #include "dyno/Opcode.h"
 #include "dyno/Type.h"
 #include "support/Bits.h"
@@ -250,6 +250,8 @@ public:
   explicit operator Operand &() const { return instrRef->operand(getNum()); }
 
   template <typename T> T as() const { return (*this)->as<T>(); }
+  template <typename T> T dyn_as() const { return (*this)->dyn_as<T>(); }
+  template <typename T> bool is() const { return (*this)->is<T>(); }
 
   template <typename T> void replace(FatObjRef<T> newRef) {
     return replace(newRef.template as<FatDynObjRef<>>());

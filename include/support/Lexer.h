@@ -1,8 +1,10 @@
 #pragma once
+#include "StringRef.h"
 #include "dyno/Constant.h"
 #include "support/ArrayRef.h"
 #include "support/ErrorRecovery.h"
 #include "support/SlabAllocator.h"
+#include "support/TwoLevelSet.h"
 #include <cassert>
 #include <cctype>
 #include <cstdio>
@@ -163,14 +165,14 @@ struct Lexer {
 
 private:
   std::optional<Token> peekToken;
-  std::unordered_map<std::string_view, uint32_t> strings = initStrings();
-  std::vector<std::string_view> rvStrings;
+  TwoLevelMap<SSOStringRef, uint32_t> strings = initStrings();
+  std::vector<SSOStringRef> rvStrings;
 
-  std::unordered_map<std::string_view, uint32_t> initStrings() {
-    std::unordered_map<std::string_view, uint32_t> map;
+  TwoLevelMap<SSOStringRef, uint32_t> initStrings() {
+    TwoLevelMap<SSOStringRef, uint32_t> map;
     size_t i = 0;
     for (auto kw : keywords)
-      map.emplace(kw, i++);
+      map.insert(kw, i++);
     return map;
   }
 
@@ -371,15 +373,14 @@ public:
   }
 
   unsigned GetIdentIdx(std::string_view ident) {
-    auto it = strings.find(ident);
-    if (it == strings.end()) {
-      rvStrings.push_back(ident);
-      return (strings[ident] = strings.size()) - NUM_KEYWORDS;
-    }
+    auto [found, it] = strings.findOrInsert(
+        ident, [&] { return (strings.size() - NUM_KEYWORDS); });
+    if (!found)
+      rvStrings.emplace_back(ident);
     return it->second - NUM_KEYWORDS;
   }
 
-  std::string_view GetIdent(unsigned identIdx) { return rvStrings[identIdx]; }
+  SSOStringRef GetIdent(unsigned identIdx) { return rvStrings[identIdx]; }
 
   static std::string_view extractEnclosingLine(std::string_view input,
                                                size_t i) {

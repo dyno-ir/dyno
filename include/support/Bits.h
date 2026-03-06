@@ -140,6 +140,18 @@ constexpr uint64_t hash_u64(uint64_t a) {
   return a ^ (a >> 32);
 }
 
+constexpr uint32_t strhash_u32(const char *data, size_t len) {
+  uint32_t hash = 0x811c9dc5;
+  uint32_t prime = 0x01000193;
+
+  for (size_t i = 0; i < len; i++) {
+    hash ^= static_cast<uint8_t>(data[i]);
+    hash *= prime;
+  }
+
+  return hash;
+}
+
 // split integer into regions of N bits, return 1000... for each region if equal
 template <int N, std::integral T> constexpr T n_equal_mask(T lhs, T rhs) {
   constexpr T REP01 = repeatBits((T(1) << (N - 1)) - T(1), N);

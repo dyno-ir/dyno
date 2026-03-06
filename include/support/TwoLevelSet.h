@@ -1,4 +1,5 @@
 #pragma once
+#include "support/DenseMapInfo.h"
 #include "support/DenseMultimap.h"
 
 template <typename T, typename KeyT = uint32_t,
@@ -27,37 +28,76 @@ public:
   auto erase(DenseMultimap<KeyT, T>::iterator it) { return map.erase(it); }
 };
 
-template <typename K, typename T, typename KeyT = uint32_t,
-          auto HashFunc = [](const T &t) { return std::hash<T>()(t); }>
-class TwoLevelMap {
-  DenseMultimap<Unhashed<KeyT>, std::pair<K, T>> map;
+// Swiss-Table style map. This is for complex keys, use plain DenseMap for small
+// POD keys.
+template <typename K, typename T, typename KeyT = uint32_t> class TwoLevelMap {
+  DenseMultimap<Unhashed<KeyT>, std::pair<const K, T>> map;
+  static constexpr auto HashFunc = [](const K &t) { return std::hash<K>()(t); };
+
+  auto find_raw(const K &k) {
+    auto h = HashFunc(k);
+    auto it = map.find(h);
+    for (; it != map.end(); it = map.find_next(it)) {
+      if (it.val().first == k) [[likely]]
+        return std::make_pair(h, it);
+    }
+    return std::make_pair(h, map.end());
+  }
 
 public:
-  auto find_raw(const K &k) {
-    auto it = map.find(HashFunc(k));
-    for (; it != map.end(); it = map.find_next(it)) {
-      if (it.val() == k) [[likely]]
-        return it->val();
-    }
-    return map.end();
+  class iterator
+      : private DenseMultimap<Unhashed<KeyT>, std::pair<const K, T>>::iterator {
+    using Base = DenseMultimap<Unhashed<KeyT>, std::pair<const K, T>>::iterator;
+    friend class TwoLevelMap;
+
+    using Base::Base;
+    iterator(Base base) : Base(base) {}
+
+  public:
+    // prefer key()/val() for plain DenseMap compat
+    std::pair<const K, T> &operator*() { return this->Base::val(); }
+    std::pair<const K, T> *operator->() { return &(this->Base::val()); }
+
+    const K &key() { return (*this)->first; }
+    T &val() { return (*this)->second; }
+
+    bool operator==(const iterator &o) const { return Base::operator==(o); }
+    iterator &operator++() { return this->Base::operator++(); }
+    iterator &operator++(int) { return this->Base::operator++(0); }
+
+    iterator() = default;
+  };
+
+  iterator find(const K &k) { return iterator(find_raw(k).second); }
+  iterator insert(K &&k, T &&t) {
+    return iterator(
+        map.insert(HashFunc(k), std::make_pair(std::move(k), std::move(t))));
   }
-  auto insert(K &&k, T &&t) {
-    return map.insert(HashFunc(t), std::make_pair(std::move(k), std::move(t)));
+  iterator insert(std::pair<K, T> &&pair) {
+    return insert(std::move(pair.first), std::move(pair.second));
   }
-  auto insert(const K &k, const T &t) {
-    return map.insert(HashFunc(t), std::make_pair(k, t));
+  iterator insert(const K &k, const T &t) {
+    return iterator(map.insert(HashFunc(k), std::make_pair(k, t)));
   }
-  auto insertOrAssign(const K &k, const T &t) {
-    return map.insertOrAssign(HashFunc(t), std::make_pair(k, t));
+  iterator insertOrAssign(const K &k, const T &t) {
+    return iterator(map.insertOrAssign(HashFunc(k), std::make_pair(k, t)));
+  }
+  auto findOrInsert(const K &k, auto &&func) {
+    auto [h, it] = find_raw(k);
+    if (it == map.end())
+      return std::make_pair(
+          false, iterator(map.insert(h, std::pair<K, T>(k, func()))));
+    return std::make_pair(true, iterator(it));
+  }
+  T &operator[](const K &k) {
+    return findOrInsert(k, []() { return T{}; }).second.val();
   }
 
-  auto begin() { return map.begin(); }
-  auto end() { return map.end(); }
+  iterator begin() { return iterator(map.begin()); }
+  iterator end() { return iterator(map.end()); }
 
-  auto begin() const { return map.begin(); }
-  auto end() const { return map.end(); }
+  auto erase(iterator it) { return map.erase(it.base); }
 
-  auto erase(DenseMultimap<KeyT, std::tuple<K, T>>::iterator it) {
-    return map.erase(it);
-  }
+  auto size() const { return map.size(); }
+  void clear() { map.clear(); }
 };

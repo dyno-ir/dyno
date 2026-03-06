@@ -19,7 +19,6 @@
 #include "support/DenseMap.h"
 #include "support/DynBitSet.h"
 #include "support/ErrorRecovery.h"
-#include "support/ResultUnwrap.h"
 #include "support/SmallVec.h"
 #include <algorithm>
 #include <bit>
@@ -34,12 +33,12 @@ class MemoryMappingPass : public Pass<MemoryMappingPass> {
     uint32_t widthRepeats;
     uint32_t depthRepeats;
   };
-  StoreLowering lowerStore(MemStoreIRef actual, MemStoreIRef model) {
-    StoreLowering l;
-    l.widthRepeats = round_up_div(actual.getLen(), model.getLen());
+  // StoreLowering lowerStore(MemStoreIRef actual, MemStoreIRef model) {
+  //   StoreLowering l;
+  //   l.widthRepeats = round_up_div(actual.getLen(), model.getLen());
 
-    // todo score w/ factor
-  }
+  //   // todo score w/ factor
+  // }
 
   struct PortFrag {
     uint32_t dstAddr;
@@ -100,6 +99,10 @@ class MemoryMappingPass : public Pass<MemoryMappingPass> {
   struct MemoryMapping {
     // metadata attached to model ports (small vec for duplicated ports)
     SmallDenseMap<ObjRef<Pointer>, SmallVec<BoundPort, 4>> boundPorts;
+
+    // metadata attached to model triggers (small vec for duplicated ports)
+    SmallDenseMap<ObjRef<Trigger>, SmallVec<ObjRef<Trigger>, 4>> boundTriggers;
+
     SmallVec<PortPartition, 2> storePartitions;
     SmallVec<PortPartition, 4> loadPartitions;
     uint32_t repeatCount;
@@ -137,7 +140,7 @@ class MemoryMappingPass : public Pass<MemoryMappingPass> {
               actual.oref().uses().filter(filterLoad).transform(getInstr)),
           modelLoads(
               model.oref().uses().filter(filterLoad).transform(getInstr)),
-          mapping{{}, (actualStores.size()), (actualLoads.size()), 0} {
+          mapping{{}, {}, (actualStores.size()), (actualLoads.size()), 0} {
       modelPortWidth = modelStores[0].getLen();
       assert(Range{modelStores}.all(
           [&](auto st) { return st.getLen() == modelPortWidth; }));
@@ -178,6 +181,46 @@ class MemoryMappingPass : public Pass<MemoryMappingPass> {
                    round_up_div(actualLoadsWidth, modelLoadsWidth));
     }
 
+    // if true & newly mapped also returns functor to undo the mapping
+    template <typename RefT> struct AutoRollback {
+      AutoRollback(const AutoRollback &) = delete;
+      AutoRollback(AutoRollback &&o) {
+        trigger = std::exchange(o.trigger, nullptr);
+      }
+      AutoRollback &operator=(const AutoRollback &) = delete;
+      AutoRollback &operator=(AutoRollback &&o) {
+        if (trigger)
+          *trigger = nullref;
+        trigger = std::exchange(o.trigger, nullptr);
+        return *this;
+      }
+      AutoRollback() = default;
+      AutoRollback(RefT *trigger) : trigger(trigger) {};
+
+      RefT *trigger = nullptr;
+      ~AutoRollback() {
+        if (trigger)
+          *trigger = nullref;
+      }
+      void commit() { trigger = nullptr; }
+    };
+    std::pair<bool, AutoRollback<ObjRef<Trigger>>>
+    mapTrigger(TriggerRef act, TriggerRef mod, uint32_t repIdx) {
+      if (act->size() != mod->size())
+        return {false, {}};
+      auto &mapped = mapping.boundTriggers
+                         .findOrInsert(mod, {mapping.repeatCount, nullref})
+                         .second.val()[repIdx];
+      if (mapped)
+        return {false, {}};
+      for (unsigned i = 0; i < act->size(); i++) {
+        if (mod->getMode(i) != act->getMode(i))
+          return {false, {}};
+      }
+      mapped = act;
+      return {true, {&mapped}};
+    }
+
     template <typename RefT>
     bool mapPorts(SmallVecImpl<PortPartition> &partitions,
                   SmallVecImpl<RefT> &actualPorts,
@@ -198,16 +241,21 @@ class MemoryMappingPass : public Pass<MemoryMappingPass> {
         // actualStore might need to be covered by multiple modelStores
         for (auto [modStIdx, modSt] : Range{modelPorts}.enumerate()) {
           for (unsigned repIdx = 0; repIdx < mapping.repeatCount; repIdx++) {
+            unsigned globIdx = modStIdx * mapping.repeatCount + repIdx;
+            // access has already been used (we do very inefficient matching)
+            if (usedModelPort[globIdx])
+              continue;
 
             // base address of duplicates is shifted.
             // their factor is implicitly multiplied by repIdx.
             const auto baseAddr = modSt.base() + modelPortWidth * repIdx;
             auto adjAddr = baseAddr;
-            unsigned globIdx = modStIdx * mapping.repeatCount + repIdx;
 
-            // store's already been used (we do very inefficient matching)
-            if (usedModelPort[globIdx])
+            // can't make loads faster, skip.
+            // TODO: implement store fowarding & do not skip for stores
+            if (modSt.port()->delay > modSt.port()->delay)
               continue;
+
             // constant stuff - we can probably just define no const addr for
             // model mems
             assert(!modSt.addr().template is<ConstantRef>() &&
@@ -228,21 +276,32 @@ class MemoryMappingPass : public Pass<MemoryMappingPass> {
             auto modPtr = modSt.addr().template as<ObjRef<Pointer>>();
             auto actPtr = actSt.addr().template as<ObjRef<Pointer>>();
 
-            auto &p =
+            AutoRollback<ObjRef<Trigger>> triggerMapping;
+            if (TriggerRef actTrig = actSt.trigger()) {
+              TriggerRef modTrig = modSt.trigger();
+              assert(modTrig && "expected trigger on model port");
+              auto pair = mapTrigger(actTrig, modTrig, repIdx);
+              if (!pair.first)
+                continue;
+              triggerMapping = std::move(pair.second);
+            }
+
+            auto &modelPortMeta =
                 mapping.boundPorts
                     .findOrInsert(modPtr,
                                   SmallVec<BoundPort, 4>(mapping.repeatCount))
-                    .second.val();
+                    .second.val()[modStIdx];
             // address object is already bound to something else.
-            if (p[modStIdx].addr != Any{actPtr, nullref})
+            if (modelPortMeta.addr != Any{actPtr, nullref}) {
               continue;
-            p[modStIdx].addr = actPtr;
+            }
+            modelPortMeta.addr = actPtr;
 
-            p[modStIdx].idxOffs =
+            modelPortMeta.idxOffs =
                 (adjAddr - baseAddr) / modSt.terms().front().getFact();
-            // p[modStIdx].idxMult =
-            //     actSt.getLen() / (mapping.repeatCount * modelPortWidth);
 
+            // commit mapping now that we can't fail anymore
+            triggerMapping.commit();
             part.writeSingle(adjAddr,
                              std::min(part.getLen() - adjAddr, modSt.getLen()),
                              unsigned(globIdx));
@@ -280,9 +339,10 @@ class MemoryMappingPass : public Pass<MemoryMappingPass> {
 
         // find port
         if (modLoad.en()) {
-          HWValue en = ConstantRef::fromU32(1);
+          HWValue en = ConstantRef::fromBool(true);
           if (actLoad.en())
             en = actLoad.en();
+          assert(en.getNumBits() == 1);
           if (subIdx) {
             auto idx = frag.dstAddr / actLoad.getLen();
             assert(idx == ((frag.dstAddr + frag.len - 1) / actLoad.getLen()) &&
@@ -354,21 +414,35 @@ class MemoryMappingPass : public Pass<MemoryMappingPass> {
       for (unsigned i = 0; i < mapping.repeatCount; i++) {
         auto &instance = instances.emplace_back(ctx, HW_STDCELL_INSTANCE,
                                                 numOutputs, 1 + numInputs);
-        std::fill(instance.begin(), instance.end(), ConstantRef::zeroBitZero());
+        std::fill(instance.begin(), instance.end(), nullref);
         instance.other(0) = cell.mod();
       }
+
+      SmallVec<ObjRef<Register>, 8> cellInputs(
+          cell.ports()
+              .filter([](auto p) { return p.isOpc(HW_INPUT_REGISTER_DEF); })
+              .transform([](size_t, auto ir) { return ir.oref(); }));
+      SmallVec<ObjRef<Register>, 4> cellOutputs(
+          cell.ports()
+              .filter([](auto p) { return p.isOpc(HW_OUTPUT_REGISTER_DEF); })
+              .transform([](size_t, auto ir) { return ir.oref(); }));
+
+      // Port reg -> I/O index map.
+      // We should maybe cache this in module.
+      auto makeMapPair = [](size_t i, auto elem) {
+        return std::make_pair(elem, uint32_t(i));
+      };
+      SmallDenseMap<ObjRef<Register>, uint32_t> inputIdxMap(
+          Range(cellInputs).transform(makeMapPair));
+      SmallDenseMap<ObjRef<Register>, uint32_t> outputIdxMap(
+          Range(cellOutputs).transform(makeMapPair));
 
       // connect act to mod in instance #repIdx
       auto connect = [&](HWValue act, WireRef mod, unsigned repIdx) {
         auto port = WireVariable::checkIsInputLookthru(mod);
         if (!port)
           report_fatal_error("expected port");
-        // todo: O(1)
-        auto idx =
-            *cell.ports()
-                 .filter([](auto p) { return p.isOpc(HW_INPUT_REGISTER_DEF); })
-                 .find_idx(port);
-
+        auto idx = inputIdxMap.find(port.oref()).val();
         act = build.buildResize(act, *port.getNumBits());
         instances[repIdx].others().drop_front()[idx] = act;
       };
@@ -376,11 +450,7 @@ class MemoryMappingPass : public Pass<MemoryMappingPass> {
         auto port = WireVariable::checkIsPort(mod, HW_OUTPUT_REGISTER_DEF);
         if (!port)
           report_fatal_error("expected port");
-        // todo: O(1)
-        auto idx =
-            *cell.ports()
-                 .filter([](auto p) { return p.isOpc(HW_OUTPUT_REGISTER_DEF); })
-                 .find_idx(port);
+        auto idx = outputIdxMap.find(port.oref()).val();
         auto w = ctx.getStore<Wire>().create(*port.getNumBits());
         instances[repIdx].defs()[idx] = w;
         return w;
@@ -423,11 +493,44 @@ class MemoryMappingPass : public Pass<MemoryMappingPass> {
                   subIdx);
       }
 
+      for (auto [modTrigO, actTrigs] : mapping.boundTriggers) {
+        auto modTrig = ctx.resolve(modTrigO);
+        for (auto [repIdx, actTrigO] : Range{actTrigs}.enumerate().filter(
+                 [](auto p) { return !!p.second; })) {
+          auto instanceInputs = instances[repIdx].others().drop_front();
+          auto actTrig = ctx.resolve(actTrigO);
+
+          for (auto [actReg, modReg] :
+               actTrig.iref().others().as<RegisterRef>().zip(
+                   modTrig.iref().others().as<RegisterRef>())) {
+            assert(modReg.iref().isOpc(HW_INPUT_REGISTER_DEF) &&
+                   "expected input");
+            auto modInputIdx = inputIdxMap.find(modReg).val();
+            instanceInputs[modInputIdx] = build.buildLoad(actReg);
+          }
+        }
+      }
+
       // build
       BlockRef block = actualLoads.empty()
                            ? actualStores.front().parentProc(ctx).block()
                            : actualLoads.front().parentProc(ctx).block();
       for (auto &inst : instances) {
+
+        for (auto [i, def] : inst.defs().enumerate()) {
+          if (def)
+            continue;
+          def = ctx.getStore<Wire>().create(
+              *ctx.resolve(cellOutputs[i]).getNumBits());
+        }
+        for (auto [i, use] : inst.others().drop_front().enumerate()) {
+          if (use)
+            continue;
+          use = ConstantBuilder{ctx.getStore<Constant>()}
+                    .undef(*ctx.resolve(cellInputs[i]).getNumBits())
+                    .get();
+        }
+
         auto instr = inst.build();
         block.end().insertPrev(instr);
       }
@@ -457,6 +560,7 @@ class MemoryMappingPass : public Pass<MemoryMappingPass> {
         continue;
       goto success;
     } while (mapper.mapping.boundPorts.clear(),
+             mapper.mapping.boundTriggers.clear(),
              ++mapper.mapping.repeatCount <= maxRepCnt);
     return false;
   success:

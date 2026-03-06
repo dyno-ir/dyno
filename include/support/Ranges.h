@@ -536,7 +536,7 @@ public:
       : it(it), itEnd(itEnd), filterF(filterF) {
     prime();
   }
-  filter_iterator(T it) : it(it) {}
+  filter_iterator(T it, T itEnd) : it(it), itEnd(itEnd) {}
 
   auto operator*() { return *it; }
 
@@ -864,6 +864,7 @@ public:
 template <typename It> class Range {
 public:
   using iterator = It;
+  using iterator_category = std::iterator_traits<It>::iterator_category;
 
   template <typename U> Range(const U &u) : Range(u.begin(), u.end()) {}
   template <typename U> Range(U &u) : Range(u.begin(), u.end()) {}
@@ -931,6 +932,14 @@ public:
                    transform_iterator<It, decltype(lambda)>(endIt)};
   }
 
+  template <typename T> auto resolve(T &resolver) {
+    auto lambda = [&resolver](size_t, auto &&obj) {
+      return resolver.resolve(obj);
+    };
+    return ::Range{transform_iterator<It, decltype(lambda)>(beginIt, lambda),
+                   transform_iterator<It, decltype(lambda)>(endIt, lambda)};
+  }
+
   template <typename T> auto cast() {
     auto lambda = [](size_t, const auto &src) { return static_cast<T>(src); };
     return ::Range{transform_iterator<It, decltype(lambda)>(beginIt, lambda),
@@ -939,7 +948,7 @@ public:
 
   template <typename FilterT> auto filter(FilterT filterF) {
     return ::Range{filter_iterator<It, FilterT>(beginIt, endIt, filterF),
-                   filter_iterator<It, FilterT>(endIt)};
+                   filter_iterator<It, FilterT>(endIt, endIt)};
   }
 
   template <typename T> void sort(T func) { std::sort(begin(), end(), func); }
@@ -1006,6 +1015,19 @@ public:
         return false;
     for (auto [a, b] : (*this).zip(other)) {
       if (a != b)
+        return false;
+    }
+    return true;
+  }
+  template <typename T, typename Comp> bool equals(Range<T> other, Comp comp) {
+    if constexpr (requires() {
+                    this->size();
+                    other.size();
+                  })
+      if (this->size() != other.size())
+        return false;
+    for (auto [a, b] : (*this).zip(other)) {
+      if (!comp(a, b))
         return false;
     }
     return true;
