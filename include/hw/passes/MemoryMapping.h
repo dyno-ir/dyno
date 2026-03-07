@@ -14,15 +14,18 @@
 #include "hw/Module.h"
 #include "hw/analysis/RegisterValue.h"
 #include "hw/analysis/WireVariable.h"
+#include "support/Algorithm.h"
 #include "support/Any.h"
 #include "support/Bits.h"
 #include "support/DenseMap.h"
 #include "support/DynBitSet.h"
 #include "support/ErrorRecovery.h"
+#include "support/Ranges.h"
 #include "support/SmallVec.h"
 #include <algorithm>
 #include <bit>
 #include <cstdint>
+#include <type_traits>
 
 namespace dyno {
 
@@ -174,11 +177,15 @@ class MemoryMappingPass : public Pass<MemoryMappingPass> {
               .lcm();
       actualPortsLCM = std::lcm(storesLCM, loadsLCM);
 
-      // this is repeats to get the required bandwidth - may be limited by loads
-      // or stores.
-      mapping.repeatCount = std::max(
-          round_up_div(actualPortsLCM * actualStores.size(), modelStoresWidth),
-          round_up_div(actualPortsLCM * actualLoads.size(), modelLoadsWidth));
+      // How many times to repeat the model memory. This is a lower bound, other
+      // constraints may push this up, if mapping fails we exponential search
+      // upwards. Lower bound is set by bandwidth and/or capacity.
+      mapping.repeatCount =
+          *InitListRange{
+              round_up_div(actualStoresWidth, modelStoresWidth),
+              round_up_div(actualLoadsWidth, modelLoadsWidth),
+              round_up_div(*actual.getNumBits(), *model.getNumBits())}
+               .max();
     }
 
     // if true & newly mapped also returns functor to undo the mapping
@@ -231,6 +238,9 @@ class MemoryMappingPass : public Pass<MemoryMappingPass> {
       for (auto [actStIdx, actSt] : Range{actualPorts}.enumerate()) {
         PortPartition &part = partitions[actStIdx];
         auto adjPortLen = actSt.getLen();
+
+        auto subPortBoundary = adjPortLen;
+
         // every port needs access to the full memory array. If a port is too
         // narrow, artifically widen it - we then later add MUXs to reduce it.
         if (adjPortLen < minPortSize)
@@ -255,6 +265,17 @@ class MemoryMappingPass : public Pass<MemoryMappingPass> {
             // TODO: implement store fowarding & do not skip for stores
             if (modSt.port()->delay > modSt.port()->delay)
               continue;
+
+            // sub instance stores may not cross the striping boundaries
+            if constexpr (std::is_same_v<RefT, MemStoreIRef>) {
+              auto lowIdx = baseAddr / subPortBoundary;
+              auto highIdx = (baseAddr + modSt.getLen() - 1) / subPortBoundary;
+
+              // bool isLast = (adjPortLen / subPortBoundary) == highIdx;
+
+              if (lowIdx != highIdx)
+                continue;
+            }
 
             // constant stuff - we can probably just define no const addr for
             // model mems
@@ -537,34 +558,61 @@ class MemoryMappingPass : public Pass<MemoryMappingPass> {
       }
     }
   };
-  // 1. Find largest read/write access. This is how big the mem needs to be,
-  // sets the widthRepeats
-  // 2. Loads at this point trivial to map (some opt can be done if only loading
-  // a subrange but is ok for now)
-  // 3. For stores, greedily cover the whole access range by picking one store
-  // and mapping it to a model store
-  //    (respect address equality constraints while doing so.)
+
+  // Size mismatch
+  /*
+    - Increase size of memory ports
+      OR
+    - Decrease size of std cells.
+      ^ doesn't work, we only want to shrink last cell.
+
+    - artifically make memory ports a multiple of the modelPortSize.
+      -> already doign this but there is no information broadcast which bits are
+    cut off.
+
+  */
+
+  bool tryMap(MemoryMapper &mapper, uint32_t repeatCount) {
+    mapper.mapping.repeatCount = repeatCount;
+    mapper.mapping.boundPorts.clear();
+    mapper.mapping.boundTriggers.clear();
+    // ports can't be smaller than this, otherwise they wouldn't cover all
+    // repeats/stripes and wouldn't be able to access all bits. We increase
+    // their size here, apply later detects it and MUXes/DEMUXes back down.
+    uint32_t minPortSize = mapper.mapping.repeatCount * mapper.modelPortWidth;
+
+    if (!mapper.mapPorts(mapper.mapping.storePartitions, mapper.actualStores,
+                         mapper.modelStores, minPortSize))
+      return false;
+    if (!mapper.mapPorts(mapper.mapping.loadPartitions, mapper.actualLoads,
+                         mapper.modelLoads, minPortSize))
+      return false;
+
+    return true;
+  }
 
   bool lowerMemory(RegisterIRef actual, RegisterIRef model) {
-    auto actualSize = actual.getNumBits();
-    auto modelSize = model.getNumBits();
-
     MemoryMapper mapper{actual, model};
     auto origRepCnt = mapper.mapping.repeatCount;
     auto maxRepCnt = origRepCnt * 2;
-    do {
-      if (!mapper.mapPorts(mapper.mapping.storePartitions, mapper.actualStores,
-                           mapper.modelStores, mapper.actualPortsLCM))
-        continue;
-      if (!mapper.mapPorts(mapper.mapping.loadPartitions, mapper.actualLoads,
-                           mapper.modelLoads, mapper.actualPortsLCM))
-        continue;
-      goto success;
-    } while (mapper.mapping.boundPorts.clear(),
-             mapper.mapping.boundTriggers.clear(),
-             ++mapper.mapping.repeatCount <= maxRepCnt);
-    return false;
-  success:
+
+    // We start with a lower bound of the number of repeats required.
+    // Bounded exponential search to find the lowest number of repeats to
+    // make it work (or fail).
+    IntRange universe(0u, maxRepCnt + 1);
+    auto searchSpace = universe.subrange(origRepCnt);
+    auto it = exp_search(universe, searchSpace,
+                         [&](auto cnt) { return tryMap(mapper, cnt); });
+
+    if (it == searchSpace.end())
+      return false;
+
+    // best value may not have been the last one we tried
+    if (mapper.mapping.repeatCount != *it) {
+      auto rv = tryMap(mapper, *it);
+      assert(rv);
+    }
+
     mapper.apply(ctx);
     return true;
   }

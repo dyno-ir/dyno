@@ -3,6 +3,7 @@
 #include "support/ArrayRef.h"
 #include <algorithm>
 #include <cassert>
+#include <concepts>
 #include <initializer_list>
 #include <iterator>
 #include <numeric>
@@ -178,14 +179,26 @@ public:
   }
 };
 
-template <typename T> class no_deref_iterator {
+template <typename T>
+class no_deref_iterator
+    : public base_iterator<no_deref_iterator<T>,
+                           typename std::iterator_traits<T>::iterator_category,
+                           typename std::iterator_traits<T>::difference_type> {
   T it;
 
 public:
-  using iterator_category = std::forward_iterator_tag;
+  using iterator_category = typename std::iterator_traits<T>::iterator_category;
   using value_type = T;
-  using difference_type = std::iterator_traits<T>::difference_type;
+  using difference_type = typename std::iterator_traits<T>::difference_type;
 
+private:
+  static constexpr bool isRandom =
+      std::is_same_v<iterator_category, std::random_access_iterator_tag>;
+  static constexpr bool isBidir =
+      std::is_same_v<iterator_category, std::bidirectional_iterator_tag> ||
+      isRandom;
+
+public:
   no_deref_iterator() = default;
   no_deref_iterator(T it) : it(it) {}
 
@@ -195,11 +208,24 @@ public:
     ++it;
     return *this;
   }
+  no_deref_iterator &operator--()
+    requires(isBidir)
+  {
+    --it;
+    return *this;
+  }
+  no_deref_iterator &
+  operator+=(std::conditional_t<isRandom, difference_type, int> n)
+    requires(isRandom)
+  {
+    it += n;
+    return *this;
+  }
 
-  no_deref_iterator operator++(int) {
-    deref_iterator tmp(*this);
-    ++(*this);
-    return tmp;
+  difference_type operator-(const no_deref_iterator &o)
+    requires(isRandom)
+  {
+    return it - o.it;
   }
 
   friend bool operator==(const no_deref_iterator &a,
@@ -210,6 +236,46 @@ public:
   friend bool operator!=(const no_deref_iterator &a,
                          const no_deref_iterator &b) {
     return a.it != b.it;
+  }
+  friend auto operator<=>(const no_deref_iterator &a,
+                          const no_deref_iterator &b)
+    requires(isRandom)
+  {
+    return a.it <=> b.it;
+  }
+};
+
+template <std::integral T>
+class integral_iterator : public base_iterator<integral_iterator<T>,
+                                               std::random_access_iterator_tag,
+                                               std::make_signed_t<T>> {
+  T it;
+
+public:
+  using iterator_category = std::random_access_iterator_tag;
+  using value_type = T;
+  using difference_type = std::make_signed_t<T>;
+
+public:
+  integral_iterator() = default;
+  integral_iterator(T it) : it(it) {}
+
+  value_type operator*() { return it; }
+
+  integral_iterator &operator+=(difference_type n) {
+    it += n;
+    return *this;
+  }
+
+  difference_type operator-(const integral_iterator &o) { return it - o.it; }
+
+  friend auto operator==(const integral_iterator &a,
+                         const integral_iterator &b) {
+    return a.it == b.it;
+  }
+  friend auto operator<=>(const integral_iterator &a,
+                          const integral_iterator &b) {
+    return a.it <=> b.it;
   }
 };
 
@@ -985,9 +1051,11 @@ public:
   template <typename T> T is_sorted(T func) {
     return std::is_sorted(begin(), end(), func);
   }
+  auto max() { return std::max_element(begin(), end()); }
   template <typename T> auto max(T func) {
     return std::max_element(begin(), end(), func);
   }
+  auto min() { return std::min_element(begin(), end()); }
   template <typename T> auto min(T func) {
     return std::min_element(begin(), end(), func);
   }
@@ -1088,6 +1156,20 @@ public:
     return beginIt[i];
   }
 
+  Range subrange(size_t start)
+    requires(requires(It a) { a + start; })
+  {
+    assert(start <= size());
+    return {beginIt + start, endIt};
+  }
+
+  Range subrange(size_t start, size_t len)
+    requires(requires(It a) { a + start; })
+  {
+    assert(start + len <= size());
+    return {beginIt + start, beginIt + start + len};
+  }
+
   operator ArrayRef<std::remove_cvref_t<decltype(*std::declval<It>())>>()
     requires(std::is_reference_v<decltype(*std::declval<It>())>)
   {
@@ -1125,6 +1207,12 @@ public:
   InitListRange(std::initializer_list<T> ilist)
       : Range<typename std::initializer_list<T>::iterator>(ilist.begin(),
                                                            ilist.end()) {}
+};
+
+template <std::integral T> class IntRange : public Range<integral_iterator<T>> {
+public:
+  IntRange(T end) : Range<integral_iterator<T>>(T(0), end) {}
+  IntRange(T start, T end) : Range<integral_iterator<T>>(start, end) {}
 };
 
 template <typename It> class RefRange {
