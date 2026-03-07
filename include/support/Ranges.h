@@ -951,6 +951,8 @@ public:
                    filter_iterator<It, FilterT>(endIt, endIt)};
   }
 
+  auto do_reverse() { return std::reverse(beginIt, endIt); }
+
   template <typename T> void sort(T func) { std::sort(begin(), end(), func); }
   template <typename T> void stable_sort(T func) {
     std::stable_sort(begin(), end(), func);

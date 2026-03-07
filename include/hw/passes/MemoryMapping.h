@@ -176,9 +176,9 @@ class MemoryMappingPass : public Pass<MemoryMappingPass> {
 
       // this is repeats to get the required bandwidth - may be limited by loads
       // or stores.
-      mapping.repeatCount =
-          std::max(round_up_div(actualStoresWidth, modelStoresWidth),
-                   round_up_div(actualLoadsWidth, modelLoadsWidth));
+      mapping.repeatCount = std::max(
+          round_up_div(actualPortsLCM * actualStores.size(), modelStoresWidth),
+          round_up_div(actualPortsLCM * actualLoads.size(), modelLoadsWidth));
     }
 
     // if true & newly mapped also returns functor to undo the mapping
@@ -290,7 +290,7 @@ class MemoryMappingPass : public Pass<MemoryMappingPass> {
                 mapping.boundPorts
                     .findOrInsert(modPtr,
                                   SmallVec<BoundPort, 4>(mapping.repeatCount))
-                    .second.val()[modStIdx];
+                    .second.val()[repIdx];
             // address object is already bound to something else.
             if (modelPortMeta.addr != Any{actPtr, nullref}) {
               continue;
@@ -469,6 +469,7 @@ class MemoryMappingPass : public Pass<MemoryMappingPass> {
         applyPort(ctx, actLoad, part, factor, connect, connectReverse, &wires,
                   subIdx);
 
+        wires.others().do_reverse();
         auto val = build.buildConcat(std::move(wires));
 
         if (factor != 1) {
@@ -590,10 +591,13 @@ public:
       if (!mod.iref().isOpc(HW_STDCELL_DEF))
         continue;
 
-      auto max =
-          *mod.iref().internal_regs().max([](RegisterIRef a, RegisterIRef b) {
-            return *a.getNumBits() < *b.getNumBits();
-          });
+      auto internal = mod.iref().internal_regs();
+      if (internal.empty())
+        continue;
+
+      auto max = *internal.max([](RegisterIRef a, RegisterIRef b) {
+        return *a.getNumBits() < *b.getNumBits();
+      });
 
       if (max.oref().getNumUses() == 0)
         continue;

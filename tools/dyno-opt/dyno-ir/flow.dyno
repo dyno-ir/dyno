@@ -101,7 +101,13 @@ meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS
 meta.INST_COMBINE_PASS
 meta.AGGRESSIVE_DEAD_CODE_ELIMINATION_PASS
 
-// MUX tree testing
+// memory inference
+meta.SIMPLE_MEMORY_INFERENCE_PASS
+meta.INST_COMBINE_PASS
+meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS
+meta.AGGRESSIVE_DEAD_CODE_ELIMINATION_PASS
+
+// flatten MUX trees
 meta.MUX_TREE_FLATTEN_PASS
 meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS
 meta.FUZZY_CSE_PASS map("minSharedBitsForMerge": "1", "maxSharedBitsForMerge": "1", "opToShare": "op.AND")
@@ -149,8 +155,17 @@ meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS
 meta.INST_COMBINE_PASS
 
 // load pre-parsed liberty
-meta.PARSE_DYNO_PASS map("fileName" : "sky130_fd_sc_hd.dyno", "newModulesActive" : "0")
+meta.PARSE_DYNO_PASS map("fileName": "sky130_fd_sc_hd.dyno", "newModulesActive": "0")
+// load memories
+meta.PARSE_DYNO_PASS map("fileName": "tools/dyno-opt/dyno-ir/example_memories.dyno", "newModulesActive": "0")
 meta.POPULATE_INLINE_CACHES_PASS
+
+// map memories
+meta.MEMORY_MAPPING_PASS
+meta.INST_COMBINE_PASS
+meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS
+meta.INST_COMBINE_PASS
+meta.AGGRESSIVE_DEAD_CODE_ELIMINATION_PASS
 
 // map flip flops
 meta.FLIP_FLOP_MAPPING_PASS

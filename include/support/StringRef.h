@@ -32,12 +32,19 @@ public:
 class StringRef : public ArrayRef<char>, public StringRefMixin<StringRef> {
 public:
   using ArrayRef::ArrayRef;
+
+  template <typename T> StringRef(T &&t) : StringRef(t.begin(), t.end()) {}
+  StringRef(const char *data) : StringRef(data, strlen(data)) {}
 };
 
 class MutStringRef : public MutArrayRef<char>,
                      public StringRefMixin<StringRef> {
 public:
   using MutArrayRef::MutArrayRef;
+
+  template <typename T>
+  MutStringRef(T &&t) : MutStringRef(t.begin(), t.end()) {}
+  MutStringRef(char *data) : MutStringRef(data, strlen(data)) {}
 };
 
 // 4+ GiB string, 8 inline chars
@@ -192,6 +199,11 @@ template <> struct std::hash<SSOStringRef> {
 };
 template <> struct std::hash<BigSSOStringRef> {
   uint32_t operator()(const BigSSOStringRef &ref) const {
+    return strhash_u32(ref.data(), ref.size());
+  }
+};
+template <> struct std::hash<StringRef> {
+  uint32_t operator()(const StringRef &ref) const {
     return strhash_u32(ref.data(), ref.size());
   }
 };

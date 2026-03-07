@@ -6,6 +6,7 @@
 #include "hw/Register.h"
 #include "hw/Wire.h"
 #include "support/Bits.h"
+#include "support/Debug.h"
 #include "support/DedupeMap.h"
 #include "support/SlabAllocator.h"
 #include "support/StringRef.h"
@@ -47,7 +48,7 @@ struct DebugSourceLoc {
 };
 
 class StringDedupeMap {
-  TwoLevelMap<SSOStringRef, uint32_t> stringMap;
+  TwoLevelMap<StringRef, uint32_t> stringMap;
   MixedSizeSlabAllocator<> strtab{sizeof(char)};
 
 public:
@@ -60,7 +61,7 @@ public:
     std::copy(str.begin(), str.end(), ptr);
     ptr[str.size()] = '\0';
 
-    auto copy = std::string_view{ptr, str.size() + 1};
+    auto copy = std::string_view{ptr, str.size()};
     stringMap.insert(std::make_pair(copy, idx));
     return idx;
   }

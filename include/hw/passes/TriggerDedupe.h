@@ -25,6 +25,7 @@ class TriggerDedupePass : public Pass<TriggerDedupePass> {
   SmallVec<TriggerIRef, 4> canonical;
 
   void runOnModule(ModuleIRef mod) {
+    canonical.clear();
     SmallVec<TriggerIRef, 128> destroyList;
     for (auto trigger : mod.triggers()) {
       if (trigger.oref()->defUse.getNumUses() == 0) {

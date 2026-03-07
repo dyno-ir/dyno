@@ -59,7 +59,7 @@ public:
     return ArrayRef{ptr, sz - 1};
   }
 
-  constexpr const_pointer data() { return ptr; }
+  constexpr const_pointer data() const { return ptr; }
 
   static constexpr ArrayRef emptyRef() { return ArrayRef{nullptr, size_t(0)}; }
   template <typename U>

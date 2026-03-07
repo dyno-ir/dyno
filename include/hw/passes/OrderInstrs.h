@@ -10,6 +10,7 @@
 #include "hw/analysis/SCFTraversal.h"
 #include "op/IDs.h"
 #include "op/StructuredControlFlow.h"
+#include "support/Any.h"
 #include "support/DynBitSet.h"
 
 namespace dyno {
@@ -36,10 +37,10 @@ private:
       return;
     for (auto instr : HierBlockRange{sub}) {
       for (auto use : instr.others()) {
-        auto wire = use->dyn_as<WireRef>();
-        if (!wire)
+        if (use->fat().getType() != Any{HW_WIRE, HW_POINTER})
           continue;
-        auto instr = HWInstrRef{wire.getDefI()};
+        HWInstrRef instr =
+            use->as<FatDynObjRef<InstrDefUse>>()->getSingleDef()->instr();
         if (!instr.isDescendantOf(sub, ctx))
           handleUse(block, use, uses);
       }
@@ -88,8 +89,9 @@ private:
 
   void handleUse(BlockRef block, OperandRef use,
                  SmallVecImpl<OperandRef> &uses) {
-    if (auto asWire = use->dyn_as<WireRef>()) {
-      auto instr = asWire.getDefI();
+    if (use->fat().getType() == Any{HW_WIRE, HW_POINTER}) {
+      auto instr =
+          use->as<FatDynObjRef<InstrDefUse>>()->getSingleDef()->instr();
       if (map[instr].at(MARK))
         return;
       if (ctx.getCtx<CoreDialectContext>().cfg[instr].blockRef() != block) {
@@ -225,8 +227,8 @@ public:
   }
 
   static constexpr auto runFuncs =
-      std::make_tuple(&OrderInstrsPass::runProcess,
-                      &OrderInstrsPass::runModule, &OrderInstrsPass::run);
+      std::make_tuple(&OrderInstrsPass::runProcess, &OrderInstrsPass::runModule,
+                      &OrderInstrsPass::run);
 
   auto make(Context &ctx) { return OrderInstrsPass(ctx); }
   explicit OrderInstrsPass(Context &ctx) : ctx(ctx) {}
