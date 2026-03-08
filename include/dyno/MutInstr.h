@@ -28,7 +28,7 @@ public:
     o.instr = nullref;
   }
 
-  // reseves operands only, append with emplace_back/defsDone
+  // reserves operands only, append with emplace_back/defsDone
   MutInstr(Context &ctx, DialectOpcode opc, uint32_t reserve = 64)
       : ctx(&ctx), sz(0) {
     // unlikely that we hit the exact size so better go for a big initial alloc.

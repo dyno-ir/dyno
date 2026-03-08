@@ -84,6 +84,51 @@ public:
   }
 };
 
+// SmallVec<T, 0> is a vector with 0 expected elements - no initial alloc is
+// made.
+// Vec<T> is a large vector with many expected elements and large initial
+// alloc.
+template <typename T, uint32_t InitialAlloc = (4096 / sizeof(T))>
+class Vec : public SmallVecImpl<T> {
+public:
+  Vec()
+      : SmallVecImpl<T>(
+            reinterpret_cast<T *>(::operator new[](InitialAlloc * sizeof(T))),
+            InitialAlloc) {}
+  Vec(size_t size)
+      : SmallVecImpl<T>(
+            reinterpret_cast<T *>(::operator new[](size * sizeof(T))), size) {
+    this->resize(size);
+  }
+
+  Vec(SmallVecImpl<T> &&o) : SmallVecImpl<T>(nullptr, 0, std::move(o)) {}
+
+  template <typename It> Vec(Range<It> range);
+  Vec(std::initializer_list<T> list);
+
+  Vec &operator=(Vec &&o) {
+    // recover from moved-from state.
+    if (this->arr == nullptr) [[unlikely]] {
+      this->cap = 0;
+      this->sz = 0;
+    }
+    this->SmallVecImpl<T>::operator=(std::move(o));
+    return *this;
+  }
+
+  Vec(const SmallVecImpl<T> &o) : SmallVecImpl<T>(nullptr, 0, o) {}
+
+  Vec &operator=(const Vec &o) {
+    // recover from moved-from state.
+    if (this->arr == nullptr) [[unlikely]] {
+      this->cap = 0;
+      this->sz = 0;
+    }
+    this->SmallVecImpl<T>::operator=(o);
+    return *this;
+  }
+};
+
 template <typename T> class SmallVecImpl {
 public:
   using value_type = T;
@@ -104,7 +149,7 @@ private:
     assert(cap > 0);
     assert(minSz <= cap * 2);
 
-    size_type newCap = 2 * cap;
+    size_type newCap = std::max(1u, 2 * cap);
     T *newArr = reinterpret_cast<T *>(::operator new[](newCap * sizeof(T)));
     std::uninitialized_move(begin(), end(), newArr);
     destroy();
@@ -388,6 +433,19 @@ inline SmallVec<T, N>::SmallVec(std::initializer_list<T> list) : SmallVec() {
 template <typename T, unsigned N>
 template <typename It>
 inline SmallVec<T, N>::SmallVec(Range<It> range) : SmallVec() {
+  this->template push_back_range<It>(range);
+}
+
+template <typename T, unsigned N>
+inline Vec<T, N>::Vec(std::initializer_list<T> list) : Vec() {
+  this->reserve(list.size());
+  for (auto &elem : list)
+    this->emplace_back(elem);
+}
+
+template <typename T, unsigned N>
+template <typename It>
+inline Vec<T, N>::Vec(Range<It> range) : Vec() {
   this->template push_back_range<It>(range);
 }
 

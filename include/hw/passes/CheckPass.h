@@ -19,11 +19,36 @@ public:
   struct Config {
     bool dominance = true;
     bool operandsDefined = true;
-    bool danglingBlocks = true;
+    bool danglingBlocks = false;
     bool noLoops = false;
   };
 
   Config config;
+
+  // bool optimizeOneHotMux(InstrRef instr) {
+  //   // hash to find duplicates
+  //   bool change = false;
+  //   SmallDenseMap<DynObjRef, SmallVec<uint32_t, 2>, 16> map;
+  //   for (auto [sel, val] : Range{instr.others()}.pairwise()) {
+  //     auto [found, iter] = map.findOrInsert(sel->thin(), {});
+
+  //     // if this is the first time looking at select, check if it's known
+  //     if (!found) [[likely]] {
+  //       auto known = knownBits.getKnownBits(sel->as<HWValue>());
+  //       if (known.valueEquals(1)) {
+  //         // found a one entry, remove the instr
+  //         replaceUses(instr.def(0)->as<WireRef>(), val->as<HWValue>());
+  //         deleteMatchedInstr(instr);
+  //         return true;
+  //       } else if (known.valueEquals(0)) {
+  //         // drop zero entries
+  //         change = true;
+  //         continue;
+  //       }
+  //     } else
+  //       change = true;
+  //   }
+  // }
 
   template <typename... Ts> void error(InstrRef instr, Ts... ts) {
     dumpInstr(HWInstrRef{instr}.parentBlock(ctx).defI(), ctx);

@@ -30,10 +30,11 @@ class LinearizeControlFlowPass : public Pass<LinearizeControlFlowPass> {
   InstCombinePass instCombine;
 
 public:
-  struct Config {
-    bool flattenLoops = true;
-    bool flattenMultiway = true;
-  };
+#define CONFIG_STRUCT_LAMBDA(FIELD, ENUM)                                      \
+  FIELD(bool, flattenLoops, true)                                           \
+  FIELD(bool, flattenMultiway, true)
+  CONFIG_STRUCT(CONFIG_STRUCT_LAMBDA)
+#undef CONFIG_STRUCT_LAMBDA
   Config config;
 
 private:

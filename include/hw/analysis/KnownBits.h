@@ -446,7 +446,8 @@ public:
       case *OP_ICMP_EQ: {
         if (bigInt->valueEquals(instr.isOpc(OP_ICMP_EQ) ? 0 : 1))
           break;
-        if (!instr.other(1)->is<ConstantRef>())
+        if (!(instr.other(0)->is<WireRef>() &&
+              instr.other(1)->is<ConstantRef>()))
           break;
         auto constVal = instr.other(1)->as<ConstantRef>();
         auto asWire = instr.other(0)->as<WireRef>();

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "support/ArrayRef.h"
+#include "support/Bits.h"
 #include <algorithm>
 #include <cassert>
 #include <concepts>
@@ -926,6 +927,75 @@ public:
     return a.it <=> b.it;
   }
 };
+
+template <typename WordIt, bool Inv = false> class set_bits_iterator {
+  WordIt word;
+  WordIt wordsEnd;
+  size_t symb;
+  using WordT = std::iterator_traits<WordIt>::value_type;
+  static constexpr size_t WordBits = bit_mask_sz<WordT>;
+
+public:
+  using iterator_category = std::forward_iterator_tag;
+  using reference = size_t;
+  using value_type = size_t;
+  using difference_type = int;
+
+  bool curSymb() {
+    return Inv ^ DynBitField<WordT>{*word, symb & (WordBits - 1), 1};
+  }
+
+  auto getWord() { return Inv ? ~*word : *word; }
+
+  void prime() {
+    if (word == wordsEnd || curSymb())
+      return;
+    if (auto rem = getWord() >> (symb & (WordBits - 1))) {
+      symb += std::countr_zero(rem);
+      return;
+    }
+    symb += (-symb) & (WordBits - 1);
+    do {
+      ++word;
+    } while (getWord() && word != wordsEnd);
+
+    if (word == wordsEnd)
+      return;
+
+    symb += std::countr_zero(getWord());
+
+    assert(curSymb());
+  }
+
+  set_bits_iterator &operator++() {
+    auto mod = symb & (WordBits - 1);
+    symb++;
+    word += (mod == (WordBits - 1));
+
+    prime();
+    return *this;
+  }
+  set_bits_iterator operator++(int) {
+    auto temp{*this};
+    ++(*this);
+    return temp;
+  }
+
+  // a bit hacky, only rely on this for comparing against end(). To do this
+  // properly would also have to track symbsEnd.
+  bool operator==(const set_bits_iterator &o) const {
+    return word == o.word || (word == (o.word - 1) && symb >= o.symb);
+  }
+
+  size_t operator*() { return symb; }
+
+  set_bits_iterator(WordIt word, WordIt wordsEnd, size_t symb)
+      : word(word), wordsEnd(wordsEnd), symb(symb) {
+    prime();
+  }
+};
+template <typename WordIt>
+using unset_bits_iterator = set_bits_iterator<WordIt, true>;
 
 template <typename It> class Range {
 public:

@@ -266,6 +266,10 @@ public:
             *reinterpret_cast<int *>(ptr) = idx;
           });
     }
+    else {
+      if (!config.empty())
+        report_fatal_error("pass {} is not configurable", passName);
+    }
   }
 
 private:

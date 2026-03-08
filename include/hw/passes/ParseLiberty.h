@@ -8,6 +8,7 @@
 #include "support/Lexer.h"
 #include "support/MMap.h"
 #include "support/SlabAllocator.h"
+#include "support/StringRef.h"
 #include <variant>
 
 namespace dyno {
@@ -369,7 +370,7 @@ class LibertyToDyno {
     }
   }
 
-  std::unordered_map<std::string_view, RegisterRef> portNameMap;
+  TwoLevelMap<SSOStringRef, RegisterRef> portNameMap;
   HWValue parseExpr(std::string_view expr, HWInstrBuilder &build) {
     auto exprParse = LibertyExprParser{build, [&](std::string_view ident) {
                                          auto it = portNameMap.find(ident);
@@ -436,7 +437,7 @@ public:
             auto reg = build.buildRegister(1);
             ctx.getCtx<HWDialectContext>().regNameInfo.addName(
                 reg, param.strLit.value);
-            portNameMap.emplace(param.strLit.value, reg);
+            portNameMap.insert(param.strLit.value, reg);
             outs.emplace_back(reg);
           }
 

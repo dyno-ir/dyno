@@ -155,7 +155,7 @@ meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS
 meta.INST_COMBINE_PASS
 
 // load pre-parsed liberty
-meta.PARSE_DYNO_PASS map("fileName": "sky130_fd_sc_hd.dyno", "newModulesActive": "0")
+meta.PARSE_DYNO_PASS map("fileName": "tools/dyno-opt/dyno-ir/sky130_fd_sc_hd.dyno", "newModulesActive": "0")
 // load memories
 meta.PARSE_DYNO_PASS map("fileName": "tools/dyno-opt/dyno-ir/example_memories.dyno", "newModulesActive": "0")
 meta.POPULATE_INLINE_CACHES_PASS

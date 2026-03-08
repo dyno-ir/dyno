@@ -469,7 +469,8 @@ public:
   unsigned getNumUses() const { return refs.size() - numDefs; }
 
   const OperandRef &getDef() {
-    assert(numDefs == 1);
+    assert(numDefs != 0);
+    assert(numDefs <= 1);
     return *def_begin();
   }
 

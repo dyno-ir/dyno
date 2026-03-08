@@ -147,6 +147,8 @@ class ConstantMappingPass : public Pass<ConstantMappingPass> {
       for (auto use : instr.others()) {
         if (!use->is<ConstantRef>())
           continue;
+        if (instr.isOpc(HW_STORE) && use != instr.other(0))
+          continue;
         build.setInsertPoint(instr);
         auto w = makeConstant(use->as<ConstantRef>(), zeroW, oneW);
         use.replace(w);

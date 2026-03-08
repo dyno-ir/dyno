@@ -445,14 +445,12 @@ public:
   }
 
   void runOnModule(ModuleIRef module) {
+    map.resize(ctx.getStore<Process>().numIDs());
     findDeps(module);
     linearize(module);
-  }
-  void runWrapper(auto &&runFunc) {
-    map.resize(ctx.getStore<Process>().numIDs());
-    runFunc();
     map.clear();
   }
+  void runWrapper(auto &&runFunc) { runFunc(); }
 
   void run() {
     runWrapper([&] {
