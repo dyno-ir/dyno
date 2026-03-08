@@ -3,6 +3,7 @@
 #include "support/ArrayRef.h"
 #include "support/Bits.h"
 #include "support/Ranges.h"
+#include "support/SmallVec.h"
 #include <bit>
 #include <cassert>
 #include <cstddef>
