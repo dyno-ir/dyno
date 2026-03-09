@@ -824,7 +824,7 @@ public:
   step_iterator() = default;
   step_iterator(T it, unsigned n) : it(it), n(n) {}
 
-  value_type operator*() { return *it; }
+  value_type operator*() const { return *it; }
 
   step_iterator &operator+=(difference_type d)
     requires(isRandom)
@@ -875,9 +875,9 @@ class tuple_iterator
 
 public:
   using iterator_category = std::iterator_traits<T>::iterator_category;
-  using value_type = tuple_n_t<typename std::iterator_traits<T>::reference, N>;
-  using pointer = value_type *;
-  using reference = value_type &;
+  using value_type = tuple_n_t<typename std::iterator_traits<T>::value_type, N>;
+  using pointer = void;
+  using reference = tuple_n_t<typename std::iterator_traits<T>::reference, N>;
   using difference_type = std::iterator_traits<T>::difference_type;
 
 private:
@@ -891,11 +891,12 @@ public:
   tuple_iterator() = default;
   tuple_iterator(T it) : it(it) {}
 
-  value_type operator*() {
+  reference operator*() const {
     return [this]<std::size_t... Is>(std::index_sequence<Is...>) {
+      auto itCopy(it);
       std::array<T, N> its;
-      ((its[Is] = it++), ...);
-      return value_type(*its[Is]...);
+      ((its[Is] = itCopy++), ...);
+      return reference(*its[Is]...);
     }(std::make_index_sequence<N>());
   }
 
