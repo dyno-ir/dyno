@@ -1,5 +1,5 @@
 
-/*
+
 TEST_CASE :string("instcombine-constants"), :block, :block, :block {
   MODULE_DEF :module("mod"), :block {
     OUTPUT_REGISTER_DEF %out_a:register(128)
@@ -508,7 +508,7 @@ TEST_CASE :string("instcombine-mux-lift"), :block, :block, :block {
   }
 }{
   meta.INST_COMBINE_PASS
-}*/
+}
 
 /*
 TEST_CASE :string("test-mem-map"), :block, :block, :block, {
@@ -566,6 +566,7 @@ TEST_CASE :string("test-mem-map"), :block, :block, :block, {
 }
 */
 
+/*
 TEST_CASE :string("test-mem-map-2bit-wr-8bit-rd"), :block, :block, :block, {
   // 2 bit async read sync write memory
 
@@ -644,7 +645,7 @@ TEST_CASE :string("test-mem-map-2bit-wr-8bit-rd"), :block, :block, :block, {
   meta.INST_COMBINE_PASS
   meta.AGGRESSIVE_DEAD_CODE_ELIMINATION_PASS
 }
-
+*/
 
 /*
 TEST_CASE :string("test-mem-map-2w"), :block, :block, :block, {
