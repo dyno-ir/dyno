@@ -510,7 +510,7 @@ TEST_CASE :string("instcombine-mux-lift"), :block, :block, :block {
   meta.INST_COMBINE_PASS
 }
 
-/*
+
 TEST_EQUIVALENCE :string("test-arith-lower"), :block, :block {
   MODULE_DEF :module("mod"), :block {
     INPUT_REGISTER_DEF %clk:register(1)
@@ -546,7 +546,7 @@ TEST_EQUIVALENCE :string("test-arith-lower"), :block, :block {
   meta.INST_COMBINE_PASS
   meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS
   meta.RANDOM_EQUIVALENCE_CHECK_PASS map("cycles": "1000")
-}*/
+}
 
 TEST_EQUIVALENCE :string("test-icmp-lower"), :block, :block {
   MODULE_DEF :module("mod"), :block {
