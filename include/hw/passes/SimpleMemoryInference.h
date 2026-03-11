@@ -623,7 +623,7 @@ public:
   void runModule(ModuleIRef mod) { runOnModule(mod); }
   void runRegister(RegisterIRef reg) { runOnRegister(reg); }
 
-  static constexpr auto runFuncs = std::make_tuple(
+  static constexpr auto runFuncs = mk_tuple(
       &SimpleMemoryInferencePass::runRegister,
       &SimpleMemoryInferencePass::runModule, &SimpleMemoryInferencePass::run);
 };

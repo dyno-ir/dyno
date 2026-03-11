@@ -1191,12 +1191,17 @@ public:
     return analyzeMuxTree(root, [](InstrRef) {}, matchMultiUse, exploreConds);
   }
 
+  struct Frame {
+    HWValue val;
+    uint32_t idx;
+  };
+
   std::optional<MuxTree>
   analyzeMuxTree(InstrRef root, std::invocable<InstrRef> auto visitedCallback,
                  bool matchMultiUse = false, bool exploreConds = true) {
     conditionsDedupeMap.clear();
-    SmallVec<std::tuple<HWValue, uint32_t>, 32> worklist{
-        {root.def(0)->as<WireRef>(), 1}};
+
+    SmallVec<Frame, 32> worklist{{root.def(0)->as<WireRef>(), 1u}};
 
     SmallVec<SmallBoolExprCNF, 4> prefixes;
 
@@ -1252,7 +1257,7 @@ public:
 
       switch (*instr.getDialectOpcode()) {
       case *HW_MUX: {
-        std::get<1>(worklist.back()) += 1;
+        worklist.back().idx += 1;
         worklist.emplace_back(operand->as<HWValue>(), 1);
         if (operand != instr.other(1)) {
           auto negated = prefixes.back().negated2(muxtree->conditions.size());

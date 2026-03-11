@@ -7,11 +7,11 @@
 #include "support/ErrorRecovery.h"
 #include "support/TemplateUtil.h"
 #include "support/Tokenizer.h"
+#include "support/Tuple.h"
 #include <charconv>
 #include <map>
 #include <string_view>
 #include <strings.h>
-#include <tuple>
 #include <type_traits>
 #include <utility>
 
@@ -87,7 +87,7 @@ CONFIG_STRUCT_TYPES(LAMBDA)
 
 #define CONFIG_EXPAND_ENUM_CALL(name, defaultV, ...)                           \
   EnumFunc(reinterpret_cast<void *>(&this->name), #name,                       \
-           std::vector<const char *>{QUOTE_LIST(__VA_ARGS__)});
+           Vec<const char *>{QUOTE_LIST(__VA_ARGS__)});
 
 #define CONFIG_STRUCT(lambda)                                                  \
   struct Config {                                                              \
@@ -204,8 +204,8 @@ template <typename Derived> class Pass {
   template <typename T, std::size_t... Is>
   static auto createArgTuple(ArrayRef<void *> values,
                              std::index_sequence<Is...>) {
-    return std::tuple<typename std::tuple_element<Is, T>::type...>{
-        castArg<typename std::tuple_element<Is, T>::type>(values[Is])...};
+    return Tuple<typename tuple_element<Is, T>::type...>{
+        castArg<typename tuple_element<Is, T>::type>(values[Is])...};
   }
 
 public:
@@ -217,7 +217,9 @@ public:
     constexpr auto sz = std::tuple_size_v<arg_tuple>;
     auto argTuple =
         createArgTuple<arg_tuple>(args, std::make_index_sequence<sz>{});
-    return new Derived(std::make_from_tuple<Derived>(std::move(argTuple)));
+    return new Derived(argTuple.apply([](auto &&...args) {
+      return Derived(std::forward<decltype(args)...>(args)...);
+    }));
   }
 
   static bool typeErasedRun(void *self, ArrayRef<void *> args) {
@@ -225,8 +227,8 @@ public:
     constexpr auto sz = std::tuple_size_v<arg_tuple>;
     auto argTuple =
         createArgTuple<arg_tuple>(args, std::make_index_sequence<sz>{});
-    return std::apply(&BindMethod<&Pass::runGenericPtr>::fv,
-                      std::tuple_cat(std::make_tuple(self), argTuple));
+    return tuple_concat(mk_tuple(self), argTuple)
+        .apply(&BindMethod<&Pass::runGenericPtr>::fv);
   }
 
   static void typeErasedDestroy(void *obj) {
@@ -239,7 +241,7 @@ public:
     if constexpr (requires(Derived &d) {
                     d.config.for_fields(
                         [](void *, ConfigStructType, const char *) {},
-                        [](void *, const char *, std::vector<const char *>) {});
+                        [](void *, const char *, Vec<const char *>) {});
                   }) {
       auto &self = *reinterpret_cast<Derived *>(selfPtr);
       // reset to default config
@@ -254,7 +256,7 @@ public:
             if (!parser.parseConfigType(ptr, ty, it->second))
               report_fatal_error("invalid setting {}: {}", nm, it->second);
           },
-          [&](void *ptr, const char *nm, std::vector<const char *> labels) {
+          [&](void *ptr, const char *nm, Vec<const char *> labels) {
             auto it = config.find(std::string(nm));
             if (it == config.end())
               return;
@@ -265,8 +267,7 @@ public:
             auto idx = it2 - labels.begin();
             *reinterpret_cast<int *>(ptr) = idx;
           });
-    }
-    else {
+    } else {
       if (!config.empty())
         report_fatal_error("pass {} is not configurable", passName);
     }
@@ -284,7 +285,7 @@ private:
     } else {
       static_assert(std::tuple_size_v<function_args_t<T>> == 1,
                     "expected 0 or 1 arg function");
-      using arg_t = std::tuple_element_t<0, function_args_t<T>>;
+      using arg_t = tuple_element_t<0, function_args_t<T>>;
       if (auto conv = ref.dyn_as<arg_t>()) {
         (self.*func)(conv);
         return true;
@@ -297,9 +298,8 @@ public:
   bool runGeneric(FatDynObjRef<> ref) {
     auto &self = *reinterpret_cast<Derived *>(this);
     if constexpr (requires { self.runFuncs; }) {
-      return std::apply(
-          [&](auto &&...funcs) { return (tryRun(ref, funcs) || ...); },
-          self.runFuncs);
+      return self.runFuncs.apply(
+          [&](auto &&...funcs) { return (tryRun(ref, funcs) || ...); });
     } else if (!ref) {
       self.run();
       return true;

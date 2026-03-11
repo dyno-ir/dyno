@@ -102,8 +102,8 @@ class FlipFlopMappingPass : public Pass<FlipFlopMappingPass> {
   };
 
   using StdCellOrFixupF = PointersIntsVariant<FixupType, StdCellFF *>;
-  std::vector<StdCellOrFixupF> ffMap =
-      std::vector<StdCellOrFixupF>(512, FixupType::FAIL);
+  Vec<StdCellOrFixupF> ffMap =
+      Vec<StdCellOrFixupF>(512, FixupType::FAIL);
   SlabAllocator<StdCellFF> stdCellFFs;
 
   struct FatFF {
@@ -642,7 +642,7 @@ public:
         runOnModule(mod);
     });
   }
-  static constexpr auto runFuncs = std::make_tuple(
+  static constexpr auto runFuncs = mk_tuple(
       &FlipFlopMappingPass::runModule, &FlipFlopMappingPass::run);
 
   auto make(Context &ctx) { return FlipFlopMappingPass(ctx); }

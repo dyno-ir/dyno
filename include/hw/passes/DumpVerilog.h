@@ -13,7 +13,7 @@
 #include "support/Utility.h"
 #include <fstream>
 #include <print>
-#include <tuple>
+#include "support/Tuple.h"
 namespace dyno {
 
 class void_stream final : public std::ostream {
@@ -319,7 +319,7 @@ public:
   }
 
   static constexpr auto runFuncs =
-      std::make_tuple(&DumpVerilogPass::runModule, &DumpVerilogPass::run);
+      mk_tuple(&DumpVerilogPass::runModule, &DumpVerilogPass::run);
 };
 
 }; // namespace dyno

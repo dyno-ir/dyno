@@ -1,7 +1,7 @@
 #pragma once
 
-#include "support/ArrayRef.h"
 #include "support/Bits.h"
+#include "support/Tuple.h"
 #include <algorithm>
 #include <cassert>
 #include <concepts>
@@ -9,7 +9,6 @@
 #include <iterator>
 #include <numeric>
 #include <optional>
-#include <tuple>
 #include <type_traits>
 #include <utility>
 
@@ -1223,35 +1222,35 @@ public:
     requires(requires(It a) { a[i]; })
   {
     if constexpr (requires { size(); })
-      assert(i < size());
+      assert(i < size_t(size()));
     return beginIt[i];
   }
 
   Range subrange(size_t start)
     requires(requires(It a) { a + start; })
   {
-    assert(start <= size());
+    assert(start <= size_t(size()));
     return {beginIt + start, endIt};
   }
 
   Range subrange(size_t start, size_t len)
     requires(requires(It a) { a + start; })
   {
-    assert(start + len <= size());
+    assert(start + len <= size_t(size()));
     return {beginIt + start, beginIt + start + len};
   }
 
-  operator ArrayRef<std::remove_cvref_t<decltype(*std::declval<It>())>>()
-    requires(std::is_reference_v<decltype(*std::declval<It>())>)
-  {
-    return ArrayRef{&*beginIt, &*endIt};
-  }
-  operator MutArrayRef<std::remove_cvref_t<decltype(*std::declval<It>())>>()
-    requires(std::is_reference_v<decltype(*std::declval<It>())> &&
-             !std::is_const_v<decltype(*std::declval<It>())>)
-  {
-    return MutArrayRef{&*beginIt, &*endIt};
-  }
+  // operator ArrayRef<std::remove_cvref_t<decltype(*std::declval<It>())>>()
+  //   requires(std::is_reference_v<decltype(*std::declval<It>())>)
+  // {
+  //   return ArrayRef{&*beginIt, &*endIt};
+  // }
+  // operator MutArrayRef<std::remove_cvref_t<decltype(*std::declval<It>())>>()
+  //   requires(std::is_reference_v<decltype(*std::declval<It>())> &&
+  //            !std::is_const_v<decltype(*std::declval<It>())>)
+  // {
+  //   return MutArrayRef{&*beginIt, &*endIt};
+  // }
 
   decltype(auto) front() {
     assert(!empty());

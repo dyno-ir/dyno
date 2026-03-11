@@ -1,6 +1,6 @@
 #pragma once
 #include <cstdint>
-#include <tuple>
+#include "support/Tuple.h"
 #include <type_traits>
 #include <utility>
 
@@ -39,31 +39,31 @@ template <typename T> struct function_info;
 template <typename R, typename C, typename... Args>
 struct function_info<R (C::*)(Args...)> {
   using type = C;
-  using args = std::tuple<Args...>;
+  using args = Tuple<Args...>;
   using ret = R;
 };
 template <typename R, typename C, typename... Args>
 struct function_info<R (C::*)(Args...) const> {
   using type = C;
-  using args = std::tuple<Args...>;
+  using args = Tuple<Args...>;
   using ret = R;
 };
 template <typename R, typename C, typename... Args>
 struct function_info<R (C::*)(Args...) volatile> {
   using type = C;
-  using args = std::tuple<Args...>;
+  using args = Tuple<Args...>;
   using ret = R;
 };
 
 template <typename R, typename C, typename... Args>
 struct function_info<R (C::*)(Args...) const volatile> {
   using type = C;
-  using args = std::tuple<Args...>;
+  using args = Tuple<Args...>;
   using ret = R;
 };
 
 template <typename R, typename... Args> struct function_info<R (*)(Args...)> {
-  using args = std::tuple<Args...>;
+  using args = Tuple<Args...>;
   using ret = R;
 };
 
@@ -73,7 +73,7 @@ template <typename M> using function_ret_t = typename function_info<M>::ret;
 
 template <auto fn, typename Tuple> struct BindMethodImpl;
 template <auto fn, typename... Args>
-struct BindMethodImpl<fn, std::tuple<Args...>> {
+struct BindMethodImpl<fn, Tuple<Args...>> {
   static auto f(member_obj_t<decltype(fn)> &obj, Args... args) {
     return (obj.*fn)(std::forward<decltype(args)>(args)...);
   }

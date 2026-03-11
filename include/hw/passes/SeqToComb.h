@@ -130,7 +130,7 @@ public:
   }
   void runModule(ModuleIRef mod) { runOnModule(mod); }
   static constexpr auto runFuncs =
-      std::make_tuple(&SeqToCombPass::runModule, &SeqToCombPass::run);
+      mk_tuple(&SeqToCombPass::runModule, &SeqToCombPass::run);
 };
 
 }; // namespace dyno

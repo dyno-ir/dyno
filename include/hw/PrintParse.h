@@ -107,26 +107,24 @@ public:
       auto asInfo = ref.as<StdCellInfoRef>();
       str << "stdcell_info(";
 
-      auto list = std::make_tuple(FOR_STDCELL_INFO_ELEMENTS(EXPAND_MEMBERS));
+      auto list = mk_tuple(FOR_STDCELL_INFO_ELEMENTS(EXPAND_MEMBERS));
       auto names = std::to_array({FOR_STDCELL_INFO_ELEMENTS(EXPAND_NAMES)});
-      std::apply(
-          [&](auto &...args) {
-            size_t i = 0;
-            bool any = false;
-            (
-                [&] {
-                  if (args) {
-                    if (any)
-                      str << ", ";
-                    // fixme: floating point in parser.
-                    std::print(str, "\"{}\": {}", names[i], unsigned(*args));
-                    i++;
-                    any = true;
-                  }
-                }(),
-                ...);
-          },
-          list);
+      list.apply([&](auto &...args) {
+        size_t i = 0;
+        bool any = false;
+        (
+            [&] {
+              if (args) {
+                if (any)
+                  str << ", ";
+                // fixme: floating point in parser.
+                std::print(str, "\"{}\": {}", names[i], unsigned(*args));
+                i++;
+                any = true;
+              }
+            }(),
+            ...);
+      });
       str << ")";
       break;
     }
@@ -255,25 +253,23 @@ public:
       auto asInfo = ctx->getStore<StdCellInfo>().create();
       lexer->popEnsure(DynoLexer::op_rbropen);
 
-      auto list = std::make_tuple(FOR_STDCELL_INFO_ELEMENTS(EXPAND_MEMBERS));
+      auto list = mk_tuple(FOR_STDCELL_INFO_ELEMENTS(EXPAND_MEMBERS));
       auto names = std::to_array({FOR_STDCELL_INFO_ELEMENTS(EXPAND_NAMES)});
 
       while (lexer->peekIs(Token::STRING_LITERAL)) {
         auto tok = lexer->popEnsure(Token::STRING_LITERAL).strLit.value;
-        auto res = std::apply(
-            [&](auto &...args) {
-              unsigned i = 0;
-              return ([&] {
-                if (names[i++] == tok) {
-                  lexer->popEnsure(DynoLexer::op_colon);
-                  // todo: non int
-                  args = lexer->popEnsure(Token::INT_LITERAL).intLit.value;
-                  return true;
-                }
-                return false;
-              }() || ...);
-            },
-            list);
+        auto res = list.apply([&](auto &...args) {
+          unsigned i = 0;
+          return ([&] {
+            if (names[i++] == tok) {
+              lexer->popEnsure(DynoLexer::op_colon);
+              // todo: non int
+              args = lexer->popEnsure(Token::INT_LITERAL).intLit.value;
+              return true;
+            }
+            return false;
+          }() || ...);
+        });
         if (!res)
           return nullref;
         if (!lexer->popIf(DynoLexer::op_comma))

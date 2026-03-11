@@ -9,7 +9,7 @@
 namespace dyno {
 
 template <std::unsigned_integral Word> class AIGSim {
-  using StateMap = AIGNodeMap<std::vector<Word>>;
+  using StateMap = AIGNodeMap<Vec<Word>>;
 
   AIG &aig;
   StateMap state;

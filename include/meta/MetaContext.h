@@ -8,7 +8,7 @@
 #include "dyno/NewDeleteObjStore.h"
 #include "hw/DebugInfo.h"
 #include "op/MapObj.h"
-#include <tuple>
+#include "support/Tuple.h"
 
 namespace dyno {
 class MetaContext {
@@ -28,7 +28,7 @@ public:
 
 class MetaDialectContext : public ContextMixin<MetaDialectContext> {
 public:
-  std::tuple<> stores;
+  Tuple<> stores;
   static constexpr DialectID dialect{DIALECT_META};
   template <typename T> auto &getStore();
 };

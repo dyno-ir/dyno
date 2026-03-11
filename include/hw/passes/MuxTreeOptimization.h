@@ -14,6 +14,7 @@
 #include "hw/analysis/MuxTree.h"
 #include "op/IDs.h"
 #include "support/Debug.h"
+#include "support/DynBitSet.h"
 #include "support/SlabAllocator.h"
 
 namespace dyno {
@@ -76,7 +77,7 @@ private:
     unsigned bestTotal = 0;
     double bestRatio = 0.0;
 
-    std::vector<bool> binTreeCompat(tree->entries.size());
+    DynBitSet<SmallVec<uint64_t, 2>> binTreeCompat(tree->entries.size());
 
     for (unsigned litIdx = 0; litIdx < tree->conditions.size(); litIdx++) {
       SmallBoolExprCNF testExpr;
@@ -442,9 +443,9 @@ public:
     runWrapper([&] { runOnProcess(proc); });
   }
 
-  static constexpr auto runFuncs = std::make_tuple(
-      &MuxTreeOptimizationPass::runProcess,
-      &MuxTreeOptimizationPass::runModule, &MuxTreeOptimizationPass::run);
+  static constexpr auto runFuncs = mk_tuple(
+      &MuxTreeOptimizationPass::runProcess, &MuxTreeOptimizationPass::runModule,
+      &MuxTreeOptimizationPass::run);
 
   auto make(Context &ctx) { return MuxTreeOptimizationPass(ctx); }
   explicit MuxTreeOptimizationPass(Context &ctx) : ctx(ctx), build(ctx) {}

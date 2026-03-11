@@ -10,7 +10,7 @@
 #include "meta/MetaPassManager.h"
 #include "support/CallableRef.h"
 #include "support/TemplateUtil.h"
-#include <tuple>
+#include "support/Tuple.h"
 #include <type_traits>
 namespace dyno {
 
@@ -36,7 +36,7 @@ template <typename Derived> class ContextMixin {
 
   auto &self() { return *static_cast<Derived *>(this); }
   static constexpr size_t numStores =
-      std::tuple_size_v<decltype(std::declval<Derived>().stores)>;
+      decltype(std::declval<Derived>().stores)::size;
 
   static unsigned getMaxTyID() {
     // find highest used type ID
@@ -44,8 +44,8 @@ template <typename Derived> class ContextMixin {
       unsigned maxID = 0;
       (
           [&] {
-            using StoreT = std::remove_reference_t<std::tuple_element_t<
-                Is, decltype(std::declval<Derived>().stores)>>;
+            using StoreT = std::remove_reference_t<
+                tuple_element_t<Is, decltype(std::declval<Derived>().stores)>>;
             maxID = std::max(
                 maxID,
                 unsigned(
@@ -59,11 +59,11 @@ template <typename Derived> class ContextMixin {
   }
   auto makeResolverMethods() {
     // create vector and assign elements
-    std::vector<CallableRef<FatDynObjRef<>(DynObjRef)>> arr(getMaxTyID() + 1);
+    Vec<CallableRef<FatDynObjRef<>(DynObjRef)>> arr(getMaxTyID() + 1);
     [&]<std::size_t... Is>(std::index_sequence<Is...>) {
       (
           [&] {
-            auto &store = std::get<Is>(self().stores);
+            auto &store = self().stores.template get<Is>();
             using StoreT = std::remove_reference_t<decltype(store)>;
             arr[ObjTraits<typename StoreT::value_type>::ty.getTypeID() & 127] =
                 CallableRef{&store, BindMethod<&StoreT::resolveGeneric>::fv};
@@ -77,17 +77,17 @@ template <typename Derived> class ContextMixin {
   template <auto Func>
   static FatDynObjRef<> castToSpecificRef(void *obj, FatDynObjRef<> ref) {
     using ArgT = std::remove_reference_t<
-        std::tuple_element_t<1, function_args_t<decltype(Func)>>>;
+        tuple_element_t<1, function_args_t<decltype(Func)>>>;
     return Func(obj, ref.as<ArgT>());
   }
   auto makeCopyMethods() {
     // create vector and assign elements
-    std::vector<CallableRef<FatDynObjRef<>(FatDynObjRef<>)>> arr(getMaxTyID() +
+    Vec<CallableRef<FatDynObjRef<>(FatDynObjRef<>)>> arr(getMaxTyID() +
                                                                  1);
     [&]<std::size_t... Is>(std::index_sequence<Is...>) {
       (
           [&] {
-            auto &store = std::get<Is>(self().stores);
+            auto &store = self().stores.template get<Is>();
             using StoreT = std::remove_reference_t<decltype(store)>;
             using SignT = ObjTraits<typename StoreT::value_type>::FatRefT (
                 StoreT::*)(FatObjRef<typename StoreT::value_type> &&);
@@ -104,13 +104,13 @@ template <typename Derived> class ContextMixin {
   }
 
 public:
-  std::vector<CallableRef<FatDynObjRef<>(DynObjRef)>> resolverMethods =
+  Vec<CallableRef<FatDynObjRef<>(DynObjRef)>> resolverMethods =
       makeResolverMethods();
-  std::vector<CallableRef<FatDynObjRef<>(FatDynObjRef<>)>> copyMethods =
+  Vec<CallableRef<FatDynObjRef<>(FatDynObjRef<>)>> copyMethods =
       makeCopyMethods();
 
   void reset() {
-    std::apply([](auto &...stores) { (stores.reset(), ...); }, self().stores);
+    self().stores.apply([](auto &...stores) { (stores.reset(), ...); });
   }
 };
 

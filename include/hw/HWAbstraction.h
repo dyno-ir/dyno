@@ -550,35 +550,35 @@ private:
     return nullopt;
   }
   template <typename... Rest>
-  std::tuple<Optional<uint32_t>, uint32_t, bool>
+  Tuple<Optional<uint32_t>, uint32_t, bool>
   spliceNumBitsOps(HWValue value, BitRange range, Rest... rest) {
     auto lhs = spliceSingleNumBits(value, range);
     auto [rhsB, rhsN, rhsConst] = spliceNumBitsOps(rest...);
 
-    return std::make_tuple((!lhs || !rhsB) ? nullopt : Optional(*lhs + *rhsB),
+    return mk_tuple((!lhs || !rhsB) ? nullopt : Optional(*lhs + *rhsB),
                            rhsN + (lhs.value_or(1) != 0),
                            rhsConst && lhs && range.addr.is<ConstantRef>() &&
                                value.is<ConstantRef>());
   }
-  std::tuple<Optional<uint32_t>, uint32_t, bool> spliceNumBitsOps() {
-    return std::make_tuple(0, 0, true);
+  Tuple<Optional<uint32_t>, uint32_t, bool> spliceNumBitsOps() {
+    return mk_tuple(Optional<uint32_t>{0}, 0u, true);
   }
 
   Optional<uint32_t> concatSingleNumBits(HWValue value) {
     return value.getNumBits();
   }
   template <typename... Rest>
-  std::tuple<Optional<uint32_t>, uint32_t, bool>
+  Tuple<Optional<uint32_t>, uint32_t, bool>
   concatNumBitsOps(HWValue value, Rest... rest) {
     auto lhs = concatSingleNumBits(value);
     auto [rhsB, rhsN, rhsConst] = concatNumBitsOps(rest...);
 
-    return std::make_tuple((!lhs || !rhsB) ? nullopt : Optional(*lhs + *rhsB),
+    return mk_tuple((!lhs || !rhsB) ? nullopt : Optional(*lhs + *rhsB),
                            rhsN + (lhs.value_or(1) != 0),
                            rhsConst && lhs && value.is<ConstantRef>());
   }
-  std::tuple<Optional<uint32_t>, uint32_t, bool> concatNumBitsOps() {
-    return std::make_tuple(0, 0, true);
+  Tuple<Optional<uint32_t>, uint32_t, bool> concatNumBitsOps() {
+    return mk_tuple(Optional<uint32_t>{0}, 0u, true);
   }
 
   HWValue buildConstSpliceOfConcat(WireRef wire, uint32_t numBits,

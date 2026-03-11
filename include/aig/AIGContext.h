@@ -8,12 +8,12 @@ namespace dyno {
 
 class AIGDialectContext : public ContextMixin<AIGDialectContext> {
 public:
-  std::tuple<NewDeleteObjStore<AIGObj>> stores;
+  Tuple<NewDeleteObjStore<AIGObj>> stores;
 
   static constexpr DialectID dialect{DIALECT_AIG};
 
   template <typename T> auto &getStore();
-  template <> auto &getStore<AIGObj>() { return std::get<0>(stores); }
+  template <> auto &getStore<AIGObj>() { return stores.get<0>(); }
 };
 
 template <> struct DialectContext<DialectID{DIALECT_AIG}> {

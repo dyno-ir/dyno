@@ -10,7 +10,7 @@ template <typename T> class ObjPool {
 public:
   using Traits = ObjTraits<T>;
   using value_type = T;
-  using vec_type = std::vector<T *>; // Traits::template vec_type<T *>;
+  using vec_type = Vec<T *>; // Traits::template vec_type<T *>;
 
   struct FreeNode {
     FreeNode *next;

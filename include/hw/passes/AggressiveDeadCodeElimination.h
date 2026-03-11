@@ -23,7 +23,7 @@
 #include "op/StructuredControlFlow.h"
 #include "support/Debug.h"
 #include "support/Utility.h"
-#include <tuple>
+#include "support/Tuple.h"
 namespace dyno {
 
 // todo: function support
@@ -618,7 +618,7 @@ public:
   }
 
   static constexpr auto runFuncs =
-      std::make_tuple(&AggressiveDeadCodeEliminationPass::runModule,
+      mk_tuple(&AggressiveDeadCodeEliminationPass::runModule,
                       &AggressiveDeadCodeEliminationPass::run);
 
   auto make(Context &ctx) { return AggressiveDeadCodeEliminationPass(ctx); }

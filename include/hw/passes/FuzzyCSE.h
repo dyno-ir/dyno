@@ -15,7 +15,7 @@
 #include "support/Debug.h"
 #include "support/DynBitSet.h"
 #include <cassert>
-#include <tuple>
+#include "support/Tuple.h"
 
 namespace dyno {
 
@@ -406,7 +406,7 @@ private:
   struct Use {
     uint16_t instr;
   };
-  std::vector<SmallVec<Use, 4>> operandUses;
+  Vec<SmallVec<Use, 4>> operandUses;
   SmallVec<AbstractInstr, 16> candidates;
   SmallVec<uint32_t, 32> worklist;
 
@@ -539,7 +539,7 @@ public:
   }
 
   static constexpr auto runFuncs =
-      std::make_tuple(&FuzzyCSEPass::runModule, &FuzzyCSEPass::run);
+      mk_tuple(&FuzzyCSEPass::runModule, &FuzzyCSEPass::run);
 };
 
 }; // namespace dyno

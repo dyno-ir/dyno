@@ -186,6 +186,6 @@ public:
   }
   void runModule(ModuleIRef mod) { runOnModule(mod); }
   static constexpr auto runFuncs =
-      std::make_tuple(&CheckPass::run, &CheckPass::runModule);
+      mk_tuple(&CheckPass::run, &CheckPass::runModule);
 };
 }; // namespace dyno

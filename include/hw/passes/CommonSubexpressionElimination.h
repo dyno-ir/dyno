@@ -226,7 +226,7 @@ public:
   }
 
   static constexpr auto runFuncs =
-      std::make_tuple(&CommonSubexpressionEliminationPass::runProcess,
+      mk_tuple(&CommonSubexpressionEliminationPass::runProcess,
                       &CommonSubexpressionEliminationPass::runModule,
                       &CommonSubexpressionEliminationPass::run);
 

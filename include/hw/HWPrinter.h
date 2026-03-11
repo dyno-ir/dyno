@@ -41,7 +41,7 @@ public:
                         DialectID{DIALECT_HW}});
   }
 
-  auto &regNames() { return std::get<HWDialectPrinter>(printers).regNames; }
+  auto &regNames() { return printers.get<HWDialectPrinter>().regNames; }
 
   [[nodiscard]] auto bindCtx(Context &ctx) {
     return std::pair(

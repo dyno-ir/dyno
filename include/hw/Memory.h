@@ -59,10 +59,10 @@ public:
     return other(clockBase() + 2);
   }
 
-  std::optional<std::tuple<unsigned, RegisterRef, bool>> getClock() {
+  std::optional<Tuple<unsigned, RegisterRef, bool>> getClock() {
     if (!hasClock())
       return std::nullopt;
-    return std::make_tuple(delay()->as<ConstantRef>().getExactVal(),
+    return mk_tuple(delay()->as<ConstantRef>().getExactVal(),
                            clock()->as<RegisterRef>(),
                            clockPol()->as<ConstantRef>().valueEquals(1));
   }

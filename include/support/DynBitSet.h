@@ -90,6 +90,7 @@ protected:
 
 public:
   using reference = DynBitField<typename Base::container_t::value_type>;
+  using pointer = void;
   using value_type = reference;
   using Base::at_unchecked;
   void resizeSymbs(size_t) = delete;
@@ -203,10 +204,10 @@ public:
       return old;
     }
 
-    reference operator*() {
+    reference operator*() const {
       return reference{*word, symb * SymbolBits, SymbolBits};
     }
-    reference operator[](ssize_t i) { return *((*this) + i); }
+    reference operator[](ssize_t i) const { return *((*this) + i); }
 
     friend difference_type operator-=(iterator lhs, iterator rhs) {
       return (lhs.word - rhs.word) * Base::WordSymbs + (lhs.symb - rhs.symb);
@@ -231,7 +232,7 @@ public:
   using Base::Base;
 
   void set(size_t i) { (*this)[i] = 1; }
-  void clear(size_t i) { (*this)[i] = 0; }
+  void clr(size_t i) { (*this)[i] = 0; }
   auto get(size_t i) const { return (*this)[i]; }
 
   auto setBitIdxs() {
@@ -439,7 +440,7 @@ public:
   TriangularBitSet(size_t sz) : bits(sz != 0 ? idx(sz, 0) : 0) {}
 
   void set(size_t i, size_t j) { bits.set(idx(i, j)); }
-  void clr(size_t i, size_t j) { bits.clear(idx(i, j)); }
+  void clr(size_t i, size_t j) { bits.clr(idx(i, j)); }
   void set(size_t i, size_t j, bool v) {
     if (v) {
       set(i, j);

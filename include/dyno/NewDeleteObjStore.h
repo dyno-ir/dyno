@@ -9,7 +9,7 @@
 #include <optional>
 #include <support/Ranges.h>
 #include <utility>
-#include <vector>
+
 
 namespace dyno {
 // todo: mechanism to downsize map
@@ -22,7 +22,7 @@ private:
   using CreateHookT = void (*)(FatRefT);
   using DestroyHookT = void (*)(FatRefT);
 
-  std::vector<ObjID> freeIds;
+  Vec<ObjID> freeIds;
   ObjMapVec<T, T *> map;
 
 public:

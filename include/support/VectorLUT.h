@@ -2,7 +2,7 @@
 
 #include "support/Optional.h"
 #include <cassert>
-#include <vector>
+
 
 template <typename T> class VectorLUT {
 public:
@@ -11,7 +11,7 @@ public:
   using pointer = T *;
   using const_reference = const T &;
   using const_pointer = const T *;
-  using Container = std::vector<dyno::Optional<T>>;
+  using Container = Vec<dyno::Optional<T>>;
 
 private:
   size_t base = 0;

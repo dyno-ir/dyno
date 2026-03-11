@@ -166,7 +166,7 @@ struct Lexer {
 private:
   std::optional<Token> peekToken;
   TwoLevelMap<SSOStringRef, uint32_t> strings = initStrings();
-  std::vector<SSOStringRef> rvStrings;
+  Vec<SSOStringRef> rvStrings;
 
   TwoLevelMap<SSOStringRef, uint32_t> initStrings() {
     TwoLevelMap<SSOStringRef, uint32_t> map;

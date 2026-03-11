@@ -188,8 +188,8 @@ class SATSolver {
 public:
   SATClauseStore clauses;
   SATVarStore vars;
-  std::vector<uint32_t> watches;
-  std::vector<SATLit> trail;
+  Vec<uint32_t> watches;
+  Vec<SATLit> trail;
 
   SATLit addVar() { return SATLit{vars.create(), false}; }
 

@@ -85,7 +85,7 @@ class DynoTestPrinter
 public:
   DynoTestPrinter(Context &ctx, std::ostream &os)
       : ContextPrinterWrapper(ctx, os) {
-    std::get<HWDialectPrinter>(this->printers).regNames =
+    this->printers.get<HWDialectPrinter>().regNames =
         &ctx.getCtx<HWDialectContext>().regNameInfo;
   }
 };

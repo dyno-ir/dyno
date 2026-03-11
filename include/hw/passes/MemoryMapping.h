@@ -735,7 +735,7 @@ public:
   }
 
   static constexpr auto runFuncs =
-      std::make_tuple(&MemoryMappingPass::run, &MemoryMappingPass::runModule);
+      mk_tuple(&MemoryMappingPass::run, &MemoryMappingPass::runModule);
 
   explicit MemoryMappingPass(Context &ctx) : ctx(ctx) {}
   auto make(Context &ctx) { return MemoryMappingPass{ctx}; }

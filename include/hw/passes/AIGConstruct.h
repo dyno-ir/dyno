@@ -26,7 +26,7 @@ namespace dyno {
 class AIGBuilder {
   Context &ctx [[maybe_unused]];
   ObjMapVec<Wire, ThinArrayRef<AIGNodeTRef>> wireToAIGNode;
-  std::vector<AIGNodeTRef> wireToAIGNodeStorage;
+  Vec<AIGNodeTRef> wireToAIGNodeStorage;
 
 public:
   AIG &aig;
@@ -42,8 +42,7 @@ public:
       dyno_unreachable("");
     }
     return wireToAIGNode[wire].resolve(
-        ArrayRef{wireToAIGNodeStorage.begin().base(),
-                 wireToAIGNodeStorage.end().base()});
+        ArrayRef{wireToAIGNodeStorage.begin(), wireToAIGNodeStorage.end()});
   }
 
   AIGNodeTRef resolveBit(HWValue val, unsigned bit) {
@@ -198,8 +197,8 @@ public:
       wireToAIGNodeStorage.emplace_back(node.as<AIGNodeRef>());
     }
     wireToAIGNode[wire] = arr;
-    return arr.resolve(MutArrayRef{wireToAIGNodeStorage.begin().base(),
-                                   wireToAIGNodeStorage.end().base()});
+    return arr.resolve(
+        MutArrayRef{wireToAIGNodeStorage.begin(), wireToAIGNodeStorage.end()});
   }
   auto buildOutput(HWValue wire) {
     auto numBits = *wire.getNumBits();
@@ -437,7 +436,7 @@ public:
   }
 
   static constexpr auto runFuncs =
-      std::make_tuple(&AIGConstructPass::runModule, &AIGConstructPass::run);
+      mk_tuple(&AIGConstructPass::runModule, &AIGConstructPass::run);
 
   auto make(Context &ctx) { return AIGConstructPass(ctx); }
   explicit AIGConstructPass(Context &ctx) : ctx(ctx), build(ctx) {}

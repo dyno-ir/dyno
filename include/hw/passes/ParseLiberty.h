@@ -401,7 +401,8 @@ public:
     HWInstrBuilderStack build{ctx};
 
     SmallVec<std::pair<RegisterRef, Token>, 16> funcList;
-    SmallVec<std::tuple<RegisterRef, RegisterRef, LibertyParser::Block *>, 16>
+
+    SmallVec<Tuple<RegisterRef, RegisterRef, LibertyParser::Block *>, 16>
         ffList;
 
     for (auto *object : block->blocks) {

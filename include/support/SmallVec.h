@@ -100,7 +100,13 @@ public:
             reinterpret_cast<T *>(::operator new[](size * sizeof(T))), size) {
     this->resize(size);
   }
+  Vec(size_t size, const T &templ)
+      : SmallVecImpl<T>(
+            reinterpret_cast<T *>(::operator new[](size * sizeof(T))), size) {
+    this->resize(size, templ);
+  }
 
+  Vec(Vec &&o) : SmallVecImpl<T>(nullptr, 0, std::move(o)) {}
   Vec(SmallVecImpl<T> &&o) : SmallVecImpl<T>(nullptr, 0, std::move(o)) {}
 
   template <typename It> Vec(Range<It> range);
@@ -117,6 +123,7 @@ public:
   }
 
   Vec(const SmallVecImpl<T> &o) : SmallVecImpl<T>(nullptr, 0, o) {}
+  Vec(const Vec<T> &o) : SmallVecImpl<T>(nullptr, 0, o) {}
 
   Vec &operator=(const Vec &o) {
     // recover from moved-from state.
@@ -134,8 +141,11 @@ public:
   using value_type = T;
   using size_type = unsigned;
   using iterator = T *;
+  using pointer = T *;
   using const_iterator = const T *;
   using param_type = T &;
+  using reference = T &;
+  using const_reference = const T &;
 
 protected:
   size_type sz;
@@ -415,6 +425,7 @@ public:
   }
 
   T *data() { return begin(); }
+  const T *data() const { return begin(); }
 
   iterator begin() { return arr; }
   iterator end() { return arr + sz; }

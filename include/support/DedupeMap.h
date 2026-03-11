@@ -4,7 +4,7 @@
 #include "support/DenseMultimap.h"
 #include <cstdint>
 
-template <typename T, typename Container = std::vector<T>,
+template <typename T, typename Container = Vec<T>,
           auto HashFunc = [](const T &t) { return std::hash<T>()(t); }>
 class DedupeMap {
   DenseMultimap<Unhashed<uint32_t>, uint32_t> map;

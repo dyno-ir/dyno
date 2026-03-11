@@ -33,14 +33,14 @@ public:
 
   static constexpr DialectID dialect{DIALECT_HW};
 
-  std::tuple<StoreType_t<Wire>, StoreType_t<Register>, StoreType_t<Process>,
+  Tuple<StoreType_t<Wire>, StoreType_t<Register>, StoreType_t<Process>,
              StoreType_t<Module>, StoreType_t<Trigger>,
              StoreType_t<StdCellInfo>, StoreType_t<MemoryPort>,
              StoreType_t<Pointer>>
       stores;
 
   ValueNameInfo<Register> regNameInfo;
-  template <typename T> T &get() { return std::get<T>(stores); }
+  template <typename T> T &get() { return stores.get<T>(); }
 
   template <typename T> StoreType_t<T> &getStore() {
     return get<StoreType_t<T>>();

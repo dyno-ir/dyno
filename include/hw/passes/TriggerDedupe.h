@@ -59,7 +59,7 @@ public:
   void runModule(ModuleIRef mod) { runOnModule(mod); }
 
   static constexpr auto runFuncs =
-      std::make_tuple(&TriggerDedupePass::runModule, &TriggerDedupePass::run);
+      mk_tuple(&TriggerDedupePass::runModule, &TriggerDedupePass::run);
 
 public:
   auto make(Context &ctx) { return TriggerDedupePass(ctx); }

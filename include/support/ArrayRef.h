@@ -6,7 +6,7 @@
 #include <cstdint>
 #include <iterator>
 #include <type_traits>
-#include <vector>
+#include "support/SmallVec.h"
 
 template <typename T>
 concept CArrayRef = requires {
@@ -67,7 +67,7 @@ public:
 
   template <typename U,
             typename = std::enable_if_t<!std::is_same_v<U, bool>, void>>
-  constexpr ArrayRef(const std::vector<U> &u) : ArrayRef(u.data(), u.size()) {}
+  constexpr ArrayRef(const Vec<U> &u) : ArrayRef(u.data(), u.size()) {}
 
   template <typename U, size_t N>
   constexpr ArrayRef(const U (&c_arr)[N]) : ArrayRef(c_arr, c_arr + N) {}

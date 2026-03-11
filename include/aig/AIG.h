@@ -255,7 +255,7 @@ template <> struct ObjTraits<AIGNode> {
 class ThinAIGNodeStore {
   friend class AIG;
   friend class AIGNodeStore;
-  DedupeMap<AIGNode, std::vector<AIGNode>, AIGNode::hash> dedupeMap;
+  DedupeMap<AIGNode, Vec<AIGNode>, AIGNode::hash> dedupeMap;
 
 public:
   AIGNodeRef resolve(AIGNodeTRef ref) {
@@ -332,8 +332,8 @@ class AIGNodeStore {
   friend class AIG;
   ThinAIGNodeStore thin;
   FatAIGNodeStore<NewDeleteObjStore<FatAIGNode>> fat;
-  std::vector<unsigned> useCountGates;
-  std::vector<unsigned> useCountIns;
+  Vec<unsigned> useCountGates;
+  Vec<unsigned> useCountIns;
 
 public:
   AIGNodeRef resolve(AIGNodeTRef ref) {
@@ -379,8 +379,8 @@ class AIG {
 public:
   AIGNodeStore store;
 
-  std::vector<FatAIGNodeRef> inputs;
-  std::vector<FatAIGNodeRef> outputs;
+  Vec<FatAIGNodeRef> inputs;
+  Vec<FatAIGNodeRef> outputs;
 
   static AIGNodeTRef simplify(AIGNodeTRef lhs, AIGNodeTRef rhs) {
     assert(lhs.getObjID() <= rhs.getObjID());
@@ -588,7 +588,7 @@ public:
   }
 };
 
-template <typename T> using AIGNodeVecMap = AIGNodeMap<std::vector<T>>;
+template <typename T> using AIGNodeVecMap = AIGNodeMap<Vec<T>>;
 
 class AIGNodeRemap {
   AIGNodeVecMap<uint32_t> idMap;

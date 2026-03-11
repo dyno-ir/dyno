@@ -36,6 +36,6 @@ public:
     parser.parse(mmap, config.fileName);
   }
 
-  constexpr static auto runFuncs = std::make_tuple(&ParseDynoPass::run);
+  constexpr static auto runFuncs = mk_tuple(&ParseDynoPass::run);
 };
 }; // namespace dyno

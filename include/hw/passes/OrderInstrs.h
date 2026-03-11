@@ -19,7 +19,7 @@ namespace dyno {
 // respect order of side effect instrs.
 class OrderInstrsPass : public Pass<OrderInstrsPass> {
   Context &ctx;
-  ObjMap<Instr, DynSymbSet<std::vector<uint64_t>, 2>> map;
+  ObjMap<Instr, DynSymbSet<Vec<uint64_t>, 2>> map;
   enum { PRE_MARK = 0, MARK = 1 };
 
 public:
@@ -227,7 +227,7 @@ public:
   }
 
   static constexpr auto runFuncs =
-      std::make_tuple(&OrderInstrsPass::runProcess, &OrderInstrsPass::runModule,
+      mk_tuple(&OrderInstrsPass::runProcess, &OrderInstrsPass::runModule,
                       &OrderInstrsPass::run);
 
   auto make(Context &ctx) { return OrderInstrsPass(ctx); }

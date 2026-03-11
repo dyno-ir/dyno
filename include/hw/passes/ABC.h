@@ -14,9 +14,9 @@
 #include "hw/Process.h"
 #include "support/ErrorRecovery.h"
 #include "support/TemplateUtil.h"
+#include "support/Tuple.h"
 #include "support/Utility.h"
 #include <fstream>
-#include <tuple>
 #include <type_traits>
 
 namespace dyno {
@@ -419,8 +419,8 @@ public:
   }
 
   static constexpr auto runFuncs =
-      std::make_tuple(&ABCPass::runModule, &ABCPass::runProcess,
-                      &ABCPass::runAIG, &ABCPass::run);
+      mk_tuple(&ABCPass::runModule, &ABCPass::runProcess, &ABCPass::runAIG,
+                 &ABCPass::run);
 
   auto make(Context &ctx) { return ABCPass(ctx); }
   explicit ABCPass(Context &ctx) : ctx(ctx) {}

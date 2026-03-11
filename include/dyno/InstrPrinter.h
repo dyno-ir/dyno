@@ -19,7 +19,7 @@
 #include <initializer_list>
 #include <iostream>
 #include <ostream>
-#include <tuple>
+#include "support/Tuple.h"
 
 namespace dyno {
 
@@ -99,7 +99,7 @@ private:
   DenseMap<DynObjRef, IntroducedName> introduced;
   uint32_t numericNameCnt = 0;
 
-  std::vector<bool> isDefault = std::vector<bool>(MAX_NUM_DIALECTS);
+  UnsizedBitSet<SmallVec<uint64_t, 2>> isDefault = (MAX_NUM_DIALECTS);
 
 protected:
   TempBindPtr<SourceLocInfo<Instr>> sourceLocInfo;
@@ -341,7 +341,7 @@ template <typename... Printers>
 class ContextPrinterWrapper : public PrinterBase {
 
 protected:
-  std::tuple<Printers...> printers;
+  Tuple<Printers...> printers;
 
 public:
   ContextPrinterWrapper(Context &ctx, OStreamWrapper str)
@@ -366,7 +366,7 @@ class PrinterWrapper : private AutoDialectInfos<Printers::dialect...>,
                        public PrinterBase {
 
 protected:
-  std::tuple<Printers...> printers;
+  Tuple<Printers...> printers;
 
 public:
   PrinterWrapper(OStreamWrapper str)

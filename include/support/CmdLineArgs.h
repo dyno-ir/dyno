@@ -328,7 +328,7 @@ inline void CmdLineArg<ArrayRef<char>>::parse(CmdLineArgBase *self,
     static_cast<CmdLineArg *>(self)->value = ptr;                              \
   }                                                                            \
   template <>                                                                  \
-  inline void CmdLineArg<std::vector<TYPE>>::parse(CmdLineArgBase *self,       \
+  inline void CmdLineArg<Vec<TYPE>>::parse(CmdLineArgBase *self,       \
                                                    const char *ptr) {          \
     static_cast<CmdLineArg *>(self)->value.emplace_back(ptr);                  \
   }
@@ -365,7 +365,7 @@ inline void CmdLineArg<bool>::parse(CmdLineArgBase *self, const char *ptr) {
       report_fatal_error("expected number (" #TYPE "): {}", str);              \
   }                                                                            \
   template <>                                                                  \
-  inline void CmdLineArg<std::vector<TYPE>>::parse(CmdLineArgBase *self,       \
+  inline void CmdLineArg<Vec<TYPE>>::parse(CmdLineArgBase *self,       \
                                                    const char *ptr) {          \
     std::string_view str{ptr};                                                 \
     TYPE val;                                                                  \

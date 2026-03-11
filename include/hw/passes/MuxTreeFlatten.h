@@ -6,18 +6,21 @@
 #include "hw/HWValue.h"
 #include "hw/Process.h"
 #include "hw/analysis/KnownBits.h"
-#include <tuple>
+#include "support/Tuple.h"
 namespace dyno {
 class MuxTreeFlattenPass : public Pass<MuxTreeFlattenPass> {
   Context &ctx;
   KnownBitsAnalysis knownBits;
   ObjMapVec<Instr, bool> visitedMap;
 
+  struct Frame {
+    HWValue val;
+    uint32_t idx;
+  };
   HWValue convertTreeToOneHot(InstrRef root,
                               std::invocable<InstrRef> auto visitedCallback,
                               bool matchMultiUse = false) {
-    SmallVec<std::tuple<HWValue, uint32_t>, 32> worklist{
-        {root.def(0)->as<WireRef>(), 1}};
+    SmallVec<Frame, 32> worklist{{root.def(0)->as<WireRef>(), 1u}};
 
     SmallVec<HWValue, 4> prefixes;
     SmallVec<std::pair<HWValue, HWValue>, 4> cases;
@@ -61,7 +64,7 @@ class MuxTreeFlattenPass : public Pass<MuxTreeFlattenPass> {
 
       switch (*instr.getDialectOpcode()) {
       case *HW_MUX: {
-        std::get<1>(worklist.back()) += 1;
+        worklist.back().idx += 1;
         worklist.emplace_back(operand->as<HWValue>(), 1);
         if (operand != instr.other(1)) {
           prefixes.back().setCustom(1);
@@ -118,9 +121,9 @@ public:
   void runProcess(ProcessIRef proc) {
     runWrapper([&] { runOnProcess(proc); });
   }
-  static constexpr auto runFuncs = std::make_tuple(
-      &MuxTreeFlattenPass::runProcess, &MuxTreeFlattenPass::runModule,
-      &MuxTreeFlattenPass::run);
+  static constexpr auto runFuncs =
+      mk_tuple(&MuxTreeFlattenPass::runProcess, &MuxTreeFlattenPass::runModule,
+               &MuxTreeFlattenPass::run);
   explicit MuxTreeFlattenPass(Context &ctx) : ctx(ctx) {}
   MuxTreeFlattenPass make(Context &ctx) { return MuxTreeFlattenPass{ctx}; }
 };

@@ -321,7 +321,7 @@ public:
   void runModule(ModuleIRef mod) { runOnModule(mod); }
   void runProcess(ProcessIRef proc) { runOnProcess(proc); }
 
-  static constexpr auto runFuncs = std::make_tuple(
+  static constexpr auto runFuncs = mk_tuple(
       &LinearizeControlFlowPass::runProcess,
       &LinearizeControlFlowPass::runModule, &LinearizeControlFlowPass::run);
 

@@ -35,7 +35,7 @@
 #include "support/SmallVec.h"
 #include "support/Utility.h"
 #include <algorithm>
-#include <tuple>
+#include "support/Tuple.h"
 namespace dyno {
 
 bool generated(Context &ctx, SmallVecImpl<InstrRef> &matched,
@@ -1987,7 +1987,7 @@ public:
   }
 
   static constexpr auto runFuncs =
-      std::make_tuple(&InstCombinePass::runModule, &InstCombinePass::runInstr,
+      mk_tuple(&InstCombinePass::runModule, &InstCombinePass::runInstr,
                       &InstCombinePass::runBlock, &InstCombinePass::run);
 
 public:

@@ -85,7 +85,7 @@ public:
   explicit SSAConstructPass(Context &ctx) : ctx(ctx), autoDebugInfo(ctx) {}
 
   struct MultiwayResult {
-    SmallVec<std::tuple<RegisterRef, std::pair<uint32_t, uint32_t>, TriggerID>,
+    SmallVec<Tuple<RegisterRef, std::pair<uint32_t, uint32_t>, TriggerID>,
              2>
         yieldRegs;
     SmallVec<SmallVec<HWValue, 4>, 2> yieldVals;
@@ -212,7 +212,7 @@ public:
                                   MutArrayRef<BlockRef> loopBlocks) {
     assert(loopBlocks.size() == numLoopBlocks);
     auto startDepth = depth - numLoopBlocks;
-    SmallVec<std::tuple<RegisterRef, std::pair<uint32_t, uint32_t>, TriggerID>,
+    SmallVec<Tuple<RegisterRef, std::pair<uint32_t, uint32_t>, TriggerID>,
              4>
         yieldVals;
     std::array<SmallVec<HWValue, 4>, numLoopBlocks> materializedYieldVals;
@@ -307,7 +307,7 @@ public:
       }
     }
 
-    return std::make_tuple(yieldVals, materializedYieldVals, unyieldWires);
+    return mk_tuple(yieldVals, materializedYieldVals, unyieldWires);
   }
 
   // this is not really needed, template also works with size == 1.
@@ -320,7 +320,7 @@ public:
     unsigned startDepth = depth - 1;
     unsigned bodyDepth = depth;
 
-    SmallVec<std::tuple<RegisterRef, std::pair<uint32_t, uint32_t>, TriggerID>,
+    SmallVec<Tuple<RegisterRef, std::pair<uint32_t, uint32_t>, TriggerID>,
              4>
         yieldVals;
     SmallVec<HWValue, 4> materializedYieldVals(yieldVals.size());
@@ -387,13 +387,13 @@ public:
       }
     }
 
-    return std::make_tuple(yieldVals, materializedYieldVals, unyieldWires);
+    return mk_tuple(yieldVals, materializedYieldVals, unyieldWires);
   }
 
   bool addYieldsToLoopInstr(
       HWInstrBuilder &build, InstrRef loopInstr,
       ArrayRef<
-          std::tuple<RegisterRef, std::pair<uint32_t, uint32_t>, TriggerID>>
+          Tuple<RegisterRef, std::pair<uint32_t, uint32_t>, TriggerID>>
           yieldVals) {
     if (yieldVals.size() == 0)
       return false;
@@ -849,7 +849,7 @@ public:
   }
 
   static constexpr auto runFuncs =
-      std::make_tuple(&SSAConstructPass::runProcess,
+      mk_tuple(&SSAConstructPass::runProcess,
                       &SSAConstructPass::runModule, &SSAConstructPass::run);
 };
 

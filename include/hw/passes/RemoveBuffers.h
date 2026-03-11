@@ -107,7 +107,7 @@ public:
   }
 
   static constexpr auto runFuncs =
-      std::make_tuple(&RemoveBuffersPass::runModule, &RemoveBuffersPass::run);
+      mk_tuple(&RemoveBuffersPass::runModule, &RemoveBuffersPass::run);
 };
 
 }; // namespace dyno

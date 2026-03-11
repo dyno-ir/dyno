@@ -69,7 +69,7 @@ private:
 
 struct PassRegistry {
 
-  std::vector<OpcodeInfo> metaOpcodeInfoArr;
+  Vec<OpcodeInfo> metaOpcodeInfoArr;
   SlabAllocator<TypeErasedPass> typeErasedPasses;
   MixedSizeSlabAllocator<> stringAlloc;
 
