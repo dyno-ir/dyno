@@ -25,6 +25,7 @@
 #include <iterator>
 #include <optional>
 #include <ostream>
+#include <random>
 #include <sstream>
 #include <string>
 #include <type_traits>
@@ -97,15 +98,24 @@ protected:
   constexpr uint32_t __attribute__((always_inline)) getWord(uint32_t i) const {
     if (i >= bitsToWords(self().getRawNumBits()))
       dyno_unreachable("out of bounds");
-
-    if (i >= self().getNumWords())
+    return getWord(i, self().getNumWords());
+  }
+  // with numWords passed in in case the underlying container has been resized
+  constexpr uint32_t __attribute__((always_inline))
+  getWord(uint32_t i, uint32_t numWords) const {
+    if (i >= numWords)
       return repeatExtend(self().getExtend());
     return self().getWords()[i];
   }
   constexpr uint32_t __attribute__((always_inline))
+  getWord4S(uint32_t i, uint32_t numWords) const {
+    return self().getIs4S()
+               ? getWord(i, numWords)
+               : unpack_bits(getWord(i / 2, numWords) >> ((i % 2) * 16));
+  }
+  constexpr uint32_t __attribute__((always_inline))
   getWord4S(uint32_t i) const {
-    return self().getIs4S() ? getWord(i)
-                            : unpack_bits(getWord(i / 2) >> ((i % 2) * 16));
+    return getWord4S(i, self().getNumWords());
   }
   constexpr uint8_t getRawBit(uint32_t i) const {
     assert(i <= self().getRawNumBits());
@@ -512,6 +522,16 @@ public:
     if (rv.getIs4S())
       rv.conv4To2StateIfPossible();
     return rv;
+  }
+
+  void randomize(std::mt19937 &rand) {
+    if (getIs4S())
+      this->set(0U, this->getNumBits());
+    expand();
+    for (auto &word : words) {
+      word = rand();
+    }
+    normalize();
   }
 
 #define LINEAR_OP(ident, code)                                                 \
@@ -1707,22 +1727,14 @@ public:
     custom() = 1;
   }
   template <auto Func4S, auto Func2S, typename T0, typename T1>
-  static void bitwiseOp4S(BigIntBase &out, const T0 &lhsMayAlias,
-                          const T1 &rhs) {
-    if (!lhsMayAlias.getIs4S() && !rhs.getIs4S()) {
-      Func2S(out, lhsMayAlias, rhs);
+  static void bitwiseOp4S(BigIntBase &out, const T0 &lhs, const T1 &rhs) {
+    if (!lhs.getIs4S() && !rhs.getIs4S()) {
+      Func2S(out, lhs, rhs);
       return;
     }
-    const T0 *lhsPtr = &lhsMayAlias;
-    BigIntBase lhsCopy;
-    if constexpr (std::is_same_v<BigIntBase, T0>) {
-      if (&out == &lhsMayAlias && !lhsMayAlias.getIs4S()) {
-        lhsCopy = lhsMayAlias;
-        lhsPtr = &lhsCopy;
-      }
-    }
 
-    const T0 &lhs = *lhsPtr;
+    auto lhsNumWords = lhs.getNumWords();
+    auto rhsNumWords = rhs.getNumWords();
 
     out.words.resize(std::max(lhs.getNumWords(), rhs.getNumWords()));
     out.numBits = std::max(lhs.getRawNumBits(), rhs.getRawNumBits());
@@ -1730,8 +1742,8 @@ public:
     uint32_t hasUnk = 0;
 
     for (size_t i = 0; i < out.getNumWords(); i++) {
-      uint32_t lhsV = lhs.getWord4S(i);
-      uint32_t rhsV = rhs.getWord4S(i);
+      uint32_t lhsV = lhs.getWord4S(i, lhsNumWords);
+      uint32_t rhsV = rhs.getWord4S(i, rhsNumWords);
       uint32_t outV = Func4S(lhsV, rhsV);
       out.words[i] = outV;
       hasUnk |= outV & REP10;

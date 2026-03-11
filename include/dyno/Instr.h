@@ -10,12 +10,14 @@
 #include "support/DenseMapInfo.h"
 #include "support/RTTI.h"
 #include "support/SmallVec.h"
+#include "support/TwoLevelSet.h"
 #include "support/Utility.h"
 #include <cassert>
 #include <compare>
 #include <cstdint>
 #include <dyno/Interface.h>
 #include <dyno/Obj.h>
+#include <functional>
 #include <iterator>
 #include <limits>
 #include <support/InlineStorage.h>
@@ -864,29 +866,23 @@ inline void OperandRef::destroy() {
 struct UniqueOperand {
   Instr *instr;
   uint32_t idx;
+  bool operator==(const UniqueOperand &o) const {
+    return instr == o.instr && idx == o.idx;
+  }
 };
 
 } // namespace dyno
 
-template <> struct DenseMapInfo<dyno::UniqueOperand> {
-  static constexpr dyno::UniqueOperand getEmptyKey() { return {nullptr, 0}; }
-  static constexpr dyno::UniqueOperand getTombstoneKey() {
-    return {nullptr, 1};
-  }
-  static unsigned getHashValue(const dyno::UniqueOperand &k) {
-    auto ptrHash = hash_u64(uintptr_t(k.instr));
-    return hash_combine(hash_combine(uint32_t(ptrHash), hash_u32(k.idx)),
-                        ptrHash >> 32);
-  }
-  static bool isEqual(const dyno::UniqueOperand &lhs,
-                      const dyno::UniqueOperand &rhs) {
-    return lhs.instr == rhs.instr && lhs.idx == rhs.idx;
+template <> struct std::hash<dyno::UniqueOperand> {
+  size_t operator()(const dyno::UniqueOperand &op) {
+    return hash_combine64(hash_u64(reinterpret_cast<uintptr_t>(op.instr)),
+                          op.idx);
   }
 };
 
 namespace dyno {
 
-inline DenseMap<UniqueOperand, uint32_t> linkIdxSpillMap;
+inline TwoLevelMap<UniqueOperand, uint32_t> linkIdxSpillMap;
 
 // to be called on instr def use side OperandRefs.
 inline void OperandRef::setLinkIdx(uint32_t idx) {
@@ -896,6 +892,11 @@ inline void OperandRef::setLinkIdx(uint32_t idx) {
     (*this)->ref.setCustom(idx);
   } else {
     (*this)->ref.setCustom(maxV);
+
+    unsigned elemes = 0;
+    for (auto e : linkIdxSpillMap)
+      elemes++;
+    assert(elemes == linkIdxSpillMap.size());
 
     // not cleared to avoid slowing down fast path.
     linkIdxSpillMap.insertOrAssign(UniqueOperand(instr().getPtr(), getNum()),

@@ -40,7 +40,7 @@ public:
   FIELD(bool, lowerAddCompress, true)                                          \
   FIELD(bool, lowerSimpleAdd, true)                                            \
   FIELD(bool, lowerSub, true)                                                  \
-  FIELD(bool, lowerConstantMul, true)                                          \
+  FIELD(bool, lowerMul, true)                                                  \
   FIELD(bool, lowerMultiInputBitwise, true)                                    \
   FIELD(bool, lowerEqualityICMP, true)                                         \
   FIELD(bool, lowerOrderingICMP, true)                                         \
@@ -410,7 +410,8 @@ private:
       auto signsDifferent = build.buildXor(signLHS, signRHS);
       // sign bit is set if b > a i.e. a < b
       HWValue signBit = build.buildSplice(sumWire, 1, numBits - 1);
-      out = build.buildMux(signsDifferent, signLHS, signBit);
+      out = build.buildMux(signsDifferent, signLHS,
+                           build.buildXor(signBit, signLHS));
     } else {
       out = build.buildSplice(sumWire, 1, numBits);
       invertResult = !invertResult;
@@ -523,7 +524,59 @@ private:
     destroyMap[instr] = 1;
   }
 
+  void lowerMultiInputMul(InstrRef mul) {
+    const unsigned maxCompressIns = 2;
+    if (mul.getNumOthers() <= 2)
+      return;
+
+    build.setInsertPoint(HWInstrRef{mul}.iter(ctx));
+    auto operands = getOperandsSortedByDelay(mul);
+    while (operands.size() > 2) {
+      auto compressIns = std::min(maxCompressIns, operands.size());
+
+      OtherVec<HWValue> subOperands{ctx, 1, compressIns};
+      uint32_t worstDelay = 0;
+      for (size_t i = 0; i < compressIns; i++) {
+        auto [val, dl] = operands.pop_back_val();
+        subOperands.emplace_back(val);
+        worstDelay = dl;
+      }
+      auto prod = build.buildMul(std::move(subOperands));
+
+      auto comprDelay = delay.getDefDelay(prod.as<WireRef>().getDefI().def());
+      if (!comprDelay)
+        worstDelay = UINT32_MAX;
+      else if (worstDelay != UINT32_MAX)
+        worstDelay += *comprDelay;
+
+      auto it =
+          std::find_if(operands.begin(), operands.end(), [&](const auto &pair) {
+            return pair.second < worstDelay;
+          });
+      unsigned pos = it - operands.begin();
+
+      operands.resize(operands.size() + 1);
+      std::move_backward(operands.begin() + pos, operands.end() - 1,
+                         operands.end());
+      operands[pos] = std::make_pair(prod, worstDelay);
+    }
+
+    OperandVec<HWValue> finalMul(ctx, 1, 2);
+    finalMul.emplace_back(mul.def(0)->as<WireRef>());
+    finalMul.emplace_back(operands[0].first);
+    finalMul.emplace_back(operands[1].first);
+
+    build.buildMul(std::move(finalMul));
+
+    mul.def(0).replace(FatDynObjRef<>{nullref});
+    destroyMap[mul] = 1;
+  }
+
   void lowerMultiply(InstrRef instr) {
+    if (instr.getNumOthers() > 2) {
+      lowerMultiInputMul(instr);
+      return;
+    }
     auto val = instr.other(0)->as<WireRef>();
     auto bits = *val.getNumBits();
     Range facts{instr.other_begin() + 1, instr.other_end()};
@@ -550,6 +603,8 @@ private:
             carry = false;
         }
       }
+      if (sum >= bits)
+        continue;
       auto doAdd = build.buildAnd(terms);
       auto mask = build.buildRepeat(doAdd, bits);
       auto shifted = build.buildSLL(val, cbuild.val(bits, sum).get());
@@ -564,7 +619,7 @@ private:
     destroyMap[instr] = 1;
   }
 
-  void lowerConstantMul(InstrRef instr) {
+  void lowerMul(InstrRef instr) {
     // until we implement real multiply.
     if (instr.getNumOthers() != 2 || !instr.other(1)->is<ConstantRef>()) {
       lowerMultiply(instr);
@@ -890,7 +945,7 @@ private:
       break;
 
     case *OP_MUL:
-      lowerConstantMul(instr);
+      lowerMul(instr);
       break;
 
     case *OP_ICMP_ULT:
@@ -951,7 +1006,7 @@ public:
         return config.lowerSub;
 
       if (instr.isOpc(OP_MUL))
-        return config.lowerConstantMul;
+        return config.lowerMul;
 
       if (instr.isOpc(OP_ICMP_ULT, OP_ICMP_SLT, OP_ICMP_ULE, OP_ICMP_SLE,
                       OP_ICMP_UGT, OP_ICMP_SGT, OP_ICMP_UGE, OP_ICMP_SGE))

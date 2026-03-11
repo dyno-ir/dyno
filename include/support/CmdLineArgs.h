@@ -3,6 +3,8 @@
 #include "support/Bits.h"
 #include "support/ErrorRecovery.h"
 #include "support/SmallVec.h"
+#include "support/StringRef.h"
+#include "support/TwoLevelSet.h"
 #include <array>
 #include <cctype>
 #include <charconv>
@@ -13,7 +15,6 @@
 #include <string>
 #include <string_view>
 #include <system_error>
-#include <unordered_map>
 
 // todo:
 // - multiple arguments for regular options like -a=1,2,3
@@ -87,7 +88,7 @@ inline void CmdLineArg<CmdLineHelpObj>::parse(CmdLineArgBase *self,
 class CmdLineArgHandler {
 private:
   std::array<CmdLineArgBase *, 256> shortArgMap = {};
-  std::unordered_map<std::string_view, CmdLineArgBase *> longArgMap;
+  TwoLevelMap<SSOStringRef, CmdLineArgBase *> longArgMap;
   SmallVec<CmdLineArgBase *, 4> positionalArgs;
   SmallVec<CmdLineArgBase *, 4> mandatoryArgs;
   SmallVec<CmdLineArgBase *, 128> allArgs;

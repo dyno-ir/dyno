@@ -11,9 +11,6 @@
 #include "hw/Wire.h"
 #include "hw/analysis/CacheInvalidation.h"
 #include "op/IDs.h"
-#include "support/Bits.h"
-#include "support/Debug.h"
-#include "support/DenseMap.h"
 #include "support/Utility.h"
 #include <concepts>
 namespace dyno {

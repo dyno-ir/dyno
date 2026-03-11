@@ -62,8 +62,11 @@ public:
     T &val() { return (*this)->second; }
 
     bool operator==(const iterator &o) const { return Base::operator==(o); }
-    iterator &operator++() { return this->Base::operator++(); }
-    iterator &operator++(int) { return this->Base::operator++(0); }
+    iterator &operator++() {
+      this->Base::operator++();
+      return *this;
+    }
+    iterator &operator++(int) { return iterator(this->Base::operator++(0)); }
 
     iterator() = default;
   };
@@ -80,7 +83,7 @@ public:
     return iterator(map.insert(HashFunc(k), std::make_pair(k, t)));
   }
   iterator insertOrAssign(const K &k, const T &t) {
-    return iterator(map.insertOrAssign(HashFunc(k), std::make_pair(k, t)));
+    return findOrInsert(k, []() { return T{}; }).second;
   }
   auto findOrInsert(const K &k, auto &&func) {
     auto [h, it] = find_raw(k);

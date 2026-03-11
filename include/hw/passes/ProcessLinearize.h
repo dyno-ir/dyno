@@ -3,7 +3,7 @@
 #include "dyno/Obj.h"
 #include "dyno/ObjMap.h"
 #include "dyno/Pass.h"
-#include "hw/DeepCopy.h"
+#include "dyno/DeepCopy.h"
 #include "hw/HWAbstraction.h"
 #include "hw/HWPrinter.h"
 #include "hw/IDs.h"

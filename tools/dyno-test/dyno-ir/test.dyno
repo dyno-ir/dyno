@@ -72,7 +72,7 @@ TEST_CASE :string("fuzzy-cse-basic"), :block, :block, :block {
       ADD %ac:wire(32), %a_v, %c_v
 
       STORE %abc, %out_a
-      STORE %ac, %out_a
+      STORE %ac, %out_b
     }
   }
 }{
@@ -92,7 +92,7 @@ TEST_CASE :string("fuzzy-cse-basic"), :block, :block, :block {
       ADD %abc:wire(32), %b_v, %ac
 
       STORE %abc, %out_a
-      STORE %ac, %out_a
+      STORE %ac, %out_b
     }
   }
 }{
@@ -511,6 +511,96 @@ TEST_CASE :string("instcombine-mux-lift"), :block, :block, :block {
 }
 
 /*
+TEST_EQUIVALENCE :string("test-arith-lower"), :block, :block {
+  MODULE_DEF :module("mod"), :block {
+    INPUT_REGISTER_DEF %clk:register(1)
+    INPUT_REGISTER_DEF %in_a:register(32)
+    INPUT_REGISTER_DEF %in_b:register(32)
+    INPUT_REGISTER_DEF %in_c:register(32)
+    OUTPUT_REGISTER_DEF %out_sum:register(32)
+    OUTPUT_REGISTER_DEF %out_and:register(32)
+    OUTPUT_REGISTER_DEF %out_or:register(32)
+    OUTPUT_REGISTER_DEF %out_xor:register(32)
+    OUTPUT_REGISTER_DEF %out_mul:register(32)
+
+    COMB_PROCESS_DEF :process, :block {
+      LOAD %a_v:wire(32), %in_a
+      LOAD %b_v:wire(32), %in_b
+      LOAD %c_v:wire(32), %in_c
+
+      ADD %sum:wire(32), %a_v, %b_v, %c_v
+      AND %and:wire(32), %a_v, %b_v, %c_v
+      OR %or:wire(32), %a_v, %b_v, %c_v
+      XOR %xor:wire(32), %a_v, %b_v, %c_v
+      MUL %mul:wire(32), %a_v, %b_v, %c_v
+
+      STORE %sum, %out_sum
+      STORE %and, %out_and
+      STORE %or, %out_or
+      STORE %xor, %out_xor
+      STORE %mul, %out_mul
+    }
+  }
+}{
+  meta.LOWER_OPS_PASS
+  meta.INST_COMBINE_PASS
+  meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS
+  meta.RANDOM_EQUIVALENCE_CHECK_PASS map("cycles": "1000")
+}*/
+
+TEST_EQUIVALENCE :string("test-icmp-lower"), :block, :block {
+  MODULE_DEF :module("mod"), :block {
+    INPUT_REGISTER_DEF %clk:register(1)
+    INPUT_REGISTER_DEF %in_a:register(32)
+    INPUT_REGISTER_DEF %in_b:register(32)
+    OUTPUT_REGISTER_DEF %out_eq:register(1)
+    OUTPUT_REGISTER_DEF %out_ne:register(1)
+    OUTPUT_REGISTER_DEF %out_ult:register(1)
+    OUTPUT_REGISTER_DEF %out_ule:register(1)
+    OUTPUT_REGISTER_DEF %out_ugt:register(1)
+    OUTPUT_REGISTER_DEF %out_uge:register(1)
+    OUTPUT_REGISTER_DEF %out_slt:register(1)
+    OUTPUT_REGISTER_DEF %out_sle:register(1)
+    OUTPUT_REGISTER_DEF %out_sgt:register(1)
+    OUTPUT_REGISTER_DEF %out_sge:register(1)
+
+    COMB_PROCESS_DEF :process, :block {
+      LOAD %a_v:wire(32), %in_a
+      LOAD %b_v:wire(32), %in_b
+
+      ICMP_EQ  %eq_v:wire(1), %a_v, %b_v
+      ICMP_NE  %ne_v:wire(1), %a_v, %b_v
+      ICMP_ULT %ult_v:wire(1), %a_v, %b_v
+      ICMP_ULE %ule_v:wire(1), %a_v, %b_v
+      ICMP_UGT %ugt_v:wire(1), %a_v, %b_v
+      ICMP_UGE %uge_v:wire(1), %a_v, %b_v
+      ICMP_SLT %slt_v:wire(1), %a_v, %b_v
+      ICMP_SLE %sle_v:wire(1), %a_v, %b_v
+      ICMP_SGT %sgt_v:wire(1), %a_v, %b_v
+      ICMP_SGE %sge_v:wire(1), %a_v, %b_v
+
+      STORE %eq_v, %out_eq
+      STORE %ne_v, %out_ne
+      STORE %ult_v, %out_ult
+      STORE %ule_v, %out_ule
+      STORE %ugt_v, %out_ugt
+      STORE %uge_v, %out_uge
+      STORE %slt_v, %out_slt
+      STORE %sle_v, %out_sle
+      STORE %sgt_v, %out_sgt
+      STORE %sge_v, %out_sge
+    }
+  }
+}{
+  meta.LOWER_OPS_PASS
+  meta.INST_COMBINE_PASS
+  meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS
+  meta.DUMP_PASS map("path": "slt.dyno")
+  meta.RANDOM_EQUIVALENCE_CHECK_PASS map("cycles": "10000")
+}
+
+
+/*
 TEST_CASE :string("test-mem-map"), :block, :block, :block, {
   // 2 bit async read sync write memory
 
@@ -564,9 +654,7 @@ TEST_CASE :string("test-mem-map"), :block, :block, :block, {
 }{
   meta.MEMORY_MAPPING_PASS
 }
-*/
 
-/*
 TEST_CASE :string("test-mem-map-2bit-wr-8bit-rd"), :block, :block, :block, {
   // 2 bit async read sync write memory
 
@@ -645,9 +733,7 @@ TEST_CASE :string("test-mem-map-2bit-wr-8bit-rd"), :block, :block, :block, {
   meta.INST_COMBINE_PASS
   meta.AGGRESSIVE_DEAD_CODE_ELIMINATION_PASS
 }
-*/
 
-/*
 TEST_CASE :string("test-mem-map-2w"), :block, :block, :block, {
   // 2 bit async read, 2x sync write memory
   STDCELL_DEF %Test:module("Test"), %0:block {

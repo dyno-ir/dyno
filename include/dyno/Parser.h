@@ -290,6 +290,8 @@ public:
     }
   }
 
+  void reset() { identMap.clear(); }
+
   ParserBase(Context &ctx) : ctx(ctx) {}
 };
 

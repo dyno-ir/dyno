@@ -4,7 +4,7 @@
 #include "dyno/Context.h"
 #include "dyno/Pass.h"
 #include "hw/AutoDebugInfo.h"
-#include "hw/DeepCopy.h"
+#include "dyno/DeepCopy.h"
 #include "hw/HWAbstraction.h"
 #include "hw/HWContext.h"
 #include "hw/HWInstr.h"

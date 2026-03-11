@@ -1,6 +1,8 @@
 
 #pragma once
+#ifdef ENABLE_FST
 #include "FST.h"
+#endif
 #include "dyno/Instr.h"
 #include "dyno/ObjMap.h"
 #include "hw/HWInstr.h"
@@ -39,8 +41,9 @@ public:
     uint32_t addr;
     BigInt value;
   };
+#ifdef ENABLE_FST
   std::optional<FSTWriter<Register, Wire>> fstWriter;
-
+#endif
   // register to operand in TriggerIRef
   ObjMapVec<Register, SmallVec<OperandRef, 1>> triggers;
   ObjMapVec<Trigger, SmallVec<DeferredStore, 16>> deferredStores;
@@ -74,8 +77,10 @@ private:
     }
   }
   void onValueChange(RegisterIRef reg) {
+#ifdef ENABLE_FST
     if (fstWriter)
       fstWriter->updateValue(reg.oref(), regVals[reg.oref()]);
+#endif
     scheduleDependentForEval(reg);
     queueTriggers(reg);
   }
@@ -215,6 +220,7 @@ public:
       auto in = getValue(splice.in()->as<HWValue>());
       BigInt::rangeSelectOp4S(out, in, evalAddress(splice.base()),
                               *outW.getNumBits());
+      break;
     }
 
     case *HW_INSERT: {
@@ -549,7 +555,7 @@ public:
     setReg(reg, b);
   }
 
-  void setReg(RegisterIRef reg, BigInt b) {
+  void setReg(RegisterIRef reg, const BigInt &b) {
     auto &slot = regVals[reg.oref()];
     if (slot == b)
       return;
@@ -557,11 +563,15 @@ public:
     onValueChange(reg);
   }
 
+  void regValueChanged(RegisterIRef reg) { onValueChange(reg); }
+
   BigInt &getReg(unsigned i) {
     auto it = module.block().begin();
     std::advance(it, i);
     return regVals[it->as<RegisterIRef>().oref()];
   }
+  BigInt &getReg(RegisterIRef reg) { return regVals[reg.oref()]; }
+  const BigInt &getWire(WireRef wire) { return wireVals[wire]; }
 
   void clearRegs() {
     regVals.resize(ctx.getStore<Register>().numIDs());
@@ -570,6 +580,7 @@ public:
     }
   }
 
+#ifdef ENABLE_FST
   void fstInitHierarchy() {
     for (auto [ref, val] : regVals) {
       if (!ref)
@@ -592,10 +603,13 @@ public:
       fstWriter->updateValue(reg, regVals[reg]);
     }
   }
+#endif
 
   void forwardTime(uint64_t incr) {
+#ifdef ENABLE_FST
     if (fstWriter)
       fstWriter->stepForward(incr);
+#endif
   }
 
 public:

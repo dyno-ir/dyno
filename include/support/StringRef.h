@@ -10,6 +10,11 @@ template <typename Derived> class StringRefMixin {
   const Derived &cself() const { return *static_cast<const Derived *>(this); }
 
 public:
+  using value_type = char;
+  using iterator = const char *;
+  using pointer = const char *;
+  using reference = const char &;
+
   operator ArrayRef<char>() { return {self().data(), self().size()}; }
   operator Range<const char *>() { return {self().begin(), self().end()}; }
   operator std::string_view() { return {self().data(), self().size()}; }
@@ -49,12 +54,6 @@ public:
 
 // 4+ GiB string, 8 inline chars
 class BigSSOStringRef : public StringRefMixin<BigSSOStringRef> {
-
-public:
-  using value_type = char;
-  using iterator = char *;
-  using pointer = char *;
-  using reference = char &;
 
 private:
   uint64_t len;
@@ -107,11 +106,6 @@ public:
 // converted to string_view or StringRef the inline buffer might
 // go out of scope, so non-temp downstream uses should use SSOStringRef too.
 class SSOStringRef : public StringRefMixin<SSOStringRef> {
-public:
-  using value_type = char;
-  using iterator = char *;
-  using pointer = char *;
-  using reference = char &;
 
 private:
   uint32_t len;

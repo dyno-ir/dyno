@@ -11,7 +11,9 @@
 #include "hw/Register.h"
 #include "hw/Wire.h"
 #include "hw/passes/ParseDyno.h"
+#define ENABLE_FST
 #include "hw/run/HWInterpreter.h"
+#undef ENABLE_FST
 #include "ieee1800/sv_vpi_user.h"
 #include "ieee1800/vpi_user.h"
 #include "support/SmallVec.h"

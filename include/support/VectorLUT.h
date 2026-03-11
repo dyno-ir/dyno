@@ -3,7 +3,6 @@
 #include "support/Optional.h"
 #include <cassert>
 
-
 template <typename T> class VectorLUT {
 public:
   using value_type = T;
@@ -50,5 +49,9 @@ public:
   dyno::Optional<T> &find(size_t k) {
     ensure(k);
     return data[k - base];
+  }
+  void clear() {
+    base = 0;
+    data.clear();
   }
 };

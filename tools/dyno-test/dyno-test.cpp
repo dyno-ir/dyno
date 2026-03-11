@@ -1,6 +1,7 @@
 #include "aig/AIGContext.h"
 #include "aig/PrintParse.h"
 #include "dyno/Context.h"
+#include "dyno/DeepCopy.h"
 #include "dyno/DialectInfo.h"
 #include "dyno/IDImpl.h"
 #include "dyno/Instr.h"
@@ -65,13 +66,15 @@ template <> struct DialectContext<DialectID{DIALECT_TEST}> {
 };
 
 constexpr DialectOpcode TEST_TEST_CASE{DIALECT_TEST, 0};
+constexpr DialectOpcode TEST_TEST_EQUIVALENCE{DIALECT_TEST, 1};
 
 // in general to define dialect/type/opcode info specialize this struct or void
 // registerDialect<>
 template <> struct DialectTraits<DIALECT_TEST> {
   constexpr static DialectInfo info{"test"};
   constexpr static std::array<TyInfo, 0> tyInfo = {};
-  constexpr static OpcodeInfo opcInfo[] = {OpcodeInfo{"TEST_CASE"}};
+  constexpr static OpcodeInfo opcInfo[] = {OpcodeInfo{"TEST_CASE"},
+                                           OpcodeInfo{"TEST_EQUIVALENCE"}};
 };
 
 using DynoTestParser =
@@ -178,7 +181,6 @@ public:
       print.printInstr(instr);
 
     BlockCompare compare{};
-
     if (auto diff = compare.compareBlocks(pre, post)) {
       std::print(os, "failed test: \"{}\"\n", name);
       std::print(os, "actual  : {}\n",
@@ -188,6 +190,32 @@ public:
 
       return false;
     }
+
+    std::print(os, "passed test: \"{}\"\n", name);
+    return true;
+  }
+
+  bool execTestEquiv(InstrRef instr, bool verbose) {
+    std::string_view name = instr.def(0)->as<StringObjRef>()->data;
+    auto pre = instr.def(1)->as<BlockRef>();
+    auto passes = instr.def(2)->as<BlockRef>();
+
+    std::array<void *, 1> ctorArgs = {reinterpret_cast<void *>(&ctx)};
+    MetaPassPipelineInterpreter pipeline{ctx, ctorArgs};
+
+    if (pre.size() != 1)
+      report_fatal_error("expected single Instr in body of test \"{}\"", name);
+
+    // duplicate the instr to be tested
+    DeepCopier copier{ctx};
+    copier.copyInstr(*pre.begin(), pre.end());
+
+    for (auto instr : Range{pre}.drop_back()) {
+      FatDynObjRef<> ref{instr};
+      std::array<void *, 1> args = {reinterpret_cast<void *>(&ref)};
+      pipeline.interpretPassPipeline(passes, args);
+    }
+
     std::print(os, "passed test: \"{}\"\n", name);
     return true;
   }
@@ -196,7 +224,9 @@ public:
     switch (*instr.getDialectOpcode()) {
     case *TEST_TEST_CASE: {
       return execTestCase(instr, verbose);
-      break;
+    }
+    case *TEST_TEST_EQUIVALENCE: {
+      return execTestEquiv(instr, verbose);
     }
 
     default: {
@@ -260,6 +290,8 @@ int main(int argc, char **argv) {
     opContext.reset();
     aigContext.reset();
     interp.reset();
+
+    parser.reset();
   }
   return pass ? 0 : -1;
 }

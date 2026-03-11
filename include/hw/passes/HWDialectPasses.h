@@ -27,6 +27,7 @@
 #include "hw/passes/ParseDyno.h"
 #include "hw/passes/ParseLiberty.h"
 #include "hw/passes/ProcessLinearize.h"
+#include "hw/passes/RandomEquivalenceCheck.h"
 #include "hw/passes/RebuildCache.h"
 #include "hw/passes/RegisterPartition.h"
 #include "hw/passes/RemoveBuffers.h"
@@ -76,5 +77,6 @@ registerDialectPasses<DialectID{DIALECT_HW}>(PassRegistry &passRegistry) {
   passRegistry.registerPass<ParseDynoPass>();
   passRegistry.registerPass<DumpVerilogPass>();
   passRegistry.registerPass<PopulateInlineCachesPass>();
+  passRegistry.registerPass<RandomEquivalenceCheckPass>();
 }
 }; // namespace dyno

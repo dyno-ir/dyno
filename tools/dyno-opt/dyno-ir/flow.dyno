@@ -1,5 +1,4 @@
 
-
 // preprocessing, inlining
 meta.REMOVE_INIT_PROCS_PASS
 meta.FUNCTION_INLINE_PASS
@@ -30,6 +29,8 @@ meta.INST_COMBINE_PASS
 meta.AGGRESSIVE_DEAD_CODE_ELIMINATION_PASS
 meta.INST_COMBINE_PASS
 
+meta.DUMP_PASS map("path": "pre_lin.dyno")
+
 // unroll loops, simplify
 meta.LINEARIZE_CONTROL_FLOW_PASS map("flattenLoops": "1", "flattenMultiway": "0")
 meta.PROCESS_LINEARIZE_PASS map("retainIODeps": "0", "retainInnerDeps": "0")
@@ -47,7 +48,7 @@ meta.LOWER_OPS_PASS map(
   "lowerAddCompress"       : "0",
   "lowerSimpleAdd"         : "0",
   "lowerSub"               : "1",
-  "lowerConstantMul"       : "1",
+  "lowerMul"               : "1",
   "lowerMultiInputBitwise" : "0",
   "lowerEqualityICMP"      : "0",
   "lowerOrderingICMP"      : "1",
@@ -81,6 +82,8 @@ meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS
 meta.ORDER_INSTRS_PASS map("assertNoCircularDeps": "1", "moveStoresBeforeLoads": "1")
 meta.AGGRESSIVE_DEAD_CODE_ELIMINATION_PASS
 
+meta.DUMP_PASS map("path": "pre_lin2.dyno")
+meta.CHECK_PASS
 // flatten all remaining control flow
 meta.LINEARIZE_CONTROL_FLOW_PASS map("flattenLoops": "1", "flattenMultiway": "1")
 meta.SSA_CONSTRUCT_PASS
@@ -120,7 +123,7 @@ meta.LOWER_OPS_PASS map(
   "lowerAddCompress"       : "0",
   "lowerSimpleAdd"         : "0",
   "lowerSub"               : "1",
-  "lowerConstantMul"       : "1",
+  "lowerMul"               : "1",
   "lowerMultiInputBitwise" : "0",
   "lowerEqualityICMP"      : "1",
   "lowerOrderingICMP"      : "1",
@@ -184,7 +187,7 @@ meta.LOWER_OPS_PASS map(
   "lowerAddCompress"       : "1",
   "lowerSimpleAdd"         : "1",
   "lowerSub"               : "1",
-  "lowerConstantMul"       : "1",
+  "lowerMul"               : "1",
   "lowerMultiInputBitwise" : "1",
   "lowerEqualityICMP"      : "1",
   "lowerOrderingICMP"      : "1",
