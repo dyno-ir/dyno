@@ -156,7 +156,9 @@ template <typename Value, typename... Types> class StaticGenericObjVecMap {
   }
 
 public:
-  template <typename K> auto &map() { return maps.template get<K>(); }
+  template <typename K> auto &map() {
+    return maps.template get<ObjMapVec<K, Value>>();
+  }
   Tuple<ObjMapVec<Types, Value>...> maps;
 
   template <typename K> void ensure(ObjRef<K> ref) {
