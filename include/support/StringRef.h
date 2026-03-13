@@ -1,4 +1,5 @@
 #pragma once
+#include "support/DenseMapInfo.h"
 #include "support/ArrayRef.h"
 #include "support/Bits.h"
 #include "support/Ranges.h"
@@ -19,10 +20,12 @@ public:
   operator Range<const char *>() { return {self().begin(), self().end()}; }
   operator std::string_view() { return {self().data(), self().size()}; }
 
-  Derived substr(size_t pos, size_t n) const {
+  constexpr Derived substr(size_t pos, size_t n) const {
     return Derived{cself().begin() + pos, cself().begin() + pos + n};
   }
-  Derived substr(size_t pos) const { return substr(pos, cself().size() - pos); }
+  constexpr Derived substr(size_t pos) const {
+    return substr(pos, cself().size() - pos);
+  }
 
   bool deepEquals(const Derived &other) const {
     if (cself().size() != other.size())
@@ -39,7 +42,7 @@ public:
   using ArrayRef::ArrayRef;
 
   template <typename T> StringRef(T &&t) : StringRef(t.begin(), t.end()) {}
-  StringRef(const char *data) : StringRef(data, strlen(data)) {}
+  constexpr StringRef(const char *data) : StringRef(data, strlen(data)) {}
 };
 
 class MutStringRef : public MutArrayRef<char>,
@@ -48,8 +51,8 @@ public:
   using MutArrayRef::MutArrayRef;
 
   template <typename T>
-  MutStringRef(T &&t) : MutStringRef(t.begin(), t.end()) {}
-  MutStringRef(char *data) : MutStringRef(data, strlen(data)) {}
+  constexpr MutStringRef(T &&t) : MutStringRef(t.begin(), t.end()) {}
+  constexpr MutStringRef(char *data) : MutStringRef(data, strlen(data)) {}
 };
 
 // 4+ GiB string, 8 inline chars

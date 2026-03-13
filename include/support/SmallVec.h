@@ -317,7 +317,6 @@ public:
   void reserve(size_type n) {
     if (n <= cap)
       return;
-    assert(cap > 0);
 
     T *newArr = reinterpret_cast<T *>(::operator new[](n * sizeof(T)));
     std::uninitialized_move(begin(), end(), newArr);

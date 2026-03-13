@@ -1,4 +1,4 @@
-
+#pragma once
 #include "dyno/Constant.h"
 #include "dyno/Context.h"
 #include "hw/AutoDebugInfo.h"

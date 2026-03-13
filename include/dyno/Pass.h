@@ -28,7 +28,7 @@ namespace dyno {
     lambda(uint64_t, U64) \
     lambda(int64_t, I64) \
     lambda(const char*, STRING_CHAR_PTR) \
-    lambda(ArrayRef<char>, STRING_REF) \
+    lambda(StringRef, STRING_REF) \
     lambda(std::string_view, STRING_VIEW) \
     lambda(std::string, STD_STRING) \
     lambda(dyno::DialectOpcode, DIALECT_OPCODE) \
@@ -139,7 +139,7 @@ struct ConfigParser {
       break;
     }
     case ConfigStructType::STRING_REF: {
-      *reinterpret_cast<ArrayRef<char> *>(ptr) = ArrayRef<char>{data};
+      *reinterpret_cast<StringRef *>(ptr) = StringRef{data};
       break;
     }
     case ConfigStructType::STRING_VIEW: {

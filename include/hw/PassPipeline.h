@@ -105,9 +105,9 @@ public:
     idx++;
   }
 
-  void setLibertyPath(const std::string &path) {
-    parseLiberty.config.path = path;
-    abc.config.path = path;
+  void setLibertyPath(StringRef path) {
+    parseLiberty.config.path = std::string(path.begin(), path.end());
+    abc.config.path = std::string(path.begin(), path.end());
   }
 
   void runOptPipeline() {
@@ -386,9 +386,9 @@ public:
     runPass(longestPath);
   }
 
-  void dumpVerilog(std::string name) {
+  void dumpVerilog(StringRef name) {
     DumpVerilogPass dumpVerilog{ctx};
-    dumpVerilog.config.fileName = std::move(name);
+    dumpVerilog.config.fileName = std::string(name.begin(), name.end());
     dumpVerilog.run();
   }
 

@@ -893,11 +893,6 @@ inline void OperandRef::setLinkIdx(uint32_t idx) {
   } else {
     (*this)->ref.setCustom(maxV);
 
-    unsigned elemes = 0;
-    for (auto e : linkIdxSpillMap)
-      elemes++;
-    assert(elemes == linkIdxSpillMap.size());
-
     // not cleared to avoid slowing down fast path.
     linkIdxSpillMap.insertOrAssign(UniqueOperand(instr().getPtr(), getNum()),
                                    idx);
