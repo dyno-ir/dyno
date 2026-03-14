@@ -83,6 +83,11 @@ public:
   bool has() const { return bool(*this); }
 };
 
+template <> class Optional<bool> : public Optional<uint8_t> {
+public:
+  using Optional<uint8_t>::Optional;
+};
+
 }; // namespace dyno
 
 template <typename T> struct DenseMapInfo<dyno::Optional<T>> {

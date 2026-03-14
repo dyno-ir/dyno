@@ -16,7 +16,8 @@ public:
   PrinterBase *base;
   OpDialectPrinter(PrinterBase *base) : base(base) {
     base->interfaces.registerVal<PrinterBase::type::print_fn>(
-        dialect, CallableRef{this, BindMethod<&OpDialectPrinter::printType>::fv});
+        dialect,
+        CallableRef{this, BindMethod<&OpDialectPrinter::printType>::fv});
   }
 
   bool printType(FatDynObjRef<> ref, bool def) {
@@ -82,7 +83,9 @@ public:
     case OP_STRING.type: {
       lexer.popEnsure(DynoLexer::op_rbropen);
       std::map<std::string, std::string> map;
-      std::string val{lexer.popEnsure(Token::STRING_LITERAL).strLit.value};
+      std::string val{
+          lexer.popEnsure(Token::STRING_LITERAL, Token::INLINE_CODE_LITERAL)
+              .strLit.value};
       lexer.popEnsure(DynoLexer::op_rbrclose);
       return base->ctx.getStore<StringObj>().create(std::move(val));
     }

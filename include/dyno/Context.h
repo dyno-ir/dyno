@@ -82,8 +82,7 @@ template <typename Derived> class ContextMixin {
   }
   auto makeCopyMethods() {
     // create vector and assign elements
-    Vec<CallableRef<FatDynObjRef<>(FatDynObjRef<>)>> arr(getMaxTyID() +
-                                                                 1);
+    Vec<CallableRef<FatDynObjRef<>(FatDynObjRef<>)>> arr(getMaxTyID() + 1);
     [&]<std::size_t... Is>(std::index_sequence<Is...>) {
       (
           [&] {
@@ -162,6 +161,7 @@ class Context {
   ArrayInterface<TypeErasedCtx> contexts;
   ArrayInterface<CallableRef<FatDynObjRef<>(DynObjRef)>> resolvers;
   ArrayInterface<CallableRef<FatDynObjRef<>(FatDynObjRef<>)>> copiers;
+  Vec<CallableRef<void()>, MAX_NUM_DIALECTS> resets;
 
   DialectInfos dialectInfos;
   PassRegistry passRegistry;
@@ -171,6 +171,7 @@ public:
   Interface<OpcodeInfo> opcodeInfosIF{dialectInfos.opcodeInfoArr.data()};
   Interface<TyInfo> typeInfosIF{dialectInfos.typeInfoArr.data()};
 
+public:
   DialectInfos &getDialectInfos() { return dialectInfos; }
   PassRegistry &getPassRegistry() { return passRegistry; }
 
@@ -204,6 +205,9 @@ public:
     contexts.registerDialect(T::dialect,
                              TypeErasedCtx{reinterpret_cast<void *>(&context)});
 
+    if constexpr (requires { context.reset(); })
+      resets.emplace_back(CallableRef{&context, &BindMethod<&T::reset>::fv});
+
     // dialect info registration (this can be overriden by the dialect)
     dyno::registerDialect<T::dialect>(this, dialectInfos.dialectInfoArr.data(),
                                       dialectInfos.typeInfoArr.data(),
@@ -221,6 +225,11 @@ public:
     if constexpr (requires { context.copyMethods; }) {
       copiers.registerDialect(T::dialect, ArrayRef{context.copyMethods});
     }
+  }
+
+  void reset() {
+    for (auto reset : resets)
+      reset();
   }
 
   CFG &getCFG() { return getCtx<CoreDialectContext>().cfg; }

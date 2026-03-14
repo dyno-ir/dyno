@@ -12,6 +12,7 @@
 #include <cstdint>
 #include <cstring>
 #include <iostream>
+#include <print>
 #include <sstream>
 #include <string>
 #include <string_view>
@@ -87,6 +88,8 @@ inline void CmdLineArg<CmdLineHelpObj>::parse(CmdLineArgBase *self,
                                               const char *ptr);
 
 class CmdLineArgHandler {
+  friend class SubCommandHandler;
+
 private:
   std::array<CmdLineArgBase *, 256> shortArgMap = {};
   TwoLevelMap<SSOStringRef, CmdLineArgBase *> longArgMap;
@@ -103,7 +106,7 @@ public:
   const char *executableName = "<executable>";
 
   void registerArg(CmdLineArgBase &c) {
-    if (c.shortName) {
+    if (c.shortName && !c.positional()) {
       auto &slot = shortArgMap[*c.shortName];
       if (slot != nullptr)
         report_fatal_error(
@@ -112,7 +115,7 @@ public:
       slot = &c;
     }
 
-    if (!c.longName.empty()) {
+    if (!c.longName.empty() && !c.positional()) {
       auto &slot = longArgMap[c.longName];
       if (slot != nullptr)
         report_fatal_error(
@@ -128,7 +131,7 @@ public:
       mandatoryArgs.emplace_back(&c);
   }
 
-  void printHelpExit(bool isError = true) {
+  void printHelp(bool isError = true, int optionsSpace = 2) {
     std::ostream &os = isError ? std::cerr : std::cout;
     std::print(os, "usage: {}", executableName);
 
@@ -143,7 +146,10 @@ public:
         std::print(os, "...");
     }
 
-    std::print(os, "\n\noptions:\n");
+    for (int i = 0; i < optionsSpace; i++)
+      std::print("\n");
+
+    std::print(os, "options:\n");
     for (auto &arg : Range{allArgs}.deref()) {
       if (arg.flags & CmdLineArgFlags::POSITIONAL)
         continue;
@@ -173,7 +179,9 @@ public:
         std::print(os, " ");
       std::print(os, "{}\n", arg.description.data());
     }
-
+  }
+  void printHelpExit(bool isError = true) {
+    printHelp(isError);
     exit(isError ? -1 : 0);
   }
 

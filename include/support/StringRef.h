@@ -1,9 +1,10 @@
 #pragma once
-#include "support/DenseMapInfo.h"
 #include "support/ArrayRef.h"
 #include "support/Bits.h"
+#include "support/DenseMapInfo.h"
 #include "support/Ranges.h"
 #include <cstring>
+#include <format>
 #include <limits>
 
 template <typename Derived> class StringRefMixin {
@@ -35,13 +36,23 @@ public:
   friend bool operator==(const Derived &a, const Derived &b) {
     return a.deepEquals(b);
   }
+  const char *find(char c) const {
+    return std::find(cself().begin(), cself().end(), c);
+  }
+  bool contains(char c) const { return find(c) != cself().end(); }
 };
 
 class StringRef : public ArrayRef<char>, public StringRefMixin<StringRef> {
 public:
   using ArrayRef::ArrayRef;
 
-  template <typename T> StringRef(T &&t) : StringRef(t.begin(), t.end()) {}
+  template <typename T>
+  constexpr StringRef(T &&t) : StringRef(t.begin(), t.end()) {}
+  constexpr StringRef(std::basic_string<char> &str)
+      : StringRef(str.data(), str.size()) {}
+  constexpr StringRef(const std::basic_string<char> &str)
+      : StringRef(str.data(), str.size()) {}
+  constexpr StringRef(char *data) : StringRef(data, strlen(data)) {}
   constexpr StringRef(const char *data) : StringRef(data, strlen(data)) {}
 };
 
@@ -203,4 +214,20 @@ template <> struct std::hash<StringRef> {
   uint32_t operator()(const StringRef &ref) const {
     return strhash_u32(ref.data(), ref.size());
   }
+};
+
+template <>
+struct std::formatter<StringRef> : std::formatter<std::string_view> {
+  using std::formatter<std::string_view>::format;
+  using std::formatter<std::string_view>::parse;
+};
+template <>
+struct std::formatter<SSOStringRef> : std::formatter<std::string_view> {
+  using std::formatter<std::string_view>::format;
+  using std::formatter<std::string_view>::parse;
+};
+template <>
+struct std::formatter<BigSSOStringRef> : std::formatter<std::string_view> {
+  using std::formatter<std::string_view>::format;
+  using std::formatter<std::string_view>::parse;
 };

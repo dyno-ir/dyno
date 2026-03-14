@@ -307,7 +307,8 @@ class MemoryMappingPass : public Pass<MemoryMappingPass> {
             // increasing repeats)
             auto lowIdx = baseAddr / subPortBoundary;
             auto highIdx = (baseAddr + adjModPortLen - 1) / subPortBoundary;
-            auto overflBits = (baseAddr + adjModPortLen - 1) - (lowIdx * subPortBoundary);
+            auto overflBits =
+                (baseAddr + adjModPortLen - 1) - (lowIdx * subPortBoundary);
 
             bool isLast = (adjActPortLen / subPortBoundary) == highIdx;
 
