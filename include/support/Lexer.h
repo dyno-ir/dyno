@@ -240,6 +240,38 @@ public:
 
     lastI = i;
 
+    // String Literal
+    bool multiline = (srcC[i] == '[' && srcC[i + 1] == '{') && ParseInlineCode;
+    if (srcC[i] == '\"' || multiline) {
+      size_t delimLen = multiline ? 2 : 1;
+      size_t litLen = delimLen;
+      if (i + litLen >= len)
+        return Token::makeNone();
+      while (multiline
+                 ? (srcC[i + litLen] != '}' || srcC[i + litLen + 1] != ']')
+                 : (srcC[i + litLen] != '\"')) {
+        if (srcC[i + litLen] == '\n') {
+          if (!multiline)
+            return Token::makeNone();
+          else
+            lineNumber++;
+        }
+        litLen++;
+        if (i + litLen >= len)
+          return Token::makeNone();
+      }
+
+      Token t = Token::makeNone();
+      if (multiline)
+        t = Token::makeInlineCodeLit(
+            std::string_view(srcC + i + delimLen, litLen - delimLen));
+      else
+        t = Token::makeStrLit(
+            std::string_view(srcC + i + delimLen, litLen - delimLen));
+      i += litLen + delimLen;
+      return t;
+    }
+
     { // Try lexing operator
       for (auto [j, op] : Range{operators}.enumerate()) {
         size_t k = 0;
@@ -310,34 +342,6 @@ public:
         len++;
       i += len;
       return Token::makeNumericLit(std::string_view{&src[i - len], len});
-    }
-
-    // String Literal
-    bool multiline = (srcC[i] == '[' && srcC[i + 1] == '{') && ParseInlineCode;
-    if (srcC[i] == '\"' || multiline) {
-      size_t delimLen = multiline ? 2 : 1;
-      size_t litLen = delimLen;
-      if (i + litLen >= len)
-        return Token::makeNone();
-      while (multiline
-                 ? (srcC[i + litLen] != '}' || srcC[i + litLen + 1] != ']')
-                 : (srcC[i + litLen] != '\"')) {
-        if (!multiline && srcC[i + litLen] == '\n')
-          return Token::makeNone();
-        litLen++;
-        if (i + litLen >= len)
-          return Token::makeNone();
-      }
-
-      Token t = Token::makeNone();
-      if (multiline)
-        t = Token::makeInlineCodeLit(
-            std::string_view(srcC + i + delimLen, litLen - delimLen));
-      else
-        t = Token::makeStrLit(
-            std::string_view(srcC + i + delimLen, litLen - delimLen));
-      i += litLen + delimLen;
-      return t;
     }
 
     return Token::makeNone();

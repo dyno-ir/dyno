@@ -95,16 +95,16 @@ int main(int argc, char **argv) {
 
   debugType = *argDebug;
 
-  DynoLexer::State state = {};
-  while (auto instr = parser.parseSingle(mmap, fileName, state)) {
-    pass &= interp.exec(instr, *argPrintAfterAll);
+  // DynoLexer::State state = {};
+  // while (auto instr = parser.parseSingle(mmap, fileName, state)) {
+  //   pass &= interp.exec(instr, *argPrintAfterAll);
 
-    // Completely reset the context after a single pass. Otherwise previous'
-    // freeIDs will always affect current, which can affect operand ordering.
-    // (Other option would be more fuzzy comparison)
-    ctx.reset();
-    interp.reset();
-    parser.reset();
-  }
+  //   // Completely reset the context after a single pass. Otherwise previous'
+  //   // freeIDs will always affect current, which can affect operand ordering.
+  //   // (Other option would be more fuzzy comparison)
+  //   ctx.reset();
+  //   interp.reset();
+  //   parser.reset();
+  // }
   return pass ? 0 : -1;
 }

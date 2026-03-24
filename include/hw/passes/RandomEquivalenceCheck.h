@@ -31,7 +31,7 @@ private:
         .iref();
   }
 
-  void runOnModule(ModuleIRef test) {
+  bool runOnModule(ModuleIRef test) {
     auto model = getModelModule(test);
 
     HWInterpreter modelInterp{ctx, test, std::cout, std::cerr};
@@ -115,10 +115,12 @@ private:
             inpS << "\n";
           }
 
-          report_fatal_error(
-              "mismatch {}actual: {}\nexpected: {}\n\ninputs:\n{}", regS.str(),
-              testInterp.getReg(testOut).toString(),
+          std::print(
+              dbgs(), "mismatch {}actual: {}\nexpected: {}\n\ninputs:\n{}",
+              regS.str(), testInterp.getReg(testOut).toString(),
               modelInterp.getReg(modelOut).toString(), std::move(inpS).str());
+
+          return false;
         }
       }
 
@@ -135,20 +137,17 @@ private:
         clk = ~clk;
       }
     }
+    return true;
   }
 
 public:
-  void runWrapper(auto &&runFunc) { runFunc(); }
+  bool runModule(ModuleIRef mod) { return runOnModule(mod); }
 
-  void runModule(ModuleIRef mod) {
-    runWrapper([&] { runOnModule(mod); });
-  }
-
-  void run() {
-    runWrapper([&] {
-      for (auto mod : ctx.getCtx<HWDialectContext>().activeModules())
-        runOnModule(mod.iref());
-    });
+  bool run() {
+    for (auto mod : ctx.getCtx<HWDialectContext>().activeModules())
+      if (!runOnModule(mod.iref()))
+        return false;
+    return true;
   }
 
   static constexpr auto runFuncs = mk_tuple(

@@ -799,9 +799,10 @@ struct SmallBoolExprCNF {
     }
 
     SmallBoolExprCNF exprOut;
-    for (auto [_, v] : clauseSet) {
+    for (auto &v : clauseSet) {
+      auto &vc = const_cast<SymbSet &>(v);
       auto pos = exprOut.literals.size();
-      for (auto [litId, assign] : Range{v}.enumerate()) {
+      for (auto [litId, assign] : Range{vc}.enumerate()) {
         if (assign == UNDEFINED)
           continue;
         exprOut.literals.emplace_back(
@@ -1036,9 +1037,9 @@ struct SmallBoolExprCNF {
       }
     }
 
-    for (auto [_, v] : clauseSet) {
+    for (auto &v : clauseSet) {
       auto pos = literals.size();
-      for (auto [litId, assign] : Range{v}.enumerate()) {
+      for (auto [litId, assign] : Range{const_cast<SymbSet &>(v)}.enumerate()) {
         if (assign == UNDEFINED)
           continue;
         literals.emplace_back(

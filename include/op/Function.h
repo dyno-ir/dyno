@@ -54,6 +54,15 @@ public:
   unsigned getNumParams() { return func()->params.size(); }
   BlockRef getBlock() { return this->def(1)->as<BlockRef>(); }
 
+  void rebuildCache() {
+    func()->params.clear();
+    for (auto instr : getBlock()) {
+      if (!instr.isOpc(OP_PARAM))
+        break;
+      func()->params.emplace_back(instr);
+    }
+  }
+
   static bool is_impl(const FatObjRef<Instr> &ref) {
     return InstrRef{ref}.isOpc(OP_FUNCTION_DEF);
   }

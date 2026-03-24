@@ -271,21 +271,14 @@ public:
     }
   }
 
-  // essentially coroutine mode to parse one instruction after one another.
-  // state just default initialized for first call.
-  InstrRef parseSingle(ArrayRef<char> src, std::string fileName,
-                       DynoLexer::State &state) {
-    auto val = lexer.emplace(ctx.getDialectInfos(), src, std::move(fileName));
-    lexer->restoreState(state);
-
+  // Parse a single instruction. Lexer must be initialized by caller.
+  InstrRef parseSingle() {
     if (lexer->peekIs(Token::NONE))
       return nullref;
     if (auto res = parseInstr(); !res) {
       lexer->printError(res.error());
       report_fatal_error("parse error");
     } else {
-      ArrayRef{src.begin() + lexer->getState().i, src.end()};
-      state = lexer->getState();
       return *res;
     }
   }

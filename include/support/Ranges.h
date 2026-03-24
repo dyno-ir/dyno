@@ -1001,6 +1001,7 @@ template <typename It> class Range {
 public:
   using iterator = It;
   using iterator_category = std::iterator_traits<It>::iterator_category;
+  using value_type = std::iterator_traits<It>::value_type;
 
   template <typename U> Range(const U &u) : Range(u.begin(), u.end()) {}
   template <typename U> Range(U &u) : Range(u.begin(), u.end()) {}

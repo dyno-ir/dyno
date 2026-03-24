@@ -194,6 +194,8 @@ public:
   }
 
   bool isEnd() const;
+
+  static BlockRef_iterator invalid() { return BlockRef_iterator(nullref, 0); }
 };
 static_assert(std::bidirectional_iterator<BlockRef_iterator<true>>);
 

@@ -15,7 +15,10 @@
 #include "hw/passes/FlipFlopMapping.h"
 #include "hw/passes/FunctionInline.h"
 #include "hw/passes/FuzzyCSE.h"
+#include "hw/passes/InactiveCopy.h"
 #include "hw/passes/InstCombine.h"
+#include "hw/passes/LiftFlipFlops.h"
+#include "hw/passes/LiftStdCells.h"
 #include "hw/passes/LinearizeControlFlow.h"
 #include "hw/passes/LoadCoalesce.h"
 #include "hw/passes/LoopSimplify.h"
@@ -33,6 +36,7 @@
 #include "hw/passes/RemoveBuffers.h"
 #include "hw/passes/RemoveInitProcs.h"
 #include "hw/passes/SSAConstruct.h"
+#include "hw/passes/SelectModules.h"
 #include "hw/passes/SeqToComb.h"
 #include "hw/passes/SimpleMemoryInference.h"
 #include "hw/passes/TriggerDedupe.h"
@@ -78,5 +82,9 @@ registerDialectPasses<DialectID{DIALECT_HW}>(PassRegistry &passRegistry) {
   passRegistry.registerPass<DumpVerilogPass>();
   passRegistry.registerPass<PopulateInlineCachesPass>();
   passRegistry.registerPass<RandomEquivalenceCheckPass>();
+  passRegistry.registerPass<InactiveCopyPass>();
+  passRegistry.registerPass<LiftStdCellsPass>();
+  passRegistry.registerPass<SelectModulesPass>();
+  passRegistry.registerPass<LiftFlipFlopsPass>();
 }
 }; // namespace dyno

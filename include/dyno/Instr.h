@@ -215,7 +215,8 @@ public:
 
   OperandRef &operator+=(int i) {
     uint16_t newVal = instrRef.getCustom() + i;
-    assert(newVal <= instrRef->numOperands && "out of bounds");
+    // allow two extra so that other_begin() + 1 is valid even without others.
+    assert(newVal < instrRef->numOperands + 2 && "out of bounds");
     instrRef.setCustom(newVal);
     return *this;
   }

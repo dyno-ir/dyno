@@ -2,30 +2,70 @@
 #include "support/DenseMapInfo.h"
 #include "support/DenseMultimap.h"
 
-template <typename T, typename KeyT = uint32_t,
-          auto HashFunc = [](const T &t) { return std::hash<T>()(t); }>
-class TwoLevelSet {
-  DenseMultimap<Unhashed<KeyT>, T> map;
+template <typename K, typename KeyT = uint32_t> class TwoLevelSet {
+  DenseMultimap<Unhashed<KeyT>, K> map;
+  static constexpr auto HashFunc = [](const K &t) { return std::hash<K>()(t); };
+
+  auto find_raw(const K &k) {
+    auto h = HashFunc(k);
+    auto it = map.find(h);
+    for (; it != map.end(); it = map.find_next(it)) {
+      if (it.val() == k) [[likely]]
+        return std::make_pair(h, it);
+    }
+    return std::make_pair(h, map.end());
+  }
 
 public:
-  auto find(const T &t) {
-    auto it = map.find(HashFunc(t));
-    for (; it != map.end(); it = map.find_next(it)) {
-      if (it.val() == t) [[likely]]
-        return it;
+  class iterator : private DenseMultimap<Unhashed<KeyT>, K>::iterator {
+    using Base = DenseMultimap<Unhashed<KeyT>, K>::iterator;
+    friend class TwoLevelSet;
+
+    using Base::Base;
+    iterator(Base base) : Base(base) {}
+
+  public:
+    const K &operator*() { return this->Base::val(); }
+    const K *operator->() { return &(this->Base::val()); }
+
+    const K &key() { return (*this); }
+
+    bool operator==(const iterator &o) const { return Base::operator==(o); }
+    iterator &operator++() {
+      this->Base::operator++();
+      return *this;
     }
-    return map.end();
+    iterator &operator++(int) { return iterator(this->Base::operator++(0)); }
+
+    iterator() = default;
+  };
+
+  iterator find(const K &k) { return iterator(find_raw(k).second); }
+  iterator insert(K &&k) {
+    return iterator(map.insert(HashFunc(k), std::move(k)));
   }
-  auto insert(T &&t) { return map.insert(HashFunc(t), std::move(t)); }
-  auto insert(const T &t) { return map.insert(HashFunc(t), T(t)); }
+  iterator insert(const K &k) { return iterator(map.insert(HashFunc(k), k)); }
 
-  auto begin() { return map.begin(); }
-  auto end() { return map.end(); }
+  bool contains(const K &k) { return find(k) != end(); }
 
-  auto begin() const { return map.begin(); }
-  auto end() const { return map.end(); }
+  iterator begin() { return iterator(map.begin()); }
+  iterator end() { return iterator(map.end()); }
 
-  auto erase(DenseMultimap<KeyT, T>::iterator it) { return map.erase(it); }
+  auto erase(iterator it) { return map.erase(it.base); }
+
+  auto size() const { return map.size(); }
+  bool empty() const { return size() == 0; }
+  void clear() { map.clear(); }
+
+  TwoLevelSet() = default;
+
+  template <typename T>
+  TwoLevelSet(Range<T> range)
+      : map(range.transform(
+            [](size_t,
+               auto &&val) -> std::pair<KeyT, typename Range<T>::value_type> {
+              return {HashFunc(val), val};
+            })) {};
 };
 
 // Swiss-Table style map. This is for complex keys, use plain DenseMap for small
@@ -102,5 +142,6 @@ public:
   auto erase(iterator it) { return map.erase(it.base); }
 
   auto size() const { return map.size(); }
+  bool empty() const { return size() == 0; }
   void clear() { map.clear(); }
 };

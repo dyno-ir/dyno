@@ -12,6 +12,7 @@
 #include "support/CmdLineArgs.h"
 #include "support/ErrorRecovery.h"
 #include "support/SubCommand.h"
+#include "support/TwoLevelSet.h"
 #include "test/IDs.h"
 #include "test/TestInterpreter.h"
 #include <optional>
@@ -49,6 +50,12 @@ CmdLineArg<std::string_view> argScriptFileName{
     CmdLineArgFlags::VALUE_REQUIRED | CmdLineArgFlags::MANDATORY |
         CmdLineArgFlags::POSITIONAL,
     ""};
+
+// Test Args
+CmdLineArg<Vec<StringRef>> argTestOnly{
+    std::nullopt, "only",
+    "Only run listed test, can be specified multiple times.",
+    CmdLineArgFlags::VALUE_REQUIRED | CmdLineArgFlags::MULTIPLE};
 
 // Common Args
 CmdLineArg<bool> argDebug{
@@ -140,9 +147,16 @@ void test(Context &ctx) {
   TestInterpreter interp{ctx, print};
   bool pass = true;
 
-  DynoLexer::State state = {};
-  while (auto instr = parser.parseSingle(mmap, fileName, state)) {
-    pass &= interp.exec(instr, *argPrintAfterAll);
+  TwoLevelSet<StringRef> only{Range(*argTestOnly)};
+  auto val =
+      parser.lexer.emplace(ctx.getDialectInfos(), mmap, std::move(fileName));
+  while (auto instr = parser.parseSingle()) {
+    if (instr.getDialect() != DIALECT_TEST)
+      continue;
+    auto nm = instr.def(0)->as<StringObjRef>()->data;
+    if (only.empty() || only.contains(nm)) {
+      pass &= interp.exec(instr, *argPrintAfterAll);
+    }
 
     // Completely reset the context after a single pass. Otherwise previous'
     // freeIDs will always affect current, which can affect operand ordering.
@@ -176,6 +190,7 @@ int main(int argc, char **argv) {
     script.registerArg(argPrintAfterAll);
 
     test.registerArg(argScriptFileName);
+    test.registerArg(argTestOnly);
     test.registerArg(argDebug);
     test.registerArg(argPrintAfterAll);
 

@@ -71,7 +71,9 @@ public:
       while (lexer.peekIs(Token::STRING_LITERAL)) {
         auto key = lexer.Pop().strLit.value;
         lexer.popEnsure(DynoLexer::op_colon);
-        auto val = lexer.popEnsure(Token::STRING_LITERAL).strLit.value;
+        auto val =
+            lexer.popEnsure(Token::STRING_LITERAL, Token::INLINE_CODE_LITERAL)
+                .strLit.value;
         map.insert(std::make_pair(key, val));
         if (!lexer.popIf(DynoLexer::op_comma))
           break;
@@ -83,11 +85,13 @@ public:
     case OP_STRING.type: {
       lexer.popEnsure(DynoLexer::op_rbropen);
       std::map<std::string, std::string> map;
-      std::string val{
-          lexer.popEnsure(Token::STRING_LITERAL, Token::INLINE_CODE_LITERAL)
-              .strLit.value};
+      std::string val{lexer.popEnsure(Token::STRING_LITERAL).strLit.value};
       lexer.popEnsure(DynoLexer::op_rbrclose);
       return base->ctx.getStore<StringObj>().create(std::move(val));
+    }
+
+    case OP_FUNC.type: {
+      return base->ctx.getStore<Function>().create();
     }
 
     default:

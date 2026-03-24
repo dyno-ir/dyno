@@ -301,6 +301,8 @@ public:
       return self.runFuncs.apply(
           [&](auto &&...funcs) { return (tryRun(ref, funcs) || ...); });
     } else if (!ref) {
+      if constexpr (requires {bool(self.run());})
+        return self.run();
       self.run();
       return true;
     }

@@ -3,6 +3,8 @@
 #include "dyno/Context.h"
 #include "dyno/InstrPrinter.h"
 #include "meta/PrintParse.h"
+#include "op/Function.h"
+#include "op/IDs.h"
 #include "op/MapObj.h"
 #include "op/PrintParse.h"
 #include "support/ErrorRecovery.h"
@@ -41,8 +43,16 @@ class MetaPassPipelineInterpreter {
   PassStorage passes;
 
 public:
-  void interpretPassPipeline(BlockRef block, ArrayRef<void *> passRunArgs) {
+  bool interpretPassPipeline(BlockRef block, ArrayRef<void *> passRunArgs) {
     for (auto instr : block) {
+      if (instr.isOpc(OP_FUNCTION_DEF))
+        continue;
+      if (instr.isOpc(OP_CALL)) {
+        auto asCall = instr.as<CallInstrRef>();
+        if (!interpretPassPipeline(asCall.func().iref().getBlock(), passRunArgs))
+          return false;
+        continue;
+      }
       if (instr.getDialect() != DIALECT_META)
         report_fatal_error("expected meta dialect instruction");
       auto opc = instr.getDialectOpcode();
@@ -59,12 +69,15 @@ public:
         pass.config(cfg->data, lexer);
       }
 
-      if (!pass.run(passRunArgs))
-        report_fatal_error("failed to run pass: ",
-                           PrinterWrapper<CoreDialectPrinter, OpDialectPrinter,
-                                          MetaDialectPrinter>{OStreamWrapper{}}
-                               .toString(instr));
+      if (!pass.run(passRunArgs)) {
+        std::print(dbgs(), "failed to run pass: ",
+                   PrinterWrapper<CoreDialectPrinter, OpDialectPrinter,
+                                  MetaDialectPrinter>{OStreamWrapper{}}
+                       .toString(instr));
+        return false;
+      }
     }
+    return true;
   }
 
   MetaPassPipelineInterpreter(Context &ctx, ArrayRef<void *> passCtorArgs)

@@ -121,6 +121,12 @@ public:
   }
   iterator insert(const K &k, const V &v) { return insert(k, V{v}); }
 
+  template <typename It> void insert(Range<It> arr) {
+    for (auto [k, v] : arr) {
+      insert(k, v);
+    }
+  }
+
   iterator find_next(iterator prev) {
     auto [found, it] = findNextImpl(prev);
     if (!found)

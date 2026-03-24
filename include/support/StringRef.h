@@ -6,6 +6,8 @@
 #include <cstring>
 #include <format>
 #include <limits>
+#include <string>
+#include <string_view>
 
 template <typename Derived> class StringRefMixin {
   Derived &self() { return *static_cast<Derived *>(this); }
@@ -38,6 +40,12 @@ public:
   }
   const char *find(char c) const {
     return std::find(cself().begin(), cself().end(), c);
+  }
+  const char *find(const char *other) const {
+    auto idx = std::string_view(cself().begin(), cself().end()).find(other);
+    if (idx == std::string_view::npos)
+      return cself().end();
+    return cself().begin() + idx;
   }
   bool contains(char c) const { return find(c) != cself().end(); }
 };

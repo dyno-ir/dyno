@@ -5,6 +5,8 @@
 #include "dyno/Pass.h"
 #include "hw/Module.h"
 #include "slang/driver/Driver.h"
+#include "slang/text/SourceLocation.h"
+#include "slang/util/SmallVector.h"
 #include "support/ErrorRecovery.h"
 #include <expected>
 
@@ -18,6 +20,7 @@ public:
   static constexpr size_t NumArgs = 8;
 #define CONFIG_STRUCT_LAMBDA(FIELD, ENUM)                                      \
   FIELD(StringRef, path, "")                                                   \
+  FIELD(StringRef, code, "")                                                   \
   FIELD(StringRef, arg0, "")                                                   \
   FIELD(StringRef, arg1, "")                                                   \
   FIELD(StringRef, arg2, "")                                                   \
@@ -48,6 +51,20 @@ public:
 
     if (!driver.parseCommandLine(1 + numArgs, argv.data()))
       return std::unexpected("slang: failed to parse args");
+
+    // allow inluding files via config.path, config.code (verbatim) or just
+    // args.
+    if (!config.path.empty())
+      driver.sourceLoader.addFiles(config.path);
+    if (!config.code.empty()) {
+      slang::SmallVector<char> buffer(config.code.size() + 1,
+                                      slang::UninitializedTag{});
+      buffer.append_range(config.code);
+      buffer.emplace_back(0);
+      auto buf =
+          driver.sourceManager.assignBuffer("config.code", std::move(buffer));
+      driver.sourceLoader.addBuffer(buf);
+    }
 
     if (!driver.processOptions())
       return std::unexpected("slang: failed to process options");

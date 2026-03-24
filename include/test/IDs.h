@@ -30,6 +30,7 @@ template <> struct DialectContext<DialectID{DIALECT_TEST}> {
 
 constexpr DialectOpcode TEST_TEST_CASE{DIALECT_TEST, 0};
 constexpr DialectOpcode TEST_TEST_EQUIVALENCE{DIALECT_TEST, 1};
+constexpr DialectOpcode TEST_TEST_SCRIPT{DIALECT_TEST, 2};
 
 // in general to define dialect/type/opcode info specialize this struct or void
 // registerDialect<>
@@ -37,6 +38,7 @@ template <> struct DialectTraits<DIALECT_TEST> {
   constexpr static DialectInfo info{"test"};
   constexpr static std::array<TyInfo, 0> tyInfo = {};
   constexpr static OpcodeInfo opcInfo[] = {OpcodeInfo{"TEST_CASE"},
-                                           OpcodeInfo{"TEST_EQUIVALENCE"}};
+                                           OpcodeInfo{"TEST_EQUIVALENCE"},
+                                           OpcodeInfo{"TEST_SCRIPT"}};
 };
 }; // namespace dyno

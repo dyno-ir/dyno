@@ -246,7 +246,9 @@ public:
                                      this->size()}};
   }
   auto clearAllBits() { std::fill(this->raw().begin(), this->raw().end(), 0); }
-  auto setAllBits() { std::fill(this->raw().begin(), this->raw().end(), ~0ULL); }
+  auto setAllBits() {
+    std::fill(this->raw().begin(), this->raw().end(), ~0ULL);
+  }
 };
 
 template <typename Container, size_t SymbolBits,

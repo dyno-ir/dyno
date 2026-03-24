@@ -15,6 +15,7 @@
 #include "hw/HWValue.h"
 #include "hw/IDs.h"
 #include "hw/LoadStore.h"
+#include "hw/MemoryPort.h"
 #include "hw/Module.h"
 #include "hw/Pointer.h"
 #include "hw/Process.h"
@@ -556,9 +557,9 @@ private:
     auto [rhsB, rhsN, rhsConst] = spliceNumBitsOps(rest...);
 
     return mk_tuple((!lhs || !rhsB) ? nullopt : Optional(*lhs + *rhsB),
-                           rhsN + (lhs.value_or(1) != 0),
-                           rhsConst && lhs && range.addr.is<ConstantRef>() &&
-                               value.is<ConstantRef>());
+                    rhsN + (lhs.value_or(1) != 0),
+                    rhsConst && lhs && range.addr.is<ConstantRef>() &&
+                        value.is<ConstantRef>());
   }
   Tuple<Optional<uint32_t>, uint32_t, bool> spliceNumBitsOps() {
     return mk_tuple(Optional<uint32_t>{0}, 0u, true);
@@ -568,14 +569,14 @@ private:
     return value.getNumBits();
   }
   template <typename... Rest>
-  Tuple<Optional<uint32_t>, uint32_t, bool>
-  concatNumBitsOps(HWValue value, Rest... rest) {
+  Tuple<Optional<uint32_t>, uint32_t, bool> concatNumBitsOps(HWValue value,
+                                                             Rest... rest) {
     auto lhs = concatSingleNumBits(value);
     auto [rhsB, rhsN, rhsConst] = concatNumBitsOps(rest...);
 
     return mk_tuple((!lhs || !rhsB) ? nullopt : Optional(*lhs + *rhsB),
-                           rhsN + (lhs.value_or(1) != 0),
-                           rhsConst && lhs && value.is<ConstantRef>());
+                    rhsN + (lhs.value_or(1) != 0),
+                    rhsConst && lhs && value.is<ConstantRef>());
   }
   Tuple<Optional<uint32_t>, uint32_t, bool> concatNumBitsOps() {
     return mk_tuple(Optional<uint32_t>{0}, 0u, true);
@@ -1650,6 +1651,18 @@ public:
     }
     case *HW_MODULE: {
       ctx.getStore<Module>().destroy(obj.as<ModuleRef>());
+      break;
+    }
+    case *HW_STDCELL_INFO: {
+      ctx.getStore<StdCellInfo>().destroy(obj.as<StdCellInfoRef>());
+      break;
+    }
+    case *HW_MEM_PORT: {
+      ctx.getStore<MemoryPort>().destroy(obj.as<MemoryPortRef>());
+      break;
+    }
+    case *HW_POINTER: {
+      ctx.getStore<Pointer>().destroy(obj.as<PointerRef>());
       break;
     }
     default:

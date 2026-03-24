@@ -107,12 +107,14 @@ public:
     }
   }
 
-  template <std::invocable<Bucket *, size_type> T> void grow(T &&reinsertFunc) {
+  template <std::invocable<Bucket *, size_type> T>
+  void grow(T &&reinsertFunc, uint32_t newCap) {
     auto oldBuckets = getBuckets();
     auto oldCap = cap;
 
     getBuckets() = (Bucket *)::operator new[](
-        sizeof(Bucket) * (cap *= 2), std::align_val_t(alignof(Bucket)));
+        sizeof(Bucket) * newCap, std::align_val_t(alignof(Bucket)));
+    cap = newCap;
     std::uninitialized_default_construct_n(getBuckets(), cap);
 
     sz = 0;
@@ -131,7 +133,7 @@ public:
     auto max = cap * Bucket::entriesPerBucket;
     auto pct = (max / 2) + (max / 4) + (max / 8) + (max / 16);
     if (sz >= pct) {
-      grow(reinsertFunc);
+      grow(reinsertFunc, 2 * cap);
       return true;
     }
     return false;
@@ -296,11 +298,14 @@ template <typename Derived, typename K, typename V, typename Bucket,
 class DenseMapBase : public DenseSetMapBase<Derived, K, Bucket, Iterator> {
   using Base = DenseSetMapBase<Derived, K, Bucket, Iterator>;
 
+  void reinsertFunc(Bucket *bucket, Base::size_type j) {
+    insert(std::move(bucket->keys[j]), std::move(bucket->values[j]));
+    std::destroy_at(&bucket->values[j]);
+  }
+
   bool growIfOversized() {
-    return Base::growIfOversized([&](Bucket *bucket, size_type j) {
-      insert(std::move(bucket->keys[j]), std::move(bucket->values[j]));
-      std::destroy_at(&bucket->values[j]);
-    });
+    return Base::growIfOversized(
+        [&](Bucket *bucket, Base::size_type j) { reinsertFunc(bucket, j); });
   }
 
 protected:
@@ -315,6 +320,18 @@ public:
   using bucket_type = Bucket;
   using Base::begin;
   using Base::end;
+
+  void reserve(Base::size_type newCap) {
+    // increase by inverse max fill: 1 / 0.9375 = 1.0667
+    newCap = round_up_div(uint64_t(newCap) * 107, uint64_t(100));
+    newCap = round_up_div(newCap, Bucket::entriesPerBucket);
+    newCap = ceil_to_pow2(newCap);
+    if (newCap <= cap)
+      return;
+    this->Base::grow(
+        [&](Bucket *bucket, Base::size_type j) { reinsertFunc(bucket, j); },
+        newCap);
+  }
 
   iterator insert(const K &k, V &&v) {
     growIfOversized();
@@ -436,6 +453,12 @@ protected:
   using Base::self;
   using Base::sz;
 
+  bool growIfOversized() {
+    return Base::growIfOversized([&](Bucket *bucket, size_type j) {
+      insert(std::move(bucket->keys[j]));
+    });
+  }
+
 public:
   using iterator = Base::iterator;
   using size_type = Base::size_type;
@@ -443,10 +466,18 @@ public:
   using Base::begin;
   using Base::end;
 
-  bool growIfOversized() {
-    return Base::growIfOversized([&](Bucket *bucket, size_type j) {
-      insert(std::move(bucket->keys[j]));
-    });
+  void reserve(Base::size_type newCap) {
+    // increase by inverse max fill: 1 / 0.9375 = 1.0667
+    newCap = round_up_div(uint64_t(newCap) * 107, uint64_t(100));
+    newCap = round_up_div(newCap, Bucket::entriesPerBucket);
+    newCap = ceil_to_pow2(newCap);
+    if (newCap <= cap)
+      return;
+    this->Base::grow(
+        [&](Bucket *bucket, Base::size_type j) {
+          insert(std::move(bucket->keys[j]));
+        },
+        newCap);
   }
 
   iterator insert(const K &k) {
@@ -680,8 +711,8 @@ public:
     return *this;
   }
   LargeSetMap(size_t cap)
-      : Base(round_up_div(ceil_to_pow2(std::max(cap, 1ZU)),
-                          size_t(Bucket::entriesPerBucket)),
+      : Base(ceil_to_pow2(round_up_div(cap * 107,
+                                       size_t(Bucket::entriesPerBucket) * 100)),
              0) {
     buckets = (Bucket *)::operator new[](sizeof(Bucket) * this->cap,
                                          std::align_val_t(alignof(Bucket)));
@@ -692,14 +723,14 @@ public:
     requires(std::is_same_v<typename Range<T>::iterator_category,
                             std::random_access_iterator_tag>)
       : LargeSetMap(range.size()) {
-    this->Base::insert(range);
+    this->insert(range);
   }
   template <typename T>
   LargeSetMap(Range<T> range)
     requires(!std::is_same_v<typename Range<T>::iterator_category,
                              std::random_access_iterator_tag>)
       : LargeSetMap() {
-    this->Base::insert(range);
+    this->insert(range);
   }
 
   ~LargeSetMap() {
@@ -784,11 +815,11 @@ public:
     return *this;
   }
   SmallSetMap(size_t cap)
-      : Base(round_up_div(
-                 ceil_to_pow2(std::max(
-                     cap, InlineBuckets * size_t(Bucket::entriesPerBucket))),
-                 size_t(Bucket::entriesPerBucket)),
-             0) {
+      : Base(
+            ceil_to_pow2(std::max(
+                round_up_div(cap * 107, size_t(Bucket::entriesPerBucket) * 100),
+                InlineBuckets)),
+            0) {
     if (this->cap > InlineBuckets) {
       buckets = (Bucket *)::operator new[](sizeof(Bucket) * this->cap,
                                            std::align_val_t(alignof(Bucket)));
@@ -802,14 +833,14 @@ public:
     requires(std::is_same_v<typename Range<T>::iterator_category,
                             std::random_access_iterator_tag>)
       : SmallSetMap(range.size()) {
-    this->Base::insert(range);
+    this->insert(range);
   }
   template <typename T>
   SmallSetMap(Range<T> range)
     requires(!std::is_same_v<typename Range<T>::iterator_category,
                              std::random_access_iterator_tag>)
       : SmallSetMap() {
-    this->Base::insert(range);
+    this->insert(range);
   }
 
   ~SmallSetMap() {

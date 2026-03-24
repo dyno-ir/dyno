@@ -58,7 +58,8 @@ public:
                      InstrHook instrCallback) {
     auto copyInstr = InstrRef{ctx.getStore<Instr>().create(
         srcInstr.getNumOperands(), srcInstr.getDialectOpcode())};
-    dstIt.insertPrev(copyInstr);
+    if (dstIt != BlockRef_iterator<true>::invalid())
+      dstIt.insertPrev(copyInstr);
     InstrBuilder build{copyInstr};
 
     for (size_t i = 0; i < srcInstr.getNumDefs(); i++) {
