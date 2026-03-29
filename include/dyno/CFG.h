@@ -73,6 +73,11 @@ public:
     return bool(map[ref].block);
   }
 
+  void reset() {
+    blocks.reset();
+    map.clear();
+  }
+
   BlockRef_iterator_base operator[](ObjRef<Instr> ref);
 };
 

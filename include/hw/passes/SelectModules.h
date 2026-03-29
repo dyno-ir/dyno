@@ -23,8 +23,6 @@ private:
     std::regex regex(config.regex);
     mod.mod()->ignore =
         !(std::regex_match(mod.mod()->name, regex) ^ config.unselect);
-    std::print(dbgs(), "mod {} selected {} (rgx {})\n", mod.mod()->name,
-               !mod.mod()->ignore, config.regex);
   }
 
 public:

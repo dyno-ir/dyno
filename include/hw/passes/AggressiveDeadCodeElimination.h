@@ -495,6 +495,10 @@ class AggressiveDeadCodeEliminationPass
         blockDestroyMap[instr.as<SwitchInstrRef>().block()] = 1;
         break;
       }
+      case *OP_FUNC: {
+        blockDestroyMap[instr.as<FunctionIRef>().getBlock()] = 1;
+        break;
+      }
       }
 
       if (ctx.getCtx<CoreDialectContext>().cfg.contains(instr))

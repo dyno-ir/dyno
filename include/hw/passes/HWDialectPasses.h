@@ -22,6 +22,7 @@
 #include "hw/passes/LinearizeControlFlow.h"
 #include "hw/passes/LoadCoalesce.h"
 #include "hw/passes/LoopSimplify.h"
+#include "hw/passes/LowerMemAccess.h"
 #include "hw/passes/LowerOps.h"
 #include "hw/passes/MemoryMapping.h"
 #include "hw/passes/ModuleInline.h"
@@ -86,5 +87,6 @@ registerDialectPasses<DialectID{DIALECT_HW}>(PassRegistry &passRegistry) {
   passRegistry.registerPass<LiftStdCellsPass>();
   passRegistry.registerPass<SelectModulesPass>();
   passRegistry.registerPass<LiftFlipFlopsPass>();
+  passRegistry.registerPass<LowerMemAccessPass>();
 }
 }; // namespace dyno

@@ -61,6 +61,18 @@ public:
     return false;
   }
 
+  auto useInstrs(DialectOpcode opc) {
+    return oref()
+        .uses()
+        .filter([opc](auto use) { return use.instr().isOpc(opc); })
+        .transform([](size_t, auto op) { return op.instr(); });
+  }
+  auto loads() { return useInstrs(HW_LOAD); }
+  auto stores() { return useInstrs(HW_STORE); }
+  auto storeDefers() { return useInstrs(HW_STORE_DEFER); }
+  auto memLoads() { return useInstrs(HW_MEM_LOAD); }
+  auto memStores() { return useInstrs(HW_MEM_STORE); }
+
   InstrRef getSingleStore() {
     InstrRef rv = nullref;
     for (auto use : oref().uses()) {

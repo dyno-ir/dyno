@@ -18,26 +18,36 @@ public:
   FIELD(uint64_t, cycles, 1000)                                                \
   ENUM(clockMode, COMB, COMB, CLOCK)                                           \
   FIELD(bool, exhaustive, false)                                               \
-  FIELD(bool, relaxXZ, false)
+  FIELD(bool, relaxXZ, false)                                                  \
+  FIELD(bool, swapTestAndModel, false)                                         \
+  FIELD(bool, trace, false)
   CONFIG_STRUCT(CONFIG_STRUCT_LAMBDA)
 #undef CONFIG_STRUCT_LAMBDA
   Config config;
 
 private:
   ModuleIRef getModelModule(ModuleIRef testModule) {
-    assert(ctx.getStore<Module>().numIDs() == 2);
-    return ctx.getStore<Module>()
-        .resolve(ObjRef<Module>{ObjID{1 - testModule.mod().getObjID()}})
-        .iref();
+    SmallVec<ModuleRef, 4> mods(Range{ctx.getStore<Module>()}.filter(
+        [](auto mod) { return mod.iref().isOpc(HW_MODULE_DEF); }));
+    if (mods.size() != 2)
+      report_fatal_error("expected two modules (model and test)");
+    auto it = Range{mods}.find(testModule.mod());
+    if (it == mods.end())
+      report_fatal_error("test module not active?");
+    return mods[!(it - mods.begin())].iref();
   }
 
   bool runOnModule(ModuleIRef test) {
     auto model = getModelModule(test);
+    if (config.swapTestAndModel)
+      std::swap(test, model);
 
     HWInterpreter modelInterp{ctx, test, std::cout, std::cerr};
     modelInterp.setup();
     HWInterpreter testInterp{ctx, test, std::cout, std::cerr};
     testInterp.setup();
+
+    testInterp.trace = config.trace;
 
     auto testClk = test.ports().front();
     auto modelClk = model.ports().front();
@@ -49,12 +59,19 @@ private:
       return reg.isOpc(HW_OUTPUT_REGISTER_DEF);
     };
     std::mt19937 rand(42);
-    BigInt clk = "1'b1"_bv;
+    BigInt clk = "1'b0"_bv;
+    // set these to avoid initial x -> 0 transition
+    testInterp.getReg(testClk) = clk;
+    modelInterp.getReg(modelClk) = clk;
     for (uint64_t i = 0; i < config.cycles || config.exhaustive; i++) {
       bool carry = true;
       for (auto [testIn, modelIn] :
            Range{test.ports().filter(filterInputs)}.zip(
                model.ports().filter(filterInputs))) {
+        if (config.clockMode == Config::CLOCK && testIn == testClk) {
+          assert(modelIn == modelClk);
+          continue;
+        }
         if (config.exhaustive) {
           auto &val = (modelInterp.getReg(modelIn) += "1'b1"_bv);
           testInterp.getReg(testIn) = val;
@@ -69,6 +86,11 @@ private:
         } else {
           auto &val = modelInterp.getReg(modelIn);
           val.randomize(rand);
+          if (config.trace) {
+            val.toStream(dbgs());
+            dbgs() << " -> ";
+            dumpInstr(testIn, ctx);
+          }
           modelInterp.regValueChanged(modelIn);
           testInterp.getReg(testIn) = val;
           testInterp.regValueChanged(testIn);
@@ -78,11 +100,7 @@ private:
       if (config.exhaustive && carry)
         break;
 
-      if (config.clockMode == Config::CLOCK) {
-        testInterp.setReg(testClk, clk);
-        modelInterp.setReg(modelClk, clk);
-        clk = ~clk;
-      } else {
+      if (config.clockMode == Config::COMB) {
         testInterp.eval();
         modelInterp.eval();
       }
@@ -109,15 +127,19 @@ private:
             inpS << "\n";
           }
           for (auto wire : ctx.getStore<Wire>()) {
+            auto &val = testInterp.getWire(wire);
+            if (val.getNumBits() == 0)
+              continue;
             print.introduceAndPrintDef(wire);
             inpS << " : ";
-            testInterp.getWire(wire).toStream(inpS);
+            val.toStream(inpS);
             inpS << "\n";
           }
 
           std::print(
-              dbgs(), "mismatch {}actual: {}\nexpected: {}\n\ninputs:\n{}",
-              regS.str(), testInterp.getReg(testOut).toString(),
+              dbgs(),
+              "mismatch (cycle {}) {}actual: {}\nexpected: {}\n\ninputs:\n{}",
+              i, regS.str(), testInterp.getReg(testOut).toString(),
               modelInterp.getReg(modelOut).toString(), std::move(inpS).str());
 
           return false;
@@ -125,9 +147,14 @@ private:
       }
 
       if (config.clockMode == Config::CLOCK) {
+        clk = ~clk;
+        testInterp.setReg(testClk, clk);
+        modelInterp.setReg(modelClk, clk);
+
         testInterp.eval();
         modelInterp.eval();
 
+        clk = ~clk;
         testInterp.setReg(testClk, clk);
         modelInterp.setReg(modelClk, clk);
 

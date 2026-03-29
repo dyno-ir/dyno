@@ -147,7 +147,7 @@ public:
 
   void reset() {
     instrs.reset();
-    cfg.blocks.reset();
+    cfg.reset();
     constants.reset();
     instrSourceLocInfo.reset();
   }

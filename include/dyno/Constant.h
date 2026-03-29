@@ -278,11 +278,13 @@ public:
   }
 
   constexpr std::optional<uint32_t> getLimitedVal() const {
-    assert(!self().getIs4S());
+    if (self().getIs4S())
+      return std::nullopt;
     return getRawLimitedVal();
   }
   constexpr std::optional<int32_t> getLimitedValS() const {
-    assert(!self().getIs4S());
+    if (self().getIs4S())
+      return std::nullopt;
     if (self().getNumWords() > 1)
       return std::nullopt;
     if (self().getExtNumWords() > 1 &&
@@ -634,9 +636,10 @@ public:
           std::min(originalNumWords + (round_up_div(rhs, WordBits)),
                    round_up_div(lhs.getRawNumBits(), WordBits)));
     else {
-      if (out.extend() != 0) {
-        out.words.resize(out.getExtNumWords());
-      }
+      if (lhs.extend() != 0)
+        out.words.resize(lhs.getExtNumWords());
+      else
+        out.words.resize(lhs.getNumWords());
     }
 
     ssize_t lower = 0;
@@ -1058,6 +1061,9 @@ public:
                           : (getWord(highI) << (32 - shamt)));
     }
 
+    out.words.resize(outWords);
+    out.numBits = bitLen;
+
     if ((bitOffs & 1) && src.getExtend() == 0b01)
       out.setExtend(0b10);
     else if ((bitOffs & 1) && src.getExtend() == 0b10)
@@ -1065,8 +1071,6 @@ public:
     else
       out.setExtend(src.getExtend());
 
-    out.words.resize(outWords);
-    out.numBits = bitLen;
     out.normalize();
   }
 
@@ -1534,9 +1538,9 @@ public:
         sz > out.getNumWords())
       out.expandUntil(sz);
 
-    auto mask = shamt == 0 ? 0 : bit_mask_zeros<uint32_t>(shamt);
-    if (shamt + rhs.getRawNumBits() < WordBits)
-      mask |= bit_mask_zeros<uint32_t>(shamt + rhs.getRawNumBits());
+    auto mask = shamt == 0 ? 0 : bit_mask_ones<uint32_t>(shamt);
+    if (uint64_t diff = WordBits - (shamt + rhs.getRawNumBits()); diff > 0)
+      mask |= bit_mask_ones<uint32_t>(diff, shamt + rhs.getRawNumBits());
     out.words[offs] &= mask;
     out.words[offs] |= rhs.getWord(0) << shamt;
 
@@ -1906,10 +1910,13 @@ public:
     if (lhs.getIs4S()) {
       BigIntBase::resizeOp(out, lhs, 2 * newSize,
                            sign ? lhs.getExtendPatFromSignBit() : 0);
+      out.custom() = 1;
       out.conv4To2StateIfPossible();
-    } else
+    } else {
       BigIntBase::resizeOp(out, lhs, newSize,
                            sign ? lhs.getExtendPatFromSignBit() : 0);
+      out.custom() = 0;
+    }
   }
   template <BigIntAPI T>
   static void rangeSelectOp4S(BigIntBase &out, const T &src, uint32_t bitOffs,
@@ -1919,6 +1926,7 @@ public:
       out.setCustom(1);
       out.conv4To2StateIfPossible();
     } else {
+      out.setCustom(0);
       BigIntBase::rangeSelectOp(out, src, bitOffs, bitLen);
     }
   }
@@ -2433,18 +2441,19 @@ public:
         return std::unexpected(ParseError::ILLEGAL_DIGIT);
       if (c == 'x')
         digit = PatBigInt{2 * baseBits, FourState::SX, 1};
-      if (c == 'z')
+      else if (c == 'z')
         digit = PatBigInt{2 * baseBits, FourState::SZ, 1};
+      else {
+        unsigned hexVal;
+        if (c >= 'a')
+          hexVal = c - 'a' + 10;
+        else if (c >= 'A')
+          hexVal = c - 'A' + 10;
+        else
+          hexVal = c - '0';
 
-      unsigned hexVal;
-      if (c >= 'a')
-        hexVal = c - 'a' + 10;
-      else if (c >= 'A')
-        hexVal = c - 'A' + 10;
-      else
-        hexVal = c - '0';
-
-      digit = BigIntBase::fromU64(hexVal, baseBits);
+        digit = BigIntBase::fromU64(hexVal, baseBits);
+      }
 
       if (base == 10) {
         assert(!digit.getIs4S());
@@ -2460,13 +2469,13 @@ public:
     }
 
     if (numBits) {
-      if (acc.numBits > *numBits) {
+      if (acc.getNumBits() > *numBits) {
         auto leading = BigIntBase::leadingZeros4S(acc);
-        if (!leading || acc.numBits - *leading > *numBits)
+        if (!leading || acc.getNumBits() - *leading > *numBits)
           return std::unexpected(ParseError::TOO_MANY_DIGITS_GIVEN);
         BigIntBase::resizeOp4S(acc, acc, *numBits, false);
       }
-      if (acc.numBits < *numBits)
+      if (acc.getNumBits() < *numBits)
         BigIntBase::resizeOp4S(acc, acc, *numBits, isSigned);
     }
     return ParseResult(acc, isSigned,

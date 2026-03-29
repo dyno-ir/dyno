@@ -74,7 +74,7 @@ public:
     bool compilation_ok;
     compilation_ok = driver.parseAllSources();
     compilation = driver.createCompilation();
-    driver.reportCompilation(*compilation, false);
+    driver.reportCompilation(*compilation, true);
     auto diag = compilation->getSemanticDiagnostics();
 
     if (!compilation_ok) {

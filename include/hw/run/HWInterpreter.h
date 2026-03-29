@@ -1,5 +1,6 @@
 
 #pragma once
+#include <optional>
 #ifdef ENABLE_FST
 #include "FST.h"
 #endif
@@ -35,6 +36,7 @@ class HWInterpreter {
 public:
   ObjMapVec<Wire, BigInt> wireVals;
   ObjMapVec<Register, BigInt> regVals;
+  SmallDenseSet<ObjRef<Instr>, 16> evalSet;
   SmallVec<ProcessIRef, 16> evalStack;
   struct DeferredStore {
     StoreIRef store;
@@ -90,7 +92,9 @@ private:
         continue;
       auto load = use.instr().as<LoadIRef>();
       auto proc = load.parentProc(ctx);
-      evalStack.emplace_back(proc);
+      auto [found, it] = evalSet.findOrInsert(proc);
+      if (!found)
+        evalStack.emplace_back(proc);
     }
   }
 
@@ -134,7 +138,7 @@ private:
         Func);
   }
 
-  uint32_t evalAddress(OperandRef op) {
+  std::optional<uint32_t> evalAddress(OperandRef op) {
     if (op == op.instr().end())
       return 0;
     auto base = op->as<ConstantRef>();
@@ -142,10 +146,14 @@ private:
 
     while ((op + 1) != op.instr().end()) {
       auto term = AddressGenTermOperand{op + 1};
-      auto idx = getValue(term.getIdx()).getExactVal();
-      assert((!term.getMax() || idx < *term.getMax()) &&
-             "address out of bounds");
-      addr += term.getFact() * idx;
+      auto idx = getValue(term.getIdx()).getLimitedVal();
+      if (!idx)
+        return std::nullopt;
+      if ((term.getMax() && idx >= *term.getMax()))
+        return std::nullopt;
+
+      addr += term.getFact() * *idx;
+      op += 3;
     }
 
     return addr;
@@ -155,6 +163,7 @@ private:
     auto &regVal = regVals[reg.oref()];
     auto oldCopy = regVal;
     BigInt::insertOp4S(regVal, regVal, val, addr);
+    assert(regVal.getNumWords() != 0);
     if (oldCopy != regVal)
       onValueChange(reg);
   }
@@ -168,6 +177,7 @@ public:
         runBigIntFunc(bigIntFunc<GenericBigIntRef, GenericBigIntRef>,          \
                       getValue(instr.other(0)->as<HWValue>()),                 \
                       getValue(instr.other(1)->as<HWValue>()));                \
+    break;                                                                     \
   }
       FOR_HW_BIN_OPS(LAMBDA)
 #undef LAMBDA
@@ -218,17 +228,26 @@ public:
       auto outW = splice.out()->as<WireRef>();
       auto &out = wireVals[outW];
       auto in = getValue(splice.in()->as<HWValue>());
-      BigInt::rangeSelectOp4S(out, in, evalAddress(splice.base()),
-                              *outW.getNumBits());
+      auto addr = evalAddress(splice.base());
+      if (!addr)
+        out = PatBigInt::undef(splice.getLen());
+      else
+        BigInt::rangeSelectOp4S(out, in, *addr, *outW.getNumBits());
       break;
     }
 
     case *HW_INSERT: {
       auto insert = instr.as<InsertIRef>();
       auto &out = wireVals[insert.out()->as<WireRef>()];
-      auto base = getValue(insert.val()->as<HWValue>());
-      auto in = getValue(insert.in()->as<HWValue>());
-      BigInt::insertOp4S(out, base, in, evalAddress(insert.base()));
+      auto base = getValue(insert.in()->as<HWValue>());
+      auto val = getValue(insert.val()->as<HWValue>());
+
+      auto addr = evalAddress(insert.base());
+
+      if (!addr)
+        out = PatBigInt::undef(insert.getMemoryLen());
+      else
+        BigInt::insertOp4S(out, base, val, *addr);
       break;
     }
 
@@ -275,7 +294,7 @@ public:
         trig = proc.other(0)->as<TriggerRef>().iref();
       }
 
-      deferredStores[trig.oref()].emplace_back(store, addr,
+      deferredStores[trig.oref()].emplace_back(store, *addr,
                                                getValue(store.value()));
       break;
     }
@@ -283,7 +302,7 @@ public:
     case *HW_STORE: {
       auto store = instr.as<StoreIRef>();
       auto val = getValue(store.value());
-      runStore(store.reg().iref(), val, evalAddress(store.base()));
+      runStore(store.reg().iref(), val, *evalAddress(store.base()));
       break;
     }
 
@@ -292,11 +311,14 @@ public:
       auto &val = wireVals[load.value()];
       auto &reg = regVals[load.reg()];
       if (load.isFullReg()) {
+        assert(reg.getNumBits() != 0);
         val = reg;
+        assert(val.getNumBits() != 0);
         break;
       }
-      BigInt::rangeSelectOp4S(val, reg, evalAddress(load.base()),
+      BigInt::rangeSelectOp4S(val, reg, *evalAddress(load.base()),
                               load.getLen());
+      assert(val.getNumBits() != 0);
       break;
     }
 
@@ -481,7 +503,9 @@ public:
   void evalActive() {
     // active
     while (!evalStack.empty()) {
-      evalProc(evalStack.pop_back_val());
+      auto ref = evalStack.pop_back_val();
+      evalSet.erase(evalSet.find(ref));
+      evalProc(ref);
     }
   }
 
@@ -503,8 +527,10 @@ public:
   }
 
   void initialEval() {
-    for (auto proc : module.procs())
+    for (auto proc : module.procs()) {
+      evalSet.insert(proc);
       evalStack.emplace_back(proc);
+    }
     eval();
   }
 
