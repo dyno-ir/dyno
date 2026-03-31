@@ -17,6 +17,7 @@
 #include "op/IDs.h"
 #include "support/Bits.h"
 #include "support/ErrorRecovery.h"
+#include "support/TempBind.h"
 #include "support/Utility.h"
 #include <cstdint>
 #include <iterator>
@@ -32,7 +33,7 @@ class LowerOpsPass : public Pass<LowerOpsPass> {
   SmallVec<InstrRef, 32> worklist;
   ObjMapVec<Instr, bool> destroyMap;
 
-  AutoCopyDebugInfoStack autoDebugInfo;
+  TempBindVal<AutoCopyDebugInfoStack> autoDebugInfo;
 
 public:
 #define CONFIG_STRUCT_LAMBDA(FIELD, ENUM)                                      \
@@ -918,7 +919,7 @@ private:
   }
 
   void runOnInstr(InstrRef instr) {
-    auto token = autoDebugInfo.addWithToken(instr);
+    auto token = autoDebugInfo->addWithToken(instr);
 
     switch (*instr.getDialectOpcode()) {
     case *OP_ADD:
@@ -1067,19 +1068,25 @@ public:
   }
 
   void run() {
+    auto tok = autoDebugInfo.emplace(ctx);
     for (auto mod : ctx.getCtx<HWDialectContext>().activeModules()) {
       runOnModule(mod.iref());
     }
   }
-  void runProcess(ProcessIRef proc) { runOnProcess(proc); }
-  void runModule(ModuleIRef mod) { runOnModule(mod); }
+  void runProcess(ProcessIRef proc) {
+    auto tok = autoDebugInfo.emplace(ctx);
+    runOnProcess(proc);
+  }
+  void runModule(ModuleIRef mod) {
+    auto tok = autoDebugInfo.emplace(ctx);
+    runOnModule(mod);
+  }
 
   static constexpr auto runFuncs = mk_tuple(
       &LowerOpsPass::runProcess, &LowerOpsPass::runModule, &LowerOpsPass::run);
 
   static auto make(Context &ctx) { return LowerOpsPass(ctx); }
   explicit LowerOpsPass(Context &ctx)
-      : ctx(ctx), build(ctx), cbuild(ctx.getStore<Constant>()),
-        autoDebugInfo(ctx) {}
+      : ctx(ctx), build(ctx), cbuild(ctx.getStore<Constant>()) {}
 };
 }; // namespace dyno

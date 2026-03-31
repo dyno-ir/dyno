@@ -14,8 +14,8 @@
 #include "support/Bits.h"
 #include "support/Debug.h"
 #include "support/DynBitSet.h"
-#include <cassert>
 #include "support/Tuple.h"
+#include <cassert>
 
 namespace dyno {
 
@@ -24,7 +24,7 @@ class FuzzyCSEPass : public Pass<FuzzyCSEPass> {
   BitAliasAnalysis bitAlias;
   HWInstrBuilder build;
   ControlFlowAnalysis controlFlowAnalysis;
-  AutoCopyDebugInfoStack autoDbgInfo;
+  TempBindVal<AutoCopyDebugInfoStack> autoDbgInfo;
 
   struct AbstractValue {
     uint16_t id;
@@ -139,7 +139,7 @@ private:
     // Rebuild the two instructions, with (1) adding the shared sum as an
     // additional operand and (2) replacing all matched operand fragments with
     // neutral element.
-    auto tok = autoDbgInfo.addWithToken(instr.ref);
+    auto tok = autoDbgInfo->addWithToken(instr.ref);
     SmallVec<HWValue, 8> lhsNewOps;
     for (auto [opIdx, op] : Range{instr.ref.others()}.enumerate()) {
       if (covered[opIdx])
@@ -319,8 +319,8 @@ private:
       print.printInstr(rhsAbstr.ref, ctx);
     })
 
-    autoDbgInfo.pushDebugInfo(lhsAbstr.ref);
-    autoDbgInfo.pushDebugInfo(rhsAbstr.ref);
+    autoDbgInfo->pushDebugInfo(lhsAbstr.ref);
+    autoDbgInfo->pushDebugInfo(rhsAbstr.ref);
 
     auto parentBlock = controlFlowAnalysis.findSharedParentBlock(
         HWInstrRef{lhsAbstr.ref}.parentBlock(ctx),
@@ -362,8 +362,8 @@ private:
         [](auto lhs, auto rhs) { return lhs.second < rhs.second; });
     worklist.emplace_back(newInstrAbstr.idx);
 
-    autoDbgInfo.popDebugInfo();
-    autoDbgInfo.popDebugInfo();
+    autoDbgInfo->popDebugInfo();
+    autoDbgInfo->popDebugInfo();
 
     build.setInsertPoint(lhsAbstr.ref);
     auto lhsIdxs = Range{intersectOps}.transform(
@@ -519,11 +519,11 @@ private:
 
 public:
   FuzzyCSEPass(Context &ctx)
-      : ctx(ctx), bitAlias(ctx), build(ctx), controlFlowAnalysis(ctx),
-        autoDbgInfo(ctx) {}
+      : ctx(ctx), bitAlias(ctx), build(ctx), controlFlowAnalysis(ctx) {}
   static auto make(Context &ctx) { return FuzzyCSEPass{ctx}; }
 
   void runWrapper(auto &&runFunc) {
+    auto tok = autoDbgInfo.emplace(ctx);
     bitAlias.clearCache();
     runFunc();
   }

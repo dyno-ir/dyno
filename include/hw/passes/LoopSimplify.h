@@ -523,7 +523,7 @@ public:
 
 class LoopSimplifyPass : public Pass<LoopSimplifyPass> {
   Context &ctx;
-  LoopSimplifer loopSimplifier;
+  TempBindVal<LoopSimplifer> loopSimplifier;
 
 public:
   struct Config {
@@ -536,7 +536,7 @@ private:
     auto instrs = getSCFInstrsPreorder(proc.block());
     for (auto instr : Range{instrs}.reverse()) {
       if (instr.isOpc(OP_FOR, OP_WHILE, OP_DO_WHILE))
-        loopSimplifier.runOnLoop(instr);
+        loopSimplifier->runOnLoop(instr);
     }
   }
 
@@ -548,18 +548,25 @@ private:
 
 public:
   void run() {
+    auto tok = loopSimplifier.emplace(ctx);
     for (auto mod : ctx.getCtx<HWDialectContext>().activeModules()) {
       runOnModule(mod.iref());
     }
   }
-  void runProcess(ProcessIRef proc) { runOnProcess(proc); }
-  void runModule(ModuleIRef mod) { runOnModule(mod); }
+  void runProcess(ProcessIRef proc) {
+    auto tok = loopSimplifier.emplace(ctx);
+    runOnProcess(proc);
+  }
+  void runModule(ModuleIRef mod) {
+    auto tok = loopSimplifier.emplace(ctx);
+    runOnModule(mod);
+  }
 
   static constexpr auto runFuncs =
       mk_tuple(&LoopSimplifyPass::runProcess, &LoopSimplifyPass::runModule,
-                 &LoopSimplifyPass::run);
+               &LoopSimplifyPass::run);
 
   auto make(Context &ctx) { return LoopSimplifyPass(ctx); }
-  explicit LoopSimplifyPass(Context &ctx) : ctx(ctx), loopSimplifier(ctx) {}
+  explicit LoopSimplifyPass(Context &ctx) : ctx(ctx) {}
 };
 }; // namespace dyno

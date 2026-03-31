@@ -1,7 +1,7 @@
 #pragma once
+#include "dyno/Lexer.h"
 #include "dyno/Obj.h"
 #include "dyno/Opcode.h"
-#include "dyno/Parser.h"
 #include "dyno/Type.h"
 #include "support/ArrayRef.h"
 #include "support/ErrorRecovery.h"
@@ -280,6 +280,8 @@ private:
     if constexpr (std::tuple_size_v<function_args_t<T>> == 0) {
       if (ref)
         return false;
+      if constexpr (requires { bool((self.*func)()); })
+        return (self.*func)();
       (self.*func)();
       return true;
     } else {
@@ -287,6 +289,8 @@ private:
                     "expected 0 or 1 arg function");
       using arg_t = tuple_element_t<0, function_args_t<T>>;
       if (auto conv = ref.dyn_as<arg_t>()) {
+        if constexpr (requires { bool((self.*func)(conv)); })
+          return (self.*func)(conv);
         (self.*func)(conv);
         return true;
       }
@@ -301,7 +305,7 @@ public:
       return self.runFuncs.apply(
           [&](auto &&...funcs) { return (tryRun(ref, funcs) || ...); });
     } else if (!ref) {
-      if constexpr (requires {bool(self.run());})
+      if constexpr (requires { bool(self.run()); })
         return self.run();
       self.run();
       return true;

@@ -10,16 +10,17 @@
 #include "hw/HWValue.h"
 #include "hw/IDs.h"
 #include "hw/Register.h"
+#include "support/TempBind.h"
 
 namespace dyno {
 
 class SeqToCombPass : public Pass<SeqToCombPass> {
   Context &ctx;
-  AutoCopyDebugInfoStack autoDbgInfo;
+  TempBindVal<AutoCopyDebugInfoStack> autoDbgInfo;
 
 public:
   auto make(Context &ctx) { return SeqToCombPass(ctx); }
-  explicit SeqToCombPass(Context &ctx) : ctx(ctx), autoDbgInfo(ctx) {}
+  explicit SeqToCombPass(Context &ctx) : ctx(ctx) {}
 
   using TaggedRegRef = CustomInstrRef<RegisterIRef, uint64_t>;
 
@@ -38,7 +39,7 @@ public:
     for (auto instr : range) {
       switch (*instr.getDialectOpcode()) {
       case *HW_STORE: {
-        auto tok = autoDbgInfo.addWithToken(instr);
+        auto tok = autoDbgInfo->addWithToken(instr);
         // for all regs that are written to by regular STORE in seq process:
         // add a last value loopback FF (i.e. LOAD at front, STORE_DEFER at
         // end of proc)
@@ -69,7 +70,7 @@ public:
         break;
       }
       case *HW_STORE_DEFER: {
-        auto tok = autoDbgInfo.addWithToken(instr);
+        auto tok = autoDbgInfo->addWithToken(instr);
         auto store = instr.as<StoreIRef>();
         build.setInsertPoint(HWInstrRef{instr}.iter(ctx));
 
@@ -79,7 +80,7 @@ public:
         break;
       }
       case *OP_ASSERT: {
-        auto tok = autoDbgInfo.addWithToken(instr);
+        auto tok = autoDbgInfo->addWithToken(instr);
         build.setInsertPoint(HWInstrRef{instr}.iter(ctx));
         build.buildAssert(instr.operand(0)->as<HWValue>(), trigger);
         destroyList.emplace_back(instr);
@@ -124,11 +125,15 @@ public:
   }
 
   void run() {
+    auto tok = autoDbgInfo.emplace(ctx);
     for (auto mod : ctx.getCtx<HWDialectContext>().activeModules()) {
       runOnModule(mod.iref());
     }
   }
-  void runModule(ModuleIRef mod) { runOnModule(mod); }
+  void runModule(ModuleIRef mod) {
+    auto tok = autoDbgInfo.emplace(ctx);
+    runOnModule(mod);
+  }
   static constexpr auto runFuncs =
       mk_tuple(&SeqToCombPass::runModule, &SeqToCombPass::run);
 };

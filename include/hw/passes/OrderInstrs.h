@@ -5,6 +5,9 @@
 #include "dyno/Pass.h"
 #include "hw/HWContext.h"
 #include "hw/HWInstr.h"
+#include "hw/HWPrinter.h"
+#include "hw/IDs.h"
+#include "hw/LoadStore.h"
 #include "hw/Process.h"
 #include "hw/Register.h"
 #include "hw/analysis/SCFTraversal.h"
@@ -12,6 +15,7 @@
 #include "op/StructuredControlFlow.h"
 #include "support/Any.h"
 #include "support/DynBitSet.h"
+#include "support/SmallVec.h"
 
 namespace dyno {
 
@@ -29,6 +33,7 @@ public:
   CONFIG_STRUCT(CONFIG_STRUCT_LAMBDA)
 #undef CONFIG_STRUCT_LAMBDA
   Config config;
+  bool storeOrderPass = false;
 
 private:
   void handleUsesInSubBlock(BlockRef block, BlockRef sub,
@@ -110,6 +115,7 @@ private:
   void prioritzeUses(MutArrayRef<OperandRef> uses) {
     std::stable_sort(
         uses.begin(), uses.end(), [](OperandRef lhs, OperandRef rhs) {
+          // todo: reg priority for storeOrderPass?
           return lhs->as<FatDynObjRef<InstrDefUse>>()->getNumUses() <
                  rhs->as<FatDynObjRef<InstrDefUse>>()->getNumUses();
         });
@@ -120,7 +126,7 @@ private:
     struct Frame {
       InstrRef instr;
     };
-    SmallVec<Frame, 8> stack{Frame{root}};
+    SmallVec<Frame, 16> stack{Frame{root}};
     while (!stack.empty()) {
       auto &frame = stack.back();
       auto &instr = frame.instr;
@@ -128,7 +134,8 @@ private:
       if (instr.getCustom()) {
         stack.pop_back();
         map[instr].at(MARK) = 1;
-        ordered.emplace_back(instr);
+        if (!storeOrderPass || instr.isOpc(HW_STORE))
+          ordered.emplace_back(instr);
         continue;
       }
 
@@ -137,7 +144,7 @@ private:
         continue;
       }
       auto pm = map[instr].at(PRE_MARK);
-      if (config.assertNoCircularDeps)
+      if (config.assertNoCircularDeps && !storeOrderPass)
         assert(!pm);
       if (pm) {
         // circular dep
@@ -148,7 +155,15 @@ private:
       pm = 1;
       instr.setCustom(1);
 
-      SmallVec<OperandRef, 4> uses;
+      SmallVec<OperandRef, 16> uses;
+      if (storeOrderPass) {
+        if (auto asLoad = instr.dyn_as<LoadIRef>()) {
+          auto singleStore = asLoad.reg().iref().getSingleStore();
+          if (singleStore && singleStore.isOpc(HW_STORE)) {
+            uses.emplace_back(singleStore.as<StoreIRef>().operand(1));
+          }
+        }
+      }
       for (auto use : instr.others())
         handleUse(block, use, uses);
       handleSCFUses(instr, block, uses);
@@ -163,9 +178,19 @@ private:
     ordered.reserve(block.size());
 
     if (config.moveStoresBeforeLoads) {
+      auto mapCopy = map;
+      storeOrderPass = true;
       for (auto instr : block) {
         if (instr.isOpc(HW_STORE))
           visit(block, instr, ordered);
+      }
+      storeOrderPass = false;
+      map = std::move(mapCopy);
+
+      auto copy = std::move(ordered);
+      ordered = {};
+      for (auto instr : Range{copy}.resolve(ctx)) {
+        visit(block, instr, ordered);
       }
     }
     for (auto instr : block) {
@@ -228,7 +253,7 @@ public:
 
   static constexpr auto runFuncs =
       mk_tuple(&OrderInstrsPass::runProcess, &OrderInstrsPass::runModule,
-                      &OrderInstrsPass::run);
+               &OrderInstrsPass::run);
 
   auto make(Context &ctx) { return OrderInstrsPass(ctx); }
   explicit OrderInstrsPass(Context &ctx) : ctx(ctx) {}

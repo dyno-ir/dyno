@@ -49,7 +49,8 @@ public:
         continue;
       if (instr.isOpc(OP_CALL)) {
         auto asCall = instr.as<CallInstrRef>();
-        if (!interpretPassPipeline(asCall.func().iref().getBlock(), passRunArgs))
+        if (!interpretPassPipeline(asCall.func().iref().getBlock(),
+                                   passRunArgs))
           return false;
         continue;
       }
@@ -58,16 +59,18 @@ public:
       auto opc = instr.getDialectOpcode();
       auto &pass = passes.findOrCreate(opc, passCtorArgs);
 
+      FatObjRef<MapObj> cfg = nullref;
       if (instr.getNumOperands() != 0) {
         if (instr.getNumOperands() != 1)
           report_fatal_error("expected at most one operand (config)");
-        auto cfg = instr.operand(0)->dyn_as<MapRef>();
+        cfg = instr.operand(0)->dyn_as<MapRef>();
         if (!cfg)
           report_fatal_error("expected map object");
-        DynoLexer lexer{ctx.getDialectInfos(), ArrayRef<char>::emptyRef(),
-                        "<internal>"};
-        pass.config(cfg->data, lexer);
       }
+      DynoLexer lexer{ctx.getDialectInfos(), ArrayRef<char>::emptyRef(),
+                      "<internal>"};
+      std::map<std::string, std::string> empty{};
+      pass.config(cfg ? cfg->data : empty, lexer);
 
       if (!pass.run(passRunArgs)) {
         std::print(dbgs(), "failed to run pass: ",

@@ -24,7 +24,7 @@ class SSAConstructPass : public Pass<SSAConstructPass> {
   Context &ctx;
   unsigned depth = 0;
   ObjMapVec<Instr, bool> isNewInstr;
-  AutoCopyDebugInfoStack autoDebugInfo;
+  TempBindVal<AutoCopyDebugInfoStack> autoDebugInfo;
 
 public:
 #define CONFIG_STRUCT_LAMBDA(FIELD, ENUM)                                      \
@@ -82,7 +82,7 @@ private:
 
 public:
   auto make(Context &ctx) { return SSAConstructPass(ctx); }
-  explicit SSAConstructPass(Context &ctx) : ctx(ctx), autoDebugInfo(ctx) {}
+  explicit SSAConstructPass(Context &ctx) : ctx(ctx) {}
 
   struct MultiwayResult {
     SmallVec<Tuple<RegisterRef, std::pair<uint32_t, uint32_t>, TriggerID>,
@@ -454,7 +454,7 @@ public:
     SmallVec<FatDynObjRef<>, 32> destroyList;
 
     for (auto instr : block) {
-      auto token = autoDebugInfo.addWithToken(instr);
+      auto token = autoDebugInfo->addWithToken(instr);
       switch (*instr.getDialectOpcode()) {
 
       case *HW_STORE_DEFER:
@@ -821,6 +821,7 @@ public:
   }
 
   void runWrapper(auto &&runFunc) {
+    auto tok = autoDebugInfo.emplace(ctx);
     isNewInstr.clear();
     isNewInstr.resize(ctx.getStore<Instr>().numIDs());
     auto &createHooks = ctx.getStore<Instr>().createHooks;

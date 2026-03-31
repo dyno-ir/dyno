@@ -244,6 +244,18 @@ replace {
   HW_SPLICE $out, $in, const_add($addrA, $addrB), $termsA..., $termsB...
 }
 
+match {
+  HW_SPLICE $x, $args...
+  OP_TRUNC $out, $x:HW_WIRE
+}
+with [{
+  if ($x.begin()->as<WireRef>().getNumUses() != 1)
+    goto $fail;
+}]
+replace {
+  HW_SPLICE $out, $args...
+}
+
 // we need check duplicates of these. dyno dsl pattern matching should fix.
 macro chk_const_diff_lens $self, $lhs, $rhs [{
   auto lhsBits = *(*$lhs.begin())->as<HWValue>().getNumBits();

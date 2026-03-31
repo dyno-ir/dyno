@@ -2,9 +2,9 @@
 
 #include "dyno/Constant.h"
 #include "dyno/Context.h"
+#include "dyno/DeepCopy.h"
 #include "dyno/Pass.h"
 #include "hw/AutoDebugInfo.h"
-#include "dyno/DeepCopy.h"
 #include "hw/HWAbstraction.h"
 #include "hw/HWContext.h"
 #include "hw/HWInstr.h"
@@ -25,13 +25,13 @@ class LinearizeControlFlowPass : public Pass<LinearizeControlFlowPass> {
   DeepCopier copier;
   HWInstrBuilder build;
   SmallVec<InstrRef, 64> worklist;
-  AutoCopyDebugInfoStack autoDebugInfo;
+  TempBindVal<AutoCopyDebugInfoStack> autoDebugInfo;
   LoopSimplifer loopSimplify;
   InstCombinePass instCombine;
 
 public:
 #define CONFIG_STRUCT_LAMBDA(FIELD, ENUM)                                      \
-  FIELD(bool, flattenLoops, true)                                           \
+  FIELD(bool, flattenLoops, true)                                              \
   FIELD(bool, flattenMultiway, true)
   CONFIG_STRUCT(CONFIG_STRUCT_LAMBDA)
 #undef CONFIG_STRUCT_LAMBDA
@@ -114,7 +114,7 @@ private:
     copier.deepCopyInstrs(instr.getFalseBlock().begin(), insertIter, copyHook);
     build.setInsertPoint(endIter);
 
-    auto token = autoDebugInfo.addWithToken(instr);
+    auto token = autoDebugInfo->addWithToken(instr);
 
     assert(yields.size() % 2 == 0 && "invalid number of yield values");
     for (size_t i = 0; i < yields.size() / 2; i++) {
@@ -163,7 +163,7 @@ private:
 
     build.setInsertPoint(endIter);
 
-    auto token = autoDebugInfo.addWithToken(instr);
+    auto token = autoDebugInfo->addWithToken(instr);
     assert(numYieldValues == 0 || defaultIdx);
 
     size_t lastIdx = instr.block().size() - 1;
@@ -244,7 +244,7 @@ private:
 
     auto cbuild = ConstantBuilder{ctx.getStore<Constant>()};
 
-    auto token = autoDebugInfo.addWithToken(forLoop);
+    auto token = autoDebugInfo->addWithToken(forLoop);
 
     cbuild.val(forLoop.getLower()->as<ConstantRef>());
     for (uint64_t i = 0; i < *div.getLimitedVal(); i++) {
@@ -314,20 +314,27 @@ private:
 
 public:
   void run() {
+    auto tok = autoDebugInfo.emplace(ctx);
     for (auto module : ctx.getCtx<HWDialectContext>().activeModules()) {
       runOnModule(module.iref());
     }
   }
-  void runModule(ModuleIRef mod) { runOnModule(mod); }
-  void runProcess(ProcessIRef proc) { runOnProcess(proc); }
+  void runModule(ModuleIRef mod) {
+    auto tok = autoDebugInfo.emplace(ctx);
+    runOnModule(mod);
+  }
+  void runProcess(ProcessIRef proc) {
+    auto tok = autoDebugInfo.emplace(ctx);
+    runOnProcess(proc);
+  }
 
   static constexpr auto runFuncs = mk_tuple(
       &LinearizeControlFlowPass::runProcess,
       &LinearizeControlFlowPass::runModule, &LinearizeControlFlowPass::run);
 
   explicit LinearizeControlFlowPass(Context &ctx)
-      : ctx(ctx), copier(ctx), build(ctx), autoDebugInfo(ctx),
-        loopSimplify(ctx), instCombine(ctx) {}
+      : ctx(ctx), copier(ctx), build(ctx), loopSimplify(ctx), instCombine(ctx) {
+  }
   static LinearizeControlFlowPass make(Context &ctx) {
     return LinearizeControlFlowPass{ctx};
   }
