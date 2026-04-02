@@ -6,6 +6,7 @@
 #include "dyno/Interface.h"
 #include "dyno/NewDeleteObjStore.h"
 #include "dyno/Obj.h"
+#include "dyno/Symbol.h"
 #include "hw/DebugInfo.h"
 #include "meta/MetaPassManager.h"
 #include "support/CallableRef.h"
@@ -123,24 +124,28 @@ public:
   CFG cfg;
   ConstantStoreT constants;
   SourceLocInfo<Instr> instrSourceLocInfo;
+  SymbolStore *symbols;
 
   template <typename T> auto &getStore();
   template <> auto &getStore<Instr>() { return instrs; }
   template <> auto &getStore<Constant>() { return constants; }
+  template <> auto &getStore<Symbol>() { return *symbols; }
 
   BlockRef createBlock() { return cfg.blocks.create(cfg); };
 
+  std::array<CallableRef<FatDynObjRef<>(DynObjRef)>, 5> resolverMethods;
+
   // clang-format off
-  std::array<CallableRef<FatDynObjRef<>(DynObjRef)>, 4> resolverMethods = {
+  CoreDialectContext(SymbolStore* symbols = nullptr) : symbols(symbols), resolverMethods({
     // zeroth element is invalid in core dialect, forward to instr resolver which will assert
     CallableRef{&instrs, BindMethod<&InstrStoreT::resolveGeneric>::fv},
     CallableRef{&instrs, BindMethod<&InstrStoreT::resolveGeneric>::fv},
     CallableRef{&constants, BindMethod<&ConstantStoreT::resolveGeneric>::fv},
     CallableRef{&cfg.blocks, BindMethod<&decltype(cfg.blocks)::resolveGeneric>::fv},
-  };
+    CallableRef{symbols, BindMethod<&SymbolStore::resolveGeneric>::fv},
+  })
   // clang-format on
-
-  CoreDialectContext() {
+  {
     instrs.destroyHooks.emplace_back(
         [&](InstrRef instr) { instrSourceLocInfo.resetDebugInfo(instr); });
   }

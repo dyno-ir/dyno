@@ -3,6 +3,7 @@
 #include "dyno/Context.h"
 #include "dyno/DialectInfo.h"
 #include "dyno/IDImpl.h"
+#include "dyno/IDs.h"
 #include "dyno/Instr.h"
 #include "dyno/Interface.h"
 #include "dyno/Lexer.h"
@@ -13,6 +14,7 @@
 #include "support/RTTI.h"
 #include "support/ResultUnwrap.h"
 #include "support/SmallVec.h"
+#include "support/StringRef.h"
 #include "support/TempBind.h"
 #include "support/TemplateUtil.h"
 #include "support/Tokenizer.h"
@@ -316,13 +318,36 @@ public:
 
   FatDynObjRef<> parseCore(DialectType type, ArrayRef<char> name) {
     assert(type.dialect == DIALECT_CORE);
-    if (type == CORE_BLOCK) {
+    switch (type.type) {
+    case CORE_BLOCK.type: {
       auto block = base.getCFG().blocks.create(base.getCFG());
       return block;
     }
+    case CORE_SYMBOL.type: {
+      SSOStringRef nm = name;
+      Optional<DialectType> type = nullopt;
+      if (base.lexer->popIf(DynoLexer::op_rbropen)) {
+        nm = base.lexer->popEnsure(Token::STRING_LITERAL).strLit.value;
+        if (base.lexer->popIf(DynoLexer::op_comma)) {
+          if (auto t = base.lexer->popType())
+            type = *t;
+          else
+            report_fatal_error("invalid type");
+        }
+        base.lexer->popEnsure(DynoLexer::op_rbrclose);
+      }
+      auto symb = base.ctx.getStore<Symbol>().findOrInsert(nm);
+      if (type != nullopt) {
+        if (symb->type && symb->type != type)
+          report_fatal_error("symbol type mismatch");
+        else
+          symb->type = type;
+      }
 
+      return symb;
+    }
+    }
     return nullref;
   }
 };
-
 }; // namespace dyno

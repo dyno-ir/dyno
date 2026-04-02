@@ -6,12 +6,14 @@
 #include "dyno/DialectInfo.h"
 #include "dyno/IDs.h"
 #include "dyno/Obj.h"
+#include "dyno/Symbol.h"
 #include "hw/DebugInfo.h"
 #include "hw/HWContext.h"
 #include "support/CallableRef.h"
 #include "support/DenseMap.h"
 #include "support/RTTI.h"
 #include "support/TempBind.h"
+#include "support/Tuple.h"
 #include "support/Utility.h"
 #include <array>
 #include <dyno/Instr.h>
@@ -19,7 +21,6 @@
 #include <initializer_list>
 #include <iostream>
 #include <ostream>
-#include "support/Tuple.h"
 
 namespace dyno {
 
@@ -135,6 +136,12 @@ public:
       str << dialectI[ref].name << ".";
     }
     str << tyI[ref].name;
+  }
+  void printTypeDefault(DialectType type) {
+    if (!isDefault[type.getDialectID()]) {
+      str << dialectI[type.getDialectID()]->name << ".";
+    }
+    str << tyI[type.getDialectID()][type.getTypeID()].name;
   }
 
   void printOpcodeDefault(InstrRef ref) {
@@ -387,12 +394,38 @@ public:
     base->interfaces.registerVal<PrinterBase::type::print_fn>(
         DIALECT_CORE,
         CallableRef{this, &BindMethod<&CoreDialectPrinter::printTypeCore>::fv});
+    base->interfaces.registerVal<PrinterBase::name_fn>(
+        DIALECT_CORE,
+        CallableRef{this, &BindMethod<&CoreDialectPrinter::getNameCore>::fv});
+  }
+
+  std::optional<PrinterBase::IntroducedName> getNameCore(FatDynObjRef<> ref) {
+    switch (ref.getTyID()) {
+    case CORE_SYMBOL.type: {
+      return PrinterBase::IntroducedName{ref.as<SymbolRef>()->name.c_str()};
+    }
+    default:
+      return std::nullopt;
+    }
   }
 
   bool printTypeCore(FatDynObjRef<> ref, bool def) {
     switch (ref.getTyID()) {
     case CORE_CONSTANT.type: {
       base.str << '#' << ref.as<ConstantRef>();
+      return true;
+    }
+    case CORE_SYMBOL.type: {
+      auto asSymb = ref.as<SymbolRef>();
+      base.str << "symbol";
+      if (!def || asSymb->type) {
+        std::print(base.str, "(\"{}\"", asSymb->name);
+        if (asSymb->type) {
+          std::print(base.str, ", ");
+          base.printTypeDefault(*asSymb->type);
+        }
+        std::print(base.str, ")");
+      }
       return true;
     }
     default:
