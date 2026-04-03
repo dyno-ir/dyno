@@ -1,11 +1,9 @@
 #pragma once
 
 #include "dyno/Instr.h"
-#include "dyno/InstrNumbering.h"
 #include "dyno/NewDeleteObjStore.h"
 #include "dyno/Obj.h"
 #include "dyno/ObjMap.h"
-#include "support/CallableRef.h"
 #include "support/RTTI.h"
 #include <cassert>
 
