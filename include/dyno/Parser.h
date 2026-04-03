@@ -32,8 +32,8 @@ protected:
 
 public:
   TempBindVal<DynoLexer> lexer;
-  using obj_parse_fn =
-      CallableRef<FatDynObjRef<>(DialectType type, ArrayRef<char> name)>;
+  using obj_parse_fn = CallableRef<FatDynObjRef<>(
+      DialectType type, ArrayRef<char> name, bool isDef)>;
   Interfaces<NUM_DIALECTS, obj_parse_fn> interfaces;
   Context &ctx;
 
@@ -48,12 +48,13 @@ private:
   };
 
 protected:
-  std::expected<FatDynObjRef<>, ParseError> parseObject(ArrayRef<char> name) {
+  std::expected<FatDynObjRef<>, ParseError> parseObject(ArrayRef<char> name,
+                                                        bool isDef) {
     auto state = lexer->getState();
     UNWRAP(type, lexer->popType());
     auto fn = interfaces.template getVal<obj_parse_fn>(type.getDialectID());
     assert(fn);
-    auto ref = fn(type, std::string_view{name});
+    auto ref = fn(type, std::string_view{name}, isDef);
     if (!ref) {
       lexer->restoreState(state);
       return std::unexpected{
@@ -82,7 +83,7 @@ protected:
 
     if (lexer->popIf(DynoLexer::op_colon)) {
       isDef = !lexer->popIf(DynoLexer::op_qmark);
-      UNWRAP(newObj, parseObject(ArrayRef{identStr}))
+      UNWRAP(newObj, parseObject(ArrayRef{identStr}, isDef))
       obj = newObj;
       auto isFwdDef = forwardDef.find(ident.ident.idx);
       if (!(isFwdDef.has() && *isFwdDef))
@@ -111,12 +112,12 @@ protected:
 
     if (tok.type == DynoLexer::op_colon) {
       lexer->Pop();
-      UNWRAP(ref, parseObject(ArrayRef<char>::emptyRef()))
+      UNWRAP(ref, parseObject(ArrayRef<char>::emptyRef(), true))
       return ParseOperand{ref, true};
     }
 
     if (lexer->peekType()) {
-      UNWRAP(ref, parseObject(ArrayRef<char>::emptyRef()))
+      UNWRAP(ref, parseObject(ArrayRef<char>::emptyRef(), false))
       return ParseOperand{ref, false};
     }
 
@@ -316,7 +317,7 @@ public:
         CallableRef{this, BindMethod<&CoreDialectParser::parseCore>::fv});
   }
 
-  FatDynObjRef<> parseCore(DialectType type, ArrayRef<char> name) {
+  FatDynObjRef<> parseCore(DialectType type, ArrayRef<char> name, bool isDef) {
     assert(type.dialect == DIALECT_CORE);
     switch (type.type) {
     case CORE_BLOCK.type: {
@@ -342,6 +343,11 @@ public:
           report_fatal_error("symbol type mismatch");
         else
           symb->type = type;
+      }
+      if (isDef) {
+        if (symb->defCtx && symb->defCtx != &base.ctx)
+          report_fatal_error("symbol defined in multiple contexts");
+        symb->defCtx = &base.ctx;
       }
 
       return symb;

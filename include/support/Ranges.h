@@ -190,6 +190,8 @@ public:
   using iterator_category = typename std::iterator_traits<T>::iterator_category;
   using value_type = T;
   using difference_type = typename std::iterator_traits<T>::difference_type;
+  using pointer = void;
+  using reference = void;
 
 private:
   static constexpr bool isRandom =
@@ -231,11 +233,6 @@ public:
   friend bool operator==(const no_deref_iterator &a,
                          const no_deref_iterator &b) {
     return a.it == b.it;
-  }
-
-  friend bool operator!=(const no_deref_iterator &a,
-                         const no_deref_iterator &b) {
-    return a.it != b.it;
   }
   friend auto operator<=>(const no_deref_iterator &a,
                           const no_deref_iterator &b)

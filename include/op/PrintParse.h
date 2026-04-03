@@ -61,7 +61,7 @@ public:
         dialect, CallableRef{this, BindMethod<&OpDialectParser::parseObj>::fv});
   }
 
-  FatDynObjRef<> parseObj(DialectType type, ArrayRef<char> name) {
+  FatDynObjRef<> parseObj(DialectType type, ArrayRef<char> name, bool isDef) {
     DynoLexer &lexer = *base->lexer;
 
     switch (type.type) {

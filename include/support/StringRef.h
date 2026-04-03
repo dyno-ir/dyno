@@ -118,6 +118,8 @@ public:
   BigSSOStringRef(const char *begin, const char *end)
       : BigSSOStringRef(begin, end - begin) {}
 
+  BigSSOStringRef(const std::string &str)
+      : BigSSOStringRef(str.data(), str.length()) {}
   template <typename T>
   BigSSOStringRef(T &&t) : BigSSOStringRef(t.begin(), t.end()) {}
   BigSSOStringRef(const char *data) : BigSSOStringRef(data, strlen(data)) {}
@@ -172,6 +174,8 @@ public:
   SSOStringRef(const char *begin, const char *end)
       : SSOStringRef(begin, end - begin) {}
 
+  SSOStringRef(const std::string &str)
+      : SSOStringRef(str.data(), str.length()) {}
   template <typename T>
   SSOStringRef(T &&t) : SSOStringRef(t.begin(), t.end()) {}
   SSOStringRef(const char *data)

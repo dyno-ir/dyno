@@ -3,6 +3,7 @@
 #include "dyno/NewDeleteObjStore.h"
 #include "dyno/Obj.h"
 #include "dyno/Type.h"
+#include "support/ErrorRecovery.h"
 #include "support/Optional.h"
 #include "support/StringRef.h"
 #include "support/TwoLevelSet.h"
@@ -14,6 +15,7 @@ public:
   InstrDefUse defUse;
   const std::string name;
   Optional<DialectType> type = nullopt;
+  Context *defCtx;
 
   Symbol(DynObjRef, SSOStringRef name, Optional<DialectType> type = nullopt)
       : name(name.begin(), name.end()), type(type) {}
@@ -36,6 +38,20 @@ class SymbolStore {
   TwoLevelMap<SSOStringRef, ObjRef<Symbol>> map;
 
 public:
+  SymbolRef create(FatObjRef<Symbol> other) {
+    auto ref = findOrInsert(SSOStringRef{other->name});
+    if (other->defCtx) {
+      if (ref->defCtx && ref->defCtx != other->defCtx)
+        report_fatal_error("symbol defined in multiple contexts");
+      ref->defCtx = other->defCtx;
+    }
+    if (other->type) {
+      if (ref->type && ref->type != other->type)
+        report_fatal_error("symbol referenced with different types");
+      ref->type = other->type;
+    }
+    return ref;
+  }
   SymbolRef findOrInsert(SSOStringRef name) {
     auto [found, it] =
         map.findOrInsert(name, [&]() { return store.create(name); });

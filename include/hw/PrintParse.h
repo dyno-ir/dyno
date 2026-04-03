@@ -171,7 +171,7 @@ public:
         CallableRef{this, BindMethod<&HWDialectParser::parseHW>::fv});
   }
 
-  FatDynObjRef<> parseHW(DialectType type, ArrayRef<char> name) {
+  FatDynObjRef<> parseHW(DialectType type, ArrayRef<char> name, bool isDef) {
     auto *lexer = &*base.lexer;
     auto *ctx = &base.ctx;
     switch (*type) {

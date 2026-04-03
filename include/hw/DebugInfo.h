@@ -129,6 +129,18 @@ public:
     }
   }
 
+  void copyDebugInfoOOC(SourceLocInfo &other, ObjRef<InstrT> src,
+                        ObjRef<InstrT> dst) {
+    if (&other == this)
+      return copyDebugInfo(src, dst);
+    if (!other.instrMap.inRange(src) || other.instrMap[src].empty())
+      return;
+    for (auto loc : other.getSourceLocs(src)) {
+      addSrcLoc(dst, loc.fileName, loc.beginLine, loc.beginCol, loc.endLine,
+                loc.endCol);
+    }
+  }
+
   void reset() {
     srcLocDedupe.clear();
     instrMap.clear();

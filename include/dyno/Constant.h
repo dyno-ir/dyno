@@ -3007,6 +3007,10 @@ public:
     return acc;
   }
 
+  ConstantRef create(FatObjRef<Constant> other) {
+    return findOrInsert(ConstantRef{other});
+  }
+
   ConstantRef findOrInsert(const BigInt &bigInt) {
     if (bigInt.getNumWords() == 1 &&
         bigInt.getRawNumBits() < (1ULL << ConstantRef::NBits::size))

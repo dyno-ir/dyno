@@ -108,7 +108,7 @@ public:
   static constexpr DialectID dialect{DIALECT_AIG};
   explicit AIGDialectParser(ParserBase *base) : base(base) {}
 
-  FatDynObjRef<> parseAIG(DialectType type, ArrayRef<char> name) {
+  FatDynObjRef<> parseAIG(DialectType type, ArrayRef<char> name, bool isDef) {
     (void)base;
     return nullref;
   }

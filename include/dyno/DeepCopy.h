@@ -15,7 +15,9 @@ concept IsCopyHook =
 
 class DeepCopier {
 public:
+  // destination context
   Context &ctx;
+  Context &srcCtx;
 
   // we actually don't need to store dialect/ty twice so could just store
   // objID for new. Then we need another type switch to get the ptr though, so
@@ -43,9 +45,11 @@ public:
       return blockRef;
     }
     case *CORE_CONSTANT: {
-      // do not copy constants
-      return obj;
+      if (&srcCtx == &ctx)
+        // do not copy constants in same ctx
+        return obj;
     }
+      [[fallthrough]];
     default: {
       auto copy = ctx.copy(obj);
       assert(copy && "copy not implemented");
@@ -79,8 +83,9 @@ public:
       build.addRef(ref);
     }
 
-    ctx.getCtx<CoreDialectContext>().instrSourceLocInfo.copyDebugInfo(
-        srcInstr, copyInstr);
+    ctx.getCtx<CoreDialectContext>().instrSourceLocInfo.copyDebugInfoOOC(
+        srcCtx.getCtx<CoreDialectContext>().instrSourceLocInfo, srcInstr,
+        copyInstr);
     return copyInstr;
   }
 
@@ -91,6 +96,7 @@ public:
   template <IsCopyHook InstrHook>
   InstrRef moveInstr(InstrRef srcInstr, BlockRef_iterator<true> dstIt,
                      InstrHook instrCallback) {
+    assert(&srcCtx == &ctx);
     ctx.getCtx<CoreDialectContext>().cfg[srcInstr] = dstIt;
     return srcInstr;
   }
@@ -145,7 +151,8 @@ public:
   }
 
 public:
-  DeepCopier(Context &ctx) : ctx(ctx) {}
+  DeepCopier(Context &ctx) : ctx(ctx), srcCtx(ctx) {}
+  DeepCopier(Context &dstCtx, Context &srcCtx) : ctx(dstCtx), srcCtx(srcCtx) {}
 };
 
 }; // namespace dyno

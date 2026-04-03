@@ -3,6 +3,7 @@
 #include "dyno/CFG.h"
 #include "dyno/Constant.h"
 #include "dyno/DialectInfo.h"
+#include "dyno/IDs.h"
 #include "dyno/Interface.h"
 #include "dyno/NewDeleteObjStore.h"
 #include "dyno/Obj.h"
@@ -18,6 +19,17 @@ namespace dyno {
 struct TypeErasedCtx {
   void *ctx;
 };
+
+namespace detail {
+// convert method that takes/returns static arg into one taking/returning
+// dynamic arg
+template <auto Func>
+static FatDynObjRef<> castToSpecificRef(void *obj, FatDynObjRef<> ref) {
+  using ArgT = std::remove_reference_t<
+      tuple_element_t<1, function_args_t<decltype(Func)>>>;
+  return Func(obj, ref.as<ArgT>());
+}
+}; // namespace detail
 
 template <> struct InterfaceTraits<TypeErasedCtx> {
   static const TypeErasedCtx dispatch1(DynObjRef ref,
@@ -56,6 +68,7 @@ template <typename Derived> class ContextMixin {
           ...);
       return maxID;
     }(std::make_index_sequence<numStores>{});
+    assert(maxID <= 127);
     return maxID;
   }
   auto makeResolverMethods() {
@@ -73,14 +86,6 @@ template <typename Derived> class ContextMixin {
     }(std::make_index_sequence<numStores>{});
     return arr;
   }
-  // convert method that takes/returns static arg into one taking/returning
-  // dynamic arg
-  template <auto Func>
-  static FatDynObjRef<> castToSpecificRef(void *obj, FatDynObjRef<> ref) {
-    using ArgT = std::remove_reference_t<
-        tuple_element_t<1, function_args_t<decltype(Func)>>>;
-    return Func(obj, ref.as<ArgT>());
-  }
   auto makeCopyMethods() {
     // create vector and assign elements
     Vec<CallableRef<FatDynObjRef<>(FatDynObjRef<>)>> arr(getMaxTyID() + 1);
@@ -94,8 +99,8 @@ template <typename Derived> class ContextMixin {
             if constexpr (requires { (SignT)(&StoreT::create); }) {
               arr[ObjTraits<typename StoreT::value_type>::ty.getTypeID() &
                   127] = CallableRef{
-                  &store,
-                  castToSpecificRef<BindMethod<(SignT)(&StoreT::create)>::fv>};
+                  &store, detail::castToSpecificRef<
+                              BindMethod<(SignT)(&StoreT::create)>::fv>};
             }
           }(),
           ...);
@@ -124,6 +129,7 @@ public:
   CFG cfg;
   ConstantStoreT constants;
   SourceLocInfo<Instr> instrSourceLocInfo;
+  // set via setSymbols or constructor
   SymbolStore *symbols;
 
   template <typename T> auto &getStore();
@@ -133,21 +139,37 @@ public:
 
   BlockRef createBlock() { return cfg.blocks.create(cfg); };
 
-  std::array<CallableRef<FatDynObjRef<>(DynObjRef)>, 5> resolverMethods;
-
   // clang-format off
-  CoreDialectContext(SymbolStore* symbols = nullptr) : symbols(symbols), resolverMethods({
-    // zeroth element is invalid in core dialect, forward to instr resolver which will assert
-    CallableRef{&instrs, BindMethod<&InstrStoreT::resolveGeneric>::fv},
+  std::array<CallableRef<FatDynObjRef<>(DynObjRef)>, 5> resolverMethods = {
+    CallableRef<FatDynObjRef<>(DynObjRef)>{},
     CallableRef{&instrs, BindMethod<&InstrStoreT::resolveGeneric>::fv},
     CallableRef{&constants, BindMethod<&ConstantStoreT::resolveGeneric>::fv},
     CallableRef{&cfg.blocks, BindMethod<&decltype(cfg.blocks)::resolveGeneric>::fv},
-    CallableRef{symbols, BindMethod<&SymbolStore::resolveGeneric>::fv},
-  })
+    CallableRef<FatDynObjRef<>(DynObjRef)>{},
+  };
+  std::array<CallableRef<FatDynObjRef<>(FatDynObjRef<>)>, 5> copyMethods = {
+    CallableRef<FatDynObjRef<>(FatDynObjRef<>)>{},
+    CallableRef<FatDynObjRef<>(FatDynObjRef<>)>{},
+    CallableRef<FatDynObjRef<>(FatDynObjRef<>)>{CallableRef{
+        &constants,
+        &detail::castToSpecificRef<BindMethod<&ConstantStore::create>::fv>}},
+    CallableRef<FatDynObjRef<>(FatDynObjRef<>)>{},
+    CallableRef<FatDynObjRef<>(FatDynObjRef<>)>{},
+  };
   // clang-format on
-  {
+
+  CoreDialectContext(SymbolStore *symbols = nullptr) : symbols(symbols) {
     instrs.destroyHooks.emplace_back(
         [&](InstrRef instr) { instrSourceLocInfo.resetDebugInfo(instr); });
+  }
+
+  void setSymbols(SymbolStore &symbolStore) {
+    symbols = &symbolStore;
+    resolverMethods[CORE_SYMBOL.type & 127] =
+        CallableRef{symbols, BindMethod<&SymbolStore::resolveGeneric>::fv};
+    copyMethods[CORE_SYMBOL.type & 127] = CallableRef{
+        symbols,
+        &detail::castToSpecificRef<BindMethod<&SymbolStore::create>::fv>};
   }
 
   void reset() {
