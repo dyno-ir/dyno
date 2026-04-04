@@ -77,9 +77,39 @@
       "type": "lldb",
       "request": "launch",
       "name": "dyno-test",
-      "program": "${workspaceFolder}/build/tools/dyno-test/dyno-test",
+      "program": "${workspaceFolder}/build/tools/dyno-sv/dyno-sv",
       "args": [
+        "test",
+        "${workspaceFolder}/tools/dyno-opt/dyno-ir/flow.dyno",
         "${workspaceFolder}/tools/dyno-test/dyno-ir/test.dyno",
+        "--only=test-script",
+        "--debug"
+      ],
+    },
+    {
+      "type": "lldb",
+      "request": "launch",
+      "name": "dyno script",
+      "program": "${workspaceFolder}/build/tools/dyno-sv/dyno-sv",
+      "args": [
+        "script",
+        "${workspaceFolder}/tools/dyno-opt/dyno-ir/script.dyno",
+        "--print-after-all",
+        "--debug"
+      ],
+    },
+    {
+      "type": "lldb",
+      "request": "launch",
+      "name": "dyno-opt dump",
+      "program": "${workspaceFolder}/build/tools/dyno-opt/dyno-opt",
+      "args": [
+        "${workspaceFolder}/dump.dyno",
+        "--flow=${workspaceFolder}/tools/dyno-opt/dyno-ir/flow.dyno",
+        "-o=opt.dyno",
+        "-p",
+        "--liberty",
+        "sky130_fd_sc_hd__tt_025C_1v80.lib",
       ],
     },
     {

@@ -4,12 +4,14 @@
 #include "dyno/Context.h"
 #include "dyno/DeepCopy.h"
 #include "dyno/DialectInfo.h"
+#include "dyno/FatContext.h"
 #include "dyno/IDImpl.h"
 #include "dyno/Instr.h"
 #include "dyno/InstrPrinter.h"
 #include "dyno/Lexer.h"
 #include "dyno/Obj.h"
 #include "dyno/Parser.h"
+#include "dyno/passes/ResolveImports.h"
 #include "hw/HWContext.h"
 #include "hw/HWPrinter.h"
 #include "hw/PrintParse.h"
@@ -29,9 +31,10 @@
 #include <string>
 using namespace dyno;
 
-CmdLineArg<StringRef> argFileName{
-    std::nullopt, "input file", "Input Dyno-IR file path.",
-    CmdLineArgFlags::POSITIONAL | CmdLineArgFlags::MANDATORY};
+CmdLineArg<Vec<StringRef>> argFileName{
+    std::nullopt, "input file", "Input Dyno-IR file(s) path.",
+    CmdLineArgFlags::POSITIONAL | CmdLineArgFlags::MANDATORY |
+        CmdLineArgFlags::MULTIPLE};
 
 CmdLineArg<bool> argDumpAfterAll{std::nullopt, "dump-after-all",
                                  "Dump IR into ./dumps after every pass.", 0,
@@ -42,6 +45,11 @@ CmdLineArg<bool> argPrintAfterAll{'p', "print-after-all",
 CmdLineArg<bool> argDebug{
     'd', "debug", "Run in debug mode (only has effect for debug builds).", 0,
     false};
+
+CmdLineArg<Vec<StringRef>> argTestOnly{
+    std::nullopt, "only",
+    "Only run listed test, can be specified multiple times.",
+    CmdLineArgFlags::VALUE_REQUIRED | CmdLineArgFlags::MULTIPLE};
 
 using DynoTestParser =
     Parser<CoreDialectParser, MetaDialectParser, OpDialectParser,
@@ -60,51 +68,42 @@ public:
 };
 
 int main(int argc, char **argv) {
-  Context ctx;
-  HWDialectContext hwContext;
-  CoreDialectContext coreContext;
-  MetaDialectContext metaContext;
-  OpDialectContext opContext;
-  AIGDialectContext aigContext;
-  TestDialectContext testContext;
-  ctx.registerDialect(coreContext);
-  ctx.registerDialect(hwContext);
-  ctx.registerDialect(opContext);
-  ctx.registerDialect(aigContext);
-  ctx.registerDialect(testContext);
-  // meta must be registered last
-  ctx.registerDialect(metaContext);
+  SymbolStore symbols;
+  FatContext ctx;
+  ctx.add<HWDialectContext>();
+  ctx.add<CoreDialectContext>();
+  ctx.add<OpDialectContext>();
+  ctx.add<AIGDialectContext>();
+  ctx.add<TestDialectContext>();
+  ctx.add<MetaDialectContext>();
 
   CmdLineArgHandler cmdLineArgHandler;
   cmdLineArgHandler.registerArg(argFileName);
   cmdLineArgHandler.registerArg(argDumpAfterAll);
   cmdLineArgHandler.registerArg(argPrintAfterAll);
+  cmdLineArgHandler.registerArg(argTestOnly);
   cmdLineArgHandler.registerArg(argDebug);
   cmdLineArgHandler.parse(argc, argv);
 
   DynoTestParser parser{ctx};
 
-  std::string fileName{argFileName->begin(), argFileName->end()};
-  MMap mmap{fileName};
-  if (!mmap)
-    report_fatal_error("failed to open file: {}", fileName);
+  TwoLevelSet<StringRef> only{Range(*argTestOnly)};
+  auto block = ctx.getStore<Block>().create(ctx.getCFG());
 
+  for (auto file : *argFileName) {
+    std::string fileName{file.begin(), file.end()};
+    MMap mmap{fileName};
+    if (!mmap)
+      report_fatal_error("failed to open file: {}", fileName);
+    parser.parse(mmap, fileName, block.end());
+  }
+
+  ResolveImportsPass{ctx}.run();
+  auto sandbox = ctx.create();
+  sandbox.getCtx<CoreDialectContext>().setSymbols(
+      *ctx.getCtx<CoreDialectContext>().symbols);
   DynoTestPrinter print{ctx, std::cout};
-  TestInterpreter interp{ctx, print};
-  bool pass = true;
-
-  debugType = *argDebug;
-
-  // DynoLexer::State state = {};
-  // while (auto instr = parser.parseSingle(mmap, fileName, state)) {
-  //   pass &= interp.exec(instr, *argPrintAfterAll);
-
-  //   // Completely reset the context after a single pass. Otherwise previous'
-  //   // freeIDs will always affect current, which can affect operand ordering.
-  //   // (Other option would be more fuzzy comparison)
-  //   ctx.reset();
-  //   interp.reset();
-  //   parser.reset();
-  // }
+  TestInterpreter interp{sandbox, print};
+  auto pass = interp.execBlock(block, sandbox, only, *argPrintAfterAll);
   return pass ? 0 : -1;
 }

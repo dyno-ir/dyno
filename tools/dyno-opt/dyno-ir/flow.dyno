@@ -1,222 +1,247 @@
+EXPORT :symbol("flow_earlyCanonFlow"),           %earlyCanonFlow           :?func
+EXPORT :symbol("flow_synthCanonicalize"),        %synthCanonicalize        :?func
+EXPORT :symbol("flow_synthEarlyOpt"),            %synthEarlyOpt            :?func
+EXPORT :symbol("flow_synthLowerControlFlow"),    %synthLowerControlFlow    :?func
+EXPORT :symbol("flow_synthMemoryFFMuxHandling"), %synthMemoryFFMuxHandling :?func
+EXPORT :symbol("flow_synthLowerMemoryFF"),       %synthLowerMemoryFF       :?func
+EXPORT :symbol("flow_synthTechmap"),             %synthTechmap             :?func
+EXPORT :symbol("flow_completeFlow"),             %completeFlow             :?func
 
-// preprocessing, inlining
-meta.REMOVE_INIT_PROCS_PASS
-meta.FUNCTION_INLINE_PASS
-meta.INST_COMBINE_PASS
-meta.MODULE_INLINE_PASS
-meta.TRIGGER_DEDUPE_PASS
+FUNCTION_DEF %earlyCanonFlow:func, :block {
+  // preprocessing, inlining
+  meta.REMOVE_INIT_PROCS_PASS
+  meta.FUNCTION_INLINE_PASS
+  meta.INST_COMBINE_PASS
+  meta.MODULE_INLINE_PASS
+  meta.TRIGGER_DEDUPE_PASS
 
-// early dedupe/simplification
-meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS map("differentBlocks": "0")
-meta.INST_COMBINE_PASS
+  // early dedupe/simplification
+  meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS map("differentBlocks": "0")
+  meta.INST_COMBINE_PASS
 
-// process fusion & ssa construction
-meta.SEQ_TO_COMB_PASS
-meta.SSA_CONSTRUCT_PASS
-meta.PROCESS_LINEARIZE_PASS map("retainIODeps": "0", "retainInnerDeps": "0")
-meta.SSA_CONSTRUCT_PASS
-meta.SSA_CONSTRUCT_PASS map("mode": "DEFERRED")
-meta.INST_COMBINE_PASS
-meta.LOAD_COALESCE_PASS
-meta.INST_COMBINE_PASS
+  // process fusion & ssa construction
+  meta.SEQ_TO_COMB_PASS
+  meta.SSA_CONSTRUCT_PASS
+  meta.PROCESS_LINEARIZE_PASS map("retainIODeps": "0", "retainInnerDeps": "0")
+  meta.SSA_CONSTRUCT_PASS
+  meta.SSA_CONSTRUCT_PASS map("mode": "DEFERRED")
+  meta.INST_COMBINE_PASS
+  meta.LOAD_COALESCE_PASS
+  meta.INST_COMBINE_PASS
 
-// canonicalize
-meta.LOOP_SIMPLIFY_PASS
-meta.AGGRESSIVE_DEAD_CODE_ELIMINATION_PASS
-meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS map("differentBlocks": "1")
-meta.ORDER_INSTRS_PASS map("assertNoCircularDeps": "1", "moveStoresBeforeLoads": "0")
-meta.INST_COMBINE_PASS
-meta.AGGRESSIVE_DEAD_CODE_ELIMINATION_PASS
-meta.INST_COMBINE_PASS
+  // canonicalize
+  meta.LOOP_SIMPLIFY_PASS
+  meta.AGGRESSIVE_DEAD_CODE_ELIMINATION_PASS
+  meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS map("differentBlocks": "1")
+  meta.ORDER_INSTRS_PASS map("assertNoCircularDeps": "1", "moveStoresBeforeLoads": "0")
+  meta.INST_COMBINE_PASS
+  meta.AGGRESSIVE_DEAD_CODE_ELIMINATION_PASS
+  meta.INST_COMBINE_PASS
+}
 
-meta.DUMP_PASS map("path": "pre_lin.dyno")
+// Early synthesis: unroll loops, fuse processes, canonicalize
+FUNCTION_DEF %synthCanonicalize:func, :block {
+  // unroll loops, simplify
+  meta.LINEARIZE_CONTROL_FLOW_PASS map("flattenLoops": "1", "flattenMultiway": "0")
+  meta.PROCESS_LINEARIZE_PASS map("retainIODeps": "0", "retainInnerDeps": "0")
+  meta.SSA_CONSTRUCT_PASS
+  meta.LOAD_COALESCE_PASS
+  meta.INST_COMBINE_PASS
+  meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS map("differentBlocks": "1")
+  meta.ORDER_INSTRS_PASS map("assertNoCircularDeps": "1", "moveStoresBeforeLoads": "0")
+  meta.INST_COMBINE_PASS
+  meta.AGGRESSIVE_DEAD_CODE_ELIMINATION_PASS
 
-// unroll loops, simplify
-meta.LINEARIZE_CONTROL_FLOW_PASS map("flattenLoops": "1", "flattenMultiway": "0")
-meta.PROCESS_LINEARIZE_PASS map("retainIODeps": "0", "retainInnerDeps": "0")
-meta.SSA_CONSTRUCT_PASS
-meta.LOAD_COALESCE_PASS
-meta.INST_COMBINE_PASS
-meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS map("differentBlocks": "1")
-meta.ORDER_INSTRS_PASS map("assertNoCircularDeps": "1", "moveStoresBeforeLoads": "0")
-meta.INST_COMBINE_PASS
-meta.AGGRESSIVE_DEAD_CODE_ELIMINATION_PASS
+  // lower arith to ADD
+  meta.LOWER_OPS_PASS map(
+    "lowerMultiInputAdd"     : "0",
+    "lowerAddCompress"       : "0",
+    "lowerSimpleAdd"         : "0",
+    "lowerSub"               : "1",
+    "lowerMul"               : "1",
+    "lowerMultiInputBitwise" : "0",
+    "lowerEqualityICMP"      : "0",
+    "lowerOrderingICMP"      : "1",
+    "lowerShift"             : "0",
+    "lowerInsert"            : "0",
+    "lowerExtract"           : "0",
+    "lowerOneHotMux"         : "0",
+  )
+  meta.INST_COMBINE_PASS
+  meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS
+}
 
-// lower arith to ADD
-meta.LOWER_OPS_PASS map(
-  "lowerMultiInputAdd"     : "0",
-  "lowerAddCompress"       : "0",
-  "lowerSimpleAdd"         : "0",
-  "lowerSub"               : "1",
-  "lowerMul"               : "1",
-  "lowerMultiInputBitwise" : "0",
-  "lowerEqualityICMP"      : "0",
-  "lowerOrderingICMP"      : "1",
-  "lowerShift"             : "0",
-  "lowerInsert"            : "0",
-  "lowerExtract"           : "0",
-  "lowerOneHotMux"         : "0",
-)
-meta.INST_COMBINE_PASS
-meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS
+FUNCTION_DEF %synthEarlyOpt:func, :block {
+  // share
+  meta.FUZZY_CSE_PASS
+  meta.ORDER_INSTRS_PASS map("assertNoCircularDeps": "1", "moveStoresBeforeLoads": "0")
+  meta.INST_COMBINE_PASS
+  meta.EARLY_SHARE_PASS map("opToShare": "op.ADD")
+  meta.EARLY_SHARE_PASS map("opToShare": "hw.SPLICE")
+  meta.EARLY_SHARE_PASS map("opToShare": "hw.INSERT")
+  meta.INST_COMBINE_PASS
+  meta.SSA_CONSTRUCT_PASS
+  meta.INST_COMBINE_PASS
+  meta.AGGRESSIVE_DEAD_CODE_ELIMINATION_PASS
 
-// share
-meta.FUZZY_CSE_PASS
-meta.ORDER_INSTRS_PASS map("assertNoCircularDeps": "1", "moveStoresBeforeLoads": "0")
-meta.INST_COMBINE_PASS
-meta.EARLY_SHARE_PASS map("opToShare": "op.ADD")
-meta.EARLY_SHARE_PASS map("opToShare": "hw.SPLICE")
-meta.EARLY_SHARE_PASS map("opToShare": "hw.INSERT")
-meta.INST_COMBINE_PASS
-meta.SSA_CONSTRUCT_PASS
-meta.INST_COMBINE_PASS
-meta.AGGRESSIVE_DEAD_CODE_ELIMINATION_PASS
+  // merge processes created during share
+  meta.PROCESS_LINEARIZE_PASS map("retainIODeps": "0", "retainInnerDeps": "0")
+  meta.ORDER_INSTRS_PASS map("assertNoCircularDeps": "1", "moveStoresBeforeLoads": "1")
+  meta.SSA_CONSTRUCT_PASS
+  meta.LOAD_COALESCE_PASS
+  meta.INST_COMBINE_PASS
+  meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS
+  meta.ORDER_INSTRS_PASS map("assertNoCircularDeps": "1", "moveStoresBeforeLoads": "1")
+  meta.AGGRESSIVE_DEAD_CODE_ELIMINATION_PASS
+}
 
-// merge processes created during share
-meta.PROCESS_LINEARIZE_PASS map("retainIODeps": "0", "retainInnerDeps": "0")
-meta.ORDER_INSTRS_PASS map("assertNoCircularDeps": "1", "moveStoresBeforeLoads": "1")
-meta.SSA_CONSTRUCT_PASS
-meta.LOAD_COALESCE_PASS
-meta.INST_COMBINE_PASS
-meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS
-meta.ORDER_INSTRS_PASS map("assertNoCircularDeps": "1", "moveStoresBeforeLoads": "1")
-meta.AGGRESSIVE_DEAD_CODE_ELIMINATION_PASS
+FUNCTION_DEF %synthLowerControlFlow:func, :block {
+  // flatten all remaining control flow
+  meta.LINEARIZE_CONTROL_FLOW_PASS map("flattenLoops": "1", "flattenMultiway": "1")
+  meta.SSA_CONSTRUCT_PASS
+  meta.LOAD_COALESCE_PASS
+  meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS
+  meta.INST_COMBINE_PASS
+  meta.AGGRESSIVE_DEAD_CODE_ELIMINATION_PASS
 
-meta.DUMP_PASS map("path": "pre_lin2.dyno")
-meta.CHECK_PASS
-// flatten all remaining control flow
-meta.LINEARIZE_CONTROL_FLOW_PASS map("flattenLoops": "1", "flattenMultiway": "1")
-meta.SSA_CONSTRUCT_PASS
-meta.LOAD_COALESCE_PASS
-meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS
-meta.INST_COMBINE_PASS
-meta.AGGRESSIVE_DEAD_CODE_ELIMINATION_PASS
+  // optimize, share
+  meta.INST_COMBINE_PASS
+  meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS
+  meta.FUZZY_CSE_PASS
+  meta.ORDER_INSTRS_PASS map("moveStoresBeforeLoads": "1")
+  meta.INST_COMBINE_PASS
+  meta.SSA_CONSTRUCT_PASS
+  meta.INST_COMBINE_PASS
+  meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS
+  meta.INST_COMBINE_PASS
+  meta.AGGRESSIVE_DEAD_CODE_ELIMINATION_PASS
+}
 
-// optimize, share
-meta.INST_COMBINE_PASS
-meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS
-meta.FUZZY_CSE_PASS
-meta.ORDER_INSTRS_PASS map("moveStoresBeforeLoads": "1")
-meta.INST_COMBINE_PASS
-meta.SSA_CONSTRUCT_PASS
-meta.INST_COMBINE_PASS
-meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS
-meta.INST_COMBINE_PASS
-meta.AGGRESSIVE_DEAD_CODE_ELIMINATION_PASS
+FUNCTION_DEF %synthMemoryFFMuxHandling:func, :block {
+  // memory inference
+  meta.SIMPLE_MEMORY_INFERENCE_PASS
+  meta.INST_COMBINE_PASS
+  meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS
+  meta.AGGRESSIVE_DEAD_CODE_ELIMINATION_PASS
 
-// memory inference
-meta.SIMPLE_MEMORY_INFERENCE_PASS
-meta.INST_COMBINE_PASS
-meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS
-meta.AGGRESSIVE_DEAD_CODE_ELIMINATION_PASS
+  // flatten MUX trees
+  meta.MUX_TREE_FLATTEN_PASS
+  meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS
+  meta.FUZZY_CSE_PASS map("minSharedBitsForMerge": "1", "maxSharedBitsForMerge": "1", "opToShare": "op.AND")
+  meta.ORDER_INSTRS_PASS map("assertNoCircularDeps": "1", "moveStoresBeforeLoads": "1")
+  meta.INST_COMBINE_PASS
 
-// flatten MUX trees
-meta.MUX_TREE_FLATTEN_PASS
-meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS
-meta.FUZZY_CSE_PASS map("minSharedBitsForMerge": "1", "maxSharedBitsForMerge": "1", "opToShare": "op.AND")
-meta.ORDER_INSTRS_PASS map("assertNoCircularDeps": "1", "moveStoresBeforeLoads": "1")
-meta.INST_COMBINE_PASS
+  // lower insert/extract
+  meta.LOWER_OPS_PASS map(
+    "lowerMultiInputAdd"     : "1",
+    "lowerAddCompress"       : "0",
+    "lowerSimpleAdd"         : "0",
+    "lowerSub"               : "1",
+    "lowerMul"               : "1",
+    "lowerMultiInputBitwise" : "0",
+    "lowerEqualityICMP"      : "1",
+    "lowerOrderingICMP"      : "1",
+    "lowerShift"             : "1",
+    "lowerInsert"            : "1",
+    "lowerExtract"           : "1",
+    "lowerOneHotMux"         : "0",
+  )
 
-// lower insert/extract
-meta.LOWER_OPS_PASS map(
-  "lowerMultiInputAdd"     : "1",
-  "lowerAddCompress"       : "0",
-  "lowerSimpleAdd"         : "0",
-  "lowerSub"               : "1",
-  "lowerMul"               : "1",
-  "lowerMultiInputBitwise" : "0",
-  "lowerEqualityICMP"      : "1",
-  "lowerOrderingICMP"      : "1",
-  "lowerShift"             : "1",
-  "lowerInsert"            : "1",
-  "lowerExtract"           : "1",
-  "lowerOneHotMux"         : "0",
-)
+  // lift MUXs up the dep chain for reg partition
+  // (s.t. regs with e.g. concat input can be split)
+  meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS
+  meta.INST_COMBINE_PASS map("liftMUX" : "1")
+  meta.REGISTER_PARTITION_PASS
+  meta.INST_COMBINE_PASS map("liftMUX" : "1")
 
-// lift MUXs up the dep chain for reg partition
-// (s.t. regs with e.g. concat input can be split)
-meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS
-meta.INST_COMBINE_PASS map("liftMUX" : "1")
-meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS
-meta.INST_COMBINE_PASS map("liftMUX" : "1")
-meta.REGISTER_PARTITION_PASS
-meta.INST_COMBINE_PASS map("liftMUX" : "1")
+  meta.PROCESS_LINEARIZE_PASS
+  meta.INST_COMBINE_PASS
+  meta.SSA_CONSTRUCT_PASS
+  meta.INST_COMBINE_PASS
+  meta.AGGRESSIVE_DEAD_CODE_ELIMINATION_PASS
 
-meta.PROCESS_LINEARIZE_PASS
-meta.INST_COMBINE_PASS
-meta.SSA_CONSTRUCT_PASS
-meta.INST_COMBINE_PASS
-meta.AGGRESSIVE_DEAD_CODE_ELIMINATION_PASS
+  // flip flop inference
+  meta.INST_COMBINE_PASS
+  meta.FLIP_FLOP_INFERENCE_PASS
+  meta.TRIGGER_DEDUPE_PASS
+  meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS
+  meta.INST_COMBINE_PASS
+  meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS
+  meta.INST_COMBINE_PASS
+}
 
-// flip flop inference
-meta.INST_COMBINE_PASS
-meta.FLIP_FLOP_INFERENCE_PASS
-meta.TRIGGER_DEDUPE_PASS
-meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS
-meta.INST_COMBINE_PASS
-meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS
-meta.INST_COMBINE_PASS
+FUNCTION_DEF %synthLowerMemoryFF:func, :block {
+  // load pre-parsed liberty
+  meta.PARSE_DYNO_PASS map("fileName": "tools/dyno-opt/dyno-ir/sky130_fd_sc_hd.dyno", "newModulesActive": "0")
+  // load memories
+  meta.PARSE_DYNO_PASS map("fileName": "tools/dyno-opt/dyno-ir/example_memories.dyno", "newModulesActive": "0")
+  meta.POPULATE_INLINE_CACHES_PASS
 
-// load pre-parsed liberty
-meta.PARSE_DYNO_PASS map("fileName": "tools/dyno-opt/dyno-ir/sky130_fd_sc_hd.dyno", "newModulesActive": "0")
-// load memories
-meta.PARSE_DYNO_PASS map("fileName": "tools/dyno-opt/dyno-ir/example_memories.dyno", "newModulesActive": "0")
-meta.POPULATE_INLINE_CACHES_PASS
+  // map memories
+  meta.MEMORY_MAPPING_PASS
+  meta.INST_COMBINE_PASS
+  meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS
+  meta.INST_COMBINE_PASS
+  meta.AGGRESSIVE_DEAD_CODE_ELIMINATION_PASS
 
-// map memories
-meta.MEMORY_MAPPING_PASS
-meta.INST_COMBINE_PASS
-meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS
-meta.INST_COMBINE_PASS
-meta.AGGRESSIVE_DEAD_CODE_ELIMINATION_PASS
+  // map flip flops
+  meta.FLIP_FLOP_MAPPING_PASS
+  meta.INST_COMBINE_PASS
+  meta.PROCESS_LINEARIZE_PASS
+  meta.ORDER_INSTRS_PASS
+  meta.INST_COMBINE_PASS
+  meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS
+  meta.SSA_CONSTRUCT_PASS
+  meta.INST_COMBINE_PASS
+  meta.AGGRESSIVE_DEAD_CODE_ELIMINATION_PASS
+}
 
-// map flip flops
-meta.FLIP_FLOP_MAPPING_PASS
-meta.INST_COMBINE_PASS
-meta.PROCESS_LINEARIZE_PASS
-meta.ORDER_INSTRS_PASS
-meta.INST_COMBINE_PASS
-meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS
-meta.SSA_CONSTRUCT_PASS
-meta.INST_COMBINE_PASS
-meta.AGGRESSIVE_DEAD_CODE_ELIMINATION_PASS
+FUNCTION_DEF %synthTechmap:func, :block {
+  // lower everything
+  meta.LOWER_OPS_PASS map(
+    "lowerMultiInputAdd"     : "1",
+    "lowerAddCompress"       : "1",
+    "lowerSimpleAdd"         : "1",
+    "lowerSub"               : "1",
+    "lowerMul"               : "1",
+    "lowerMultiInputBitwise" : "1",
+    "lowerEqualityICMP"      : "1",
+    "lowerOrderingICMP"      : "1",
+    "lowerShift"             : "1",
+    "lowerInsert"            : "1",
+    "lowerExtract"           : "1",
+    "lowerOneHotMux"         : "1",
+  )
 
-// lower everything
-meta.LOWER_OPS_PASS map(
-  "lowerMultiInputAdd"     : "1",
-  "lowerAddCompress"       : "1",
-  "lowerSimpleAdd"         : "1",
-  "lowerSub"               : "1",
-  "lowerMul"               : "1",
-  "lowerMultiInputBitwise" : "1",
-  "lowerEqualityICMP"      : "1",
-  "lowerOrderingICMP"      : "1",
-  "lowerShift"             : "1",
-  "lowerInsert"            : "1",
-  "lowerExtract"           : "1",
-  "lowerOneHotMux"         : "1",
-)
+  meta.INST_COMBINE_PASS map("fuseCommutative": "0", "removeAssumes": "1")
+  meta.AGGRESSIVE_DEAD_CODE_ELIMINATION_PASS
 
-meta.INST_COMBINE_PASS map("fuseCommutative": "0", "removeAssumes": "1")
-meta.AGGRESSIVE_DEAD_CODE_ELIMINATION_PASS
+  // AIG opt & techmap
+  meta.AIG_CONSTRUCT_PASS
+  meta.AGGRESSIVE_DEAD_CODE_ELIMINATION_PASS
+  meta.ABC_PASS map("path": "sky130_fd_sc_hd__tt_025C_1v80.lib")
+  meta.AGGRESSIVE_DEAD_CODE_ELIMINATION_PASS
+  meta.REMOVE_BUFFERS_PASS
 
-// AIG opt & techmap
-meta.AIG_CONSTRUCT_PASS
-meta.AGGRESSIVE_DEAD_CODE_ELIMINATION_PASS
-meta.ABC_PASS map("path": "sky130_fd_sc_hd__tt_025C_1v80.lib")
-meta.AGGRESSIVE_DEAD_CODE_ELIMINATION_PASS
-meta.REMOVE_BUFFERS_PASS
+  meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS
+  meta.INST_COMBINE_PASS
+  meta.AGGRESSIVE_DEAD_CODE_ELIMINATION_PASS
 
-meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS
-meta.INST_COMBINE_PASS
-meta.AGGRESSIVE_DEAD_CODE_ELIMINATION_PASS
+  meta.CONSTANT_MAPPING_PASS
+  meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS
+  meta.INST_COMBINE_PASS
+  meta.AGGRESSIVE_DEAD_CODE_ELIMINATION_PASS
 
-meta.CONSTANT_MAPPING_PASS
-meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS
-meta.INST_COMBINE_PASS
-meta.AGGRESSIVE_DEAD_CODE_ELIMINATION_PASS
+  meta.ORDER_INSTRS_PASS map("assertNoCircularDeps": "false")
+}
 
-meta.ORDER_INSTRS_PASS map("assertNoCircularDeps": "false")
-meta.FIND_LONGEST_PATH_PASS
 
-meta.DUMP_VERILOG_PASS map("fileName": "dump.v")
+FUNCTION_DEF %completeFlow:func, :block {
+  CALL %earlyCanonFlow
+  CALL %synthCanonicalize
+  CALL %synthEarlyOpt
+  CALL %synthLowerControlFlow
+  CALL %synthMemoryFFMuxHandling
+  CALL %synthLowerMemoryFF
+  CALL %synthTechmap
+}

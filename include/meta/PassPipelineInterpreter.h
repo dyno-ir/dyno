@@ -73,10 +73,11 @@ public:
       pass.config(cfg ? cfg->data : empty, lexer);
 
       if (!pass.run(passRunArgs)) {
-        std::print(dbgs(), "failed to run pass: ",
-                   PrinterWrapper<CoreDialectPrinter, OpDialectPrinter,
-                                  MetaDialectPrinter>{OStreamWrapper{}}
-                       .toString(instr));
+        std::print(
+            dbgs(), "failed to run pass: ",
+            ContextPrinterWrapper<CoreDialectPrinter, OpDialectPrinter,
+                                  MetaDialectPrinter>{ctx, OStreamWrapper{}}
+                .toString(instr));
         return false;
       }
     }

@@ -151,6 +151,28 @@ public:
     }
   }
 
+  bool execBlock(BlockRef block, Context &sandbox, TwoLevelSet<StringRef> &only,
+                 bool verbose) {
+    bool pass = true;
+
+    for (auto it : Range{block}.no_deref()) {
+      if (it->getDialect() != DIALECT_TEST)
+        continue;
+      auto nm = it->def(0)->as<StringObjRef>()->data;
+      if (only.empty() || only.contains(nm)) {
+        // copy the test into sandbox context
+        DeepCopier copier{sandbox, ctx};
+        // todo: we could also just copy the test content, not the whole thing.
+        auto testCopy =
+            copier.copyInstr(*it, BlockRef_iterator<true>::invalid());
+        pass &= exec(testCopy, verbose);
+        sandbox.reset();
+      }
+    }
+
+    return pass;
+  }
+
   TestInterpreter(Context &ctx, PrinterBase &print)
       : ctx(ctx), print(print), os(print.str) {}
 

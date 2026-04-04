@@ -15,7 +15,7 @@ public:
   InstrDefUse defUse;
   const std::string name;
   Optional<DialectType> type = nullopt;
-  Context *defCtx;
+  Context *defCtx = nullptr;
 
   Symbol(DynObjRef, SSOStringRef name, Optional<DialectType> type = nullopt)
       : name(name.begin(), name.end()), type(type) {}
@@ -53,8 +53,11 @@ public:
     return ref;
   }
   SymbolRef findOrInsert(SSOStringRef name) {
-    auto [found, it] =
-        map.findOrInsert(name, [&]() { return store.create(name); });
+    // todo: set?
+    auto [found, it] = map.findOrInsertPair(name, [&]() {
+      auto ref = store.create(name);
+      return std::make_pair(SSOStringRef{ref->name}, ref);
+    });
     return store.resolve(it.val());
   }
   SymbolRef resolve(ObjRef<Symbol> ref) { return store.resolve(ref); }
@@ -67,6 +70,9 @@ public:
     store.reset();
     map.clear();
   }
+  void destroy(SymbolRef symb) { return store.destroy(symb); }
+  auto begin() { return store.begin(); }
+  auto end() { return store.end(); }
 };
 
 /*

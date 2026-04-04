@@ -24,10 +24,13 @@ namespace detail {
 // convert method that takes/returns static arg into one taking/returning
 // dynamic arg
 template <auto Func>
-static FatDynObjRef<> castToSpecificRef(void *obj, FatDynObjRef<> ref) {
+static auto castToSpecificRef(void *obj, FatDynObjRef<> ref) {
   using ArgT = std::remove_reference_t<
       tuple_element_t<1, function_args_t<decltype(Func)>>>;
-  return Func(obj, ref.as<ArgT>());
+  if constexpr (requires { FatDynObjRef<>{Func(obj, ref.as<ArgT>())}; })
+    return FatDynObjRef<>{Func(obj, ref.as<ArgT>())};
+  else
+    return Func(obj, ref.as<ArgT>());
 }
 }; // namespace detail
 
@@ -107,12 +110,32 @@ template <typename Derived> class ContextMixin {
     }(std::make_index_sequence<numStores>{});
     return arr;
   }
+  auto makeDestroyMethods() {
+    // create vector and assign elements
+    Vec<CallableRef<void(FatDynObjRef<>)>> arr(getMaxTyID() + 1);
+    [&]<std::size_t... Is>(std::index_sequence<Is...>) {
+      (
+          [&] {
+            auto &store = self().stores.template get<Is>();
+            using StoreT = std::remove_reference_t<decltype(store)>;
+            if constexpr (requires { (&StoreT::destroy); }) {
+              arr[ObjTraits<typename StoreT::value_type>::ty.getTypeID() &
+                  127] =
+                  CallableRef{&store, detail::castToSpecificRef<
+                                          BindMethod<(&StoreT::destroy)>::fv>};
+            }
+          }(),
+          ...);
+    }(std::make_index_sequence<numStores>{});
+    return arr;
+  }
 
 public:
   Vec<CallableRef<FatDynObjRef<>(DynObjRef)>> resolverMethods =
       makeResolverMethods();
   Vec<CallableRef<FatDynObjRef<>(FatDynObjRef<>)>> copyMethods =
       makeCopyMethods();
+  Vec<CallableRef<void(FatDynObjRef<>)>> destroyMethods = makeDestroyMethods();
 
   void reset() {
     self().stores.apply([](auto &...stores) { (stores.reset(), ...); });
@@ -150,11 +173,21 @@ public:
   std::array<CallableRef<FatDynObjRef<>(FatDynObjRef<>)>, 5> copyMethods = {
     CallableRef<FatDynObjRef<>(FatDynObjRef<>)>{},
     CallableRef<FatDynObjRef<>(FatDynObjRef<>)>{},
-    CallableRef<FatDynObjRef<>(FatDynObjRef<>)>{CallableRef{
+    CallableRef<FatDynObjRef<>(FatDynObjRef<>)>{
         &constants,
-        &detail::castToSpecificRef<BindMethod<&ConstantStore::create>::fv>}},
+        &detail::castToSpecificRef<BindMethod<&ConstantStore::create>::fv>},
     CallableRef<FatDynObjRef<>(FatDynObjRef<>)>{},
     CallableRef<FatDynObjRef<>(FatDynObjRef<>)>{},
+  };
+  std::array<CallableRef<void(FatDynObjRef<>)>, 5> destroyMethods = {
+    CallableRef<void(FatDynObjRef<>)>{},
+    CallableRef{&instrs,
+        &detail::castToSpecificRef<BindMethod<&InstrStoreT::destroy>::fv>},
+    CallableRef{&constants,
+        &detail::castToSpecificRef<BindMethod<&ConstantStoreT::destroy>::fv>},
+    CallableRef{&cfg.blocks,
+        &detail::castToSpecificRef<BindMethod<&decltype(cfg.blocks)::destroy>::fv>},
+    CallableRef<void(FatDynObjRef<>)>{},
   };
   // clang-format on
 
@@ -170,6 +203,9 @@ public:
     copyMethods[CORE_SYMBOL.type & 127] = CallableRef{
         symbols,
         &detail::castToSpecificRef<BindMethod<&SymbolStore::create>::fv>};
+    destroyMethods[CORE_SYMBOL.type & 127] = CallableRef{
+        symbols,
+        &detail::castToSpecificRef<BindMethod<&SymbolStore::destroy>::fv>};
   }
 
   void reset() {
@@ -188,6 +224,7 @@ class Context {
   ArrayInterface<TypeErasedCtx> contexts;
   ArrayInterface<CallableRef<FatDynObjRef<>(DynObjRef)>> resolvers;
   ArrayInterface<CallableRef<FatDynObjRef<>(FatDynObjRef<>)>> copiers;
+  ArrayInterface<CallableRef<void(FatDynObjRef<>)>> destroyers;
   Vec<CallableRef<void()>, MAX_NUM_DIALECTS> resets;
 
   DialectInfos dialectInfos;
@@ -221,9 +258,17 @@ public:
       return fn(ref);
     return nullref;
   }
+  // slow destroy
+  void destroy(FatDynObjRef<> ref) { destroyers[ref](ref); }
 
   template <typename T> ObjTraits<T>::FatRefT resolve(ObjRef<T> ref) {
     return getStore<T>().resolve(ref);
+  }
+  template <typename T> ObjTraits<T>::FatRefT copy(FatObjRef<T> ref) {
+    return getStore<T>().create(ref);
+  }
+  template <typename T> void destroy(FatObjRef<T> ref) {
+    return getStore<T>().destroy(ref);
   }
 
   template <typename T> void registerDialect(T &context) {
@@ -252,6 +297,9 @@ public:
     if constexpr (requires { context.copyMethods; }) {
       copiers.registerDialect(T::dialect, ArrayRef{context.copyMethods});
     }
+    if constexpr (requires { context.destroyMethods; }) {
+      destroyers.registerDialect(T::dialect, ArrayRef{context.destroyMethods});
+    }
   }
 
   void reset() {
@@ -261,20 +309,25 @@ public:
 
   CFG &getCFG() { return getCtx<CoreDialectContext>().cfg; }
   template <> auto &getStore<Block>() { return getCFG().blocks; }
+
+  // destroy defs, removes others from instrDef use if tracked
+  void destroyInstr(InstrRef instr) {
+    for (auto oref : instr.defs()) {
+      auto obj = oref->fat();
+      if (Operand::isDefUseOperand(obj)) {
+#ifdef DYNO_DBG
+        reinterpret_cast<InstrDefUse *>(obj.getPtr())
+            ->replaceAllUsesWith(nullref);
+#endif
+      }
+      destroy(obj);
+    }
+
+    if (getCtx<CoreDialectContext>().cfg.contains(instr))
+      getCtx<CoreDialectContext>().cfg[instr].erase();
+    instr.destroyOthers();
+    getStore<Instr>().destroy(instr);
+  }
 };
-
-// ref type for easy reassigning
-// class ContextRef {
-// private:
-//   Context *context;
-//   Context &self() { return *context; }
-
-// public:
-//   DialectInfos &getDialectInfos() { return self().getDialectInfos(); }
-//   PassRegistry &getPassRegistry() { return self().getPassRegistry(); }
-//   template <typename T> T &getCtx() { return self().getCtx<T>(); }
-//   template <typename T> auto &getStore() { return self().getStore<T>(); }
-//   FatDynObjRef<> resolve(DynObjRef ref) { return self().resolve(ref); }
-// };
 
 }; // namespace dyno

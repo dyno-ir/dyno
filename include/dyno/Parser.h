@@ -272,6 +272,8 @@ public:
       } else
         insert.insertPrev(*instr);
     }
+    identMap.clear();
+    forwardDef.clear();
   }
 
   // Parse a single instruction. Lexer must be initialized by caller.

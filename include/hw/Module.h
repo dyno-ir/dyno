@@ -32,7 +32,8 @@ public:
   SmallVec<Port, 8> ports;
 
   Module(DynObjRef, std::string name) : name(name) {}
-  Module(DynObjRef, FatObjRef<Module> other) : name(other->name) {}
+  Module(DynObjRef, FatObjRef<Module> other)
+      : name(other->name), ignore(other->ignore) {}
 };
 
 class ModuleIRef;

@@ -7,6 +7,8 @@
 #include "dyno/FatContext.h"
 #include "dyno/Parser.h"
 #include "dyno/Symbol.h"
+#include "dyno/passes/CoreDialectPasses.h"
+#include "dyno/passes/ResolveImports.h"
 #include "hw/HWContext.h"
 #include "hw/HWPrinter.h"
 #include "hw/PassPipeline.h"
@@ -54,11 +56,10 @@ CmdLineArg<std::string_view> argFlowScript{'s', "script",
                                            CmdLineArgFlags::VALUE_REQUIRED, ""};
 
 // Flow/Test Args
-CmdLineArg<std::string_view> argScriptFileName{
-    std::nullopt, "script file", "Dyno-IR script file name.",
+CmdLineArg<Vec<StringRef>> argScriptFileName{
+    std::nullopt, "script file", "Dyno-IR script file name(s).",
     CmdLineArgFlags::VALUE_REQUIRED | CmdLineArgFlags::MANDATORY |
-        CmdLineArgFlags::POSITIONAL,
-    ""};
+        CmdLineArgFlags::POSITIONAL | CmdLineArgFlags::MULTIPLE};
 
 // Test Args
 CmdLineArg<Vec<StringRef>> argTestOnly{
@@ -129,7 +130,10 @@ void synth(Context &ctx) {
   }
 }
 
-void script(Context &ctx) { runScript(ctx, *argScriptFileName); }
+void script(Context &ctx) {
+  for (auto file : *argScriptFileName)
+    runScript(ctx, file);
+}
 
 using TestParser = Parser<CoreDialectParser, MetaDialectParser, OpDialectParser,
                           HWDialectParser, AIGDialectParser, TestDialectParser>;
@@ -147,55 +151,27 @@ public:
 void test(FatContext &ctx) {
   TestParser parser{ctx};
 
-  std::string fileName{argScriptFileName->begin(), argScriptFileName->end()};
-  MMap mmap{fileName};
-  if (!mmap)
-    report_fatal_error("failed to open file: {}", fileName);
-
-  bool pass = true;
-
   TwoLevelSet<StringRef> only{Range(*argTestOnly)};
   auto block = ctx.getStore<Block>().create(ctx.getCFG());
 
-  parser.parse(mmap, fileName, block.end());
+  for (auto file : *argScriptFileName) {
+    std::string fileName{file.begin(), file.end()};
+    MMap mmap{fileName};
+    if (!mmap)
+      report_fatal_error("failed to open file: {}", fileName);
+    parser.parse(mmap, fileName, block.end());
+  }
+
+  ResolveImportsPass{ctx}.run();
   auto sandbox = ctx.create();
   sandbox.getCtx<CoreDialectContext>().setSymbols(
       *ctx.getCtx<CoreDialectContext>().symbols);
   // todo: pass registry sharing. ideally make context not own this so we can
   // just share the ref.
   sandbox.getPassRegistry().registerPass<ParseVerilogPass>();
-  TestPrinter print{sandbox, std::cout};
+  TestPrinter print{ctx, std::cout};
   TestInterpreter interp{sandbox, print};
-
-  for (auto it : Range{block}.no_deref()) {
-    if (it->getDialect() != DIALECT_TEST)
-      continue;
-    auto nm = it->def(0)->as<StringObjRef>()->data;
-    if (only.empty() || only.contains(nm)) {
-      // copy the test into sandbox context
-      DeepCopier copier{sandbox, ctx};
-      // todo: we could also just copy the test content, not the whole thing.
-      auto testCopy = copier.copyInstr(*it, BlockRef_iterator<true>::invalid());
-      pass &= interp.exec(testCopy, *argPrintAfterAll);
-      sandbox.reset();
-    }
-  }
-
-  // while (auto instr = parser.parseSingle()) {
-  //   if (instr.getDialect() != DIALECT_TEST)
-  //     continue;
-  //   auto nm = instr.def(0)->as<StringObjRef>()->data;
-  //   if (only.empty() || only.contains(nm)) {
-  //     pass &= interp.exec(instr, *argPrintAfterAll);
-  //   }
-
-  //   // Completely reset the context after a single pass. Otherwise previous'
-  //   // freeIDs will always affect current, which can affect operand ordering.
-  //   // (Other option would be more fuzzy comparison)
-  //   ctx.reset();
-  //   interp.reset();
-  //   parser.reset();
-  // }
+  auto pass = interp.execBlock(block, sandbox, only, *argPrintAfterAll);
   if (!pass)
     exit(-1);
 }

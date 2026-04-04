@@ -65,7 +65,7 @@ public:
             [](size_t,
                auto &&val) -> std::pair<KeyT, typename Range<T>::value_type> {
               return {HashFunc(val), val};
-            })) {};
+            })){};
 };
 
 // Swiss-Table style map. This is for complex keys, use plain DenseMap for small
@@ -130,6 +130,13 @@ public:
     if (it == map.end())
       return std::make_pair(
           false, iterator(map.insert(h, std::pair<K, T>(k, func()))));
+    return std::make_pair(true, iterator(it));
+  }
+  // search with different key than insert
+  auto findOrInsertPair(const K &k, auto &&func) {
+    auto [h, it] = find_raw(k);
+    if (it == map.end())
+      return std::make_pair(false, iterator(map.insert(h, func())));
     return std::make_pair(true, iterator(it));
   }
   T &operator[](const K &k) {
