@@ -1,5 +1,6 @@
 
 #pragma once
+#include <cassert>
 #include <optional>
 #ifdef ENABLE_FST
 #include "FST.h"
@@ -471,6 +472,38 @@ public:
           defs.deref().as<WireRef>().zip(loopYieldVals->deref().as<HWValue>());
       for (auto [dst, src] : range)
         wireVals[dst] = getValue(src);
+      break;
+    }
+
+    case *HW_ASSUME: {
+      auto &val = wireVals[instr.def(0)->as<WireRef>()];
+      auto in = getValue(instr.other(0)->as<HWValue>());
+      auto cond = getValue(instr.other(1)->as<HWValue>());
+      assert(cond.getNumBits() == 1);
+      if (!cond.valueEquals(0))
+        val = in;
+      else
+        val = PatBigInt::undef(in.getNumBits());
+      break;
+    }
+
+    case *HW_ONEHOT_MUX: {
+      auto &val = wireVals[instr.def(0)->as<WireRef>()];
+      bool found = false;
+      for (auto [sel, caseVal] : instr.others().as<HWValue>().pairwise()) {
+        auto selV = getValue(sel);
+        assert(selV.getNumBits() == 1);
+        if (selV.valueEquals(1)) {
+          if (found)
+            report_fatal_error("more than one select active on one hot mux");
+          val = getValue(caseVal);
+          found = true;
+        }
+      }
+
+      if (!found)
+        val = PatBigInt::undef(val.getNumBits());
+
       break;
     }
 

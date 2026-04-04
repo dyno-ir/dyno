@@ -12,7 +12,8 @@
 #include "support/StringRef.h"
 #include "support/TwoLevelSet.h"
 #include <cstdint>
-#include <unordered_map>
+#include <format>
+
 namespace dyno {
 
 struct DebugSourceLocImpl {
@@ -44,9 +45,39 @@ struct DebugSourceLoc {
   uint32_t beginCol;
   uint32_t endLine;
   uint32_t endCol;
-  // maybe even have a genvar idx or smth
+};
+}; // namespace dyno
+template <> struct std::formatter<dyno::DebugSourceLoc> {
+  template <typename _Out>
+  constexpr typename basic_format_context<_Out, char>::iterator
+  format(const dyno::DebugSourceLoc &u,
+         basic_format_context<_Out, char> &fc) const {
+    auto out = fc.out();
+    if (u.beginLine == 0 && u.beginCol == 0 && u.endLine == 0 &&
+        u.endCol == 0) {
+      out = std::format_to(out, "{}", u.fileName);
+    } else if ((u.endLine == 0 && u.endCol == 0) ||
+               (u.beginLine == u.endLine && u.endCol == 0)) {
+      out =
+          std::format_to(out, "{}:{}:{}", u.fileName, u.beginLine, u.beginCol);
+    } else if (u.beginLine == u.endLine) {
+      out = std::format_to(out, "{}:{}:{}-{}", u.fileName, u.beginLine,
+                           u.beginCol, u.endCol);
+    } else {
+      out = std::format_to(out, "{}:{}.{}-{}.{}", u.fileName, u.beginLine,
+                           u.beginCol, u.endLine, u.endCol);
+    }
+    return out;
+  }
+
+  template <typename _In>
+  constexpr typename basic_format_parse_context<_In>::iterator
+  parse(basic_format_parse_context<_In> &ctx) const {
+    return ctx.begin();
+  }
 };
 
+namespace dyno {
 class StringDedupeMap {
   TwoLevelMap<StringRef, uint32_t> stringMap;
   MixedSizeSlabAllocator<> strtab{sizeof(char)};

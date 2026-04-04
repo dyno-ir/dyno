@@ -575,7 +575,7 @@ public:
       if (abstr.hasEn())
         break;
       abstr.hasEn() = 1;
-      abstr.enPol() = (type == FixupType::ADD_EN0_MUX);
+      abstr.enPol() = (type == FixupType::ADD_EN1_MUX);
       fixupIfNone();
       break;
     }

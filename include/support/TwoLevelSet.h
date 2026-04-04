@@ -123,7 +123,7 @@ public:
     return iterator(map.insert(HashFunc(k), std::make_pair(k, t)));
   }
   iterator insertOrAssign(const K &k, const T &t) {
-    return findOrInsert(k, []() { return T{}; }).second;
+    return findOrInsert(k, [&]() { return T{t}; }).second;
   }
   auto findOrInsert(const K &k, auto &&func) {
     auto [h, it] = find_raw(k);

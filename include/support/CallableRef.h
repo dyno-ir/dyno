@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cassert>
 #include <type_traits>
 #include <utility>
 
@@ -9,7 +10,7 @@ template <typename Ret, typename... Params> class CallableRef<Ret(Params...)> {
   void *callable;
 
   template <typename Callable>
-  static Ret callOnObject(void *callable, Params... params) {
+  static Ret callOnObject(void *callable, Params &&...params) {
     return (*reinterpret_cast<Callable *>(callable))(
         std::forward<Params>(params)...);
   }
@@ -51,12 +52,6 @@ CallableRef(Obj *obj, R (*fn)(void *, Args...)) -> CallableRef<R(Args...)>;
 template <typename Fn> class MethodRef;
 template <typename Ret, typename... Params> class MethodRef<Ret(Params...)> {
   Ret (*callback)(void *callable, Params... params) = nullptr;
-
-  template <typename Callable>
-  static Ret callOnObject(void *callable, Params... params) {
-    return (*reinterpret_cast<Callable *>(callable))(
-        std::forward<Params>(params)...);
-  }
 
 public:
   MethodRef() = default;

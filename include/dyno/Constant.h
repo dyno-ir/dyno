@@ -64,7 +64,13 @@ struct FourState {
   };
   uint8_t val;
   constexpr FourState(uint8_t i) : val(i) { assert(i <= 4); }
-  constexpr operator uint8_t() { return val; }
+  constexpr operator uint8_t() {
+    return val;
+  }
+  explicit constexpr operator bool() {
+    assert(!isUnk());
+    return val;
+  }
 
   constexpr bool isUnk() { return val == SZ || val == SX; }
 

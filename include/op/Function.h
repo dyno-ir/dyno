@@ -7,19 +7,23 @@
 #include "hw/IDs.h"
 #include "op/IDs.h"
 #include "support/Optional.h"
+#include "support/StringRef.h"
 
 namespace dyno {
 
 class Function {
 public:
   InstrDefUse defUse;
-
+  std::string name;
+  Context *defContext = nullptr;
   // alternative to maintaining full copies here would be category-ordered
   // defUse.
   SmallVec<InstrRef, 4> params;
 
-  Function(DynObjRef) {}
-  Function(DynObjRef, FatObjRef<Function> other) {}
+  Function(DynObjRef, StringRef name, Context *context)
+      : name(name.begin(), name.end()), defContext(context) {}
+  Function(DynObjRef, FatObjRef<Function> other)
+      : name(other->name), defContext(other->defContext) {}
 };
 
 class FunctionIRef;

@@ -1,6 +1,5 @@
 #pragma once
 
-#include "support/ErrorRecovery.h"
 #include <bit>
 #include <cassert>
 #include <climits>
@@ -67,6 +66,8 @@ template <typename T> constexpr unsigned flog2(T val) {
 template <typename T> constexpr T round_up_div(T dividend, T divisor) {
   return (dividend + divisor - 1) / divisor;
 }
+
+void report_fatal_error(const char *reason) __attribute__((noreturn));
 
 template <typename T>
 constexpr T checked_mul(T multiplicand, T multiplier,

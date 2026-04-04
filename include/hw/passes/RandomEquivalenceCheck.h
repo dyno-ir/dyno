@@ -111,7 +111,7 @@ private:
 
         bool r = BigInt::icmpOp4S(
             modelInterp.getReg(modelOut), testInterp.getReg(testOut),
-            config.relaxXZ ? BigInt::ICMP_CXEQ : BigInt::ICMP_EQ);
+            config.relaxXZ ? BigInt::ICMP_CXEQ : BigInt::ICMP_CEQ);
         if (!r) {
           std::stringstream regS;
           HWPrinter print{regS};
@@ -160,8 +160,6 @@ private:
 
         testInterp.eval();
         modelInterp.eval();
-
-        clk = ~clk;
       }
     }
     return true;

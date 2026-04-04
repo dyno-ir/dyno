@@ -15,6 +15,7 @@
 #include <string_view>
 #include <type_traits>
 #include <unordered_map>
+#include <utility>
 
 struct Token {
   enum BaseType {
@@ -151,10 +152,10 @@ struct Lexer {
 
   struct State {
     size_t i = 0;
-    size_t lastI = 0;
+    size_t columnStartI = 0;
     unsigned lineNumber = 1;
   };
-  State state;
+  State state, lastState;
   SlabAllocator<dyno::BigInt> bigIntLiterals;
 
   ArrayRef<const char *> operators;
@@ -190,8 +191,9 @@ public:
 
   Token lexNext() {
     auto &i = state.i;
-    auto &lastI = state.lastI;
+    // auto &lastI = state.lastI;
     auto &lineNumber = state.lineNumber;
+    auto &columnStartI = state.columnStartI;
 
     size_t len = src.size();
     const char *srcC = src.data();
@@ -199,8 +201,10 @@ public:
     while (1) {
       // Skip whitespace
       while (isspace(srcC[i])) {
-        if (srcC[i] == '\n')
+        if (srcC[i] == '\n') {
           lineNumber++;
+          columnStartI = i;
+        }
         i++;
       }
 
@@ -217,8 +221,10 @@ public:
         if (srcC[i] == '/' && srcC[i + 1] == '*') {
           i += 2;
           while (i < len && !(srcC[i - 2] == '*' && src[i - 1] == '/')) {
-            if (srcC[i - 2] == '\n')
+            if (srcC[i - 2] == '\n') {
               lineNumber++;
+              columnStartI = i;
+            }
             i++;
           }
           continue;
@@ -238,7 +244,7 @@ public:
     if (i == len)
       return Token::makeNone();
 
-    lastI = i;
+    lastState = state;
 
     // String Literal
     bool multiline = (srcC[i] == '[' && srcC[i + 1] == '{') && ParseInlineCode;
@@ -253,8 +259,10 @@ public:
         if (srcC[i + litLen] == '\n') {
           if (!multiline)
             return Token::makeNone();
-          else
+          else {
             lineNumber++;
+            columnStartI = i;
+          }
         }
         litLen++;
         if (i + litLen >= len)
@@ -366,8 +374,7 @@ public:
     auto rv = state;
     if (peekToken) {
       // we do not back up the peek token, so reset to before it.
-      rv.i = rv.lastI;
-      rv.lastI = 0; // invalid w/o peek token
+      rv = lastState;
     }
     return rv;
   }
@@ -448,13 +455,13 @@ public:
   }
   ParseError makeErrorOnPeekToken(const char *error) {
     assert(peekToken);
-    return ParseError{error, state.lastI, state.i, state.lineNumber};
+    return ParseError{error, lastState.i, state.i, state.lineNumber};
   }
 
   ParseError makeErrorOnNextToken(const char *error) {
     if (!peekToken)
       Peek();
-    return ParseError{error, state.lastI, state.i, state.lineNumber};
+    return ParseError{error, lastState.i, state.i, state.lineNumber};
   }
 
   template <typename... Ts> Token peekEnsure(Ts... types) {
@@ -489,5 +496,18 @@ public:
     this->src = src;
     this->state = State{};
     this->peekToken.reset();
+  }
+
+  std::pair<uint32_t, uint32_t> getStartOfPeekTokenLineCol() {
+    if (!peekToken)
+      Peek();
+    return std::make_pair(lastState.lineNumber,
+                          lastState.i - lastState.columnStartI);
+  }
+  std::pair<uint32_t, uint32_t> getEndOfTokenLineCol() {
+    // not strictly correct bc of whitespace but better than nothing
+    if (peekToken)
+      return getStartOfPeekTokenLineCol();
+    return std::make_pair(state.lineNumber, state.i - state.columnStartI);
   }
 };

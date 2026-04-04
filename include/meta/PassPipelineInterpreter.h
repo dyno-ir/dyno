@@ -42,20 +42,36 @@ class MetaPassPipelineInterpreter {
   ArrayRef<void *> passCtorArgs;
   PassStorage passes;
 
-public:
-  bool interpretPassPipeline(BlockRef block, ArrayRef<void *> passRunArgs) {
+  bool interpretPassPipelineImpl(Context &ctx, BlockRef block,
+                                 ArrayRef<void *> passRunArgs) {
     for (auto instr : block) {
       if (instr.isOpc(OP_FUNCTION_DEF))
         continue;
       if (instr.isOpc(OP_CALL)) {
         auto asCall = instr.as<CallInstrRef>();
-        if (!interpretPassPipeline(asCall.func().iref().getBlock(),
-                                   passRunArgs))
+        if (!interpretPassPipelineImpl(*asCall.func()->defContext,
+                                       asCall.func().iref().getBlock(),
+                                       passRunArgs))
           return false;
         continue;
       }
       if (instr.getDialect() != DIALECT_META)
         report_fatal_error("expected meta dialect instruction");
+
+      auto errorCB = [&]() {
+        auto locs =
+            ctx.getCtx<CoreDialectContext>().instrSourceLocInfo.getSourceLocs(
+                instr);
+        if (!locs.empty())
+          std::print(std::cerr, "{}: ", locs.front());
+        std::print(
+            std::cerr, "note: in pass {}\n",
+            ContextPrinterWrapper<CoreDialectPrinter, OpDialectPrinter,
+                                  MetaDialectPrinter>{ctx, OStreamWrapper{}}
+                .toString(instr));
+      };
+      push_fatal_error_callback(errorCB);
+
       auto opc = instr.getDialectOpcode();
       auto &pass = passes.findOrCreate(opc, passCtorArgs);
 
@@ -72,7 +88,9 @@ public:
       std::map<std::string, std::string> empty{};
       pass.config(cfg ? cfg->data : empty, lexer);
 
-      if (!pass.run(passRunArgs)) {
+      bool res = pass.run(passRunArgs);
+      pop_fatal_error_callback();
+      if (!res) {
         std::print(
             dbgs(), "failed to run pass: ",
             ContextPrinterWrapper<CoreDialectPrinter, OpDialectPrinter,
@@ -82,6 +100,11 @@ public:
       }
     }
     return true;
+  }
+
+public:
+  bool interpretPassPipeline(BlockRef block, ArrayRef<void *> passRunArgs) {
+    return interpretPassPipelineImpl(ctx, block, passRunArgs);
   }
 
   MetaPassPipelineInterpreter(Context &ctx, ArrayRef<void *> passCtorArgs)

@@ -41,7 +41,7 @@ namespace dyno {
 class HWInstrBuilder {
 public:
   Context &ctx;
-  BlockRef_iterator<true> insert;
+  BlockRef_iterator<true> insert = BlockRef_iterator<true>::invalid();
 
   HWInstrBuilder(Context &ctx, BlockRef_iterator<true> insert)
       : ctx(ctx), insert(insert) {}
@@ -397,7 +397,7 @@ public:
   //            operand.as<WireRef>().getSingleDef()->instr().others())
   //         build.addRef(subOp->template as<HWValue>());
 
-  //       ctx.getCtx<CoreDialectContext>().cfg[otherInstr].erase();
+  //       ctx.getCFG()[otherInstr].erase();
   //       ctx.getStore<Instr>().destroy(otherInstr);
   //     } else
   //       build.addRef(operand);
@@ -1448,7 +1448,7 @@ public:
 
   InstrRef addOperands(InstrRef old, ArrayRef<WireRef> newDefs,
                        ArrayRef<HWValue> newUses) {
-    setInsertPoint(ctx.getCtx<CoreDialectContext>().cfg[old]);
+    setInsertPoint(ctx.getCFG()[old]);
     auto newInstr = InstrRef{ctx.getStore<Instr>().create(
         old.getNumOperands() + newDefs.size() + newUses.size(),
         old.getDialectOpcode())};
@@ -1533,8 +1533,8 @@ public:
     return instr;
   }
 
-  auto buildFunc() {
-    auto funcRef = FunctionRef{ctx.getStore<Function>().create()};
+  auto buildFunc(StringRef name) {
+    auto funcRef = FunctionRef{ctx.getStore<Function>().create(name, &ctx)};
     auto funcInstr =
         FunctionIRef{ctx.getStore<Instr>().create(2, OP_FUNCTION_DEF)};
     insertInstr(funcInstr);
@@ -1675,8 +1675,23 @@ public:
       destroyObj(obj);
     }
 
-    if (ctx.getCtx<CoreDialectContext>().cfg.contains(instr))
-      ctx.getCtx<CoreDialectContext>().cfg[instr].erase();
+    if (ctx.getCFG().contains(instr)) {
+      auto eraseIt = ctx.getCFG()[instr];
+      // some checks to keep iterator stable. maybe just make insert
+      // StableBlockIterator
+      if (insert == eraseIt)
+        insert = insert.succ();
+      if (insert != BlockRef_iterator<true>::invalid() &&
+          insert.blockRef() == eraseIt.blockRef() &&
+          BlockRef_iterator<false>{insert} ==
+              insert.blockRef().end_unordered().pred()) {
+        auto instr = *insert;
+        eraseIt.erase();
+        insert = ctx.getCFG()[instr];
+      } else {
+        eraseIt.erase();
+      }
+    }
     instr.destroyOthers();
     ctx.getStore<Instr>().destroy(instr);
   }
@@ -1688,13 +1703,11 @@ public:
     for (auto instr : toDestroy)
       destroyInstr(instr);
 
-    ctx.getCtx<CoreDialectContext>().cfg.blocks.destroy(block);
+    ctx.getCFG().blocks.destroy(block);
   }
 
   void setInsertPoint(BlockRef_iterator<true> it) { insert = it; }
-  void setInsertPoint(InstrRef ref) {
-    insert = ctx.getCtx<CoreDialectContext>().cfg[ref];
-  }
+  void setInsertPoint(InstrRef ref) { insert = ctx.getCFG()[ref]; }
 }; // namespace dyno
 
 class HWInstrBuilderStack : public HWInstrBuilder {

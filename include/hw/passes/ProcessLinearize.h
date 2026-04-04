@@ -13,6 +13,7 @@
 #include "support/Debug.h"
 #include "support/DenseMap.h"
 #include "support/DynBitSet.h"
+#include "support/ErrorRecovery.h"
 #include "support/Utility.h"
 #include <algorithm>
 #include <ctime>
@@ -142,7 +143,7 @@ public:
           break;
 
         default:
-          dyno_unreachable("register ref'd by unexpected instr");
+          report_fatal_error("register ref'd by unexpected instr");
         }
       }
 

@@ -1,5 +1,5 @@
 #pragma once
-
+#include "support/CallableRef.h"
 #include <format>
 
 void report_fatal_error(const char *reason) __attribute__((noreturn));
@@ -9,3 +9,6 @@ __attribute__((noreturn)) void
 report_fatal_error(std::format_string<Args...> fmt, Args &&...args) {
   report_fatal_error(std::format(fmt, std::forward<Args>(args)...));
 }
+
+void push_fatal_error_callback(CallableRef<void()>);
+void pop_fatal_error_callback();

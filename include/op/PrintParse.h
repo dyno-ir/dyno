@@ -91,7 +91,7 @@ public:
     }
 
     case OP_FUNC.type: {
-      return base->ctx.getStore<Function>().create();
+      return base->ctx.getStore<Function>().create(name, &base->ctx);
     }
 
     default:

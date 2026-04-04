@@ -193,6 +193,8 @@ protected:
   }
 
   std::expected<InstrRef, ParseError> parseInstr() {
+    auto startLineCol = lexer->getStartOfPeekTokenLineCol();
+
     UNWRAP(opc, lexer->popOpcode());
 
     SmallVec<FatDynObjRef<>, 16> operands;
@@ -245,6 +247,10 @@ protected:
     while (lexer->popIf(DynoLexer::op_semicolon))
       ;
 
+    auto endLineCol = lexer->getEndOfTokenLineCol();
+    ctx.getCtx<CoreDialectContext>().instrSourceLocInfo.addSrcLoc(
+        instr, lexer->path, startLineCol.first, startLineCol.second,
+        endLineCol.first, endLineCol.second);
     return instr;
   }
 

@@ -5,6 +5,7 @@
 #include "hw/HWParser.h"
 #include "hw/HWPrinter.h"
 #include "hw/passes/AggressiveDeadCodeElimination.h"
+#include "hw/passes/CommonSubexpressionElimination.h"
 #include "hw/passes/FuzzyCSE.h"
 #include "hw/passes/HWDialectPasses.h"
 #include "hw/passes/InstCombine.h"
@@ -78,7 +79,9 @@ int main(int argc, char **argv) {
     FuzzyCSEPass fuzzyCSE{ctx};
     OrderInstrsPass orderInstrs{ctx};
     InstCombinePass instCombine{ctx};
+    CommonSubexpressionEliminationPass cse{ctx};
 
+    cse.run();
     aggressiveDCE.run();
     fuzzyCSE.run();
     orderInstrs.run();

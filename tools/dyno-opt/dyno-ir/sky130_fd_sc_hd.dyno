@@ -70,16 +70,8 @@ STDCELL_DEF %sky130_fd_sc_hd__a2111oi_0:module("sky130_fd_sc_hd__a2111oi_0"), %1
     AND %w34:wire(1), %w28, %w33
     NOT %w35:wire(1), %w34
     LOAD %w38:wire(1), %A2
-    LOAD %w39:wire(1), %B1
-    LOAD %w40:wire(1), %C1
-    LOAD %w41:wire(1), %D1
-    NOT %w42:wire(1), %w41
-    AND %w43:wire(1), %w40, %w42
-    NOT %w44:wire(1), %w43
-    AND %w45:wire(1), %w39, %w44
-    NOT %w46:wire(1), %w45
-    AND %w3745:wire(1), %w27, %w35, %w38, %w46
-    NOT %w3744:wire(1), %w3745
+    AND %w3723:wire(1), %w27, %w35, %w38
+    NOT %w3744:wire(1), %w3723
     STORE %w3744, %Y
   }
 }
@@ -101,17 +93,9 @@ STDCELL_DEF %sky130_fd_sc_hd__a2111oi_1:module("sky130_fd_sc_hd__a2111oi_1"), %1
     AND %w57:wire(1), %w51, %w56
     NOT %w58:wire(1), %w57
     LOAD %w61:wire(1), %A2
-    LOAD %w62:wire(1), %B1
-    LOAD %w63:wire(1), %C1
-    LOAD %w64:wire(1), %D1
-    NOT %w65:wire(1), %w64
-    AND %w66:wire(1), %w63, %w65
-    NOT %w67:wire(1), %w66
-    AND %w68:wire(1), %w62, %w67
-    NOT %w69:wire(1), %w68
-    AND %w3723:wire(1), %w50, %w58, %w61, %w69
-    NOT %w3722:wire(1), %w3723
-    STORE %w3722, %Y
+    AND %w3700:wire(1), %w50, %w58, %w61
+    NOT %w3701:wire(1), %w3700
+    STORE %w3701, %Y
   }
 }
 STDCELL_DEF %sky130_fd_sc_hd__a2111oi_2:module("sky130_fd_sc_hd__a2111oi_2"), %20:block, %21:stdcell_info("area": 15) {
@@ -132,17 +116,9 @@ STDCELL_DEF %sky130_fd_sc_hd__a2111oi_2:module("sky130_fd_sc_hd__a2111oi_2"), %2
     AND %w80:wire(1), %w74, %w79
     NOT %w81:wire(1), %w80
     LOAD %w84:wire(1), %A2
-    LOAD %w85:wire(1), %B1
-    LOAD %w86:wire(1), %C1
-    LOAD %w87:wire(1), %D1
-    NOT %w88:wire(1), %w87
-    AND %w89:wire(1), %w86, %w88
-    NOT %w90:wire(1), %w89
-    AND %w91:wire(1), %w85, %w90
-    NOT %w92:wire(1), %w91
-    AND %w3701:wire(1), %w73, %w81, %w84, %w92
-    NOT %w3700:wire(1), %w3701
-    STORE %w3700, %Y
+    AND %w3621:wire(1), %w73, %w81, %w84
+    NOT %w3632:wire(1), %w3621
+    STORE %w3632, %Y
   }
 }
 STDCELL_DEF %sky130_fd_sc_hd__a2111oi_4:module("sky130_fd_sc_hd__a2111oi_4"), %24:block, %25:stdcell_info("area": 27) {
@@ -163,17 +139,9 @@ STDCELL_DEF %sky130_fd_sc_hd__a2111oi_4:module("sky130_fd_sc_hd__a2111oi_4"), %2
     AND %w103:wire(1), %w97, %w102
     NOT %w104:wire(1), %w103
     LOAD %w107:wire(1), %A2
-    LOAD %w108:wire(1), %B1
-    LOAD %w109:wire(1), %C1
-    LOAD %w110:wire(1), %D1
-    NOT %w111:wire(1), %w110
-    AND %w112:wire(1), %w109, %w111
-    NOT %w113:wire(1), %w112
-    AND %w114:wire(1), %w108, %w113
-    NOT %w115:wire(1), %w114
-    AND %w3633:wire(1), %w96, %w104, %w107, %w115
-    NOT %w3632:wire(1), %w3633
-    STORE %w3632, %Y
+    AND %w3608:wire(1), %w96, %w104, %w107
+    NOT %w3609:wire(1), %w3608
+    STORE %w3609, %Y
   }
 }
 STDCELL_DEF %sky130_fd_sc_hd__a211o_1:module("sky130_fd_sc_hd__a211o_1"), %28:block, %29:stdcell_info("area": 8) {
@@ -238,14 +206,9 @@ STDCELL_DEF %sky130_fd_sc_hd__a211oi_1:module("sky130_fd_sc_hd__a211oi_1"), %40:
     AND %w144:wire(1), %w141, %w143
     NOT %w145:wire(1), %w144
     LOAD %w148:wire(1), %A2
-    LOAD %w149:wire(1), %B1
-    LOAD %w150:wire(1), %C1
-    NOT %w151:wire(1), %w150
-    AND %w152:wire(1), %w149, %w151
-    NOT %w153:wire(1), %w152
-    AND %w3621:wire(1), %w140, %w145, %w148, %w153
-    NOT %w3620:wire(1), %w3621
-    STORE %w3620, %Y
+    AND %w3557:wire(1), %w140, %w145, %w148
+    NOT %w3570:wire(1), %w3557
+    STORE %w3570, %Y
   }
 }
 STDCELL_DEF %sky130_fd_sc_hd__a211oi_2:module("sky130_fd_sc_hd__a211oi_2"), %44:block, %45:stdcell_info("area": 12) {
@@ -262,14 +225,9 @@ STDCELL_DEF %sky130_fd_sc_hd__a211oi_2:module("sky130_fd_sc_hd__a211oi_2"), %44:
     AND %w161:wire(1), %w158, %w160
     NOT %w162:wire(1), %w161
     LOAD %w165:wire(1), %A2
-    LOAD %w166:wire(1), %B1
-    LOAD %w167:wire(1), %C1
-    NOT %w168:wire(1), %w167
-    AND %w169:wire(1), %w166, %w168
-    NOT %w170:wire(1), %w169
-    AND %w3609:wire(1), %w157, %w162, %w165, %w170
-    NOT %w3608:wire(1), %w3609
-    STORE %w3608, %Y
+    AND %w3542:wire(1), %w157, %w162, %w165
+    NOT %w3543:wire(1), %w3542
+    STORE %w3543, %Y
   }
 }
 STDCELL_DEF %sky130_fd_sc_hd__a211oi_4:module("sky130_fd_sc_hd__a211oi_4"), %48:block, %49:stdcell_info("area": 20) {
@@ -286,14 +244,9 @@ STDCELL_DEF %sky130_fd_sc_hd__a211oi_4:module("sky130_fd_sc_hd__a211oi_4"), %48:
     AND %w178:wire(1), %w175, %w177
     NOT %w179:wire(1), %w178
     LOAD %w182:wire(1), %A2
-    LOAD %w183:wire(1), %B1
-    LOAD %w184:wire(1), %C1
-    NOT %w185:wire(1), %w184
-    AND %w186:wire(1), %w183, %w185
-    NOT %w187:wire(1), %w186
-    AND %w3571:wire(1), %w174, %w179, %w182, %w187
-    NOT %w3570:wire(1), %w3571
-    STORE %w3570, %Y
+    AND %w3485:wire(1), %w174, %w179, %w182
+    NOT %w3498:wire(1), %w3485
+    STORE %w3498, %Y
   }
 }
 STDCELL_DEF %sky130_fd_sc_hd__a21bo_1:module("sky130_fd_sc_hd__a21bo_1"), %52:block, %53:stdcell_info("area": 10) {
@@ -350,10 +303,9 @@ STDCELL_DEF %sky130_fd_sc_hd__a21boi_0:module("sky130_fd_sc_hd__a21boi_0"), %64:
     LOAD %w209:wire(1), %A1
     LOAD %w210:wire(1), %B1_N
     LOAD %w213:wire(1), %A2
-    LOAD %w214:wire(1), %B1_N
-    AND %w3557:wire(1), %w209, %w210, %w213, %w214
-    NOT %w3556:wire(1), %w3557
-    STORE %w3556, %Y
+    AND %w3470:wire(1), %w209, %w210, %w213
+    NOT %w3471:wire(1), %w3470
+    STORE %w3471, %Y
   }
 }
 STDCELL_DEF %sky130_fd_sc_hd__a21boi_1:module("sky130_fd_sc_hd__a21boi_1"), %68:block, %69:stdcell_info("area": 7) {
@@ -365,10 +317,9 @@ STDCELL_DEF %sky130_fd_sc_hd__a21boi_1:module("sky130_fd_sc_hd__a21boi_1"), %68:
     LOAD %w218:wire(1), %A1
     LOAD %w219:wire(1), %B1_N
     LOAD %w222:wire(1), %A2
-    LOAD %w223:wire(1), %B1_N
-    AND %w3543:wire(1), %w218, %w219, %w222, %w223
-    NOT %w3542:wire(1), %w3543
-    STORE %w3542, %Y
+    AND %w1443:wire(1), %w218, %w219, %w222
+    NOT %w3456:wire(1), %w1443
+    STORE %w3456, %Y
   }
 }
 STDCELL_DEF %sky130_fd_sc_hd__a21boi_2:module("sky130_fd_sc_hd__a21boi_2"), %72:block, %73:stdcell_info("area": 11) {
@@ -380,10 +331,9 @@ STDCELL_DEF %sky130_fd_sc_hd__a21boi_2:module("sky130_fd_sc_hd__a21boi_2"), %72:
     LOAD %w227:wire(1), %A1
     LOAD %w228:wire(1), %B1_N
     LOAD %w231:wire(1), %A2
-    LOAD %w232:wire(1), %B1_N
-    AND %w3499:wire(1), %w227, %w228, %w231, %w232
-    NOT %w3498:wire(1), %w3499
-    STORE %w3498, %Y
+    AND %w1383:wire(1), %w227, %w228, %w231
+    NOT %w1384:wire(1), %w1383
+    STORE %w1384, %Y
   }
 }
 STDCELL_DEF %sky130_fd_sc_hd__a21boi_4:module("sky130_fd_sc_hd__a21boi_4"), %76:block, %77:stdcell_info("area": 18) {
@@ -395,10 +345,9 @@ STDCELL_DEF %sky130_fd_sc_hd__a21boi_4:module("sky130_fd_sc_hd__a21boi_4"), %76:
     LOAD %w236:wire(1), %A1
     LOAD %w237:wire(1), %B1_N
     LOAD %w240:wire(1), %A2
-    LOAD %w241:wire(1), %B1_N
-    AND %w3485:wire(1), %w236, %w237, %w240, %w241
-    NOT %w3484:wire(1), %w3485
-    STORE %w3484, %Y
+    AND %w1374:wire(1), %w236, %w237, %w240
+    NOT %w1378:wire(1), %w1374
+    STORE %w1378, %Y
   }
 }
 STDCELL_DEF %sky130_fd_sc_hd__a21o_1:module("sky130_fd_sc_hd__a21o_1"), %80:block, %81:stdcell_info("area": 7) {
@@ -453,11 +402,9 @@ STDCELL_DEF %sky130_fd_sc_hd__a21oi_1:module("sky130_fd_sc_hd__a21oi_1"), %92:bl
     LOAD %w261:wire(1), %B1
     NOT %w262:wire(1), %w261
     LOAD %w265:wire(1), %A2
-    LOAD %w266:wire(1), %B1
-    NOT %w267:wire(1), %w266
-    AND %w3471:wire(1), %w260, %w262, %w265, %w267
-    NOT %w3470:wire(1), %w3471
-    STORE %w3470, %Y
+    AND %w1356:wire(1), %w260, %w262, %w265
+    NOT %w1357:wire(1), %w1356
+    STORE %w1357, %Y
   }
 }
 STDCELL_DEF %sky130_fd_sc_hd__a21oi_2:module("sky130_fd_sc_hd__a21oi_2"), %96:block, %97:stdcell_info("area": 8) {
@@ -470,11 +417,9 @@ STDCELL_DEF %sky130_fd_sc_hd__a21oi_2:module("sky130_fd_sc_hd__a21oi_2"), %96:bl
     LOAD %w272:wire(1), %B1
     NOT %w273:wire(1), %w272
     LOAD %w276:wire(1), %A2
-    LOAD %w277:wire(1), %B1
-    NOT %w278:wire(1), %w277
-    AND %w3457:wire(1), %w271, %w273, %w276, %w278
-    NOT %w3456:wire(1), %w3457
-    STORE %w3456, %Y
+    AND %w1343:wire(1), %w271, %w273, %w276
+    NOT %w1349:wire(1), %w1343
+    STORE %w1349, %Y
   }
 }
 STDCELL_DEF %sky130_fd_sc_hd__a21oi_4:module("sky130_fd_sc_hd__a21oi_4"), %100:block, %101:stdcell_info("area": 16) {
@@ -487,11 +432,9 @@ STDCELL_DEF %sky130_fd_sc_hd__a21oi_4:module("sky130_fd_sc_hd__a21oi_4"), %100:b
     LOAD %w283:wire(1), %B1
     NOT %w284:wire(1), %w283
     LOAD %w287:wire(1), %A2
-    LOAD %w288:wire(1), %B1
-    NOT %w289:wire(1), %w288
-    AND %w1443:wire(1), %w282, %w284, %w287, %w289
-    NOT %w1442:wire(1), %w1443
-    STORE %w1442, %Y
+    AND %w1319:wire(1), %w282, %w284, %w287
+    NOT %w1320:wire(1), %w1319
+    STORE %w1320, %Y
   }
 }
 STDCELL_DEF %sky130_fd_sc_hd__a221o_1:module("sky130_fd_sc_hd__a221o_1"), %104:block, %105:stdcell_info("area": 10) {
@@ -565,27 +508,13 @@ STDCELL_DEF %sky130_fd_sc_hd__a221oi_1:module("sky130_fd_sc_hd__a221oi_1"), %116
     NOT %w323:wire(1), %w322
     AND %w324:wire(1), %w321, %w323
     NOT %w325:wire(1), %w324
-    LOAD %w328:wire(1), %A1
     LOAD %w329:wire(1), %B2
-    LOAD %w330:wire(1), %C1
-    NOT %w331:wire(1), %w330
-    AND %w332:wire(1), %w329, %w331
+    AND %w332:wire(1), %w323, %w329
     NOT %w333:wire(1), %w332
     LOAD %w336:wire(1), %A2
-    LOAD %w337:wire(1), %B1
-    LOAD %w338:wire(1), %C1
-    NOT %w339:wire(1), %w338
-    AND %w340:wire(1), %w337, %w339
-    NOT %w341:wire(1), %w340
-    LOAD %w344:wire(1), %A2
-    LOAD %w345:wire(1), %B2
-    LOAD %w346:wire(1), %C1
-    NOT %w347:wire(1), %w346
-    AND %w348:wire(1), %w345, %w347
-    NOT %w349:wire(1), %w348
-    AND %w1384:wire(1), %w320, %w325, %w328, %w333, %w336, %w341, %w344, %w349
-    NOT %w1383:wire(1), %w1384
-    STORE %w1383, %Y
+    AND %w1298:wire(1), %w320, %w325, %w333, %w336
+    NOT %w1312:wire(1), %w1298
+    STORE %w1312, %Y
   }
 }
 STDCELL_DEF %sky130_fd_sc_hd__a221oi_2:module("sky130_fd_sc_hd__a221oi_2"), %120:block, %121:stdcell_info("area": 15) {
@@ -602,27 +531,13 @@ STDCELL_DEF %sky130_fd_sc_hd__a221oi_2:module("sky130_fd_sc_hd__a221oi_2"), %120
     NOT %w358:wire(1), %w357
     AND %w359:wire(1), %w356, %w358
     NOT %w360:wire(1), %w359
-    LOAD %w363:wire(1), %A1
     LOAD %w364:wire(1), %B2
-    LOAD %w365:wire(1), %C1
-    NOT %w366:wire(1), %w365
-    AND %w367:wire(1), %w364, %w366
+    AND %w367:wire(1), %w358, %w364
     NOT %w368:wire(1), %w367
     LOAD %w371:wire(1), %A2
-    LOAD %w372:wire(1), %B1
-    LOAD %w373:wire(1), %C1
-    NOT %w374:wire(1), %w373
-    AND %w375:wire(1), %w372, %w374
-    NOT %w376:wire(1), %w375
-    LOAD %w379:wire(1), %A2
-    LOAD %w380:wire(1), %B2
-    LOAD %w381:wire(1), %C1
-    NOT %w382:wire(1), %w381
-    AND %w383:wire(1), %w380, %w382
-    NOT %w384:wire(1), %w383
-    AND %w1379:wire(1), %w355, %w360, %w363, %w368, %w371, %w376, %w379, %w384
-    NOT %w1378:wire(1), %w1379
-    STORE %w1378, %Y
+    AND %w3960:wire(1), %w355, %w360, %w368, %w371
+    NOT %w3968:wire(1), %w3960
+    STORE %w3968, %Y
   }
 }
 STDCELL_DEF %sky130_fd_sc_hd__a221oi_4:module("sky130_fd_sc_hd__a221oi_4"), %124:block, %125:stdcell_info("area": 26) {
@@ -639,27 +554,13 @@ STDCELL_DEF %sky130_fd_sc_hd__a221oi_4:module("sky130_fd_sc_hd__a221oi_4"), %124
     NOT %w393:wire(1), %w392
     AND %w394:wire(1), %w391, %w393
     NOT %w395:wire(1), %w394
-    LOAD %w398:wire(1), %A1
     LOAD %w399:wire(1), %B2
-    LOAD %w400:wire(1), %C1
-    NOT %w401:wire(1), %w400
-    AND %w402:wire(1), %w399, %w401
+    AND %w402:wire(1), %w393, %w399
     NOT %w403:wire(1), %w402
     LOAD %w406:wire(1), %A2
-    LOAD %w407:wire(1), %B1
-    LOAD %w408:wire(1), %C1
-    NOT %w409:wire(1), %w408
-    AND %w410:wire(1), %w407, %w409
-    NOT %w411:wire(1), %w410
-    LOAD %w414:wire(1), %A2
-    LOAD %w415:wire(1), %B2
-    LOAD %w416:wire(1), %C1
-    NOT %w417:wire(1), %w416
-    AND %w418:wire(1), %w415, %w417
-    NOT %w419:wire(1), %w418
-    AND %w1374:wire(1), %w390, %w395, %w398, %w403, %w406, %w411, %w414, %w419
-    NOT %w1373:wire(1), %w1374
-    STORE %w1373, %Y
+    AND %w3952:wire(1), %w390, %w395, %w403, %w406
+    NOT %w3956:wire(1), %w3952
+    STORE %w3956, %Y
   }
 }
 STDCELL_DEF %sky130_fd_sc_hd__a222oi_1:module("sky130_fd_sc_hd__a222oi_1"), %128:block, %129:stdcell_info("area": 10) {
@@ -677,51 +578,19 @@ STDCELL_DEF %sky130_fd_sc_hd__a222oi_1:module("sky130_fd_sc_hd__a222oi_1"), %128
     NOT %w428:wire(1), %w427
     AND %w429:wire(1), %w426, %w428
     NOT %w430:wire(1), %w429
-    LOAD %w433:wire(1), %A1
-    LOAD %w434:wire(1), %B1
     LOAD %w435:wire(1), %C2
     NOT %w436:wire(1), %w435
-    AND %w437:wire(1), %w434, %w436
+    AND %w437:wire(1), %w426, %w436
     NOT %w438:wire(1), %w437
-    LOAD %w441:wire(1), %A1
     LOAD %w442:wire(1), %B2
-    LOAD %w443:wire(1), %C1
-    NOT %w444:wire(1), %w443
-    AND %w445:wire(1), %w442, %w444
+    AND %w445:wire(1), %w428, %w442
     NOT %w446:wire(1), %w445
     LOAD %w449:wire(1), %A2
-    LOAD %w450:wire(1), %B1
-    LOAD %w451:wire(1), %C1
-    NOT %w452:wire(1), %w451
-    AND %w453:wire(1), %w450, %w452
-    NOT %w454:wire(1), %w453
-    LOAD %w457:wire(1), %A1
-    LOAD %w458:wire(1), %B2
-    LOAD %w459:wire(1), %C2
-    NOT %w460:wire(1), %w459
-    AND %w461:wire(1), %w458, %w460
+    AND %w461:wire(1), %w436, %w442
     NOT %w462:wire(1), %w461
-    LOAD %w465:wire(1), %A2
-    LOAD %w466:wire(1), %B1
-    LOAD %w467:wire(1), %C2
-    NOT %w468:wire(1), %w467
-    AND %w469:wire(1), %w466, %w468
-    NOT %w470:wire(1), %w469
-    LOAD %w473:wire(1), %A2
-    LOAD %w474:wire(1), %B2
-    LOAD %w475:wire(1), %C1
-    NOT %w476:wire(1), %w475
-    AND %w477:wire(1), %w474, %w476
-    NOT %w478:wire(1), %w477
-    LOAD %w481:wire(1), %A2
-    LOAD %w482:wire(1), %B2
-    LOAD %w483:wire(1), %C2
-    NOT %w484:wire(1), %w483
-    AND %w485:wire(1), %w482, %w484
-    NOT %w486:wire(1), %w485
-    AND %w1357:wire(1), %w425, %w430, %w433, %w438, %w441, %w446, %w449, %w454, %w457, %w462, %w465, %w470, %w473, %w478, %w481, %w486
-    NOT %w1356:wire(1), %w1357
-    STORE %w1356, %Y
+    AND %w3940:wire(1), %w425, %w425, %w425, %w425, %w430, %w430, %w438, %w438, %w446, %w446, %w449, %w449, %w449, %w449, %w462, %w462
+    NOT %w3939:wire(1), %w3940
+    STORE %w3939, %Y
   }
 }
 STDCELL_DEF %sky130_fd_sc_hd__a22o_1:module("sky130_fd_sc_hd__a22o_1"), %132:block, %133:stdcell_info("area": 8) {
@@ -785,18 +654,12 @@ STDCELL_DEF %sky130_fd_sc_hd__a22oi_1:module("sky130_fd_sc_hd__a22oi_1"), %144:b
     LOAD %w517:wire(1), %A1
     LOAD %w518:wire(1), %B1
     NOT %w519:wire(1), %w518
-    LOAD %w522:wire(1), %A1
     LOAD %w523:wire(1), %B2
     NOT %w524:wire(1), %w523
     LOAD %w527:wire(1), %A2
-    LOAD %w528:wire(1), %B1
-    NOT %w529:wire(1), %w528
-    LOAD %w532:wire(1), %A2
-    LOAD %w533:wire(1), %B2
-    NOT %w534:wire(1), %w533
-    AND %w1350:wire(1), %w517, %w519, %w522, %w524, %w527, %w529, %w532, %w534
-    NOT %w1349:wire(1), %w1350
-    STORE %w1349, %Y
+    AND %w3927:wire(1), %w517, %w519, %w524, %w527
+    NOT %w3937:wire(1), %w3927
+    STORE %w3937, %Y
   }
 }
 STDCELL_DEF %sky130_fd_sc_hd__a22oi_2:module("sky130_fd_sc_hd__a22oi_2"), %148:block, %149:stdcell_info("area": 12) {
@@ -809,18 +672,12 @@ STDCELL_DEF %sky130_fd_sc_hd__a22oi_2:module("sky130_fd_sc_hd__a22oi_2"), %148:b
     LOAD %w540:wire(1), %A1
     LOAD %w541:wire(1), %B1
     NOT %w542:wire(1), %w541
-    LOAD %w545:wire(1), %A1
     LOAD %w546:wire(1), %B2
     NOT %w547:wire(1), %w546
     LOAD %w550:wire(1), %A2
-    LOAD %w551:wire(1), %B1
-    NOT %w552:wire(1), %w551
-    LOAD %w555:wire(1), %A2
-    LOAD %w556:wire(1), %B2
-    NOT %w557:wire(1), %w556
-    AND %w1343:wire(1), %w540, %w542, %w545, %w547, %w550, %w552, %w555, %w557
-    NOT %w1342:wire(1), %w1343
-    STORE %w1342, %Y
+    AND %w3910:wire(1), %w540, %w542, %w547, %w550
+    NOT %w3925:wire(1), %w3910
+    STORE %w3925, %Y
   }
 }
 STDCELL_DEF %sky130_fd_sc_hd__a22oi_4:module("sky130_fd_sc_hd__a22oi_4"), %152:block, %153:stdcell_info("area": 21) {
@@ -833,18 +690,12 @@ STDCELL_DEF %sky130_fd_sc_hd__a22oi_4:module("sky130_fd_sc_hd__a22oi_4"), %152:b
     LOAD %w563:wire(1), %A1
     LOAD %w564:wire(1), %B1
     NOT %w565:wire(1), %w564
-    LOAD %w568:wire(1), %A1
     LOAD %w569:wire(1), %B2
     NOT %w570:wire(1), %w569
     LOAD %w573:wire(1), %A2
-    LOAD %w574:wire(1), %B1
-    NOT %w575:wire(1), %w574
-    LOAD %w578:wire(1), %A2
-    LOAD %w579:wire(1), %B2
-    NOT %w580:wire(1), %w579
-    AND %w1320:wire(1), %w563, %w565, %w568, %w570, %w573, %w575, %w578, %w580
-    NOT %w1319:wire(1), %w1320
-    STORE %w1319, %Y
+    AND %w3898:wire(1), %w563, %w565, %w570, %w573
+    NOT %w3908:wire(1), %w3898
+    STORE %w3908, %Y
   }
 }
 STDCELL_DEF %sky130_fd_sc_hd__a2bb2o_1:module("sky130_fd_sc_hd__a2bb2o_1"), %156:block, %157:stdcell_info("area": 10) {
@@ -915,18 +766,12 @@ STDCELL_DEF %sky130_fd_sc_hd__a2bb2oi_1:module("sky130_fd_sc_hd__a2bb2oi_1"), %1
     LOAD %w614:wire(1), %B1
     NOT %w615:wire(1), %w614
     AND %w616:wire(1), %w613, %w615
-    LOAD %w617:wire(1), %A1_N
     LOAD %w618:wire(1), %B2
     NOT %w619:wire(1), %w618
-    AND %w620:wire(1), %w617, %w619
+    AND %w620:wire(1), %w613, %w619
     LOAD %w621:wire(1), %A2_N
-    LOAD %w622:wire(1), %B1
-    NOT %w623:wire(1), %w622
-    AND %w624:wire(1), %w621, %w623
-    LOAD %w625:wire(1), %A2_N
-    LOAD %w626:wire(1), %B2
-    NOT %w627:wire(1), %w626
-    AND %w628:wire(1), %w625, %w627
+    AND %w624:wire(1), %w615, %w621
+    AND %w628:wire(1), %w619, %w621
     OR %w631:wire(1), %w616, %w620, %w624, %w628
     STORE %w631, %Y
   }
@@ -942,18 +787,12 @@ STDCELL_DEF %sky130_fd_sc_hd__a2bb2oi_2:module("sky130_fd_sc_hd__a2bb2oi_2"), %1
     LOAD %w633:wire(1), %B1
     NOT %w634:wire(1), %w633
     AND %w635:wire(1), %w632, %w634
-    LOAD %w636:wire(1), %A1_N
     LOAD %w637:wire(1), %B2
     NOT %w638:wire(1), %w637
-    AND %w639:wire(1), %w636, %w638
+    AND %w639:wire(1), %w632, %w638
     LOAD %w640:wire(1), %A2_N
-    LOAD %w641:wire(1), %B1
-    NOT %w642:wire(1), %w641
-    AND %w643:wire(1), %w640, %w642
-    LOAD %w644:wire(1), %A2_N
-    LOAD %w645:wire(1), %B2
-    NOT %w646:wire(1), %w645
-    AND %w647:wire(1), %w644, %w646
+    AND %w643:wire(1), %w634, %w640
+    AND %w647:wire(1), %w638, %w640
     OR %w650:wire(1), %w635, %w639, %w643, %w647
     STORE %w650, %Y
   }
@@ -969,18 +808,12 @@ STDCELL_DEF %sky130_fd_sc_hd__a2bb2oi_4:module("sky130_fd_sc_hd__a2bb2oi_4"), %1
     LOAD %w652:wire(1), %B1
     NOT %w653:wire(1), %w652
     AND %w654:wire(1), %w651, %w653
-    LOAD %w655:wire(1), %A1_N
     LOAD %w656:wire(1), %B2
     NOT %w657:wire(1), %w656
-    AND %w658:wire(1), %w655, %w657
+    AND %w658:wire(1), %w651, %w657
     LOAD %w659:wire(1), %A2_N
-    LOAD %w660:wire(1), %B1
-    NOT %w661:wire(1), %w660
-    AND %w662:wire(1), %w659, %w661
-    LOAD %w663:wire(1), %A2_N
-    LOAD %w664:wire(1), %B2
-    NOT %w665:wire(1), %w664
-    AND %w666:wire(1), %w663, %w665
+    AND %w662:wire(1), %w653, %w659
+    AND %w666:wire(1), %w657, %w659
     OR %w669:wire(1), %w654, %w658, %w662, %w666
     STORE %w669, %Y
   }
@@ -1054,20 +887,10 @@ STDCELL_DEF %sky130_fd_sc_hd__a311oi_1:module("sky130_fd_sc_hd__a311oi_1"), %192
     AND %w701:wire(1), %w698, %w700
     NOT %w702:wire(1), %w701
     LOAD %w705:wire(1), %A2
-    LOAD %w706:wire(1), %B1
-    LOAD %w707:wire(1), %C1
-    NOT %w708:wire(1), %w707
-    AND %w709:wire(1), %w706, %w708
-    NOT %w710:wire(1), %w709
     LOAD %w713:wire(1), %A3
-    LOAD %w714:wire(1), %B1
-    LOAD %w715:wire(1), %C1
-    NOT %w716:wire(1), %w715
-    AND %w717:wire(1), %w714, %w716
-    NOT %w718:wire(1), %w717
-    AND %w1313:wire(1), %w697, %w702, %w705, %w710, %w713, %w718
-    NOT %w1312:wire(1), %w1313
-    STORE %w1312, %Y
+    AND %w3894:wire(1), %w697, %w702, %w705, %w713
+    NOT %w3896:wire(1), %w3894
+    STORE %w3896, %Y
   }
 }
 STDCELL_DEF %sky130_fd_sc_hd__a311oi_2:module("sky130_fd_sc_hd__a311oi_2"), %196:block, %197:stdcell_info("area": 15) {
@@ -1085,20 +908,10 @@ STDCELL_DEF %sky130_fd_sc_hd__a311oi_2:module("sky130_fd_sc_hd__a311oi_2"), %196
     AND %w727:wire(1), %w724, %w726
     NOT %w728:wire(1), %w727
     LOAD %w731:wire(1), %A2
-    LOAD %w732:wire(1), %B1
-    LOAD %w733:wire(1), %C1
-    NOT %w734:wire(1), %w733
-    AND %w735:wire(1), %w732, %w734
-    NOT %w736:wire(1), %w735
     LOAD %w739:wire(1), %A3
-    LOAD %w740:wire(1), %B1
-    LOAD %w741:wire(1), %C1
-    NOT %w742:wire(1), %w741
-    AND %w743:wire(1), %w740, %w742
-    NOT %w744:wire(1), %w743
-    AND %w1306:wire(1), %w723, %w728, %w731, %w736, %w739, %w744
-    NOT %w1305:wire(1), %w1306
-    STORE %w1305, %Y
+    AND %w3873:wire(1), %w723, %w728, %w731, %w739
+    NOT %w3882:wire(1), %w3873
+    STORE %w3882, %Y
   }
 }
 STDCELL_DEF %sky130_fd_sc_hd__a311oi_4:module("sky130_fd_sc_hd__a311oi_4"), %200:block, %201:stdcell_info("area": 26) {
@@ -1116,20 +929,10 @@ STDCELL_DEF %sky130_fd_sc_hd__a311oi_4:module("sky130_fd_sc_hd__a311oi_4"), %200
     AND %w753:wire(1), %w750, %w752
     NOT %w754:wire(1), %w753
     LOAD %w757:wire(1), %A2
-    LOAD %w758:wire(1), %B1
-    LOAD %w759:wire(1), %C1
-    NOT %w760:wire(1), %w759
-    AND %w761:wire(1), %w758, %w760
-    NOT %w762:wire(1), %w761
     LOAD %w765:wire(1), %A3
-    LOAD %w766:wire(1), %B1
-    LOAD %w767:wire(1), %C1
-    NOT %w768:wire(1), %w767
-    AND %w769:wire(1), %w766, %w768
-    NOT %w770:wire(1), %w769
-    AND %w1299:wire(1), %w749, %w754, %w757, %w762, %w765, %w770
-    NOT %w1298:wire(1), %w1299
-    STORE %w1298, %Y
+    AND %w3853:wire(1), %w749, %w754, %w757, %w765
+    NOT %w3864:wire(1), %w3853
+    STORE %w3864, %Y
   }
 }
 STDCELL_DEF %sky130_fd_sc_hd__a31o_1:module("sky130_fd_sc_hd__a31o_1"), %204:block, %205:stdcell_info("area": 8) {
@@ -1191,14 +994,10 @@ STDCELL_DEF %sky130_fd_sc_hd__a31oi_1:module("sky130_fd_sc_hd__a31oi_1"), %216:b
     LOAD %w797:wire(1), %B1
     NOT %w798:wire(1), %w797
     LOAD %w801:wire(1), %A2
-    LOAD %w802:wire(1), %B1
-    NOT %w803:wire(1), %w802
     LOAD %w806:wire(1), %A3
-    LOAD %w807:wire(1), %B1
-    NOT %w808:wire(1), %w807
-    AND %w3974:wire(1), %w796, %w798, %w801, %w803, %w806, %w808
-    NOT %w3975:wire(1), %w3974
-    STORE %w3975, %Y
+    AND %w3846:wire(1), %w796, %w798, %w801, %w806
+    NOT %w3851:wire(1), %w3846
+    STORE %w3851, %Y
   }
 }
 STDCELL_DEF %sky130_fd_sc_hd__a31oi_2:module("sky130_fd_sc_hd__a31oi_2"), %220:block, %221:stdcell_info("area": 12) {
@@ -1212,14 +1011,10 @@ STDCELL_DEF %sky130_fd_sc_hd__a31oi_2:module("sky130_fd_sc_hd__a31oi_2"), %220:b
     LOAD %w814:wire(1), %B1
     NOT %w815:wire(1), %w814
     LOAD %w818:wire(1), %A2
-    LOAD %w819:wire(1), %B1
-    NOT %w820:wire(1), %w819
     LOAD %w823:wire(1), %A3
-    LOAD %w824:wire(1), %B1
-    NOT %w825:wire(1), %w824
-    AND %w3976:wire(1), %w813, %w815, %w818, %w820, %w823, %w825
-    NOT %w3977:wire(1), %w3976
-    STORE %w3977, %Y
+    AND %w3841:wire(1), %w813, %w815, %w818, %w823
+    NOT %w3843:wire(1), %w3841
+    STORE %w3843, %Y
   }
 }
 STDCELL_DEF %sky130_fd_sc_hd__a31oi_4:module("sky130_fd_sc_hd__a31oi_4"), %224:block, %225:stdcell_info("area": 21) {
@@ -1233,14 +1028,10 @@ STDCELL_DEF %sky130_fd_sc_hd__a31oi_4:module("sky130_fd_sc_hd__a31oi_4"), %224:b
     LOAD %w831:wire(1), %B1
     NOT %w832:wire(1), %w831
     LOAD %w835:wire(1), %A2
-    LOAD %w836:wire(1), %B1
-    NOT %w837:wire(1), %w836
     LOAD %w840:wire(1), %A3
-    LOAD %w841:wire(1), %B1
-    NOT %w842:wire(1), %w841
-    AND %w3978:wire(1), %w830, %w832, %w835, %w837, %w840, %w842
-    NOT %w3979:wire(1), %w3978
-    STORE %w3979, %Y
+    AND %w3824:wire(1), %w830, %w832, %w835, %w840
+    NOT %w3839:wire(1), %w3824
+    STORE %w3839, %Y
   }
 }
 STDCELL_DEF %sky130_fd_sc_hd__a32o_1:module("sky130_fd_sc_hd__a32o_1"), %228:block, %229:stdcell_info("area": 10) {
@@ -1311,24 +1102,13 @@ STDCELL_DEF %sky130_fd_sc_hd__a32oi_1:module("sky130_fd_sc_hd__a32oi_1"), %240:b
     LOAD %w874:wire(1), %A1
     LOAD %w875:wire(1), %B1
     NOT %w876:wire(1), %w875
-    LOAD %w879:wire(1), %A1
     LOAD %w880:wire(1), %B2
     NOT %w881:wire(1), %w880
     LOAD %w884:wire(1), %A2
-    LOAD %w885:wire(1), %B1
-    NOT %w886:wire(1), %w885
     LOAD %w889:wire(1), %A3
-    LOAD %w890:wire(1), %B1
-    NOT %w891:wire(1), %w890
-    LOAD %w894:wire(1), %A2
-    LOAD %w895:wire(1), %B2
-    NOT %w896:wire(1), %w895
-    LOAD %w899:wire(1), %A3
-    LOAD %w900:wire(1), %B2
-    NOT %w901:wire(1), %w900
-    AND %w3980:wire(1), %w874, %w876, %w879, %w881, %w884, %w886, %w889, %w891, %w894, %w896, %w899, %w901
-    NOT %w3981:wire(1), %w3980
-    STORE %w3981, %Y
+    AND %w3811:wire(1), %w874, %w876, %w881, %w884, %w889
+    NOT %w3822:wire(1), %w3811
+    STORE %w3822, %Y
   }
 }
 STDCELL_DEF %sky130_fd_sc_hd__a32oi_2:module("sky130_fd_sc_hd__a32oi_2"), %244:block, %245:stdcell_info("area": 16) {
@@ -1342,24 +1122,13 @@ STDCELL_DEF %sky130_fd_sc_hd__a32oi_2:module("sky130_fd_sc_hd__a32oi_2"), %244:b
     LOAD %w909:wire(1), %A1
     LOAD %w910:wire(1), %B1
     NOT %w911:wire(1), %w910
-    LOAD %w914:wire(1), %A1
     LOAD %w915:wire(1), %B2
     NOT %w916:wire(1), %w915
     LOAD %w919:wire(1), %A2
-    LOAD %w920:wire(1), %B1
-    NOT %w921:wire(1), %w920
     LOAD %w924:wire(1), %A3
-    LOAD %w925:wire(1), %B1
-    NOT %w926:wire(1), %w925
-    LOAD %w929:wire(1), %A2
-    LOAD %w930:wire(1), %B2
-    NOT %w931:wire(1), %w930
-    LOAD %w934:wire(1), %A3
-    LOAD %w935:wire(1), %B2
-    NOT %w936:wire(1), %w935
-    AND %w3982:wire(1), %w909, %w911, %w914, %w916, %w919, %w921, %w924, %w926, %w929, %w931, %w934, %w936
-    NOT %w3983:wire(1), %w3982
-    STORE %w3983, %Y
+    AND %w3785:wire(1), %w909, %w911, %w916, %w919, %w924
+    NOT %w3796:wire(1), %w3785
+    STORE %w3796, %Y
   }
 }
 STDCELL_DEF %sky130_fd_sc_hd__a32oi_4:module("sky130_fd_sc_hd__a32oi_4"), %248:block, %249:stdcell_info("area": 27) {
@@ -1373,24 +1142,13 @@ STDCELL_DEF %sky130_fd_sc_hd__a32oi_4:module("sky130_fd_sc_hd__a32oi_4"), %248:b
     LOAD %w944:wire(1), %A1
     LOAD %w945:wire(1), %B1
     NOT %w946:wire(1), %w945
-    LOAD %w949:wire(1), %A1
     LOAD %w950:wire(1), %B2
     NOT %w951:wire(1), %w950
     LOAD %w954:wire(1), %A2
-    LOAD %w955:wire(1), %B1
-    NOT %w956:wire(1), %w955
     LOAD %w959:wire(1), %A3
-    LOAD %w960:wire(1), %B1
-    NOT %w961:wire(1), %w960
-    LOAD %w964:wire(1), %A2
-    LOAD %w965:wire(1), %B2
-    NOT %w966:wire(1), %w965
-    LOAD %w969:wire(1), %A3
-    LOAD %w970:wire(1), %B2
-    NOT %w971:wire(1), %w970
-    AND %w3984:wire(1), %w944, %w946, %w949, %w951, %w954, %w956, %w959, %w961, %w964, %w966, %w969, %w971
-    NOT %w3985:wire(1), %w3984
-    STORE %w3985, %Y
+    AND %w3752:wire(1), %w944, %w946, %w951, %w954, %w959
+    NOT %w3783:wire(1), %w3752
+    STORE %w3783, %Y
   }
 }
 STDCELL_DEF %sky130_fd_sc_hd__a41o_1:module("sky130_fd_sc_hd__a41o_1"), %252:block, %253:stdcell_info("area": 10) {
@@ -1459,17 +1217,11 @@ STDCELL_DEF %sky130_fd_sc_hd__a41oi_1:module("sky130_fd_sc_hd__a41oi_1"), %264:b
     LOAD %w1007:wire(1), %B1
     NOT %w1008:wire(1), %w1007
     LOAD %w1011:wire(1), %A2
-    LOAD %w1012:wire(1), %B1
-    NOT %w1013:wire(1), %w1012
     LOAD %w1016:wire(1), %A3
-    LOAD %w1017:wire(1), %B1
-    NOT %w1018:wire(1), %w1017
     LOAD %w1021:wire(1), %A4
-    LOAD %w1022:wire(1), %B1
-    NOT %w1023:wire(1), %w1022
-    AND %w3986:wire(1), %w1006, %w1008, %w1011, %w1013, %w1016, %w1018, %w1021, %w1023
-    NOT %w3987:wire(1), %w3986
-    STORE %w3987, %Y
+    AND %w3734:wire(1), %w1006, %w1008, %w1011, %w1016, %w1021
+    NOT %w3740:wire(1), %w3734
+    STORE %w3740, %Y
   }
 }
 STDCELL_DEF %sky130_fd_sc_hd__a41oi_2:module("sky130_fd_sc_hd__a41oi_2"), %268:block, %269:stdcell_info("area": 16) {
@@ -1484,17 +1236,11 @@ STDCELL_DEF %sky130_fd_sc_hd__a41oi_2:module("sky130_fd_sc_hd__a41oi_2"), %268:b
     LOAD %w1030:wire(1), %B1
     NOT %w1031:wire(1), %w1030
     LOAD %w1034:wire(1), %A2
-    LOAD %w1035:wire(1), %B1
-    NOT %w1036:wire(1), %w1035
     LOAD %w1039:wire(1), %A3
-    LOAD %w1040:wire(1), %B1
-    NOT %w1041:wire(1), %w1040
     LOAD %w1044:wire(1), %A4
-    LOAD %w1045:wire(1), %B1
-    NOT %w1046:wire(1), %w1045
-    AND %w3988:wire(1), %w1029, %w1031, %w1034, %w1036, %w1039, %w1041, %w1044, %w1046
-    NOT %w3989:wire(1), %w3988
-    STORE %w3989, %Y
+    AND %w3712:wire(1), %w1029, %w1031, %w1034, %w1039, %w1044
+    NOT %w3718:wire(1), %w3712
+    STORE %w3718, %Y
   }
 }
 STDCELL_DEF %sky130_fd_sc_hd__a41oi_4:module("sky130_fd_sc_hd__a41oi_4"), %272:block, %273:stdcell_info("area": 27) {
@@ -1509,17 +1255,11 @@ STDCELL_DEF %sky130_fd_sc_hd__a41oi_4:module("sky130_fd_sc_hd__a41oi_4"), %272:b
     LOAD %w1053:wire(1), %B1
     NOT %w1054:wire(1), %w1053
     LOAD %w1057:wire(1), %A2
-    LOAD %w1058:wire(1), %B1
-    NOT %w1059:wire(1), %w1058
     LOAD %w1062:wire(1), %A3
-    LOAD %w1063:wire(1), %B1
-    NOT %w1064:wire(1), %w1063
     LOAD %w1067:wire(1), %A4
-    LOAD %w1068:wire(1), %B1
-    NOT %w1069:wire(1), %w1068
-    AND %w3990:wire(1), %w1052, %w1054, %w1057, %w1059, %w1062, %w1064, %w1067, %w1069
-    NOT %w3991:wire(1), %w3990
-    STORE %w3991, %Y
+    AND %w3690:wire(1), %w1052, %w1054, %w1057, %w1062, %w1067
+    NOT %w3696:wire(1), %w3690
+    STORE %w3696, %Y
   }
 }
 STDCELL_DEF %sky130_fd_sc_hd__and2_0:module("sky130_fd_sc_hd__and2_0"), %276:block, %277:stdcell_info("area": 6) {
@@ -2502,12 +2242,8 @@ STDCELL_DEF %sky130_fd_sc_hd__edfxbp_1:module("sky130_fd_sc_hd__edfxbp_1"), %642
   COMB_PROCESS_DEF %644:process, %645:block {
     LOAD %w1422:wire(1), %D
     LOAD %w1423:wire(1), %DE
-    AND %w1424:wire(1), %w1422, %w1423
     LOAD %w1425:wire(1), %Q
-    LOAD %w1426:wire(1), %DE
-    NOT %w1427:wire(1), %w1426
-    AND %w1428:wire(1), %w1425, %w1427
-    OR %w1429:wire(1), %w1424, %w1428
+    MUX %w1429:wire(1), %w1423, %w1422, %w1425
     STORE %w1429, %r842
   }
   COMB_PROCESS_DEF %646:process, %647:block {
@@ -2526,12 +2262,8 @@ STDCELL_DEF %sky130_fd_sc_hd__edfxtp_1:module("sky130_fd_sc_hd__edfxtp_1"), %648
   COMB_PROCESS_DEF %650:process, %651:block {
     LOAD %w1434:wire(1), %D
     LOAD %w1435:wire(1), %DE
-    AND %w1436:wire(1), %w1434, %w1435
     LOAD %w1437:wire(1), %Q
-    LOAD %w1438:wire(1), %DE
-    NOT %w1439:wire(1), %w1438
-    AND %w1440:wire(1), %w1437, %w1439
-    OR %w1441:wire(1), %w1436, %w1440
+    MUX %w1441:wire(1), %w1435, %w1434, %w1437
     STORE %w1441, %r850
   }
 }
@@ -2636,39 +2368,17 @@ STDCELL_DEF %sky130_fd_sc_hd__fa_1:module("sky130_fd_sc_hd__fa_1"), %688:block, 
     LOAD %w1463:wire(1), %B
     LOAD %w1464:wire(1), %CIN
     NOT %w1465:wire(1), %w1464
-    AND %w1466:wire(1), %w1463, %w1465
-    NOT %w1467:wire(1), %w1466
-    AND %w1468:wire(1), %w1462, %w1467
-    LOAD %w1469:wire(1), %A
-    LOAD %w1470:wire(1), %B
-    LOAD %w1471:wire(1), %CIN
-    NOT %w1472:wire(1), %w1471
-    AND %w1474:wire(1), %w1469, %w1470, %w1472
-    NOT %w1475:wire(1), %w1474
-    LOAD %w1476:wire(1), %A
-    LOAD %w1477:wire(1), %B
-    LOAD %w1478:wire(1), %CIN
-    AND %w1479:wire(1), %w1477, %w1478
-    NOT %w1480:wire(1), %w1479
-    AND %w1481:wire(1), %w1476, %w1480
-    NOT %w1482:wire(1), %w1481
-    LOAD %w1483:wire(1), %A
-    LOAD %w1484:wire(1), %B
-    LOAD %w1485:wire(1), %CIN
-    AND %w1487:wire(1), %w1483, %w1484, %w1485
-    OR %w1490:wire(1), %w1468, %w1475, %w1482, %w1487
-    STORE %w1490, %SUM
+    AND %w3670:wire(1), %w1462, %w1463, %w1465
+    NOT %w3669:wire(1), %w3670
+    STORE %w3669, %SUM
   }
   COMB_PROCESS_DEF %692:process, %693:block {
     LOAD %w1491:wire(1), %A
     LOAD %w1492:wire(1), %B
     AND %w1493:wire(1), %w1491, %w1492
-    LOAD %w1494:wire(1), %A
     LOAD %w1495:wire(1), %CIN
-    AND %w1496:wire(1), %w1494, %w1495
-    LOAD %w1497:wire(1), %B
-    LOAD %w1498:wire(1), %CIN
-    AND %w1499:wire(1), %w1497, %w1498
+    AND %w1496:wire(1), %w1491, %w1495
+    AND %w1499:wire(1), %w1492, %w1495
     OR %w1501:wire(1), %w1493, %w1496, %w1499
     STORE %w1501, %COUT
   }
@@ -2684,39 +2394,17 @@ STDCELL_DEF %sky130_fd_sc_hd__fa_2:module("sky130_fd_sc_hd__fa_2"), %694:block, 
     LOAD %w1503:wire(1), %B
     LOAD %w1504:wire(1), %CIN
     NOT %w1505:wire(1), %w1504
-    AND %w1506:wire(1), %w1503, %w1505
-    NOT %w1507:wire(1), %w1506
-    AND %w1508:wire(1), %w1502, %w1507
-    LOAD %w1509:wire(1), %A
-    LOAD %w1510:wire(1), %B
-    LOAD %w1511:wire(1), %CIN
-    NOT %w1512:wire(1), %w1511
-    AND %w1514:wire(1), %w1509, %w1510, %w1512
-    NOT %w1515:wire(1), %w1514
-    LOAD %w1516:wire(1), %A
-    LOAD %w1517:wire(1), %B
-    LOAD %w1518:wire(1), %CIN
-    AND %w1519:wire(1), %w1517, %w1518
-    NOT %w1520:wire(1), %w1519
-    AND %w1521:wire(1), %w1516, %w1520
-    NOT %w1522:wire(1), %w1521
-    LOAD %w1523:wire(1), %A
-    LOAD %w1524:wire(1), %B
-    LOAD %w1525:wire(1), %CIN
-    AND %w1527:wire(1), %w1523, %w1524, %w1525
-    OR %w1530:wire(1), %w1508, %w1515, %w1522, %w1527
-    STORE %w1530, %SUM
+    AND %w3651:wire(1), %w1502, %w1503, %w1505
+    NOT %w3647:wire(1), %w3651
+    STORE %w3647, %SUM
   }
   COMB_PROCESS_DEF %698:process, %699:block {
     LOAD %w1531:wire(1), %A
     LOAD %w1532:wire(1), %B
     AND %w1533:wire(1), %w1531, %w1532
-    LOAD %w1534:wire(1), %A
     LOAD %w1535:wire(1), %CIN
-    AND %w1536:wire(1), %w1534, %w1535
-    LOAD %w1537:wire(1), %B
-    LOAD %w1538:wire(1), %CIN
-    AND %w1539:wire(1), %w1537, %w1538
+    AND %w1536:wire(1), %w1531, %w1535
+    AND %w1539:wire(1), %w1532, %w1535
     OR %w1541:wire(1), %w1533, %w1536, %w1539
     STORE %w1541, %COUT
   }
@@ -2732,39 +2420,17 @@ STDCELL_DEF %sky130_fd_sc_hd__fa_4:module("sky130_fd_sc_hd__fa_4"), %700:block, 
     LOAD %w1543:wire(1), %B
     LOAD %w1544:wire(1), %CIN
     NOT %w1545:wire(1), %w1544
-    AND %w1546:wire(1), %w1543, %w1545
-    NOT %w1547:wire(1), %w1546
-    AND %w1548:wire(1), %w1542, %w1547
-    LOAD %w1549:wire(1), %A
-    LOAD %w1550:wire(1), %B
-    LOAD %w1551:wire(1), %CIN
-    NOT %w1552:wire(1), %w1551
-    AND %w1554:wire(1), %w1549, %w1550, %w1552
-    NOT %w1555:wire(1), %w1554
-    LOAD %w1556:wire(1), %A
-    LOAD %w1557:wire(1), %B
-    LOAD %w1558:wire(1), %CIN
-    AND %w1559:wire(1), %w1557, %w1558
-    NOT %w1560:wire(1), %w1559
-    AND %w1561:wire(1), %w1556, %w1560
-    NOT %w1562:wire(1), %w1561
-    LOAD %w1563:wire(1), %A
-    LOAD %w1564:wire(1), %B
-    LOAD %w1565:wire(1), %CIN
-    AND %w1567:wire(1), %w1563, %w1564, %w1565
-    OR %w1570:wire(1), %w1548, %w1555, %w1562, %w1567
-    STORE %w1570, %SUM
+    AND %w3644:wire(1), %w1542, %w1543, %w1545
+    NOT %w3629:wire(1), %w3644
+    STORE %w3629, %SUM
   }
   COMB_PROCESS_DEF %704:process, %705:block {
     LOAD %w1571:wire(1), %A
     LOAD %w1572:wire(1), %B
     AND %w1573:wire(1), %w1571, %w1572
-    LOAD %w1574:wire(1), %A
     LOAD %w1575:wire(1), %CIN
-    AND %w1576:wire(1), %w1574, %w1575
-    LOAD %w1577:wire(1), %B
-    LOAD %w1578:wire(1), %CIN
-    AND %w1579:wire(1), %w1577, %w1578
+    AND %w1576:wire(1), %w1571, %w1575
+    AND %w1579:wire(1), %w1572, %w1575
     OR %w1581:wire(1), %w1573, %w1576, %w1579
     STORE %w1581, %COUT
   }
@@ -2780,39 +2446,17 @@ STDCELL_DEF %sky130_fd_sc_hd__fah_1:module("sky130_fd_sc_hd__fah_1"), %706:block
     LOAD %w1583:wire(1), %B
     LOAD %w1584:wire(1), %CI
     NOT %w1585:wire(1), %w1584
-    AND %w1586:wire(1), %w1583, %w1585
-    NOT %w1587:wire(1), %w1586
-    AND %w1588:wire(1), %w1582, %w1587
-    LOAD %w1589:wire(1), %A
-    LOAD %w1590:wire(1), %B
-    LOAD %w1591:wire(1), %CI
-    NOT %w1592:wire(1), %w1591
-    AND %w1594:wire(1), %w1589, %w1590, %w1592
-    NOT %w1595:wire(1), %w1594
-    LOAD %w1596:wire(1), %A
-    LOAD %w1597:wire(1), %B
-    LOAD %w1598:wire(1), %CI
-    AND %w1599:wire(1), %w1597, %w1598
-    NOT %w1600:wire(1), %w1599
-    AND %w1601:wire(1), %w1596, %w1600
-    NOT %w1602:wire(1), %w1601
-    LOAD %w1603:wire(1), %A
-    LOAD %w1604:wire(1), %B
-    LOAD %w1605:wire(1), %CI
-    AND %w1607:wire(1), %w1603, %w1604, %w1605
-    OR %w1610:wire(1), %w1588, %w1595, %w1602, %w1607
-    STORE %w1610, %SUM
+    AND %w3593:wire(1), %w1582, %w1583, %w1585
+    NOT %w3580:wire(1), %w3593
+    STORE %w3580, %SUM
   }
   COMB_PROCESS_DEF %710:process, %711:block {
     LOAD %w1611:wire(1), %A
     LOAD %w1612:wire(1), %B
     AND %w1613:wire(1), %w1611, %w1612
-    LOAD %w1614:wire(1), %A
     LOAD %w1615:wire(1), %CI
-    AND %w1616:wire(1), %w1614, %w1615
-    LOAD %w1617:wire(1), %B
-    LOAD %w1618:wire(1), %CI
-    AND %w1619:wire(1), %w1617, %w1618
+    AND %w1616:wire(1), %w1611, %w1615
+    AND %w1619:wire(1), %w1612, %w1615
     OR %w1621:wire(1), %w1613, %w1616, %w1619
     STORE %w1621, %COUT
   }
@@ -2827,42 +2471,18 @@ STDCELL_DEF %sky130_fd_sc_hd__fahcin_1:module("sky130_fd_sc_hd__fahcin_1"), %712
     LOAD %w1622:wire(1), %A
     LOAD %w1623:wire(1), %B
     LOAD %w1624:wire(1), %CIN
-    NOT %w1625:wire(1), %w1624
-    AND %w1626:wire(1), %w1623, %w1625
-    NOT %w1627:wire(1), %w1626
-    AND %w1628:wire(1), %w1622, %w1627
-    NOT %w1629:wire(1), %w1628
-    LOAD %w1630:wire(1), %A
-    LOAD %w1631:wire(1), %B
-    LOAD %w1632:wire(1), %CIN
-    NOT %w1633:wire(1), %w1632
-    AND %w1635:wire(1), %w1630, %w1631, %w1633
-    LOAD %w1636:wire(1), %A
-    LOAD %w1637:wire(1), %B
-    LOAD %w1638:wire(1), %CIN
-    AND %w1639:wire(1), %w1637, %w1638
-    NOT %w1640:wire(1), %w1639
-    AND %w1641:wire(1), %w1636, %w1640
-    LOAD %w1642:wire(1), %A
-    LOAD %w1643:wire(1), %B
-    LOAD %w1644:wire(1), %CIN
-    AND %w1646:wire(1), %w1642, %w1643, %w1644
+    AND %w1646:wire(1), %w1622, %w1623, %w1624
     NOT %w1647:wire(1), %w1646
-    OR %w1650:wire(1), %w1629, %w1641, %w1647, %w1635
-    STORE %w1650, %SUM
+    STORE %w1647, %SUM
   }
   COMB_PROCESS_DEF %716:process, %717:block {
     LOAD %w1651:wire(1), %A
     LOAD %w1652:wire(1), %CIN
     NOT %w1653:wire(1), %w1652
     AND %w1654:wire(1), %w1651, %w1653
-    LOAD %w1655:wire(1), %A
     LOAD %w1656:wire(1), %B
-    AND %w1657:wire(1), %w1655, %w1656
-    LOAD %w1658:wire(1), %B
-    LOAD %w1659:wire(1), %CIN
-    NOT %w1660:wire(1), %w1659
-    AND %w1661:wire(1), %w1658, %w1660
+    AND %w1657:wire(1), %w1651, %w1656
+    AND %w1661:wire(1), %w1653, %w1656
     OR %w1663:wire(1), %w1654, %w1657, %w1661
     STORE %w1663, %COUT
   }
@@ -2878,42 +2498,12 @@ STDCELL_DEF %sky130_fd_sc_hd__fahcon_1:module("sky130_fd_sc_hd__fahcon_1"), %718
     LOAD %w1665:wire(1), %B
     LOAD %w1666:wire(1), %CI
     NOT %w1667:wire(1), %w1666
-    AND %w1668:wire(1), %w1665, %w1667
-    NOT %w1669:wire(1), %w1668
-    AND %w1670:wire(1), %w1664, %w1669
-    LOAD %w1671:wire(1), %A
-    LOAD %w1672:wire(1), %B
-    LOAD %w1673:wire(1), %CI
-    NOT %w1674:wire(1), %w1673
-    AND %w1676:wire(1), %w1671, %w1672, %w1674
-    NOT %w1677:wire(1), %w1676
-    LOAD %w1678:wire(1), %A
-    LOAD %w1679:wire(1), %B
-    LOAD %w1680:wire(1), %CI
-    AND %w1681:wire(1), %w1679, %w1680
-    NOT %w1682:wire(1), %w1681
-    AND %w1683:wire(1), %w1678, %w1682
-    NOT %w1684:wire(1), %w1683
-    LOAD %w1685:wire(1), %A
-    LOAD %w1686:wire(1), %B
-    LOAD %w1687:wire(1), %CI
-    AND %w1689:wire(1), %w1685, %w1686, %w1687
-    OR %w1692:wire(1), %w1670, %w1677, %w1684, %w1689
-    STORE %w1692, %SUM
+    AND %w3508:wire(1), %w1664, %w1665, %w1667
+    NOT %w3495:wire(1), %w3508
+    STORE %w3495, %SUM
   }
   COMB_PROCESS_DEF %722:process, %723:block {
-    LOAD %w1693:wire(1), %A
-    LOAD %w1694:wire(1), %CI
-    NOT %w1695:wire(1), %w1694
-    LOAD %w1698:wire(1), %A
-    LOAD %w1699:wire(1), %B
-    NOT %w1700:wire(1), %w1699
-    LOAD %w1703:wire(1), %B
-    LOAD %w1704:wire(1), %CI
-    NOT %w1705:wire(1), %w1704
-    AND %w3992:wire(1), %w1693, %w1695, %w1698, %w1700, %w1703, %w1705
-    NOT %w3993:wire(1), %w3992
-    STORE %w3993, %COUT_N
+    STORE #1'd1, %COUT_N
   }
 }
 STDCELL_DEF %sky130_fd_sc_hd__ha_1:module("sky130_fd_sc_hd__ha_1"), %724:block, %725:stdcell_info("area": 12) {
@@ -2924,14 +2514,9 @@ STDCELL_DEF %sky130_fd_sc_hd__ha_1:module("sky130_fd_sc_hd__ha_1"), %724:block, 
   COMB_PROCESS_DEF %726:process, %727:block {
     LOAD %w1710:wire(1), %A
     LOAD %w1711:wire(1), %B
-    NOT %w1712:wire(1), %w1711
-    AND %w1713:wire(1), %w1710, %w1712
-    LOAD %w1714:wire(1), %A
-    LOAD %w1715:wire(1), %B
-    AND %w1716:wire(1), %w1714, %w1715
+    AND %w1716:wire(1), %w1710, %w1711
     NOT %w1717:wire(1), %w1716
-    OR %w1718:wire(1), %w1713, %w1717
-    STORE %w1718, %SUM
+    STORE %w1717, %SUM
   }
   COMB_PROCESS_DEF %728:process, %729:block {
     LOAD %w1719:wire(1), %A
@@ -2948,14 +2533,9 @@ STDCELL_DEF %sky130_fd_sc_hd__ha_2:module("sky130_fd_sc_hd__ha_2"), %730:block, 
   COMB_PROCESS_DEF %732:process, %733:block {
     LOAD %w1722:wire(1), %A
     LOAD %w1723:wire(1), %B
-    NOT %w1724:wire(1), %w1723
-    AND %w1725:wire(1), %w1722, %w1724
-    LOAD %w1726:wire(1), %A
-    LOAD %w1727:wire(1), %B
-    AND %w1728:wire(1), %w1726, %w1727
+    AND %w1728:wire(1), %w1722, %w1723
     NOT %w1729:wire(1), %w1728
-    OR %w1730:wire(1), %w1725, %w1729
-    STORE %w1730, %SUM
+    STORE %w1729, %SUM
   }
   COMB_PROCESS_DEF %734:process, %735:block {
     LOAD %w1731:wire(1), %A
@@ -2972,14 +2552,9 @@ STDCELL_DEF %sky130_fd_sc_hd__ha_4:module("sky130_fd_sc_hd__ha_4"), %736:block, 
   COMB_PROCESS_DEF %738:process, %739:block {
     LOAD %w1734:wire(1), %A
     LOAD %w1735:wire(1), %B
-    NOT %w1736:wire(1), %w1735
-    AND %w1737:wire(1), %w1734, %w1736
-    LOAD %w1738:wire(1), %A
-    LOAD %w1739:wire(1), %B
-    AND %w1740:wire(1), %w1738, %w1739
+    AND %w1740:wire(1), %w1734, %w1735
     NOT %w1741:wire(1), %w1740
-    OR %w1742:wire(1), %w1737, %w1741
-    STORE %w1742, %SUM
+    STORE %w1741, %SUM
   }
   COMB_PROCESS_DEF %740:process, %741:block {
     LOAD %w1743:wire(1), %A
@@ -3338,12 +2913,9 @@ STDCELL_DEF %sky130_fd_sc_hd__maj3_1:module("sky130_fd_sc_hd__maj3_1"), %896:blo
     LOAD %w1821:wire(1), %A
     LOAD %w1822:wire(1), %B
     AND %w1823:wire(1), %w1821, %w1822
-    LOAD %w1824:wire(1), %A
     LOAD %w1825:wire(1), %C
-    AND %w1826:wire(1), %w1824, %w1825
-    LOAD %w1827:wire(1), %B
-    LOAD %w1828:wire(1), %C
-    AND %w1829:wire(1), %w1827, %w1828
+    AND %w1826:wire(1), %w1821, %w1825
+    AND %w1829:wire(1), %w1822, %w1825
     OR %w1831:wire(1), %w1823, %w1826, %w1829
     STORE %w1831, %X
   }
@@ -3357,12 +2929,9 @@ STDCELL_DEF %sky130_fd_sc_hd__maj3_2:module("sky130_fd_sc_hd__maj3_2"), %900:blo
     LOAD %w1832:wire(1), %A
     LOAD %w1833:wire(1), %B
     AND %w1834:wire(1), %w1832, %w1833
-    LOAD %w1835:wire(1), %A
     LOAD %w1836:wire(1), %C
-    AND %w1837:wire(1), %w1835, %w1836
-    LOAD %w1838:wire(1), %B
-    LOAD %w1839:wire(1), %C
-    AND %w1840:wire(1), %w1838, %w1839
+    AND %w1837:wire(1), %w1832, %w1836
+    AND %w1840:wire(1), %w1833, %w1836
     OR %w1842:wire(1), %w1834, %w1837, %w1840
     STORE %w1842, %X
   }
@@ -3376,12 +2945,9 @@ STDCELL_DEF %sky130_fd_sc_hd__maj3_4:module("sky130_fd_sc_hd__maj3_4"), %904:blo
     LOAD %w1843:wire(1), %A
     LOAD %w1844:wire(1), %B
     AND %w1845:wire(1), %w1843, %w1844
-    LOAD %w1846:wire(1), %A
     LOAD %w1847:wire(1), %C
-    AND %w1848:wire(1), %w1846, %w1847
-    LOAD %w1849:wire(1), %B
-    LOAD %w1850:wire(1), %C
-    AND %w1851:wire(1), %w1849, %w1850
+    AND %w1848:wire(1), %w1843, %w1847
+    AND %w1851:wire(1), %w1844, %w1847
     OR %w1853:wire(1), %w1845, %w1848, %w1851
     STORE %w1853, %X
   }
@@ -3394,12 +2960,8 @@ STDCELL_DEF %sky130_fd_sc_hd__mux2_1:module("sky130_fd_sc_hd__mux2_1"), %908:blo
   COMB_PROCESS_DEF %910:process, %911:block {
     LOAD %w1854:wire(1), %A0
     LOAD %w1855:wire(1), %S
-    NOT %w1856:wire(1), %w1855
-    AND %w1857:wire(1), %w1854, %w1856
     LOAD %w1858:wire(1), %A1
-    LOAD %w1859:wire(1), %S
-    AND %w1860:wire(1), %w1858, %w1859
-    OR %w1861:wire(1), %w1857, %w1860
+    MUX %w1861:wire(1), %w1855, %w1858, %w1854
     STORE %w1861, %X
   }
 }
@@ -3411,12 +2973,8 @@ STDCELL_DEF %sky130_fd_sc_hd__mux2_2:module("sky130_fd_sc_hd__mux2_2"), %912:blo
   COMB_PROCESS_DEF %914:process, %915:block {
     LOAD %w1862:wire(1), %A0
     LOAD %w1863:wire(1), %S
-    NOT %w1864:wire(1), %w1863
-    AND %w1865:wire(1), %w1862, %w1864
     LOAD %w1866:wire(1), %A1
-    LOAD %w1867:wire(1), %S
-    AND %w1868:wire(1), %w1866, %w1867
-    OR %w1869:wire(1), %w1865, %w1868
+    MUX %w1869:wire(1), %w1863, %w1866, %w1862
     STORE %w1869, %X
   }
 }
@@ -3428,12 +2986,8 @@ STDCELL_DEF %sky130_fd_sc_hd__mux2_4:module("sky130_fd_sc_hd__mux2_4"), %916:blo
   COMB_PROCESS_DEF %918:process, %919:block {
     LOAD %w1870:wire(1), %A0
     LOAD %w1871:wire(1), %S
-    NOT %w1872:wire(1), %w1871
-    AND %w1873:wire(1), %w1870, %w1872
     LOAD %w1874:wire(1), %A1
-    LOAD %w1875:wire(1), %S
-    AND %w1876:wire(1), %w1874, %w1875
-    OR %w1877:wire(1), %w1873, %w1876
+    MUX %w1877:wire(1), %w1871, %w1874, %w1870
     STORE %w1877, %X
   }
 }
@@ -3445,12 +2999,8 @@ STDCELL_DEF %sky130_fd_sc_hd__mux2_8:module("sky130_fd_sc_hd__mux2_8"), %920:blo
   COMB_PROCESS_DEF %922:process, %923:block {
     LOAD %w1878:wire(1), %A0
     LOAD %w1879:wire(1), %S
-    NOT %w1880:wire(1), %w1879
-    AND %w1881:wire(1), %w1878, %w1880
     LOAD %w1882:wire(1), %A1
-    LOAD %w1883:wire(1), %S
-    AND %w1884:wire(1), %w1882, %w1883
-    OR %w1885:wire(1), %w1881, %w1884
+    MUX %w1885:wire(1), %w1879, %w1882, %w1878
     STORE %w1885, %X
   }
 }
@@ -3460,14 +3010,7 @@ STDCELL_DEF %sky130_fd_sc_hd__mux2i_1:module("sky130_fd_sc_hd__mux2i_1"), %924:b
   INPUT_REGISTER_DEF %S:register(1)
   OUTPUT_REGISTER_DEF %Y:register(1)
   COMB_PROCESS_DEF %926:process, %927:block {
-    LOAD %w1886:wire(1), %A0
-    LOAD %w1887:wire(1), %S
-    NOT %w1888:wire(1), %w1887
-    LOAD %w1891:wire(1), %A1
-    LOAD %w1892:wire(1), %S
-    AND %w3994:wire(1), %w1886, %w1888, %w1891, %w1892
-    NOT %w3995:wire(1), %w3994
-    STORE %w3995, %Y
+    STORE #1'd1, %Y
   }
 }
 STDCELL_DEF %sky130_fd_sc_hd__mux2i_2:module("sky130_fd_sc_hd__mux2i_2"), %928:block, %929:stdcell_info("area": 13) {
@@ -3476,14 +3019,7 @@ STDCELL_DEF %sky130_fd_sc_hd__mux2i_2:module("sky130_fd_sc_hd__mux2i_2"), %928:b
   INPUT_REGISTER_DEF %S:register(1)
   OUTPUT_REGISTER_DEF %Y:register(1)
   COMB_PROCESS_DEF %930:process, %931:block {
-    LOAD %w1896:wire(1), %A0
-    LOAD %w1897:wire(1), %S
-    NOT %w1898:wire(1), %w1897
-    LOAD %w1901:wire(1), %A1
-    LOAD %w1902:wire(1), %S
-    AND %w3996:wire(1), %w1896, %w1898, %w1901, %w1902
-    NOT %w3997:wire(1), %w3996
-    STORE %w3997, %Y
+    STORE #1'd1, %Y
   }
 }
 STDCELL_DEF %sky130_fd_sc_hd__mux2i_4:module("sky130_fd_sc_hd__mux2i_4"), %932:block, %933:stdcell_info("area": 22) {
@@ -3492,14 +3028,7 @@ STDCELL_DEF %sky130_fd_sc_hd__mux2i_4:module("sky130_fd_sc_hd__mux2i_4"), %932:b
   INPUT_REGISTER_DEF %S:register(1)
   OUTPUT_REGISTER_DEF %Y:register(1)
   COMB_PROCESS_DEF %934:process, %935:block {
-    LOAD %w1906:wire(1), %A0
-    LOAD %w1907:wire(1), %S
-    NOT %w1908:wire(1), %w1907
-    LOAD %w1911:wire(1), %A1
-    LOAD %w1912:wire(1), %S
-    AND %w3998:wire(1), %w1906, %w1908, %w1911, %w1912
-    NOT %w3999:wire(1), %w3998
-    STORE %w3999, %Y
+    STORE #1'd1, %Y
   }
 }
 STDCELL_DEF %sky130_fd_sc_hd__mux4_1:module("sky130_fd_sc_hd__mux4_1"), %936:block, %937:stdcell_info("area": 26) {
@@ -3519,21 +3048,14 @@ STDCELL_DEF %sky130_fd_sc_hd__mux4_1:module("sky130_fd_sc_hd__mux4_1"), %936:blo
     NOT %w1921:wire(1), %w1920
     AND %w1922:wire(1), %w1916, %w1921
     LOAD %w1923:wire(1), %A1
-    LOAD %w1924:wire(1), %S0
-    LOAD %w1925:wire(1), %S1
-    NOT %w1926:wire(1), %w1925
-    AND %w1928:wire(1), %w1923, %w1924, %w1926
+    AND %w1928:wire(1), %w1920, %w1923
     LOAD %w1929:wire(1), %A2
-    LOAD %w1930:wire(1), %S0
-    LOAD %w1931:wire(1), %S1
-    AND %w1932:wire(1), %w1930, %w1931
+    AND %w1932:wire(1), %w1917, %w1918
     NOT %w1933:wire(1), %w1932
     AND %w1934:wire(1), %w1929, %w1933
     LOAD %w1935:wire(1), %A3
-    LOAD %w1936:wire(1), %S0
-    LOAD %w1937:wire(1), %S1
-    AND %w1939:wire(1), %w1935, %w1936, %w1937
-    OR %w1942:wire(1), %w1922, %w1934, %w1939, %w1928
+    AND %w1939:wire(1), %w1932, %w1935
+    OR %w1942:wire(1), %w1922, %w1934, %w1928, %w1939
     STORE %w1942, %X
   }
 }
@@ -3554,21 +3076,14 @@ STDCELL_DEF %sky130_fd_sc_hd__mux4_2:module("sky130_fd_sc_hd__mux4_2"), %940:blo
     NOT %w1948:wire(1), %w1947
     AND %w1949:wire(1), %w1943, %w1948
     LOAD %w1950:wire(1), %A1
-    LOAD %w1951:wire(1), %S0
-    LOAD %w1952:wire(1), %S1
-    NOT %w1953:wire(1), %w1952
-    AND %w1955:wire(1), %w1950, %w1951, %w1953
+    AND %w1955:wire(1), %w1947, %w1950
     LOAD %w1956:wire(1), %A2
-    LOAD %w1957:wire(1), %S0
-    LOAD %w1958:wire(1), %S1
-    AND %w1959:wire(1), %w1957, %w1958
+    AND %w1959:wire(1), %w1944, %w1945
     NOT %w1960:wire(1), %w1959
     AND %w1961:wire(1), %w1956, %w1960
     LOAD %w1962:wire(1), %A3
-    LOAD %w1963:wire(1), %S0
-    LOAD %w1964:wire(1), %S1
-    AND %w1966:wire(1), %w1962, %w1963, %w1964
-    OR %w1969:wire(1), %w1949, %w1961, %w1966, %w1955
+    AND %w1966:wire(1), %w1959, %w1962
+    OR %w1969:wire(1), %w1949, %w1961, %w1955, %w1966
     STORE %w1969, %X
   }
 }
@@ -3589,21 +3104,14 @@ STDCELL_DEF %sky130_fd_sc_hd__mux4_4:module("sky130_fd_sc_hd__mux4_4"), %944:blo
     NOT %w1975:wire(1), %w1974
     AND %w1976:wire(1), %w1970, %w1975
     LOAD %w1977:wire(1), %A1
-    LOAD %w1978:wire(1), %S0
-    LOAD %w1979:wire(1), %S1
-    NOT %w1980:wire(1), %w1979
-    AND %w1982:wire(1), %w1977, %w1978, %w1980
+    AND %w1982:wire(1), %w1974, %w1977
     LOAD %w1983:wire(1), %A2
-    LOAD %w1984:wire(1), %S0
-    LOAD %w1985:wire(1), %S1
-    AND %w1986:wire(1), %w1984, %w1985
+    AND %w1986:wire(1), %w1971, %w1972
     NOT %w1987:wire(1), %w1986
     AND %w1988:wire(1), %w1983, %w1987
     LOAD %w1989:wire(1), %A3
-    LOAD %w1990:wire(1), %S0
-    LOAD %w1991:wire(1), %S1
-    AND %w1993:wire(1), %w1989, %w1990, %w1991
-    OR %w1996:wire(1), %w1976, %w1988, %w1993, %w1982
+    AND %w1993:wire(1), %w1986, %w1989
+    OR %w1996:wire(1), %w1976, %w1988, %w1982, %w1993
     STORE %w1996, %X
   }
 }
@@ -3614,9 +3122,9 @@ STDCELL_DEF %sky130_fd_sc_hd__nand2_1:module("sky130_fd_sc_hd__nand2_1"), %948:b
   COMB_PROCESS_DEF %950:process, %951:block {
     LOAD %w1997:wire(1), %A
     LOAD %w1999:wire(1), %B
-    AND %w4000:wire(1), %w1997, %w1999
-    NOT %w4001:wire(1), %w4000
-    STORE %w4001, %Y
+    AND %w3182:wire(1), %w1997, %w1999
+    NOT %w3179:wire(1), %w3182
+    STORE %w3179, %Y
   }
 }
 STDCELL_DEF %sky130_fd_sc_hd__nand2_2:module("sky130_fd_sc_hd__nand2_2"), %952:block, %953:stdcell_info("area": 6) {
@@ -3626,9 +3134,9 @@ STDCELL_DEF %sky130_fd_sc_hd__nand2_2:module("sky130_fd_sc_hd__nand2_2"), %952:b
   COMB_PROCESS_DEF %954:process, %955:block {
     LOAD %w2002:wire(1), %A
     LOAD %w2004:wire(1), %B
-    AND %w4002:wire(1), %w2002, %w2004
-    NOT %w4003:wire(1), %w4002
-    STORE %w4003, %Y
+    AND %w3176:wire(1), %w2002, %w2004
+    NOT %w3167:wire(1), %w3176
+    STORE %w3167, %Y
   }
 }
 STDCELL_DEF %sky130_fd_sc_hd__nand2_4:module("sky130_fd_sc_hd__nand2_4"), %956:block, %957:stdcell_info("area": 11) {
@@ -3638,9 +3146,9 @@ STDCELL_DEF %sky130_fd_sc_hd__nand2_4:module("sky130_fd_sc_hd__nand2_4"), %956:b
   COMB_PROCESS_DEF %958:process, %959:block {
     LOAD %w2007:wire(1), %A
     LOAD %w2009:wire(1), %B
-    AND %w4004:wire(1), %w2007, %w2009
-    NOT %w4005:wire(1), %w4004
-    STORE %w4005, %Y
+    AND %w3164:wire(1), %w2007, %w2009
+    NOT %w3161:wire(1), %w3164
+    STORE %w3161, %Y
   }
 }
 STDCELL_DEF %sky130_fd_sc_hd__nand2_8:module("sky130_fd_sc_hd__nand2_8"), %960:block, %961:stdcell_info("area": 20) {
@@ -3650,9 +3158,9 @@ STDCELL_DEF %sky130_fd_sc_hd__nand2_8:module("sky130_fd_sc_hd__nand2_8"), %960:b
   COMB_PROCESS_DEF %962:process, %963:block {
     LOAD %w2012:wire(1), %A
     LOAD %w2014:wire(1), %B
-    AND %w4006:wire(1), %w2012, %w2014
-    NOT %w4007:wire(1), %w4006
-    STORE %w4007, %Y
+    AND %w3152:wire(1), %w2012, %w2014
+    NOT %w3149:wire(1), %w3152
+    STORE %w3149, %Y
   }
 }
 STDCELL_DEF %sky130_fd_sc_hd__nand2b_1:module("sky130_fd_sc_hd__nand2b_1"), %964:block, %965:stdcell_info("area": 6) {
@@ -3700,9 +3208,9 @@ STDCELL_DEF %sky130_fd_sc_hd__nand3_1:module("sky130_fd_sc_hd__nand3_1"), %976:b
     LOAD %w2029:wire(1), %A
     LOAD %w2031:wire(1), %B
     LOAD %w2033:wire(1), %C
-    AND %w4008:wire(1), %w2029, %w2031, %w2033
-    NOT %w4009:wire(1), %w4008
-    STORE %w4009, %Y
+    AND %w3146:wire(1), %w2029, %w2031, %w2033
+    NOT %w3093:wire(1), %w3146
+    STORE %w3093, %Y
   }
 }
 STDCELL_DEF %sky130_fd_sc_hd__nand3_2:module("sky130_fd_sc_hd__nand3_2"), %980:block, %981:stdcell_info("area": 10) {
@@ -3714,9 +3222,9 @@ STDCELL_DEF %sky130_fd_sc_hd__nand3_2:module("sky130_fd_sc_hd__nand3_2"), %980:b
     LOAD %w2037:wire(1), %A
     LOAD %w2039:wire(1), %B
     LOAD %w2041:wire(1), %C
-    AND %w4010:wire(1), %w2037, %w2039, %w2041
-    NOT %w4011:wire(1), %w4010
-    STORE %w4011, %Y
+    AND %w3092:wire(1), %w2037, %w2039, %w2041
+    NOT %w3090:wire(1), %w3092
+    STORE %w3090, %Y
   }
 }
 STDCELL_DEF %sky130_fd_sc_hd__nand3_4:module("sky130_fd_sc_hd__nand3_4"), %984:block, %985:stdcell_info("area": 17) {
@@ -3728,9 +3236,9 @@ STDCELL_DEF %sky130_fd_sc_hd__nand3_4:module("sky130_fd_sc_hd__nand3_4"), %984:b
     LOAD %w2045:wire(1), %A
     LOAD %w2047:wire(1), %B
     LOAD %w2049:wire(1), %C
-    AND %w4012:wire(1), %w2045, %w2047, %w2049
-    NOT %w4013:wire(1), %w4012
-    STORE %w4013, %Y
+    AND %w3089:wire(1), %w2045, %w2047, %w2049
+    NOT %w3087:wire(1), %w3089
+    STORE %w3087, %Y
   }
 }
 STDCELL_DEF %sky130_fd_sc_hd__nand3b_1:module("sky130_fd_sc_hd__nand3b_1"), %988:block, %989:stdcell_info("area": 7) {
@@ -3789,9 +3297,9 @@ STDCELL_DEF %sky130_fd_sc_hd__nand4_1:module("sky130_fd_sc_hd__nand4_1"), %1000:
     LOAD %w2076:wire(1), %B
     LOAD %w2078:wire(1), %C
     LOAD %w2080:wire(1), %D
-    AND %w4014:wire(1), %w2074, %w2076, %w2078, %w2080
-    NOT %w4015:wire(1), %w4014
-    STORE %w4015, %Y
+    AND %w3084:wire(1), %w2074, %w2076, %w2078, %w2080
+    NOT %w3080:wire(1), %w3084
+    STORE %w3080, %Y
   }
 }
 STDCELL_DEF %sky130_fd_sc_hd__nand4_2:module("sky130_fd_sc_hd__nand4_2"), %1004:block, %1005:stdcell_info("area": 12) {
@@ -3805,9 +3313,9 @@ STDCELL_DEF %sky130_fd_sc_hd__nand4_2:module("sky130_fd_sc_hd__nand4_2"), %1004:
     LOAD %w2087:wire(1), %B
     LOAD %w2089:wire(1), %C
     LOAD %w2091:wire(1), %D
-    AND %w4016:wire(1), %w2085, %w2087, %w2089, %w2091
-    NOT %w4017:wire(1), %w4016
-    STORE %w4017, %Y
+    AND %w3070:wire(1), %w2085, %w2087, %w2089, %w2091
+    NOT %w3069:wire(1), %w3070
+    STORE %w3069, %Y
   }
 }
 STDCELL_DEF %sky130_fd_sc_hd__nand4_4:module("sky130_fd_sc_hd__nand4_4"), %1008:block, %1009:stdcell_info("area": 21) {
@@ -3821,9 +3329,9 @@ STDCELL_DEF %sky130_fd_sc_hd__nand4_4:module("sky130_fd_sc_hd__nand4_4"), %1008:
     LOAD %w2098:wire(1), %B
     LOAD %w2100:wire(1), %C
     LOAD %w2102:wire(1), %D
-    AND %w4018:wire(1), %w2096, %w2098, %w2100, %w2102
-    NOT %w4019:wire(1), %w4018
-    STORE %w4019, %Y
+    AND %w3067:wire(1), %w2096, %w2098, %w2100, %w2102
+    NOT %w3066:wire(1), %w3067
+    STORE %w3066, %Y
   }
 }
 STDCELL_DEF %sky130_fd_sc_hd__nand4b_1:module("sky130_fd_sc_hd__nand4b_1"), %1012:block, %1013:stdcell_info("area": 8) {
@@ -3837,10 +3345,10 @@ STDCELL_DEF %sky130_fd_sc_hd__nand4b_1:module("sky130_fd_sc_hd__nand4b_1"), %101
     LOAD %w2108:wire(1), %B
     LOAD %w2110:wire(1), %C
     LOAD %w2112:wire(1), %D
-    NOT %w4020:wire(1), %w2107
-    AND %w4021:wire(1), %w2108, %w2110, %w2112, %w4020
-    NOT %w4022:wire(1), %w4021
-    STORE %w4022, %Y
+    NOT %w3064:wire(1), %w2107
+    AND %w3061:wire(1), %w2108, %w2110, %w2112, %w3064
+    NOT %w3057:wire(1), %w3061
+    STORE %w3057, %Y
   }
 }
 STDCELL_DEF %sky130_fd_sc_hd__nand4b_2:module("sky130_fd_sc_hd__nand4b_2"), %1016:block, %1017:stdcell_info("area": 15) {
@@ -3854,10 +3362,10 @@ STDCELL_DEF %sky130_fd_sc_hd__nand4b_2:module("sky130_fd_sc_hd__nand4b_2"), %101
     LOAD %w2118:wire(1), %B
     LOAD %w2120:wire(1), %C
     LOAD %w2122:wire(1), %D
-    NOT %w4023:wire(1), %w2117
-    AND %w4024:wire(1), %w2118, %w2120, %w2122, %w4023
-    NOT %w4025:wire(1), %w4024
-    STORE %w4025, %Y
+    NOT %w3047:wire(1), %w2117
+    AND %w3046:wire(1), %w2118, %w2120, %w2122, %w3047
+    NOT %w3044:wire(1), %w3046
+    STORE %w3044, %Y
   }
 }
 STDCELL_DEF %sky130_fd_sc_hd__nand4b_4:module("sky130_fd_sc_hd__nand4b_4"), %1020:block, %1021:stdcell_info("area": 23) {
@@ -3871,10 +3379,10 @@ STDCELL_DEF %sky130_fd_sc_hd__nand4b_4:module("sky130_fd_sc_hd__nand4b_4"), %102
     LOAD %w2128:wire(1), %B
     LOAD %w2130:wire(1), %C
     LOAD %w2132:wire(1), %D
-    NOT %w4026:wire(1), %w2127
-    AND %w4027:wire(1), %w2128, %w2130, %w2132, %w4026
-    NOT %w4028:wire(1), %w4027
-    STORE %w4028, %Y
+    NOT %w3043:wire(1), %w2127
+    AND %w3041:wire(1), %w2128, %w2130, %w2132, %w3043
+    NOT %w3038:wire(1), %w3041
+    STORE %w3038, %Y
   }
 }
 STDCELL_DEF %sky130_fd_sc_hd__nand4bb_1:module("sky130_fd_sc_hd__nand4bb_1"), %1024:block, %1025:stdcell_info("area": 11) {
@@ -4304,13 +3812,11 @@ STDCELL_DEF %sky130_fd_sc_hd__o2111a_1:module("sky130_fd_sc_hd__o2111a_1"), %112
     LOAD %w2332:wire(1), %B1
     LOAD %w2333:wire(1), %C1
     LOAD %w2334:wire(1), %D1
-    AND %w2337:wire(1), %w2331, %w2332, %w2333, %w2334
+    AND %w2336:wire(1), %w2332, %w2333, %w2334
+    AND %w2337:wire(1), %w2331, %w2336
     LOAD %w2338:wire(1), %A2
-    LOAD %w2339:wire(1), %B1
-    LOAD %w2340:wire(1), %C1
-    LOAD %w2341:wire(1), %D1
-    AND %w2344:wire(1), %w2338, %w2339, %w2340, %w2341
-    OR %w2345:wire(1), %w2344, %w2337
+    AND %w2344:wire(1), %w2338, %w2336
+    OR %w2345:wire(1), %w2337, %w2344
     STORE %w2345, %X
   }
 }
@@ -4326,13 +3832,11 @@ STDCELL_DEF %sky130_fd_sc_hd__o2111a_2:module("sky130_fd_sc_hd__o2111a_2"), %112
     LOAD %w2347:wire(1), %B1
     LOAD %w2348:wire(1), %C1
     LOAD %w2349:wire(1), %D1
-    AND %w2352:wire(1), %w2346, %w2347, %w2348, %w2349
+    AND %w2351:wire(1), %w2347, %w2348, %w2349
+    AND %w2352:wire(1), %w2346, %w2351
     LOAD %w2353:wire(1), %A2
-    LOAD %w2354:wire(1), %B1
-    LOAD %w2355:wire(1), %C1
-    LOAD %w2356:wire(1), %D1
-    AND %w2359:wire(1), %w2353, %w2354, %w2355, %w2356
-    OR %w2360:wire(1), %w2359, %w2352
+    AND %w2359:wire(1), %w2353, %w2351
+    OR %w2360:wire(1), %w2352, %w2359
     STORE %w2360, %X
   }
 }
@@ -4348,13 +3852,11 @@ STDCELL_DEF %sky130_fd_sc_hd__o2111a_4:module("sky130_fd_sc_hd__o2111a_4"), %113
     LOAD %w2362:wire(1), %B1
     LOAD %w2363:wire(1), %C1
     LOAD %w2364:wire(1), %D1
-    AND %w2367:wire(1), %w2361, %w2362, %w2363, %w2364
+    AND %w2366:wire(1), %w2362, %w2363, %w2364
+    AND %w2367:wire(1), %w2361, %w2366
     LOAD %w2368:wire(1), %A2
-    LOAD %w2369:wire(1), %B1
-    LOAD %w2370:wire(1), %C1
-    LOAD %w2371:wire(1), %D1
-    AND %w2374:wire(1), %w2368, %w2369, %w2370, %w2371
-    OR %w2375:wire(1), %w2374, %w2367
+    AND %w2374:wire(1), %w2368, %w2366
+    OR %w2375:wire(1), %w2367, %w2374
     STORE %w2375, %X
   }
 }
@@ -4372,9 +3874,9 @@ STDCELL_DEF %sky130_fd_sc_hd__o2111ai_1:module("sky130_fd_sc_hd__o2111ai_1"), %1
     LOAD %w2381:wire(1), %B1
     LOAD %w2383:wire(1), %C1
     LOAD %w2385:wire(1), %D1
-    AND %w4029:wire(1), %w2376, %w2378, %w2381, %w2383, %w2385
-    NOT %w4030:wire(1), %w4029
-    STORE %w4030, %Y
+    AND %w3034:wire(1), %w2376, %w2378, %w2381, %w2383, %w2385
+    NOT %w2994:wire(1), %w3034
+    STORE %w2994, %Y
   }
 }
 STDCELL_DEF %sky130_fd_sc_hd__o2111ai_2:module("sky130_fd_sc_hd__o2111ai_2"), %1140:block, %1141:stdcell_info("area": 15) {
@@ -4391,9 +3893,9 @@ STDCELL_DEF %sky130_fd_sc_hd__o2111ai_2:module("sky130_fd_sc_hd__o2111ai_2"), %1
     LOAD %w2395:wire(1), %B1
     LOAD %w2397:wire(1), %C1
     LOAD %w2399:wire(1), %D1
-    AND %w4031:wire(1), %w2390, %w2392, %w2395, %w2397, %w2399
-    NOT %w4032:wire(1), %w4031
-    STORE %w4032, %Y
+    AND %w2991:wire(1), %w2390, %w2392, %w2395, %w2397, %w2399
+    NOT %w2983:wire(1), %w2991
+    STORE %w2983, %Y
   }
 }
 STDCELL_DEF %sky130_fd_sc_hd__o2111ai_4:module("sky130_fd_sc_hd__o2111ai_4"), %1144:block, %1145:stdcell_info("area": 26) {
@@ -4410,9 +3912,9 @@ STDCELL_DEF %sky130_fd_sc_hd__o2111ai_4:module("sky130_fd_sc_hd__o2111ai_4"), %1
     LOAD %w2409:wire(1), %B1
     LOAD %w2411:wire(1), %C1
     LOAD %w2413:wire(1), %D1
-    AND %w4033:wire(1), %w2404, %w2406, %w2409, %w2411, %w2413
-    NOT %w4034:wire(1), %w4033
-    STORE %w4034, %Y
+    AND %w2980:wire(1), %w2404, %w2406, %w2409, %w2411, %w2413
+    NOT %w2972:wire(1), %w2980
+    STORE %w2972, %Y
   }
 }
 STDCELL_DEF %sky130_fd_sc_hd__o211a_1:module("sky130_fd_sc_hd__o211a_1"), %1148:block, %1149:stdcell_info("area": 10) {
@@ -4425,11 +3927,10 @@ STDCELL_DEF %sky130_fd_sc_hd__o211a_1:module("sky130_fd_sc_hd__o211a_1"), %1148:
     LOAD %w2418:wire(1), %A1
     LOAD %w2419:wire(1), %B1
     LOAD %w2420:wire(1), %C1
-    AND %w2422:wire(1), %w2418, %w2419, %w2420
+    AND %w2421:wire(1), %w2419, %w2420
+    AND %w2422:wire(1), %w2418, %w2421
     LOAD %w2423:wire(1), %A2
-    LOAD %w2424:wire(1), %B1
-    LOAD %w2425:wire(1), %C1
-    AND %w2427:wire(1), %w2423, %w2424, %w2425
+    AND %w2427:wire(1), %w2421, %w2423
     OR %w2428:wire(1), %w2427, %w2422
     STORE %w2428, %X
   }
@@ -4444,11 +3945,10 @@ STDCELL_DEF %sky130_fd_sc_hd__o211a_2:module("sky130_fd_sc_hd__o211a_2"), %1152:
     LOAD %w2429:wire(1), %A1
     LOAD %w2430:wire(1), %B1
     LOAD %w2431:wire(1), %C1
-    AND %w2433:wire(1), %w2429, %w2430, %w2431
+    AND %w2432:wire(1), %w2430, %w2431
+    AND %w2433:wire(1), %w2429, %w2432
     LOAD %w2434:wire(1), %A2
-    LOAD %w2435:wire(1), %B1
-    LOAD %w2436:wire(1), %C1
-    AND %w2438:wire(1), %w2434, %w2435, %w2436
+    AND %w2438:wire(1), %w2432, %w2434
     OR %w2439:wire(1), %w2438, %w2433
     STORE %w2439, %X
   }
@@ -4463,11 +3963,10 @@ STDCELL_DEF %sky130_fd_sc_hd__o211a_4:module("sky130_fd_sc_hd__o211a_4"), %1156:
     LOAD %w2440:wire(1), %A1
     LOAD %w2441:wire(1), %B1
     LOAD %w2442:wire(1), %C1
-    AND %w2444:wire(1), %w2440, %w2441, %w2442
+    AND %w2443:wire(1), %w2441, %w2442
+    AND %w2444:wire(1), %w2440, %w2443
     LOAD %w2445:wire(1), %A2
-    LOAD %w2446:wire(1), %B1
-    LOAD %w2447:wire(1), %C1
-    AND %w2449:wire(1), %w2445, %w2446, %w2447
+    AND %w2449:wire(1), %w2443, %w2445
     OR %w2450:wire(1), %w2449, %w2444
     STORE %w2450, %X
   }
@@ -4484,9 +3983,9 @@ STDCELL_DEF %sky130_fd_sc_hd__o211ai_1:module("sky130_fd_sc_hd__o211ai_1"), %116
     NOT %w2453:wire(1), %w2452
     LOAD %w2456:wire(1), %B1
     LOAD %w2458:wire(1), %C1
-    AND %w4035:wire(1), %w2451, %w2453, %w2456, %w2458
-    NOT %w4036:wire(1), %w4035
-    STORE %w4036, %Y
+    AND %w2969:wire(1), %w2451, %w2453, %w2456, %w2458
+    NOT %w2905:wire(1), %w2969
+    STORE %w2905, %Y
   }
 }
 STDCELL_DEF %sky130_fd_sc_hd__o211ai_2:module("sky130_fd_sc_hd__o211ai_2"), %1164:block, %1165:stdcell_info("area": 12) {
@@ -4501,9 +4000,9 @@ STDCELL_DEF %sky130_fd_sc_hd__o211ai_2:module("sky130_fd_sc_hd__o211ai_2"), %116
     NOT %w2464:wire(1), %w2463
     LOAD %w2467:wire(1), %B1
     LOAD %w2469:wire(1), %C1
-    AND %w4037:wire(1), %w2462, %w2464, %w2467, %w2469
-    NOT %w4038:wire(1), %w4037
-    STORE %w4038, %Y
+    AND %w2904:wire(1), %w2462, %w2464, %w2467, %w2469
+    NOT %w2903:wire(1), %w2904
+    STORE %w2903, %Y
   }
 }
 STDCELL_DEF %sky130_fd_sc_hd__o211ai_4:module("sky130_fd_sc_hd__o211ai_4"), %1168:block, %1169:stdcell_info("area": 21) {
@@ -4518,9 +4017,9 @@ STDCELL_DEF %sky130_fd_sc_hd__o211ai_4:module("sky130_fd_sc_hd__o211ai_4"), %116
     NOT %w2475:wire(1), %w2474
     LOAD %w2478:wire(1), %B1
     LOAD %w2480:wire(1), %C1
-    AND %w4039:wire(1), %w2473, %w2475, %w2478, %w2480
-    NOT %w4040:wire(1), %w4039
-    STORE %w4040, %Y
+    AND %w2900:wire(1), %w2473, %w2475, %w2478, %w2480
+    NOT %w2899:wire(1), %w2900
+    STORE %w2899, %Y
   }
 }
 STDCELL_DEF %sky130_fd_sc_hd__o21a_1:module("sky130_fd_sc_hd__o21a_1"), %1172:block, %1173:stdcell_info("area": 7) {
@@ -4533,9 +4032,8 @@ STDCELL_DEF %sky130_fd_sc_hd__o21a_1:module("sky130_fd_sc_hd__o21a_1"), %1172:bl
     LOAD %w2485:wire(1), %B1
     AND %w2486:wire(1), %w2484, %w2485
     LOAD %w2487:wire(1), %A2
-    LOAD %w2488:wire(1), %B1
-    AND %w2489:wire(1), %w2487, %w2488
-    OR %w2490:wire(1), %w2486, %w2489
+    AND %w2489:wire(1), %w2485, %w2487
+    OR %w2490:wire(1), %w2489, %w2486
     STORE %w2490, %X
   }
 }
@@ -4549,9 +4047,8 @@ STDCELL_DEF %sky130_fd_sc_hd__o21a_2:module("sky130_fd_sc_hd__o21a_2"), %1176:bl
     LOAD %w2492:wire(1), %B1
     AND %w2493:wire(1), %w2491, %w2492
     LOAD %w2494:wire(1), %A2
-    LOAD %w2495:wire(1), %B1
-    AND %w2496:wire(1), %w2494, %w2495
-    OR %w2497:wire(1), %w2493, %w2496
+    AND %w2496:wire(1), %w2492, %w2494
+    OR %w2497:wire(1), %w2496, %w2493
     STORE %w2497, %X
   }
 }
@@ -4565,9 +4062,8 @@ STDCELL_DEF %sky130_fd_sc_hd__o21a_4:module("sky130_fd_sc_hd__o21a_4"), %1180:bl
     LOAD %w2499:wire(1), %B1
     AND %w2500:wire(1), %w2498, %w2499
     LOAD %w2501:wire(1), %A2
-    LOAD %w2502:wire(1), %B1
-    AND %w2503:wire(1), %w2501, %w2502
-    OR %w2504:wire(1), %w2500, %w2503
+    AND %w2503:wire(1), %w2499, %w2501
+    OR %w2504:wire(1), %w2503, %w2500
     STORE %w2504, %X
   }
 }
@@ -4581,9 +4077,9 @@ STDCELL_DEF %sky130_fd_sc_hd__o21ai_0:module("sky130_fd_sc_hd__o21ai_0"), %1184:
     LOAD %w2506:wire(1), %A2
     NOT %w2507:wire(1), %w2506
     LOAD %w2510:wire(1), %B1
-    AND %w4041:wire(1), %w2505, %w2507, %w2510
-    NOT %w4042:wire(1), %w4041
-    STORE %w4042, %Y
+    AND %w2898:wire(1), %w2505, %w2507, %w2510
+    NOT %w2888:wire(1), %w2898
+    STORE %w2888, %Y
   }
 }
 STDCELL_DEF %sky130_fd_sc_hd__o21ai_1:module("sky130_fd_sc_hd__o21ai_1"), %1188:block, %1189:stdcell_info("area": 5) {
@@ -4596,9 +4092,9 @@ STDCELL_DEF %sky130_fd_sc_hd__o21ai_1:module("sky130_fd_sc_hd__o21ai_1"), %1188:
     LOAD %w2514:wire(1), %A2
     NOT %w2515:wire(1), %w2514
     LOAD %w2518:wire(1), %B1
-    AND %w4043:wire(1), %w2513, %w2515, %w2518
-    NOT %w4044:wire(1), %w4043
-    STORE %w4044, %Y
+    AND %w2887:wire(1), %w2513, %w2515, %w2518
+    NOT %w2886:wire(1), %w2887
+    STORE %w2886, %Y
   }
 }
 STDCELL_DEF %sky130_fd_sc_hd__o21ai_2:module("sky130_fd_sc_hd__o21ai_2"), %1192:block, %1193:stdcell_info("area": 8) {
@@ -4611,9 +4107,9 @@ STDCELL_DEF %sky130_fd_sc_hd__o21ai_2:module("sky130_fd_sc_hd__o21ai_2"), %1192:
     LOAD %w2522:wire(1), %A2
     NOT %w2523:wire(1), %w2522
     LOAD %w2526:wire(1), %B1
-    AND %w4045:wire(1), %w2521, %w2523, %w2526
-    NOT %w4046:wire(1), %w4045
-    STORE %w4046, %Y
+    AND %w2883:wire(1), %w2521, %w2523, %w2526
+    NOT %w2882:wire(1), %w2883
+    STORE %w2882, %Y
   }
 }
 STDCELL_DEF %sky130_fd_sc_hd__o21ai_4:module("sky130_fd_sc_hd__o21ai_4"), %1196:block, %1197:stdcell_info("area": 16) {
@@ -4626,9 +4122,9 @@ STDCELL_DEF %sky130_fd_sc_hd__o21ai_4:module("sky130_fd_sc_hd__o21ai_4"), %1196:
     LOAD %w2530:wire(1), %A2
     NOT %w2531:wire(1), %w2530
     LOAD %w2534:wire(1), %B1
-    AND %w4047:wire(1), %w2529, %w2531, %w2534
-    NOT %w4048:wire(1), %w4047
-    STORE %w4048, %Y
+    AND %w2881:wire(1), %w2529, %w2531, %w2534
+    NOT %w2871:wire(1), %w2881
+    STORE %w2871, %Y
   }
 }
 STDCELL_DEF %sky130_fd_sc_hd__o21ba_1:module("sky130_fd_sc_hd__o21ba_1"), %1200:block, %1201:stdcell_info("area": 10) {
@@ -4642,10 +4138,8 @@ STDCELL_DEF %sky130_fd_sc_hd__o21ba_1:module("sky130_fd_sc_hd__o21ba_1"), %1200:
     NOT %w2539:wire(1), %w2538
     AND %w2540:wire(1), %w2537, %w2539
     LOAD %w2541:wire(1), %A2
-    LOAD %w2542:wire(1), %B1_N
-    NOT %w2543:wire(1), %w2542
-    AND %w2544:wire(1), %w2541, %w2543
-    OR %w2545:wire(1), %w2540, %w2544
+    AND %w2544:wire(1), %w2539, %w2541
+    OR %w2545:wire(1), %w2544, %w2540
     STORE %w2545, %X
   }
 }
@@ -4660,10 +4154,8 @@ STDCELL_DEF %sky130_fd_sc_hd__o21ba_2:module("sky130_fd_sc_hd__o21ba_2"), %1204:
     NOT %w2548:wire(1), %w2547
     AND %w2549:wire(1), %w2546, %w2548
     LOAD %w2550:wire(1), %A2
-    LOAD %w2551:wire(1), %B1_N
-    NOT %w2552:wire(1), %w2551
-    AND %w2553:wire(1), %w2550, %w2552
-    OR %w2554:wire(1), %w2549, %w2553
+    AND %w2553:wire(1), %w2548, %w2550
+    OR %w2554:wire(1), %w2553, %w2549
     STORE %w2554, %X
   }
 }
@@ -4678,10 +4170,8 @@ STDCELL_DEF %sky130_fd_sc_hd__o21ba_4:module("sky130_fd_sc_hd__o21ba_4"), %1208:
     NOT %w2557:wire(1), %w2556
     AND %w2558:wire(1), %w2555, %w2557
     LOAD %w2559:wire(1), %A2
-    LOAD %w2560:wire(1), %B1_N
-    NOT %w2561:wire(1), %w2560
-    AND %w2562:wire(1), %w2559, %w2561
-    OR %w2563:wire(1), %w2558, %w2562
+    AND %w2562:wire(1), %w2557, %w2559
+    OR %w2563:wire(1), %w2562, %w2558
     STORE %w2563, %X
   }
 }
@@ -4744,20 +4234,15 @@ STDCELL_DEF %sky130_fd_sc_hd__o221a_1:module("sky130_fd_sc_hd__o221a_1"), %1224:
     LOAD %w2585:wire(1), %A1
     LOAD %w2586:wire(1), %B1
     LOAD %w2587:wire(1), %C1
-    AND %w2589:wire(1), %w2585, %w2586, %w2587
+    AND %w2588:wire(1), %w2586, %w2587
+    AND %w2589:wire(1), %w2585, %w2588
     LOAD %w2590:wire(1), %A2
-    LOAD %w2591:wire(1), %B1
-    LOAD %w2592:wire(1), %C1
-    AND %w2594:wire(1), %w2590, %w2591, %w2592
-    LOAD %w2595:wire(1), %A1
+    AND %w2594:wire(1), %w2588, %w2590
     LOAD %w2596:wire(1), %B2
-    LOAD %w2597:wire(1), %C1
-    AND %w2599:wire(1), %w2595, %w2596, %w2597
-    LOAD %w2600:wire(1), %A2
-    LOAD %w2601:wire(1), %B2
-    LOAD %w2602:wire(1), %C1
-    AND %w2604:wire(1), %w2600, %w2601, %w2602
-    OR %w2607:wire(1), %w2604, %w2599, %w2594, %w2589
+    AND %w2598:wire(1), %w2587, %w2596
+    AND %w2599:wire(1), %w2598, %w2585
+    AND %w2604:wire(1), %w2598, %w2590
+    OR %w2607:wire(1), %w2594, %w2599, %w2604, %w2589
     STORE %w2607, %X
   }
 }
@@ -4772,20 +4257,15 @@ STDCELL_DEF %sky130_fd_sc_hd__o221a_2:module("sky130_fd_sc_hd__o221a_2"), %1228:
     LOAD %w2608:wire(1), %A1
     LOAD %w2609:wire(1), %B1
     LOAD %w2610:wire(1), %C1
-    AND %w2612:wire(1), %w2608, %w2609, %w2610
+    AND %w2611:wire(1), %w2609, %w2610
+    AND %w2612:wire(1), %w2608, %w2611
     LOAD %w2613:wire(1), %A2
-    LOAD %w2614:wire(1), %B1
-    LOAD %w2615:wire(1), %C1
-    AND %w2617:wire(1), %w2613, %w2614, %w2615
-    LOAD %w2618:wire(1), %A1
+    AND %w2617:wire(1), %w2611, %w2613
     LOAD %w2619:wire(1), %B2
-    LOAD %w2620:wire(1), %C1
-    AND %w2622:wire(1), %w2618, %w2619, %w2620
-    LOAD %w2623:wire(1), %A2
-    LOAD %w2624:wire(1), %B2
-    LOAD %w2625:wire(1), %C1
-    AND %w2627:wire(1), %w2623, %w2624, %w2625
-    OR %w2630:wire(1), %w2627, %w2622, %w2617, %w2612
+    AND %w2621:wire(1), %w2610, %w2619
+    AND %w2622:wire(1), %w2621, %w2608
+    AND %w2627:wire(1), %w2621, %w2613
+    OR %w2630:wire(1), %w2617, %w2622, %w2627, %w2612
     STORE %w2630, %X
   }
 }
@@ -4800,20 +4280,15 @@ STDCELL_DEF %sky130_fd_sc_hd__o221a_4:module("sky130_fd_sc_hd__o221a_4"), %1232:
     LOAD %w2631:wire(1), %A1
     LOAD %w2632:wire(1), %B1
     LOAD %w2633:wire(1), %C1
-    AND %w2635:wire(1), %w2631, %w2632, %w2633
+    AND %w2634:wire(1), %w2632, %w2633
+    AND %w2635:wire(1), %w2631, %w2634
     LOAD %w2636:wire(1), %A2
-    LOAD %w2637:wire(1), %B1
-    LOAD %w2638:wire(1), %C1
-    AND %w2640:wire(1), %w2636, %w2637, %w2638
-    LOAD %w2641:wire(1), %A1
+    AND %w2640:wire(1), %w2634, %w2636
     LOAD %w2642:wire(1), %B2
-    LOAD %w2643:wire(1), %C1
-    AND %w2645:wire(1), %w2641, %w2642, %w2643
-    LOAD %w2646:wire(1), %A2
-    LOAD %w2647:wire(1), %B2
-    LOAD %w2648:wire(1), %C1
-    AND %w2650:wire(1), %w2646, %w2647, %w2648
-    OR %w2653:wire(1), %w2650, %w2645, %w2640, %w2635
+    AND %w2644:wire(1), %w2633, %w2642
+    AND %w2645:wire(1), %w2644, %w2631
+    AND %w2650:wire(1), %w2644, %w2636
+    OR %w2653:wire(1), %w2640, %w2645, %w2650, %w2635
     STORE %w2653, %X
   }
 }
@@ -4832,9 +4307,9 @@ STDCELL_DEF %sky130_fd_sc_hd__o221ai_1:module("sky130_fd_sc_hd__o221ai_1"), %123
     LOAD %w2660:wire(1), %A2
     NOT %w2661:wire(1), %w2660
     LOAD %w2664:wire(1), %C1
-    AND %w4049:wire(1), %w2654, %w2656, %w2659, %w2661, %w2664
-    NOT %w4050:wire(1), %w4049
-    STORE %w4050, %Y
+    AND %w2870:wire(1), %w2654, %w2656, %w2659, %w2661, %w2664
+    NOT %w2869:wire(1), %w2870
+    STORE %w2869, %Y
   }
 }
 STDCELL_DEF %sky130_fd_sc_hd__o221ai_2:module("sky130_fd_sc_hd__o221ai_2"), %1240:block, %1241:stdcell_info("area": 15) {
@@ -4852,9 +4327,9 @@ STDCELL_DEF %sky130_fd_sc_hd__o221ai_2:module("sky130_fd_sc_hd__o221ai_2"), %124
     LOAD %w2674:wire(1), %A2
     NOT %w2675:wire(1), %w2674
     LOAD %w2678:wire(1), %C1
-    AND %w4051:wire(1), %w2668, %w2670, %w2673, %w2675, %w2678
-    NOT %w4052:wire(1), %w4051
-    STORE %w4052, %Y
+    AND %w2866:wire(1), %w2668, %w2670, %w2673, %w2675, %w2678
+    NOT %w2865:wire(1), %w2866
+    STORE %w2865, %Y
   }
 }
 STDCELL_DEF %sky130_fd_sc_hd__o221ai_4:module("sky130_fd_sc_hd__o221ai_4"), %1244:block, %1245:stdcell_info("area": 26) {
@@ -4872,9 +4347,9 @@ STDCELL_DEF %sky130_fd_sc_hd__o221ai_4:module("sky130_fd_sc_hd__o221ai_4"), %124
     LOAD %w2688:wire(1), %A2
     NOT %w2689:wire(1), %w2688
     LOAD %w2692:wire(1), %C1
-    AND %w4053:wire(1), %w2682, %w2684, %w2687, %w2689, %w2692
-    NOT %w4054:wire(1), %w4053
-    STORE %w4054, %Y
+    AND %w2864:wire(1), %w2682, %w2684, %w2687, %w2689, %w2692
+    NOT %w2825:wire(1), %w2864
+    STORE %w2825, %Y
   }
 }
 STDCELL_DEF %sky130_fd_sc_hd__o22a_1:module("sky130_fd_sc_hd__o22a_1"), %1248:block, %1249:stdcell_info("area": 8) {
@@ -4888,15 +4363,11 @@ STDCELL_DEF %sky130_fd_sc_hd__o22a_1:module("sky130_fd_sc_hd__o22a_1"), %1248:bl
     LOAD %w2697:wire(1), %B1
     AND %w2698:wire(1), %w2696, %w2697
     LOAD %w2699:wire(1), %A2
-    LOAD %w2700:wire(1), %B1
-    AND %w2701:wire(1), %w2699, %w2700
-    LOAD %w2702:wire(1), %A1
+    AND %w2701:wire(1), %w2697, %w2699
     LOAD %w2703:wire(1), %B2
-    AND %w2704:wire(1), %w2702, %w2703
-    LOAD %w2705:wire(1), %A2
-    LOAD %w2706:wire(1), %B2
-    AND %w2707:wire(1), %w2705, %w2706
-    OR %w2710:wire(1), %w2698, %w2701, %w2704, %w2707
+    AND %w2704:wire(1), %w2696, %w2703
+    AND %w2707:wire(1), %w2699, %w2703
+    OR %w2710:wire(1), %w2701, %w2698, %w2704, %w2707
     STORE %w2710, %X
   }
 }
@@ -4911,15 +4382,11 @@ STDCELL_DEF %sky130_fd_sc_hd__o22a_2:module("sky130_fd_sc_hd__o22a_2"), %1252:bl
     LOAD %w2712:wire(1), %B1
     AND %w2713:wire(1), %w2711, %w2712
     LOAD %w2714:wire(1), %A2
-    LOAD %w2715:wire(1), %B1
-    AND %w2716:wire(1), %w2714, %w2715
-    LOAD %w2717:wire(1), %A1
+    AND %w2716:wire(1), %w2712, %w2714
     LOAD %w2718:wire(1), %B2
-    AND %w2719:wire(1), %w2717, %w2718
-    LOAD %w2720:wire(1), %A2
-    LOAD %w2721:wire(1), %B2
-    AND %w2722:wire(1), %w2720, %w2721
-    OR %w2725:wire(1), %w2713, %w2716, %w2719, %w2722
+    AND %w2719:wire(1), %w2711, %w2718
+    AND %w2722:wire(1), %w2714, %w2718
+    OR %w2725:wire(1), %w2716, %w2713, %w2719, %w2722
     STORE %w2725, %X
   }
 }
@@ -4934,15 +4401,11 @@ STDCELL_DEF %sky130_fd_sc_hd__o22a_4:module("sky130_fd_sc_hd__o22a_4"), %1256:bl
     LOAD %w2727:wire(1), %B1
     AND %w2728:wire(1), %w2726, %w2727
     LOAD %w2729:wire(1), %A2
-    LOAD %w2730:wire(1), %B1
-    AND %w2731:wire(1), %w2729, %w2730
-    LOAD %w2732:wire(1), %A1
+    AND %w2731:wire(1), %w2727, %w2729
     LOAD %w2733:wire(1), %B2
-    AND %w2734:wire(1), %w2732, %w2733
-    LOAD %w2735:wire(1), %A2
-    LOAD %w2736:wire(1), %B2
-    AND %w2737:wire(1), %w2735, %w2736
-    OR %w2740:wire(1), %w2728, %w2731, %w2734, %w2737
+    AND %w2734:wire(1), %w2726, %w2733
+    AND %w2737:wire(1), %w2729, %w2733
+    OR %w2740:wire(1), %w2731, %w2728, %w2734, %w2737
     STORE %w2740, %X
   }
 }
@@ -4959,9 +4422,9 @@ STDCELL_DEF %sky130_fd_sc_hd__o22ai_1:module("sky130_fd_sc_hd__o22ai_1"), %1260:
     LOAD %w2746:wire(1), %A1
     LOAD %w2747:wire(1), %A2
     NOT %w2748:wire(1), %w2747
-    AND %w4055:wire(1), %w2741, %w2743, %w2746, %w2748
-    NOT %w4056:wire(1), %w4055
-    STORE %w4056, %Y
+    AND %w2824:wire(1), %w2741, %w2743, %w2746, %w2748
+    NOT %w2820:wire(1), %w2824
+    STORE %w2820, %Y
   }
 }
 STDCELL_DEF %sky130_fd_sc_hd__o22ai_2:module("sky130_fd_sc_hd__o22ai_2"), %1264:block, %1265:stdcell_info("area": 12) {
@@ -4977,9 +4440,9 @@ STDCELL_DEF %sky130_fd_sc_hd__o22ai_2:module("sky130_fd_sc_hd__o22ai_2"), %1264:
     LOAD %w2757:wire(1), %A1
     LOAD %w2758:wire(1), %A2
     NOT %w2759:wire(1), %w2758
-    AND %w4057:wire(1), %w2752, %w2754, %w2757, %w2759
-    NOT %w4058:wire(1), %w4057
-    STORE %w4058, %Y
+    AND %w2817:wire(1), %w2752, %w2754, %w2757, %w2759
+    NOT %w2806:wire(1), %w2817
+    STORE %w2806, %Y
   }
 }
 STDCELL_DEF %sky130_fd_sc_hd__o22ai_4:module("sky130_fd_sc_hd__o22ai_4"), %1268:block, %1269:stdcell_info("area": 20) {
@@ -4995,9 +4458,9 @@ STDCELL_DEF %sky130_fd_sc_hd__o22ai_4:module("sky130_fd_sc_hd__o22ai_4"), %1268:
     LOAD %w2768:wire(1), %A1
     LOAD %w2769:wire(1), %A2
     NOT %w2770:wire(1), %w2769
-    AND %w4059:wire(1), %w2763, %w2765, %w2768, %w2770
-    NOT %w4060:wire(1), %w4059
-    STORE %w4060, %Y
+    AND %w2805:wire(1), %w2763, %w2765, %w2768, %w2770
+    NOT %w2801:wire(1), %w2805
+    STORE %w2801, %Y
   }
 }
 STDCELL_DEF %sky130_fd_sc_hd__o2bb2a_1:module("sky130_fd_sc_hd__o2bb2a_1"), %1272:block, %1273:stdcell_info("area": 10) {
@@ -5010,14 +4473,10 @@ STDCELL_DEF %sky130_fd_sc_hd__o2bb2a_1:module("sky130_fd_sc_hd__o2bb2a_1"), %127
     LOAD %w2774:wire(1), %A1_N
     LOAD %w2775:wire(1), %B1
     LOAD %w2778:wire(1), %A2_N
-    LOAD %w2779:wire(1), %B1
-    LOAD %w2782:wire(1), %A1_N
     LOAD %w2783:wire(1), %B2
-    LOAD %w2786:wire(1), %A2_N
-    LOAD %w2787:wire(1), %B2
-    AND %w4061:wire(1), %w2774, %w2775, %w2778, %w2779, %w2782, %w2783, %w2786, %w2787
-    NOT %w4062:wire(1), %w4061
-    STORE %w4062, %X
+    AND %w2736:wire(1), %w2774, %w2775, %w2778, %w2783
+    NOT %w2787:wire(1), %w2736
+    STORE %w2787, %X
   }
 }
 STDCELL_DEF %sky130_fd_sc_hd__o2bb2a_2:module("sky130_fd_sc_hd__o2bb2a_2"), %1276:block, %1277:stdcell_info("area": 11) {
@@ -5030,14 +4489,10 @@ STDCELL_DEF %sky130_fd_sc_hd__o2bb2a_2:module("sky130_fd_sc_hd__o2bb2a_2"), %127
     LOAD %w2793:wire(1), %A1_N
     LOAD %w2794:wire(1), %B1
     LOAD %w2797:wire(1), %A2_N
-    LOAD %w2798:wire(1), %B1
-    LOAD %w2801:wire(1), %A1_N
     LOAD %w2802:wire(1), %B2
-    LOAD %w2805:wire(1), %A2_N
-    LOAD %w2806:wire(1), %B2
-    AND %w4063:wire(1), %w2793, %w2794, %w2797, %w2798, %w2801, %w2802, %w2805, %w2806
-    NOT %w4064:wire(1), %w4063
-    STORE %w4064, %X
+    AND %w2717:wire(1), %w2793, %w2794, %w2797, %w2802
+    NOT %w2732:wire(1), %w2717
+    STORE %w2732, %X
   }
 }
 STDCELL_DEF %sky130_fd_sc_hd__o2bb2a_4:module("sky130_fd_sc_hd__o2bb2a_4"), %1280:block, %1281:stdcell_info("area": 20) {
@@ -5050,14 +4505,10 @@ STDCELL_DEF %sky130_fd_sc_hd__o2bb2a_4:module("sky130_fd_sc_hd__o2bb2a_4"), %128
     LOAD %w2812:wire(1), %A1_N
     LOAD %w2813:wire(1), %B1
     LOAD %w2816:wire(1), %A2_N
-    LOAD %w2817:wire(1), %B1
-    LOAD %w2820:wire(1), %A1_N
     LOAD %w2821:wire(1), %B2
-    LOAD %w2824:wire(1), %A2_N
-    LOAD %w2825:wire(1), %B2
-    AND %w4065:wire(1), %w2812, %w2813, %w2816, %w2817, %w2820, %w2821, %w2824, %w2825
-    NOT %w4066:wire(1), %w4065
-    STORE %w4066, %X
+    AND %w2649:wire(1), %w2812, %w2813, %w2816, %w2821
+    NOT %w2706:wire(1), %w2649
+    STORE %w2706, %X
   }
 }
 STDCELL_DEF %sky130_fd_sc_hd__o2bb2ai_1:module("sky130_fd_sc_hd__o2bb2ai_1"), %1284:block, %1285:stdcell_info("area": 8) {
@@ -5128,16 +4579,13 @@ STDCELL_DEF %sky130_fd_sc_hd__o311a_1:module("sky130_fd_sc_hd__o311a_1"), %1296:
     LOAD %w2858:wire(1), %A1
     LOAD %w2859:wire(1), %B1
     LOAD %w2860:wire(1), %C1
-    AND %w2862:wire(1), %w2858, %w2859, %w2860
+    AND %w2861:wire(1), %w2859, %w2860
+    AND %w2862:wire(1), %w2858, %w2861
     LOAD %w2863:wire(1), %A2
-    LOAD %w2864:wire(1), %B1
-    LOAD %w2865:wire(1), %C1
-    AND %w2867:wire(1), %w2863, %w2864, %w2865
+    AND %w2867:wire(1), %w2861, %w2863
     LOAD %w2868:wire(1), %A3
-    LOAD %w2869:wire(1), %B1
-    LOAD %w2870:wire(1), %C1
-    AND %w2872:wire(1), %w2868, %w2869, %w2870
-    OR %w2874:wire(1), %w2872, %w2867, %w2862
+    AND %w2872:wire(1), %w2861, %w2868
+    OR %w2874:wire(1), %w2867, %w2872, %w2862
     STORE %w2874, %X
   }
 }
@@ -5152,16 +4600,13 @@ STDCELL_DEF %sky130_fd_sc_hd__o311a_2:module("sky130_fd_sc_hd__o311a_2"), %1300:
     LOAD %w2875:wire(1), %A1
     LOAD %w2876:wire(1), %B1
     LOAD %w2877:wire(1), %C1
-    AND %w2879:wire(1), %w2875, %w2876, %w2877
+    AND %w2878:wire(1), %w2876, %w2877
+    AND %w2879:wire(1), %w2875, %w2878
     LOAD %w2880:wire(1), %A2
-    LOAD %w2881:wire(1), %B1
-    LOAD %w2882:wire(1), %C1
-    AND %w2884:wire(1), %w2880, %w2881, %w2882
+    AND %w2884:wire(1), %w2878, %w2880
     LOAD %w2885:wire(1), %A3
-    LOAD %w2886:wire(1), %B1
-    LOAD %w2887:wire(1), %C1
-    AND %w2889:wire(1), %w2885, %w2886, %w2887
-    OR %w2891:wire(1), %w2889, %w2884, %w2879
+    AND %w2889:wire(1), %w2878, %w2885
+    OR %w2891:wire(1), %w2884, %w2889, %w2879
     STORE %w2891, %X
   }
 }
@@ -5176,16 +4621,13 @@ STDCELL_DEF %sky130_fd_sc_hd__o311a_4:module("sky130_fd_sc_hd__o311a_4"), %1304:
     LOAD %w2892:wire(1), %A1
     LOAD %w2893:wire(1), %B1
     LOAD %w2894:wire(1), %C1
-    AND %w2896:wire(1), %w2892, %w2893, %w2894
+    AND %w2895:wire(1), %w2893, %w2894
+    AND %w2896:wire(1), %w2892, %w2895
     LOAD %w2897:wire(1), %A2
-    LOAD %w2898:wire(1), %B1
-    LOAD %w2899:wire(1), %C1
-    AND %w2901:wire(1), %w2897, %w2898, %w2899
+    AND %w2901:wire(1), %w2895, %w2897
     LOAD %w2902:wire(1), %A3
-    LOAD %w2903:wire(1), %B1
-    LOAD %w2904:wire(1), %C1
-    AND %w2906:wire(1), %w2902, %w2903, %w2904
-    OR %w2908:wire(1), %w2906, %w2901, %w2896
+    AND %w2906:wire(1), %w2895, %w2902
+    OR %w2908:wire(1), %w2901, %w2906, %w2896
     STORE %w2908, %X
   }
 }
@@ -5205,9 +4647,9 @@ STDCELL_DEF %sky130_fd_sc_hd__o311ai_0:module("sky130_fd_sc_hd__o311ai_0"), %130
     NOT %w2914:wire(1), %w2913
     LOAD %w2917:wire(1), %B1
     LOAD %w2919:wire(1), %C1
-    AND %w4067:wire(1), %w2909, %w2914, %w2917, %w2919
-    NOT %w4068:wire(1), %w4067
-    STORE %w4068, %Y
+    AND %w2648:wire(1), %w2909, %w2914, %w2917, %w2919
+    NOT %w2647:wire(1), %w2648
+    STORE %w2647, %Y
   }
 }
 STDCELL_DEF %sky130_fd_sc_hd__o311ai_1:module("sky130_fd_sc_hd__o311ai_1"), %1312:block, %1313:stdcell_info("area": 8) {
@@ -5226,9 +4668,9 @@ STDCELL_DEF %sky130_fd_sc_hd__o311ai_1:module("sky130_fd_sc_hd__o311ai_1"), %131
     NOT %w2928:wire(1), %w2927
     LOAD %w2931:wire(1), %B1
     LOAD %w2933:wire(1), %C1
-    AND %w4069:wire(1), %w2923, %w2928, %w2931, %w2933
-    NOT %w4070:wire(1), %w4069
-    STORE %w4070, %Y
+    AND %w2646:wire(1), %w2923, %w2928, %w2931, %w2933
+    NOT %w2643:wire(1), %w2646
+    STORE %w2643, %Y
   }
 }
 STDCELL_DEF %sky130_fd_sc_hd__o311ai_2:module("sky130_fd_sc_hd__o311ai_2"), %1316:block, %1317:stdcell_info("area": 16) {
@@ -5247,9 +4689,9 @@ STDCELL_DEF %sky130_fd_sc_hd__o311ai_2:module("sky130_fd_sc_hd__o311ai_2"), %131
     NOT %w2942:wire(1), %w2941
     LOAD %w2945:wire(1), %B1
     LOAD %w2947:wire(1), %C1
-    AND %w4071:wire(1), %w2937, %w2942, %w2945, %w2947
-    NOT %w4072:wire(1), %w4071
-    STORE %w4072, %Y
+    AND %w2641:wire(1), %w2937, %w2942, %w2945, %w2947
+    NOT %w2639:wire(1), %w2641
+    STORE %w2639, %Y
   }
 }
 STDCELL_DEF %sky130_fd_sc_hd__o311ai_4:module("sky130_fd_sc_hd__o311ai_4"), %1320:block, %1321:stdcell_info("area": 26) {
@@ -5268,9 +4710,9 @@ STDCELL_DEF %sky130_fd_sc_hd__o311ai_4:module("sky130_fd_sc_hd__o311ai_4"), %132
     NOT %w2956:wire(1), %w2955
     LOAD %w2959:wire(1), %B1
     LOAD %w2961:wire(1), %C1
-    AND %w4073:wire(1), %w2951, %w2956, %w2959, %w2961
-    NOT %w4074:wire(1), %w4073
-    STORE %w4074, %Y
+    AND %w2638:wire(1), %w2951, %w2956, %w2959, %w2961
+    NOT %w2637:wire(1), %w2638
+    STORE %w2637, %Y
   }
 }
 STDCELL_DEF %sky130_fd_sc_hd__o31a_1:module("sky130_fd_sc_hd__o31a_1"), %1324:block, %1325:stdcell_info("area": 8) {
@@ -5284,12 +4726,10 @@ STDCELL_DEF %sky130_fd_sc_hd__o31a_1:module("sky130_fd_sc_hd__o31a_1"), %1324:bl
     LOAD %w2966:wire(1), %B1
     AND %w2967:wire(1), %w2965, %w2966
     LOAD %w2968:wire(1), %A2
-    LOAD %w2969:wire(1), %B1
-    AND %w2970:wire(1), %w2968, %w2969
+    AND %w2970:wire(1), %w2966, %w2968
     LOAD %w2971:wire(1), %A3
-    LOAD %w2972:wire(1), %B1
-    AND %w2973:wire(1), %w2971, %w2972
-    OR %w2975:wire(1), %w2967, %w2970, %w2973
+    AND %w2973:wire(1), %w2966, %w2971
+    OR %w2975:wire(1), %w2970, %w2973, %w2967
     STORE %w2975, %X
   }
 }
@@ -5304,12 +4744,10 @@ STDCELL_DEF %sky130_fd_sc_hd__o31a_2:module("sky130_fd_sc_hd__o31a_2"), %1328:bl
     LOAD %w2977:wire(1), %B1
     AND %w2978:wire(1), %w2976, %w2977
     LOAD %w2979:wire(1), %A2
-    LOAD %w2980:wire(1), %B1
-    AND %w2981:wire(1), %w2979, %w2980
+    AND %w2981:wire(1), %w2977, %w2979
     LOAD %w2982:wire(1), %A3
-    LOAD %w2983:wire(1), %B1
-    AND %w2984:wire(1), %w2982, %w2983
-    OR %w2986:wire(1), %w2978, %w2981, %w2984
+    AND %w2984:wire(1), %w2977, %w2982
+    OR %w2986:wire(1), %w2981, %w2984, %w2978
     STORE %w2986, %X
   }
 }
@@ -5324,12 +4762,10 @@ STDCELL_DEF %sky130_fd_sc_hd__o31a_4:module("sky130_fd_sc_hd__o31a_4"), %1332:bl
     LOAD %w2988:wire(1), %B1
     AND %w2989:wire(1), %w2987, %w2988
     LOAD %w2990:wire(1), %A2
-    LOAD %w2991:wire(1), %B1
-    AND %w2992:wire(1), %w2990, %w2991
+    AND %w2992:wire(1), %w2988, %w2990
     LOAD %w2993:wire(1), %A3
-    LOAD %w2994:wire(1), %B1
-    AND %w2995:wire(1), %w2993, %w2994
-    OR %w2997:wire(1), %w2989, %w2992, %w2995
+    AND %w2995:wire(1), %w2988, %w2993
+    OR %w2997:wire(1), %w2992, %w2995, %w2989
     STORE %w2997, %X
   }
 }
@@ -5347,9 +4783,9 @@ STDCELL_DEF %sky130_fd_sc_hd__o31ai_1:module("sky130_fd_sc_hd__o31ai_1"), %1336:
     AND %w3002:wire(1), %w2999, %w3001
     NOT %w3003:wire(1), %w3002
     LOAD %w3006:wire(1), %B1
-    AND %w4075:wire(1), %w2998, %w3003, %w3006
-    NOT %w4076:wire(1), %w4075
-    STORE %w4076, %Y
+    AND %w2626:wire(1), %w2998, %w3003, %w3006
+    NOT %w2625:wire(1), %w2626
+    STORE %w2625, %Y
   }
 }
 STDCELL_DEF %sky130_fd_sc_hd__o31ai_2:module("sky130_fd_sc_hd__o31ai_2"), %1340:block, %1341:stdcell_info("area": 12) {
@@ -5366,9 +4802,9 @@ STDCELL_DEF %sky130_fd_sc_hd__o31ai_2:module("sky130_fd_sc_hd__o31ai_2"), %1340:
     AND %w3013:wire(1), %w3010, %w3012
     NOT %w3014:wire(1), %w3013
     LOAD %w3017:wire(1), %B1
-    AND %w4077:wire(1), %w3009, %w3014, %w3017
-    NOT %w4078:wire(1), %w4077
-    STORE %w4078, %Y
+    AND %w2624:wire(1), %w3009, %w3014, %w3017
+    NOT %w2623:wire(1), %w2624
+    STORE %w2623, %Y
   }
 }
 STDCELL_DEF %sky130_fd_sc_hd__o31ai_4:module("sky130_fd_sc_hd__o31ai_4"), %1344:block, %1345:stdcell_info("area": 21) {
@@ -5385,9 +4821,9 @@ STDCELL_DEF %sky130_fd_sc_hd__o31ai_4:module("sky130_fd_sc_hd__o31ai_4"), %1344:
     AND %w3024:wire(1), %w3021, %w3023
     NOT %w3025:wire(1), %w3024
     LOAD %w3028:wire(1), %B1
-    AND %w4079:wire(1), %w3020, %w3025, %w3028
-    NOT %w4080:wire(1), %w4079
-    STORE %w4080, %Y
+    AND %w2620:wire(1), %w3020, %w3025, %w3028
+    NOT %w2618:wire(1), %w2620
+    STORE %w2618, %Y
   }
 }
 STDCELL_DEF %sky130_fd_sc_hd__o32a_1:module("sky130_fd_sc_hd__o32a_1"), %1348:block, %1349:stdcell_info("area": 10) {
@@ -5401,22 +4837,15 @@ STDCELL_DEF %sky130_fd_sc_hd__o32a_1:module("sky130_fd_sc_hd__o32a_1"), %1348:bl
     LOAD %w3031:wire(1), %A1
     LOAD %w3032:wire(1), %B1
     AND %w3033:wire(1), %w3031, %w3032
-    LOAD %w3034:wire(1), %A1
     LOAD %w3035:wire(1), %B2
-    AND %w3036:wire(1), %w3034, %w3035
+    AND %w3036:wire(1), %w3031, %w3035
     LOAD %w3037:wire(1), %A2
-    LOAD %w3038:wire(1), %B1
-    AND %w3039:wire(1), %w3037, %w3038
+    AND %w3039:wire(1), %w3032, %w3037
     LOAD %w3040:wire(1), %A3
-    LOAD %w3041:wire(1), %B1
-    AND %w3042:wire(1), %w3040, %w3041
-    LOAD %w3043:wire(1), %A2
-    LOAD %w3044:wire(1), %B2
-    AND %w3045:wire(1), %w3043, %w3044
-    LOAD %w3046:wire(1), %A3
-    LOAD %w3047:wire(1), %B2
-    AND %w3048:wire(1), %w3046, %w3047
-    OR %w3053:wire(1), %w3033, %w3036, %w3039, %w3042, %w3045, %w3048
+    AND %w3042:wire(1), %w3032, %w3040
+    AND %w3045:wire(1), %w3035, %w3037
+    AND %w3048:wire(1), %w3035, %w3040
+    OR %w3053:wire(1), %w3039, %w3042, %w3045, %w3048, %w3033, %w3036
     STORE %w3053, %X
   }
 }
@@ -5431,22 +4860,15 @@ STDCELL_DEF %sky130_fd_sc_hd__o32a_2:module("sky130_fd_sc_hd__o32a_2"), %1352:bl
     LOAD %w3054:wire(1), %A1
     LOAD %w3055:wire(1), %B1
     AND %w3056:wire(1), %w3054, %w3055
-    LOAD %w3057:wire(1), %A1
     LOAD %w3058:wire(1), %B2
-    AND %w3059:wire(1), %w3057, %w3058
+    AND %w3059:wire(1), %w3054, %w3058
     LOAD %w3060:wire(1), %A2
-    LOAD %w3061:wire(1), %B1
-    AND %w3062:wire(1), %w3060, %w3061
+    AND %w3062:wire(1), %w3055, %w3060
     LOAD %w3063:wire(1), %A3
-    LOAD %w3064:wire(1), %B1
-    AND %w3065:wire(1), %w3063, %w3064
-    LOAD %w3066:wire(1), %A2
-    LOAD %w3067:wire(1), %B2
-    AND %w3068:wire(1), %w3066, %w3067
-    LOAD %w3069:wire(1), %A3
-    LOAD %w3070:wire(1), %B2
-    AND %w3071:wire(1), %w3069, %w3070
-    OR %w3076:wire(1), %w3056, %w3059, %w3062, %w3065, %w3068, %w3071
+    AND %w3065:wire(1), %w3055, %w3063
+    AND %w3068:wire(1), %w3058, %w3060
+    AND %w3071:wire(1), %w3058, %w3063
+    OR %w3076:wire(1), %w3062, %w3065, %w3068, %w3071, %w3056, %w3059
     STORE %w3076, %X
   }
 }
@@ -5461,22 +4883,15 @@ STDCELL_DEF %sky130_fd_sc_hd__o32a_4:module("sky130_fd_sc_hd__o32a_4"), %1356:bl
     LOAD %w3077:wire(1), %A1
     LOAD %w3078:wire(1), %B1
     AND %w3079:wire(1), %w3077, %w3078
-    LOAD %w3080:wire(1), %A1
     LOAD %w3081:wire(1), %B2
-    AND %w3082:wire(1), %w3080, %w3081
+    AND %w3082:wire(1), %w3077, %w3081
     LOAD %w3083:wire(1), %A2
-    LOAD %w3084:wire(1), %B1
-    AND %w3085:wire(1), %w3083, %w3084
+    AND %w3085:wire(1), %w3078, %w3083
     LOAD %w3086:wire(1), %A3
-    LOAD %w3087:wire(1), %B1
-    AND %w3088:wire(1), %w3086, %w3087
-    LOAD %w3089:wire(1), %A2
-    LOAD %w3090:wire(1), %B2
-    AND %w3091:wire(1), %w3089, %w3090
-    LOAD %w3092:wire(1), %A3
-    LOAD %w3093:wire(1), %B2
-    AND %w3094:wire(1), %w3092, %w3093
-    OR %w3099:wire(1), %w3079, %w3082, %w3085, %w3088, %w3091, %w3094
+    AND %w3088:wire(1), %w3078, %w3086
+    AND %w3091:wire(1), %w3081, %w3083
+    AND %w3094:wire(1), %w3081, %w3086
+    OR %w3099:wire(1), %w3085, %w3088, %w3091, %w3094, %w3079, %w3082
     STORE %w3099, %X
   }
 }
@@ -5497,9 +4912,9 @@ STDCELL_DEF %sky130_fd_sc_hd__o32ai_1:module("sky130_fd_sc_hd__o32ai_1"), %1360:
     LOAD %w3108:wire(1), %B1
     LOAD %w3109:wire(1), %B2
     NOT %w3110:wire(1), %w3109
-    AND %w4081:wire(1), %w3100, %w3105, %w3108, %w3110
-    NOT %w4082:wire(1), %w4081
-    STORE %w4082, %Y
+    AND %w2616:wire(1), %w3100, %w3105, %w3108, %w3110
+    NOT %w2615:wire(1), %w2616
+    STORE %w2615, %Y
   }
 }
 STDCELL_DEF %sky130_fd_sc_hd__o32ai_2:module("sky130_fd_sc_hd__o32ai_2"), %1364:block, %1365:stdcell_info("area": 16) {
@@ -5519,9 +4934,9 @@ STDCELL_DEF %sky130_fd_sc_hd__o32ai_2:module("sky130_fd_sc_hd__o32ai_2"), %1364:
     LOAD %w3122:wire(1), %B1
     LOAD %w3123:wire(1), %B2
     NOT %w3124:wire(1), %w3123
-    AND %w4083:wire(1), %w3114, %w3119, %w3122, %w3124
-    NOT %w4084:wire(1), %w4083
-    STORE %w4084, %Y
+    AND %w2614:wire(1), %w3114, %w3119, %w3122, %w3124
+    NOT %w2603:wire(1), %w2614
+    STORE %w2603, %Y
   }
 }
 STDCELL_DEF %sky130_fd_sc_hd__o32ai_4:module("sky130_fd_sc_hd__o32ai_4"), %1368:block, %1369:stdcell_info("area": 27) {
@@ -5541,9 +4956,9 @@ STDCELL_DEF %sky130_fd_sc_hd__o32ai_4:module("sky130_fd_sc_hd__o32ai_4"), %1368:
     LOAD %w3136:wire(1), %B1
     LOAD %w3137:wire(1), %B2
     NOT %w3138:wire(1), %w3137
-    AND %w4085:wire(1), %w3128, %w3133, %w3136, %w3138
-    NOT %w4086:wire(1), %w4085
-    STORE %w4086, %Y
+    AND %w2602:wire(1), %w3128, %w3133, %w3136, %w3138
+    NOT %w2601:wire(1), %w2602
+    STORE %w2601, %Y
   }
 }
 STDCELL_DEF %sky130_fd_sc_hd__o41a_1:module("sky130_fd_sc_hd__o41a_1"), %1372:block, %1373:stdcell_info("area": 11) {
@@ -5558,15 +4973,12 @@ STDCELL_DEF %sky130_fd_sc_hd__o41a_1:module("sky130_fd_sc_hd__o41a_1"), %1372:bl
     LOAD %w3143:wire(1), %B1
     AND %w3144:wire(1), %w3142, %w3143
     LOAD %w3145:wire(1), %A2
-    LOAD %w3146:wire(1), %B1
-    AND %w3147:wire(1), %w3145, %w3146
+    AND %w3147:wire(1), %w3143, %w3145
     LOAD %w3148:wire(1), %A3
-    LOAD %w3149:wire(1), %B1
-    AND %w3150:wire(1), %w3148, %w3149
+    AND %w3150:wire(1), %w3143, %w3148
     LOAD %w3151:wire(1), %A4
-    LOAD %w3152:wire(1), %B1
-    AND %w3153:wire(1), %w3151, %w3152
-    OR %w3156:wire(1), %w3144, %w3147, %w3150, %w3153
+    AND %w3153:wire(1), %w3143, %w3151
+    OR %w3156:wire(1), %w3147, %w3150, %w3153, %w3144
     STORE %w3156, %X
   }
 }
@@ -5582,15 +4994,12 @@ STDCELL_DEF %sky130_fd_sc_hd__o41a_2:module("sky130_fd_sc_hd__o41a_2"), %1376:bl
     LOAD %w3158:wire(1), %B1
     AND %w3159:wire(1), %w3157, %w3158
     LOAD %w3160:wire(1), %A2
-    LOAD %w3161:wire(1), %B1
-    AND %w3162:wire(1), %w3160, %w3161
+    AND %w3162:wire(1), %w3158, %w3160
     LOAD %w3163:wire(1), %A3
-    LOAD %w3164:wire(1), %B1
-    AND %w3165:wire(1), %w3163, %w3164
+    AND %w3165:wire(1), %w3158, %w3163
     LOAD %w3166:wire(1), %A4
-    LOAD %w3167:wire(1), %B1
-    AND %w3168:wire(1), %w3166, %w3167
-    OR %w3171:wire(1), %w3159, %w3162, %w3165, %w3168
+    AND %w3168:wire(1), %w3158, %w3166
+    OR %w3171:wire(1), %w3162, %w3165, %w3168, %w3159
     STORE %w3171, %X
   }
 }
@@ -5606,15 +5015,12 @@ STDCELL_DEF %sky130_fd_sc_hd__o41a_4:module("sky130_fd_sc_hd__o41a_4"), %1380:bl
     LOAD %w3173:wire(1), %B1
     AND %w3174:wire(1), %w3172, %w3173
     LOAD %w3175:wire(1), %A2
-    LOAD %w3176:wire(1), %B1
-    AND %w3177:wire(1), %w3175, %w3176
+    AND %w3177:wire(1), %w3173, %w3175
     LOAD %w3178:wire(1), %A3
-    LOAD %w3179:wire(1), %B1
-    AND %w3180:wire(1), %w3178, %w3179
+    AND %w3180:wire(1), %w3173, %w3178
     LOAD %w3181:wire(1), %A4
-    LOAD %w3182:wire(1), %B1
-    AND %w3183:wire(1), %w3181, %w3182
-    OR %w3186:wire(1), %w3174, %w3177, %w3180, %w3183
+    AND %w3183:wire(1), %w3173, %w3181
+    OR %w3186:wire(1), %w3177, %w3180, %w3183, %w3174
     STORE %w3186, %X
   }
 }
@@ -5636,9 +5042,9 @@ STDCELL_DEF %sky130_fd_sc_hd__o41ai_1:module("sky130_fd_sc_hd__o41ai_1"), %1384:
     AND %w3194:wire(1), %w3188, %w3193
     NOT %w3195:wire(1), %w3194
     LOAD %w3198:wire(1), %B1
-    AND %w4087:wire(1), %w3187, %w3195, %w3198
-    NOT %w4088:wire(1), %w4087
-    STORE %w4088, %Y
+    AND %w2600:wire(1), %w3187, %w3195, %w3198
+    NOT %w2597:wire(1), %w2600
+    STORE %w2597, %Y
   }
 }
 STDCELL_DEF %sky130_fd_sc_hd__o41ai_2:module("sky130_fd_sc_hd__o41ai_2"), %1388:block, %1389:stdcell_info("area": 16) {
@@ -5659,9 +5065,9 @@ STDCELL_DEF %sky130_fd_sc_hd__o41ai_2:module("sky130_fd_sc_hd__o41ai_2"), %1388:
     AND %w3208:wire(1), %w3202, %w3207
     NOT %w3209:wire(1), %w3208
     LOAD %w3212:wire(1), %B1
-    AND %w4089:wire(1), %w3201, %w3209, %w3212
-    NOT %w4090:wire(1), %w4089
-    STORE %w4090, %Y
+    AND %w2595:wire(1), %w3201, %w3209, %w3212
+    NOT %w2593:wire(1), %w2595
+    STORE %w2593, %Y
   }
 }
 STDCELL_DEF %sky130_fd_sc_hd__o41ai_4:module("sky130_fd_sc_hd__o41ai_4"), %1392:block, %1393:stdcell_info("area": 27) {
@@ -5682,9 +5088,9 @@ STDCELL_DEF %sky130_fd_sc_hd__o41ai_4:module("sky130_fd_sc_hd__o41ai_4"), %1392:
     AND %w3222:wire(1), %w3216, %w3221
     NOT %w3223:wire(1), %w3222
     LOAD %w3226:wire(1), %B1
-    AND %w4091:wire(1), %w3215, %w3223, %w3226
-    NOT %w4092:wire(1), %w4091
-    STORE %w4092, %Y
+    AND %w2592:wire(1), %w3215, %w3223, %w3226
+    NOT %w2591:wire(1), %w2592
+    STORE %w2591, %Y
   }
 }
 STDCELL_DEF %sky130_fd_sc_hd__or2_0:module("sky130_fd_sc_hd__or2_0"), %1396:block, %1397:stdcell_info("area": 6) {
@@ -6022,12 +5428,8 @@ STDCELL_DEF %sky130_fd_sc_hd__sdfbbn_1:module("sky130_fd_sc_hd__sdfbbn_1"), %149
   COMB_PROCESS_DEF %1494:process, %1495:block {
     LOAD %w3366:wire(1), %D
     LOAD %w3367:wire(1), %SCE
-    NOT %w3368:wire(1), %w3367
-    AND %w3369:wire(1), %w3366, %w3368
     LOAD %w3370:wire(1), %SCD
-    LOAD %w3371:wire(1), %SCE
-    AND %w3372:wire(1), %w3370, %w3371
-    OR %w3373:wire(1), %w3369, %w3372
+    MUX %w3373:wire(1), %w3367, %w3370, %w3366
     STORE %w3373, %r1709
   }
   COMB_PROCESS_DEF %1496:process, %1497:block {
@@ -6050,12 +5452,8 @@ STDCELL_DEF %sky130_fd_sc_hd__sdfbbn_2:module("sky130_fd_sc_hd__sdfbbn_2"), %149
   COMB_PROCESS_DEF %1500:process, %1501:block {
     LOAD %w3384:wire(1), %D
     LOAD %w3385:wire(1), %SCE
-    NOT %w3386:wire(1), %w3385
-    AND %w3387:wire(1), %w3384, %w3386
     LOAD %w3388:wire(1), %SCD
-    LOAD %w3389:wire(1), %SCE
-    AND %w3390:wire(1), %w3388, %w3389
-    OR %w3391:wire(1), %w3387, %w3390
+    MUX %w3391:wire(1), %w3385, %w3388, %w3384
     STORE %w3391, %r1723
   }
   COMB_PROCESS_DEF %1502:process, %1503:block {
@@ -6078,12 +5476,8 @@ STDCELL_DEF %sky130_fd_sc_hd__sdfbbp_1:module("sky130_fd_sc_hd__sdfbbp_1"), %150
   COMB_PROCESS_DEF %1506:process, %1507:block {
     LOAD %w3401:wire(1), %D
     LOAD %w3402:wire(1), %SCE
-    NOT %w3403:wire(1), %w3402
-    AND %w3404:wire(1), %w3401, %w3403
     LOAD %w3405:wire(1), %SCD
-    LOAD %w3406:wire(1), %SCE
-    AND %w3407:wire(1), %w3405, %w3406
-    OR %w3408:wire(1), %w3404, %w3407
+    MUX %w3408:wire(1), %w3402, %w3405, %w3401
     STORE %w3408, %r1737
   }
   COMB_PROCESS_DEF %1508:process, %1509:block {
@@ -6105,12 +5499,8 @@ STDCELL_DEF %sky130_fd_sc_hd__sdfrbp_1:module("sky130_fd_sc_hd__sdfrbp_1"), %151
   COMB_PROCESS_DEF %1512:process, %1513:block {
     LOAD %w3418:wire(1), %D
     LOAD %w3419:wire(1), %SCE
-    NOT %w3420:wire(1), %w3419
-    AND %w3421:wire(1), %w3418, %w3420
     LOAD %w3422:wire(1), %SCD
-    LOAD %w3423:wire(1), %SCE
-    AND %w3424:wire(1), %w3422, %w3423
-    OR %w3425:wire(1), %w3421, %w3424
+    MUX %w3425:wire(1), %w3419, %w3422, %w3418
     STORE %w3425, %r1750
   }
   COMB_PROCESS_DEF %1514:process, %1515:block {
@@ -6132,12 +5522,8 @@ STDCELL_DEF %sky130_fd_sc_hd__sdfrbp_2:module("sky130_fd_sc_hd__sdfrbp_2"), %151
   COMB_PROCESS_DEF %1518:process, %1519:block {
     LOAD %w3433:wire(1), %D
     LOAD %w3434:wire(1), %SCE
-    NOT %w3435:wire(1), %w3434
-    AND %w3436:wire(1), %w3433, %w3435
     LOAD %w3437:wire(1), %SCD
-    LOAD %w3438:wire(1), %SCE
-    AND %w3439:wire(1), %w3437, %w3438
-    OR %w3440:wire(1), %w3436, %w3439
+    MUX %w3440:wire(1), %w3434, %w3437, %w3433
     STORE %w3440, %r1762
   }
   COMB_PROCESS_DEF %1520:process, %1521:block {
@@ -6158,12 +5544,8 @@ STDCELL_DEF %sky130_fd_sc_hd__sdfrtn_1:module("sky130_fd_sc_hd__sdfrtn_1"), %152
   COMB_PROCESS_DEF %1524:process, %1525:block {
     LOAD %w3448:wire(1), %D
     LOAD %w3449:wire(1), %SCE
-    NOT %w3450:wire(1), %w3449
-    AND %w3451:wire(1), %w3448, %w3450
     LOAD %w3452:wire(1), %SCD
-    LOAD %w3453:wire(1), %SCE
-    AND %w3454:wire(1), %w3452, %w3453
-    OR %w3455:wire(1), %w3451, %w3454
+    MUX %w3455:wire(1), %w3449, %w3452, %w3448
     STORE %w3455, %r1773
   }
 }
@@ -6179,12 +5561,8 @@ STDCELL_DEF %sky130_fd_sc_hd__sdfrtp_1:module("sky130_fd_sc_hd__sdfrtp_1"), %152
   COMB_PROCESS_DEF %1528:process, %1529:block {
     LOAD %w3462:wire(1), %D
     LOAD %w3463:wire(1), %SCE
-    NOT %w3464:wire(1), %w3463
-    AND %w3465:wire(1), %w3462, %w3464
     LOAD %w3466:wire(1), %SCD
-    LOAD %w3467:wire(1), %SCE
-    AND %w3468:wire(1), %w3466, %w3467
-    OR %w3469:wire(1), %w3465, %w3468
+    MUX %w3469:wire(1), %w3463, %w3466, %w3462
     STORE %w3469, %r1784
   }
 }
@@ -6200,12 +5578,8 @@ STDCELL_DEF %sky130_fd_sc_hd__sdfrtp_2:module("sky130_fd_sc_hd__sdfrtp_2"), %153
   COMB_PROCESS_DEF %1532:process, %1533:block {
     LOAD %w3476:wire(1), %D
     LOAD %w3477:wire(1), %SCE
-    NOT %w3478:wire(1), %w3477
-    AND %w3479:wire(1), %w3476, %w3478
     LOAD %w3480:wire(1), %SCD
-    LOAD %w3481:wire(1), %SCE
-    AND %w3482:wire(1), %w3480, %w3481
-    OR %w3483:wire(1), %w3479, %w3482
+    MUX %w3483:wire(1), %w3477, %w3480, %w3476
     STORE %w3483, %r1795
   }
 }
@@ -6221,12 +5595,8 @@ STDCELL_DEF %sky130_fd_sc_hd__sdfrtp_4:module("sky130_fd_sc_hd__sdfrtp_4"), %153
   COMB_PROCESS_DEF %1536:process, %1537:block {
     LOAD %w3490:wire(1), %D
     LOAD %w3491:wire(1), %SCE
-    NOT %w3492:wire(1), %w3491
-    AND %w3493:wire(1), %w3490, %w3492
     LOAD %w3494:wire(1), %SCD
-    LOAD %w3495:wire(1), %SCE
-    AND %w3496:wire(1), %w3494, %w3495
-    OR %w3497:wire(1), %w3493, %w3496
+    MUX %w3497:wire(1), %w3491, %w3494, %w3490
     STORE %w3497, %r1806
   }
 }
@@ -6243,12 +5613,8 @@ STDCELL_DEF %sky130_fd_sc_hd__sdfsbp_1:module("sky130_fd_sc_hd__sdfsbp_1"), %153
   COMB_PROCESS_DEF %1540:process, %1541:block {
     LOAD %w3503:wire(1), %D
     LOAD %w3504:wire(1), %SCE
-    NOT %w3505:wire(1), %w3504
-    AND %w3506:wire(1), %w3503, %w3505
     LOAD %w3507:wire(1), %SCD
-    LOAD %w3508:wire(1), %SCE
-    AND %w3509:wire(1), %w3507, %w3508
-    OR %w3510:wire(1), %w3506, %w3509
+    MUX %w3510:wire(1), %w3504, %w3507, %w3503
     STORE %w3510, %r1818
   }
   COMB_PROCESS_DEF %1542:process, %1543:block {
@@ -6270,12 +5636,8 @@ STDCELL_DEF %sky130_fd_sc_hd__sdfsbp_2:module("sky130_fd_sc_hd__sdfsbp_2"), %154
   COMB_PROCESS_DEF %1546:process, %1547:block {
     LOAD %w3518:wire(1), %D
     LOAD %w3519:wire(1), %SCE
-    NOT %w3520:wire(1), %w3519
-    AND %w3521:wire(1), %w3518, %w3520
     LOAD %w3522:wire(1), %SCD
-    LOAD %w3523:wire(1), %SCE
-    AND %w3524:wire(1), %w3522, %w3523
-    OR %w3525:wire(1), %w3521, %w3524
+    MUX %w3525:wire(1), %w3519, %w3522, %w3518
     STORE %w3525, %r1830
   }
   COMB_PROCESS_DEF %1548:process, %1549:block {
@@ -6296,12 +5658,8 @@ STDCELL_DEF %sky130_fd_sc_hd__sdfstp_1:module("sky130_fd_sc_hd__sdfstp_1"), %155
   COMB_PROCESS_DEF %1552:process, %1553:block {
     LOAD %w3532:wire(1), %D
     LOAD %w3533:wire(1), %SCE
-    NOT %w3534:wire(1), %w3533
-    AND %w3535:wire(1), %w3532, %w3534
     LOAD %w3536:wire(1), %SCD
-    LOAD %w3537:wire(1), %SCE
-    AND %w3538:wire(1), %w3536, %w3537
-    OR %w3539:wire(1), %w3535, %w3538
+    MUX %w3539:wire(1), %w3533, %w3536, %w3532
     STORE %w3539, %r1841
   }
 }
@@ -6317,12 +5675,8 @@ STDCELL_DEF %sky130_fd_sc_hd__sdfstp_2:module("sky130_fd_sc_hd__sdfstp_2"), %155
   COMB_PROCESS_DEF %1556:process, %1557:block {
     LOAD %w3546:wire(1), %D
     LOAD %w3547:wire(1), %SCE
-    NOT %w3548:wire(1), %w3547
-    AND %w3549:wire(1), %w3546, %w3548
     LOAD %w3550:wire(1), %SCD
-    LOAD %w3551:wire(1), %SCE
-    AND %w3552:wire(1), %w3550, %w3551
-    OR %w3553:wire(1), %w3549, %w3552
+    MUX %w3553:wire(1), %w3547, %w3550, %w3546
     STORE %w3553, %r1852
   }
 }
@@ -6338,12 +5692,8 @@ STDCELL_DEF %sky130_fd_sc_hd__sdfstp_4:module("sky130_fd_sc_hd__sdfstp_4"), %155
   COMB_PROCESS_DEF %1560:process, %1561:block {
     LOAD %w3560:wire(1), %D
     LOAD %w3561:wire(1), %SCE
-    NOT %w3562:wire(1), %w3561
-    AND %w3563:wire(1), %w3560, %w3562
     LOAD %w3564:wire(1), %SCD
-    LOAD %w3565:wire(1), %SCE
-    AND %w3566:wire(1), %w3564, %w3565
-    OR %w3567:wire(1), %w3563, %w3566
+    MUX %w3567:wire(1), %w3561, %w3564, %w3560
     STORE %w3567, %r1863
   }
 }
@@ -6359,12 +5709,8 @@ STDCELL_DEF %sky130_fd_sc_hd__sdfxbp_1:module("sky130_fd_sc_hd__sdfxbp_1"), %156
   COMB_PROCESS_DEF %1564:process, %1565:block {
     LOAD %w3575:wire(1), %D
     LOAD %w3576:wire(1), %SCE
-    NOT %w3577:wire(1), %w3576
-    AND %w3578:wire(1), %w3575, %w3577
     LOAD %w3579:wire(1), %SCD
-    LOAD %w3580:wire(1), %SCE
-    AND %w3581:wire(1), %w3579, %w3580
-    OR %w3582:wire(1), %w3578, %w3581
+    MUX %w3582:wire(1), %w3576, %w3579, %w3575
     STORE %w3582, %r1874
   }
   COMB_PROCESS_DEF %1566:process, %1567:block {
@@ -6385,12 +5731,8 @@ STDCELL_DEF %sky130_fd_sc_hd__sdfxbp_2:module("sky130_fd_sc_hd__sdfxbp_2"), %156
   COMB_PROCESS_DEF %1570:process, %1571:block {
     LOAD %w3588:wire(1), %D
     LOAD %w3589:wire(1), %SCE
-    NOT %w3590:wire(1), %w3589
-    AND %w3591:wire(1), %w3588, %w3590
     LOAD %w3592:wire(1), %SCD
-    LOAD %w3593:wire(1), %SCE
-    AND %w3594:wire(1), %w3592, %w3593
-    OR %w3595:wire(1), %w3591, %w3594
+    MUX %w3595:wire(1), %w3589, %w3592, %w3588
     STORE %w3595, %r1884
   }
   COMB_PROCESS_DEF %1572:process, %1573:block {
@@ -6410,12 +5752,8 @@ STDCELL_DEF %sky130_fd_sc_hd__sdfxtp_1:module("sky130_fd_sc_hd__sdfxtp_1"), %157
   COMB_PROCESS_DEF %1576:process, %1577:block {
     LOAD %w3600:wire(1), %D
     LOAD %w3601:wire(1), %SCE
-    NOT %w3602:wire(1), %w3601
-    AND %w3603:wire(1), %w3600, %w3602
     LOAD %w3604:wire(1), %SCD
-    LOAD %w3605:wire(1), %SCE
-    AND %w3606:wire(1), %w3604, %w3605
-    OR %w3607:wire(1), %w3603, %w3606
+    MUX %w3607:wire(1), %w3601, %w3604, %w3600
     STORE %w3607, %r1893
   }
 }
@@ -6430,12 +5768,8 @@ STDCELL_DEF %sky130_fd_sc_hd__sdfxtp_2:module("sky130_fd_sc_hd__sdfxtp_2"), %157
   COMB_PROCESS_DEF %1580:process, %1581:block {
     LOAD %w3612:wire(1), %D
     LOAD %w3613:wire(1), %SCE
-    NOT %w3614:wire(1), %w3613
-    AND %w3615:wire(1), %w3612, %w3614
     LOAD %w3616:wire(1), %SCD
-    LOAD %w3617:wire(1), %SCE
-    AND %w3618:wire(1), %w3616, %w3617
-    OR %w3619:wire(1), %w3615, %w3618
+    MUX %w3619:wire(1), %w3613, %w3616, %w3612
     STORE %w3619, %r1902
   }
 }
@@ -6450,12 +5784,8 @@ STDCELL_DEF %sky130_fd_sc_hd__sdfxtp_4:module("sky130_fd_sc_hd__sdfxtp_4"), %158
   COMB_PROCESS_DEF %1584:process, %1585:block {
     LOAD %w3624:wire(1), %D
     LOAD %w3625:wire(1), %SCE
-    NOT %w3626:wire(1), %w3625
-    AND %w3627:wire(1), %w3624, %w3626
     LOAD %w3628:wire(1), %SCD
-    LOAD %w3629:wire(1), %SCE
-    AND %w3630:wire(1), %w3628, %w3629
-    OR %w3631:wire(1), %w3627, %w3630
+    MUX %w3631:wire(1), %w3625, %w3628, %w3624
     STORE %w3631, %r1911
   }
 }
@@ -6492,18 +5822,14 @@ STDCELL_DEF %sky130_fd_sc_hd__sedfxbp_1:module("sky130_fd_sc_hd__sedfxbp_1"), %1
     LOAD %w3638:wire(1), %DE
     LOAD %w3639:wire(1), %SCE
     NOT %w3640:wire(1), %w3639
-    AND %w3642:wire(1), %w3637, %w3638, %w3640
+    AND %w3641:wire(1), %w3638, %w3640
+    AND %w3642:wire(1), %w3637, %w3641
     LOAD %w3643:wire(1), %Q
-    LOAD %w3644:wire(1), %DE
-    LOAD %w3645:wire(1), %SCE
-    NOT %w3646:wire(1), %w3645
-    AND %w3647:wire(1), %w3644, %w3646
-    NOT %w3648:wire(1), %w3647
+    NOT %w3648:wire(1), %w3641
     AND %w3649:wire(1), %w3643, %w3648
     LOAD %w3650:wire(1), %SCD
-    LOAD %w3651:wire(1), %SCE
-    AND %w3652:wire(1), %w3650, %w3651
-    OR %w3654:wire(1), %w3649, %w3652, %w3642
+    AND %w3652:wire(1), %w3639, %w3650
+    OR %w3654:wire(1), %w3652, %w3642, %w3649
     STORE %w3654, %r1937
   }
   COMB_PROCESS_DEF %1596:process, %1597:block {
@@ -6527,18 +5853,14 @@ STDCELL_DEF %sky130_fd_sc_hd__sedfxbp_2:module("sky130_fd_sc_hd__sedfxbp_2"), %1
     LOAD %w3661:wire(1), %DE
     LOAD %w3662:wire(1), %SCE
     NOT %w3663:wire(1), %w3662
-    AND %w3665:wire(1), %w3660, %w3661, %w3663
+    AND %w3664:wire(1), %w3661, %w3663
+    AND %w3665:wire(1), %w3660, %w3664
     LOAD %w3666:wire(1), %Q
-    LOAD %w3667:wire(1), %DE
-    LOAD %w3668:wire(1), %SCE
-    NOT %w3669:wire(1), %w3668
-    AND %w3670:wire(1), %w3667, %w3669
-    NOT %w3671:wire(1), %w3670
+    NOT %w3671:wire(1), %w3664
     AND %w3672:wire(1), %w3666, %w3671
     LOAD %w3673:wire(1), %SCD
-    LOAD %w3674:wire(1), %SCE
-    AND %w3675:wire(1), %w3673, %w3674
-    OR %w3677:wire(1), %w3672, %w3675, %w3665
+    AND %w3675:wire(1), %w3662, %w3673
+    OR %w3677:wire(1), %w3675, %w3665, %w3672
     STORE %w3677, %r1948
   }
   COMB_PROCESS_DEF %1602:process, %1603:block {
@@ -6561,18 +5883,14 @@ STDCELL_DEF %sky130_fd_sc_hd__sedfxtp_1:module("sky130_fd_sc_hd__sedfxtp_1"), %1
     LOAD %w3683:wire(1), %DE
     LOAD %w3684:wire(1), %SCE
     NOT %w3685:wire(1), %w3684
-    AND %w3687:wire(1), %w3682, %w3683, %w3685
+    AND %w3686:wire(1), %w3683, %w3685
+    AND %w3687:wire(1), %w3682, %w3686
     LOAD %w3688:wire(1), %Q
-    LOAD %w3689:wire(1), %DE
-    LOAD %w3690:wire(1), %SCE
-    NOT %w3691:wire(1), %w3690
-    AND %w3692:wire(1), %w3689, %w3691
-    NOT %w3693:wire(1), %w3692
+    NOT %w3693:wire(1), %w3686
     AND %w3694:wire(1), %w3688, %w3693
     LOAD %w3695:wire(1), %SCD
-    LOAD %w3696:wire(1), %SCE
-    AND %w3697:wire(1), %w3695, %w3696
-    OR %w3699:wire(1), %w3694, %w3697, %w3687
+    AND %w3697:wire(1), %w3684, %w3695
+    OR %w3699:wire(1), %w3697, %w3687, %w3694
     STORE %w3699, %r1958
   }
 }
@@ -6590,18 +5908,14 @@ STDCELL_DEF %sky130_fd_sc_hd__sedfxtp_2:module("sky130_fd_sc_hd__sedfxtp_2"), %1
     LOAD %w3705:wire(1), %DE
     LOAD %w3706:wire(1), %SCE
     NOT %w3707:wire(1), %w3706
-    AND %w3709:wire(1), %w3704, %w3705, %w3707
+    AND %w3708:wire(1), %w3705, %w3707
+    AND %w3709:wire(1), %w3704, %w3708
     LOAD %w3710:wire(1), %Q
-    LOAD %w3711:wire(1), %DE
-    LOAD %w3712:wire(1), %SCE
-    NOT %w3713:wire(1), %w3712
-    AND %w3714:wire(1), %w3711, %w3713
-    NOT %w3715:wire(1), %w3714
+    NOT %w3715:wire(1), %w3708
     AND %w3716:wire(1), %w3710, %w3715
     LOAD %w3717:wire(1), %SCD
-    LOAD %w3718:wire(1), %SCE
-    AND %w3719:wire(1), %w3717, %w3718
-    OR %w3721:wire(1), %w3716, %w3719, %w3709
+    AND %w3719:wire(1), %w3706, %w3717
+    OR %w3721:wire(1), %w3719, %w3709, %w3716
     STORE %w3721, %r1968
   }
 }
@@ -6619,18 +5933,14 @@ STDCELL_DEF %sky130_fd_sc_hd__sedfxtp_4:module("sky130_fd_sc_hd__sedfxtp_4"), %1
     LOAD %w3727:wire(1), %DE
     LOAD %w3728:wire(1), %SCE
     NOT %w3729:wire(1), %w3728
-    AND %w3731:wire(1), %w3726, %w3727, %w3729
+    AND %w3730:wire(1), %w3727, %w3729
+    AND %w3731:wire(1), %w3726, %w3730
     LOAD %w3732:wire(1), %Q
-    LOAD %w3733:wire(1), %DE
-    LOAD %w3734:wire(1), %SCE
-    NOT %w3735:wire(1), %w3734
-    AND %w3736:wire(1), %w3733, %w3735
-    NOT %w3737:wire(1), %w3736
+    NOT %w3737:wire(1), %w3730
     AND %w3738:wire(1), %w3732, %w3737
     LOAD %w3739:wire(1), %SCD
-    LOAD %w3740:wire(1), %SCE
-    AND %w3741:wire(1), %w3739, %w3740
-    OR %w3743:wire(1), %w3738, %w3741, %w3731
+    AND %w3741:wire(1), %w3728, %w3739
+    OR %w3743:wire(1), %w3741, %w3731, %w3738
     STORE %w3743, %r1978
   }
 }
@@ -6644,11 +5954,7 @@ STDCELL_DEF %sky130_fd_sc_hd__xnor2_1:module("sky130_fd_sc_hd__xnor2_1"), %1616:
     NOT %w3748:wire(1), %w3747
     AND %w3749:wire(1), %w3746, %w3748
     NOT %w3750:wire(1), %w3749
-    LOAD %w3751:wire(1), %A
-    LOAD %w3752:wire(1), %B
-    AND %w3753:wire(1), %w3751, %w3752
-    OR %w3754:wire(1), %w3750, %w3753
-    STORE %w3754, %Y
+    STORE %w3750, %Y
   }
 }
 STDCELL_DEF %sky130_fd_sc_hd__xnor2_2:module("sky130_fd_sc_hd__xnor2_2"), %1620:block, %1621:stdcell_info("area": 16) {
@@ -6661,11 +5967,7 @@ STDCELL_DEF %sky130_fd_sc_hd__xnor2_2:module("sky130_fd_sc_hd__xnor2_2"), %1620:
     NOT %w3757:wire(1), %w3756
     AND %w3758:wire(1), %w3755, %w3757
     NOT %w3759:wire(1), %w3758
-    LOAD %w3760:wire(1), %A
-    LOAD %w3761:wire(1), %B
-    AND %w3762:wire(1), %w3760, %w3761
-    OR %w3763:wire(1), %w3759, %w3762
-    STORE %w3763, %Y
+    STORE %w3759, %Y
   }
 }
 STDCELL_DEF %sky130_fd_sc_hd__xnor2_4:module("sky130_fd_sc_hd__xnor2_4"), %1624:block, %1625:stdcell_info("area": 27) {
@@ -6678,11 +5980,7 @@ STDCELL_DEF %sky130_fd_sc_hd__xnor2_4:module("sky130_fd_sc_hd__xnor2_4"), %1624:
     NOT %w3766:wire(1), %w3765
     AND %w3767:wire(1), %w3764, %w3766
     NOT %w3768:wire(1), %w3767
-    LOAD %w3769:wire(1), %A
-    LOAD %w3770:wire(1), %B
-    AND %w3771:wire(1), %w3769, %w3770
-    OR %w3772:wire(1), %w3768, %w3771
-    STORE %w3772, %Y
+    STORE %w3768, %Y
   }
 }
 STDCELL_DEF %sky130_fd_sc_hd__xnor3_1:module("sky130_fd_sc_hd__xnor3_1"), %1628:block, %1629:stdcell_info("area": 22) {
@@ -6694,29 +5992,9 @@ STDCELL_DEF %sky130_fd_sc_hd__xnor3_1:module("sky130_fd_sc_hd__xnor3_1"), %1628:
     LOAD %w3773:wire(1), %A
     LOAD %w3774:wire(1), %B
     LOAD %w3775:wire(1), %C
-    NOT %w3776:wire(1), %w3775
-    AND %w3777:wire(1), %w3774, %w3776
-    NOT %w3778:wire(1), %w3777
-    AND %w3779:wire(1), %w3773, %w3778
-    NOT %w3780:wire(1), %w3779
-    LOAD %w3781:wire(1), %A
-    LOAD %w3782:wire(1), %B
-    LOAD %w3783:wire(1), %C
-    NOT %w3784:wire(1), %w3783
-    AND %w3786:wire(1), %w3781, %w3782, %w3784
-    LOAD %w3787:wire(1), %A
-    LOAD %w3788:wire(1), %B
-    LOAD %w3789:wire(1), %C
-    AND %w3790:wire(1), %w3788, %w3789
-    NOT %w3791:wire(1), %w3790
-    AND %w3792:wire(1), %w3787, %w3791
-    LOAD %w3793:wire(1), %A
-    LOAD %w3794:wire(1), %B
-    LOAD %w3795:wire(1), %C
-    AND %w3797:wire(1), %w3793, %w3794, %w3795
+    AND %w3797:wire(1), %w3773, %w3774, %w3775
     NOT %w3798:wire(1), %w3797
-    OR %w3801:wire(1), %w3780, %w3792, %w3798, %w3786
-    STORE %w3801, %X
+    STORE %w3798, %X
   }
 }
 STDCELL_DEF %sky130_fd_sc_hd__xnor3_2:module("sky130_fd_sc_hd__xnor3_2"), %1632:block, %1633:stdcell_info("area": 23) {
@@ -6728,29 +6006,9 @@ STDCELL_DEF %sky130_fd_sc_hd__xnor3_2:module("sky130_fd_sc_hd__xnor3_2"), %1632:
     LOAD %w3802:wire(1), %A
     LOAD %w3803:wire(1), %B
     LOAD %w3804:wire(1), %C
-    NOT %w3805:wire(1), %w3804
-    AND %w3806:wire(1), %w3803, %w3805
-    NOT %w3807:wire(1), %w3806
-    AND %w3808:wire(1), %w3802, %w3807
-    NOT %w3809:wire(1), %w3808
-    LOAD %w3810:wire(1), %A
-    LOAD %w3811:wire(1), %B
-    LOAD %w3812:wire(1), %C
-    NOT %w3813:wire(1), %w3812
-    AND %w3815:wire(1), %w3810, %w3811, %w3813
-    LOAD %w3816:wire(1), %A
-    LOAD %w3817:wire(1), %B
-    LOAD %w3818:wire(1), %C
-    AND %w3819:wire(1), %w3817, %w3818
-    NOT %w3820:wire(1), %w3819
-    AND %w3821:wire(1), %w3816, %w3820
-    LOAD %w3822:wire(1), %A
-    LOAD %w3823:wire(1), %B
-    LOAD %w3824:wire(1), %C
-    AND %w3826:wire(1), %w3822, %w3823, %w3824
+    AND %w3826:wire(1), %w3802, %w3803, %w3804
     NOT %w3827:wire(1), %w3826
-    OR %w3830:wire(1), %w3809, %w3821, %w3827, %w3815
-    STORE %w3830, %X
+    STORE %w3827, %X
   }
 }
 STDCELL_DEF %sky130_fd_sc_hd__xnor3_4:module("sky130_fd_sc_hd__xnor3_4"), %1636:block, %1637:stdcell_info("area": 26) {
@@ -6762,29 +6020,9 @@ STDCELL_DEF %sky130_fd_sc_hd__xnor3_4:module("sky130_fd_sc_hd__xnor3_4"), %1636:
     LOAD %w3831:wire(1), %A
     LOAD %w3832:wire(1), %B
     LOAD %w3833:wire(1), %C
-    NOT %w3834:wire(1), %w3833
-    AND %w3835:wire(1), %w3832, %w3834
-    NOT %w3836:wire(1), %w3835
-    AND %w3837:wire(1), %w3831, %w3836
-    NOT %w3838:wire(1), %w3837
-    LOAD %w3839:wire(1), %A
-    LOAD %w3840:wire(1), %B
-    LOAD %w3841:wire(1), %C
-    NOT %w3842:wire(1), %w3841
-    AND %w3844:wire(1), %w3839, %w3840, %w3842
-    LOAD %w3845:wire(1), %A
-    LOAD %w3846:wire(1), %B
-    LOAD %w3847:wire(1), %C
-    AND %w3848:wire(1), %w3846, %w3847
-    NOT %w3849:wire(1), %w3848
-    AND %w3850:wire(1), %w3845, %w3849
-    LOAD %w3851:wire(1), %A
-    LOAD %w3852:wire(1), %B
-    LOAD %w3853:wire(1), %C
-    AND %w3855:wire(1), %w3851, %w3852, %w3853
+    AND %w3855:wire(1), %w3831, %w3832, %w3833
     NOT %w3856:wire(1), %w3855
-    OR %w3859:wire(1), %w3838, %w3850, %w3856, %w3844
-    STORE %w3859, %X
+    STORE %w3856, %X
   }
 }
 STDCELL_DEF %sky130_fd_sc_hd__xor2_1:module("sky130_fd_sc_hd__xor2_1"), %1640:block, %1641:stdcell_info("area": 8) {
@@ -6796,9 +6034,7 @@ STDCELL_DEF %sky130_fd_sc_hd__xor2_1:module("sky130_fd_sc_hd__xor2_1"), %1640:bl
     LOAD %w3861:wire(1), %B
     NOT %w3862:wire(1), %w3861
     AND %w3863:wire(1), %w3860, %w3862
-    LOAD %w3864:wire(1), %A
-    LOAD %w3865:wire(1), %B
-    AND %w3866:wire(1), %w3864, %w3865
+    AND %w3866:wire(1), %w3860, %w3861
     NOT %w3867:wire(1), %w3866
     OR %w3868:wire(1), %w3863, %w3867
     STORE %w3868, %X
@@ -6811,14 +6047,9 @@ STDCELL_DEF %sky130_fd_sc_hd__xor2_2:module("sky130_fd_sc_hd__xor2_2"), %1644:bl
   COMB_PROCESS_DEF %1646:process, %1647:block {
     LOAD %w3869:wire(1), %A
     LOAD %w3870:wire(1), %B
-    NOT %w3871:wire(1), %w3870
-    AND %w3872:wire(1), %w3869, %w3871
-    LOAD %w3873:wire(1), %A
-    LOAD %w3874:wire(1), %B
-    AND %w3875:wire(1), %w3873, %w3874
+    AND %w3875:wire(1), %w3869, %w3870
     NOT %w3876:wire(1), %w3875
-    OR %w3877:wire(1), %w3872, %w3876
-    STORE %w3877, %X
+    STORE %w3876, %X
   }
 }
 STDCELL_DEF %sky130_fd_sc_hd__xor2_4:module("sky130_fd_sc_hd__xor2_4"), %1648:block, %1649:stdcell_info("area": 27) {
@@ -6828,14 +6059,9 @@ STDCELL_DEF %sky130_fd_sc_hd__xor2_4:module("sky130_fd_sc_hd__xor2_4"), %1648:bl
   COMB_PROCESS_DEF %1650:process, %1651:block {
     LOAD %w3878:wire(1), %A
     LOAD %w3879:wire(1), %B
-    NOT %w3880:wire(1), %w3879
-    AND %w3881:wire(1), %w3878, %w3880
-    LOAD %w3882:wire(1), %A
-    LOAD %w3883:wire(1), %B
-    AND %w3884:wire(1), %w3882, %w3883
+    AND %w3884:wire(1), %w3878, %w3879
     NOT %w3885:wire(1), %w3884
-    OR %w3886:wire(1), %w3881, %w3885
-    STORE %w3886, %X
+    STORE %w3885, %X
   }
 }
 STDCELL_DEF %sky130_fd_sc_hd__xor3_1:module("sky130_fd_sc_hd__xor3_1"), %1652:block, %1653:stdcell_info("area": 23) {
@@ -6848,28 +6074,9 @@ STDCELL_DEF %sky130_fd_sc_hd__xor3_1:module("sky130_fd_sc_hd__xor3_1"), %1652:bl
     LOAD %w3888:wire(1), %B
     LOAD %w3889:wire(1), %C
     NOT %w3890:wire(1), %w3889
-    AND %w3891:wire(1), %w3888, %w3890
-    NOT %w3892:wire(1), %w3891
-    AND %w3893:wire(1), %w3887, %w3892
-    LOAD %w3894:wire(1), %A
-    LOAD %w3895:wire(1), %B
-    LOAD %w3896:wire(1), %C
-    NOT %w3897:wire(1), %w3896
-    AND %w3899:wire(1), %w3894, %w3895, %w3897
-    NOT %w3900:wire(1), %w3899
-    LOAD %w3901:wire(1), %A
-    LOAD %w3902:wire(1), %B
-    LOAD %w3903:wire(1), %C
-    AND %w3904:wire(1), %w3902, %w3903
-    NOT %w3905:wire(1), %w3904
-    AND %w3906:wire(1), %w3901, %w3905
-    NOT %w3907:wire(1), %w3906
-    LOAD %w3908:wire(1), %A
-    LOAD %w3909:wire(1), %B
-    LOAD %w3910:wire(1), %C
-    AND %w3912:wire(1), %w3908, %w3909, %w3910
-    OR %w3915:wire(1), %w3893, %w3900, %w3907, %w3912
-    STORE %w3915, %X
+    AND %w2488:wire(1), %w3887, %w3888, %w3890
+    NOT %w2448:wire(1), %w2488
+    STORE %w2448, %X
   }
 }
 STDCELL_DEF %sky130_fd_sc_hd__xor3_2:module("sky130_fd_sc_hd__xor3_2"), %1656:block, %1657:stdcell_info("area": 25) {
@@ -6882,28 +6089,9 @@ STDCELL_DEF %sky130_fd_sc_hd__xor3_2:module("sky130_fd_sc_hd__xor3_2"), %1656:bl
     LOAD %w3917:wire(1), %B
     LOAD %w3918:wire(1), %C
     NOT %w3919:wire(1), %w3918
-    AND %w3920:wire(1), %w3917, %w3919
-    NOT %w3921:wire(1), %w3920
-    AND %w3922:wire(1), %w3916, %w3921
-    LOAD %w3923:wire(1), %A
-    LOAD %w3924:wire(1), %B
-    LOAD %w3925:wire(1), %C
-    NOT %w3926:wire(1), %w3925
-    AND %w3928:wire(1), %w3923, %w3924, %w3926
-    NOT %w3929:wire(1), %w3928
-    LOAD %w3930:wire(1), %A
-    LOAD %w3931:wire(1), %B
-    LOAD %w3932:wire(1), %C
-    AND %w3933:wire(1), %w3931, %w3932
-    NOT %w3934:wire(1), %w3933
-    AND %w3935:wire(1), %w3930, %w3934
-    NOT %w3936:wire(1), %w3935
-    LOAD %w3937:wire(1), %A
-    LOAD %w3938:wire(1), %B
-    LOAD %w3939:wire(1), %C
-    AND %w3941:wire(1), %w3937, %w3938, %w3939
-    OR %w3944:wire(1), %w3922, %w3929, %w3936, %w3941
-    STORE %w3944, %X
+    AND %w2437:wire(1), %w3916, %w3917, %w3919
+    NOT %w2436:wire(1), %w2437
+    STORE %w2436, %X
   }
 }
 STDCELL_DEF %sky130_fd_sc_hd__xor3_4:module("sky130_fd_sc_hd__xor3_4"), %1660:block, %1661:stdcell_info("area": 27) {
@@ -6916,27 +6104,11 @@ STDCELL_DEF %sky130_fd_sc_hd__xor3_4:module("sky130_fd_sc_hd__xor3_4"), %1660:bl
     LOAD %w3946:wire(1), %B
     LOAD %w3947:wire(1), %C
     NOT %w3948:wire(1), %w3947
-    AND %w3949:wire(1), %w3946, %w3948
-    NOT %w3950:wire(1), %w3949
-    AND %w3951:wire(1), %w3945, %w3950
-    LOAD %w3952:wire(1), %A
-    LOAD %w3953:wire(1), %B
-    LOAD %w3954:wire(1), %C
-    NOT %w3955:wire(1), %w3954
-    AND %w3957:wire(1), %w3952, %w3953, %w3955
+    AND %w3957:wire(1), %w3946, %w3948
     NOT %w3958:wire(1), %w3957
-    LOAD %w3959:wire(1), %A
-    LOAD %w3960:wire(1), %B
-    LOAD %w3961:wire(1), %C
-    AND %w3962:wire(1), %w3960, %w3961
-    NOT %w3963:wire(1), %w3962
-    AND %w3964:wire(1), %w3959, %w3963
-    NOT %w3965:wire(1), %w3964
-    LOAD %w3966:wire(1), %A
-    LOAD %w3967:wire(1), %B
-    LOAD %w3968:wire(1), %C
-    AND %w3970:wire(1), %w3966, %w3967, %w3968
-    OR %w3973:wire(1), %w3951, %w3958, %w3965, %w3970
-    STORE %w3973, %X
+    AND %w3962:wire(1), %w3946, %w3947
+    NOT %w3965:wire(1), %w3945
+    OR %w2435:wire(1), %w3958, %w3962, %w3965
+    STORE %w2435, %X
   }
 }

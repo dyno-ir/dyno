@@ -1,4 +1,5 @@
 #pragma once
+#include "dyno/CFG.h"
 #include "dyno/Context.h"
 #include "dyno/Pass.h"
 #include "hw/FlipFlop.h"
@@ -10,13 +11,12 @@
 
 namespace dyno {
 
-// Convert std cell instances to regular module instances (useful for sim).
 class LiftFlipFlopsPass : public Pass<LiftFlipFlopsPass> {
   Context &ctx;
   HWInstrBuilder build{ctx};
 
   void runOnInstance(FlipFlopIRef instr) {
-    HWInstrBuilder pbuild{ctx, instr};
+    HWInstrBuilder pbuild{ctx};
 
     auto proc = build.buildProcess(HW_COMB_PROCESS_DEF);
     build.setInsertPoint(proc);
@@ -40,9 +40,11 @@ class LiftFlipFlopsPass : public Pass<LiftFlipFlopsPass> {
                                                : SensMode::NEGEDGE);
     for (auto rstIdx : IntRange{instr.numRsts()}) {
       if (instr.rstPolarity(rstIdx) == 1)
-        dVal = pbuild.buildMux(instr.rst(rstIdx), instr.rstVal(rstIdx), dVal);
+        dVal = pbuild.buildMux(pbuild.buildLoad(instr.rst(rstIdx)),
+                               instr.rstVal(rstIdx), dVal);
       else
-        dVal = pbuild.buildMux(instr.rst(rstIdx), dVal, instr.rstVal(rstIdx));
+        dVal = pbuild.buildMux(pbuild.buildLoad(instr.rst(rstIdx)), dVal,
+                               instr.rstVal(rstIdx));
 
       sens.signals.emplace_back(instr.rst(rstIdx), instr.rstPolarity(rstIdx)
                                                        ? SensMode::POSEDGE
