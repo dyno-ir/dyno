@@ -71,7 +71,7 @@ int main(int argc, char **argv) {
   SymbolStore symbols;
   FatContext ctx;
   ctx.add<HWDialectContext>();
-  ctx.add<CoreDialectContext>();
+  ctx.add<CoreDialectContext>(&symbols);
   ctx.add<OpDialectContext>();
   ctx.add<AIGDialectContext>();
   ctx.add<TestDialectContext>();
