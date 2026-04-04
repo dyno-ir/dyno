@@ -256,7 +256,7 @@ public:
   // }
 
   value_type operator*() {
-    return std::pair<const K &, V &>(bucket->keys[idx], bucket->values[idx]);
+    return std::pair<const K &, V &>(bucket->keys[idx], bucket->values()[idx]);
   }
   // can't support this with non-contiguous key/val (maybe w proxy object)
   auto operator->() = delete;
@@ -299,8 +299,8 @@ class DenseMapBase : public DenseSetMapBase<Derived, K, Bucket, Iterator> {
   using Base = DenseSetMapBase<Derived, K, Bucket, Iterator>;
 
   void reinsertFunc(Bucket *bucket, Base::size_type j) {
-    insert(std::move(bucket->keys[j]), std::move(bucket->values[j]));
-    std::destroy_at(&bucket->values[j]);
+    insert(std::move(bucket->keys[j]), std::move(bucket->values()[j]));
+    std::destroy_at(&bucket->values()[j]);
   }
 
   bool growIfOversized() {
@@ -550,7 +550,7 @@ template <typename K, typename size_type = uint32_t> struct DenseSetBucket {
   // buckets are searched linearly
   // keys are contiguous for SIMD compare
   // values are still here for better locality though
-  std::array<K, entriesPerBucket> keys; // alignas(vector_len * sizeof(K));
+  std::array<K, entriesPerBucket> keys;
 
   template <bool Inverse, typename... Args>
   size_type findVec(size_type cur = ~0, Args... k) {
@@ -659,7 +659,9 @@ template <typename K, typename size_type = uint32_t> struct DenseSetBucket {
 template <typename K, typename V, typename size_type = uint32_t>
 struct DenseMapBucket : public DenseSetBucket<K, size_type> {
   using Base = DenseSetBucket<K, size_type>;
-  std::array<V, Base::entriesPerBucket> values;
+  using StorageT = std::array<V, Base::entriesPerBucket>;
+  InlineStorage<sizeof(StorageT), alignof(StorageT)> storage;
+  auto &values() { return *(storage.template as<StorageT>()); }
 };
 
 template <typename Base> class LargeSetMap : public Base {
@@ -734,6 +736,7 @@ public:
   }
 
   ~LargeSetMap() {
+    static_assert(std::is_trivially_destructible_v<Bucket>);
     ::operator delete[](buckets, std::align_val_t(alignof(Bucket)));
   }
 };
@@ -847,6 +850,7 @@ public:
     if (isSmall())
       return;
     ASAN_UNPOISON_MEMORY_REGION(*arr, sizeof(arr));
+    static_assert(std::is_trivially_destructible_v<Bucket>);
     ::operator delete[](buckets, std::align_val_t(alignof(Bucket)));
   }
 };
@@ -875,6 +879,9 @@ class SmallDenseMap
                                         DenseMapBucket<K, V>>,
                            InlineElemns>;
   using Base::Base;
+
+public:
+  ~SmallDenseMap() { this->Base::clearDelete(); }
 };
 
 template <typename K>

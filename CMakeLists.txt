@@ -25,5 +25,8 @@ add_subdirectory(tools)
 enable_testing()
 add_test(
     NAME run_dyno_test
-    COMMAND dyno-test "${CMAKE_SOURCE_DIR}/tools/dyno-test/dyno-ir/test.dyno"
+    COMMAND dyno-sv test "${CMAKE_SOURCE_DIR}/tools/dyno-opt/dyno-ir/flow.dyno" "${CMAKE_SOURCE_DIR}/tools/dyno-test/dyno-ir/test.dyno"
+)
+set_tests_properties(run_dyno_test PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
 )

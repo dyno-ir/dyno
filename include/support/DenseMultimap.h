@@ -38,8 +38,8 @@ protected:
     return this->DenseSetMapBase<Derived, K, Bucket,
                                  DenseMultimapIterator<Bucket, K, V>>::
         growIfOversized([&](Bucket *bucket, size_type j) {
-          insert(std::move(bucket->keys[j]), std::move(bucket->values[j]));
-          std::destroy_at(&bucket->values[j]);
+          insert(std::move(bucket->keys[j]), std::move(bucket->values()[j]));
+          std::destroy_at(&bucket->values()[j]);
         });
   }
 

@@ -1,5 +1,4 @@
 
-
 TEST_CASE :string("instcombine-constants"), :block, :block, :block {
   MODULE_DEF :module("mod"), :block {
     OUTPUT_REGISTER_DEF %out_a:register(128)
@@ -597,6 +596,67 @@ TEST_EQUIVALENCE :string("test-icmp-lower"), :block, :block {
   meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS
   meta.DUMP_PASS map("path": "slt.dyno")
   meta.RANDOM_EQUIVALENCE_CHECK_PASS map("cycles": "10000")
+}
+
+TEST_SCRIPT :string("test-script"), :block {
+  PARSE_VERILOG_PASS map("code":[{
+    module Test#(parameter int DEPTH = 128, parameter int WIDTH = 2) (
+      input logic clk,
+      input logic[$clog2(DEPTH) + $clog2(WIDTH) - 1:0] IN_waddr,
+      input logic[0:0] IN_wdata,
+      input logic[0:0] IN_wmask,
+
+      input logic[$clog2(DEPTH) - 1:0] IN_raddr,
+      output logic[1:0] OUT_rdata
+    );
+
+    union packed {
+      logic[DEPTH-1:0][WIDTH-1:0] mem;
+      logic[(DEPTH*WIDTH)-1:0] flat;
+    } u;
+
+    always_ff@(posedge clk)
+      if (IN_wmask[0])
+        u.flat[IN_waddr] <= IN_wdata;
+
+    always_comb
+      OUT_rdata = u.mem[IN_raddr];
+
+    endmodule
+  }])
+  meta.DUMP_PASS map("path": "dump-2.dyno")
+
+  CALL symbol("flow_earlyCanonFlow")
+  meta.INACTIVE_COPY_PASS
+  CALL symbol("flow_synthCanonicalize")
+  CALL symbol("flow_synthEarlyOpt")
+  CALL symbol("flow_synthLowerControlFlow")
+  CALL symbol("flow_synthMemoryFFMuxHandling")
+  CALL symbol("flow_synthLowerMemoryFF")
+  meta.DUMP_PASS map("path": "dump-1.dyno")
+  meta.LIFT_STD_CELLS_PASS
+  meta.SELECT_MODULES_PASS map("regex": "^(?!.*__inactive$).*")
+  meta.MODULE_INLINE_PASS
+  meta.SELECT_MODULES_PASS map("regex": "Test")
+  meta.LOWER_MEM_ACCESS_PASS
+  meta.DUMP_PASS map("path": "dump.dyno")
+  meta.TRIGGER_DEDUPE_PASS
+
+  meta.PROCESS_LINEARIZE_PASS map("retainIODeps": "0", "retainInnerDeps": "0")
+  meta.SSA_CONSTRUCT_PASS
+  meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS
+  meta.INST_COMBINE_PASS
+  meta.AGGRESSIVE_DEAD_CODE_ELIMINATION_PASS
+
+  meta.ORDER_INSTRS_PASS map("assertNoCircularDeps": "1", "moveStoresBeforeLoads": "1")
+  meta.SSA_CONSTRUCT_PASS
+  meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS
+  meta.INST_COMBINE_PASS
+  meta.AGGRESSIVE_DEAD_CODE_ELIMINATION_PASS
+  meta.TRIGGER_DEDUPE_PASS
+
+  meta.DUMP_PASS map("path": "dump2.dyno")
+  meta.RANDOM_EQUIVALENCE_CHECK_PASS map("cycles": "10000", "clockMode": "CLOCK")
 }
 
 
