@@ -30,7 +30,7 @@ STDCELL_DEF %Test:module("fakemem_16x2_3r1w_async_read"), %0:block {
     ZEXT %w13:wire(32), %w1  ["test/tools/dyno-sv/testMemSmol3R.sv:21:5-18"]
     LOAD %w4:wire(2), %IN_wdata  ["test/tools/dyno-sv/testMemSmol3R.sv:21:5-30"]
     GEP %10:ptr, #32'd0, %w13, #32'd2, #32'd16
-    MEM_STORE %11:mem_port(1), %w4, %r11, %w6, %1, %10
+    MEM_STORE %11:mem_port(1), %w4, %r11, %w6, %10, %1
     STORE %w21, %OUT_rdata
     STORE %w2, %OUT_rdata2
     STORE %w22, %OUT_rdata3

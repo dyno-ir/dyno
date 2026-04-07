@@ -4,7 +4,14 @@
 
 template <typename K, typename KeyT = uint32_t> class TwoLevelSet {
   DenseMultimap<Unhashed<KeyT>, K> map;
-  static constexpr auto HashFunc = [](const K &t) { return std::hash<K>()(t); };
+  static constexpr auto HashFunc = [](const K &t) -> KeyT {
+    KeyT rv = std::hash<K>()(t);
+    if (rv == DenseMapInfo<Unhashed<KeyT>>::getEmptyKey() ||
+        rv == DenseMapInfo<Unhashed<KeyT>>::getTombstoneKey()) [[unlikely]] {
+      return 0;
+    }
+    return rv;
+  };
 
   auto find_raw(const K &k) {
     auto h = HashFunc(k);
@@ -72,7 +79,14 @@ public:
 // POD keys.
 template <typename K, typename T, typename KeyT = uint32_t> class TwoLevelMap {
   DenseMultimap<Unhashed<KeyT>, std::pair<const K, T>> map;
-  static constexpr auto HashFunc = [](const K &t) { return std::hash<K>()(t); };
+  static constexpr auto HashFunc = [](const K &t) -> KeyT {
+    KeyT rv = std::hash<K>()(t);
+    if (rv == DenseMapInfo<Unhashed<KeyT>>::getEmptyKey() ||
+        rv == DenseMapInfo<Unhashed<KeyT>>::getTombstoneKey()) [[unlikely]] {
+      return 0;
+    }
+    return rv;
+  };
 
   auto find_raw(const K &k) {
     auto h = HashFunc(k);

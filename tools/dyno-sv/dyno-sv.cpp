@@ -51,9 +51,9 @@ CmdLineArg<Vec<StringRef>>
                  "Slang arguments. Use multiple times for multiple args.",
                  CmdLineArgFlags::VALUE_REQUIRED | CmdLineArgFlags::MULTIPLE);
 
-CmdLineArg<std::string_view> argFlowScript{'s', "script",
-                                           "Dyno-IR flow script file name.",
-                                           CmdLineArgFlags::VALUE_REQUIRED, ""};
+CmdLineArg<StringRef> argFlowScript{'s', "script",
+                                    "Dyno-IR flow script file name.",
+                                    CmdLineArgFlags::VALUE_REQUIRED, ""};
 
 // Flow/Test Args
 CmdLineArg<Vec<StringRef>> argScriptFileName{
@@ -75,14 +75,20 @@ CmdLineArg<bool> argDebug{
 CmdLineArg<bool> argPrintAfterAll{std::nullopt, "print-after-all",
                                   "Print IR after all passes.", false};
 
-void runScript(Context &ctx, StringRef fileName) {
+using ScriptParser = Parser<CoreDialectParser, MetaDialectParser,
+                            OpDialectParser, HWDialectParser, AIGDialectParser>;
+void runScript(Context &ctx, ArrayRef<StringRef> fileNames) {
+  ScriptParser parser{ctx};
   auto flowBlock = ctx.getCFG().blocks.create(ctx.getCFG());
-  std::string flowFileName{fileName.begin(), fileName.end()};
-  MMap flowFile{flowFileName};
-  MetaParser metaParser{ctx};
-  if (!flowFile)
-    report_fatal_error("failed to open file: {}", flowFileName);
-  metaParser.parse(flowFile, flowFileName, flowBlock.end());
+  for (auto file : fileNames) {
+    std::string fileName{file.begin(), file.end()};
+    MMap mmap{fileName};
+    if (!mmap)
+      report_fatal_error("failed to open file: {}", fileName);
+    parser.parse(mmap, fileName, flowBlock.end());
+  }
+
+  ResolveImportsPass{ctx}.run();
 
   SmallVec<void *, 1> passCtorArgs{reinterpret_cast<void *>(&ctx)};
   MetaPassPipelineInterpreter interp{ctx, passCtorArgs};
@@ -90,14 +96,6 @@ void runScript(Context &ctx, StringRef fileName) {
   FatDynObjRef<> arg = nullref;
   SmallVec<void *, 1> passRunArgs{reinterpret_cast<void *>(&arg)};
   interp.interpretPassPipeline(flowBlock, passRunArgs);
-
-  std::ofstream of{"dump.dyno"};
-  HWPrinter printer{of};
-  printer.printCtx(ctx);
-
-  DumpVerilogPass dumpVerilog{ctx};
-  dumpVerilog.config.fileName = *argOutFile;
-  dumpVerilog.run();
 }
 
 void synth(Context &ctx) {
@@ -126,14 +124,12 @@ void synth(Context &ctx) {
     pipeline.dumpDyno(of);
 
   } else {
-    runScript(ctx, *argFlowScript);
+    auto arr = std::to_array({*argFlowScript});
+    runScript(ctx, ArrayRef<StringRef>{arr});
   }
 }
 
-void script(Context &ctx) {
-  for (auto file : *argScriptFileName)
-    runScript(ctx, file);
-}
+void script(Context &ctx) { runScript(ctx, *argScriptFileName); }
 
 using TestParser = Parser<CoreDialectParser, MetaDialectParser, OpDialectParser,
                           HWDialectParser, AIGDialectParser, TestDialectParser>;

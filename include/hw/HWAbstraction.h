@@ -1023,10 +1023,10 @@ public:
     ib.addRef(reg);
     if (!!en)
       ib.addRef(en);
-    if (!!trigger)
-      ib.addRef(trigger.oref());
     if (!!addr)
       ib.addRef(addr);
+    if (!!trigger)
+      ib.addRef(trigger.oref());
     for (auto &&forward : forwards) {
       ib.addRef(forward.port);
       port->writeForwardMeta.emplace_back(forward.oldTime, forward.unkTime);
@@ -1051,10 +1051,10 @@ public:
     ib.addRef(reg);
     if (!!en)
       ib.addRef(en);
-    if (!!trigger)
-      ib.addRef(trigger.oref());
     if (!!addr)
       ib.addRef(addr);
+    if (!!trigger)
+      ib.addRef(trigger.oref());
     insertInstr(instr);
     return instr;
   }

@@ -9,6 +9,7 @@
 #include "support/Any.h"
 #include "support/ErrorRecovery.h"
 #include "support/Format.h"
+#include "support/TempBind.h"
 #include "test/IDs.h"
 #include <expected>
 #include <format>
@@ -16,6 +17,7 @@
 namespace dyno {
 class TestInterpreter {
   Context &ctx;
+  TempBindPtr<Context> sandbox;
   PrinterBase &print;
   std::ostream &os;
 
@@ -26,8 +28,8 @@ public:
     auto post = instr.def(2)->as<BlockRef>();
     auto passes = instr.def(3)->as<BlockRef>();
 
-    std::array<void *, 1> ctorArgs = {reinterpret_cast<void *>(&ctx)};
-    MetaPassPipelineInterpreter pipeline{ctx, ctorArgs};
+    std::array<void *, 1> ctorArgs = {reinterpret_cast<void *>(&*sandbox)};
+    MetaPassPipelineInterpreter pipeline{*sandbox, ctorArgs};
 
     for (auto instr : pre) {
       FatDynObjRef<> ref{instr};
@@ -58,14 +60,14 @@ public:
     auto pre = instr.def(1)->as<BlockRef>();
     auto passes = instr.def(2)->as<BlockRef>();
 
-    std::array<void *, 1> ctorArgs = {reinterpret_cast<void *>(&ctx)};
-    MetaPassPipelineInterpreter pipeline{ctx, ctorArgs};
+    std::array<void *, 1> ctorArgs = {reinterpret_cast<void *>(&*sandbox)};
+    MetaPassPipelineInterpreter pipeline{*sandbox, ctorArgs};
 
     if (pre.size() != 1)
       report_fatal_error("expected single Instr in body of test \"{}\"", name);
 
     // duplicate the instr to be tested
-    DeepCopier copier{ctx};
+    DeepCopier copier{*sandbox};
     copier.copyInstr(*pre.begin(), pre.end());
 
     for (auto instr : Range{pre}.drop_back()) {
@@ -90,8 +92,8 @@ public:
     } else
       return std::unexpected("a");
 
-    std::array<void *, 1> ctorArgs = {reinterpret_cast<void *>(&ctx)};
-    MetaPassPipelineInterpreter pipeline{ctx, ctorArgs};
+    std::array<void *, 1> ctorArgs = {reinterpret_cast<void *>(&*sandbox)};
+    MetaPassPipelineInterpreter pipeline{*sandbox, ctorArgs};
 
     FatDynObjRef<> n = nullref;
     std::array<void *, 1> args = {reinterpret_cast<void *>(&n)};
@@ -107,7 +109,7 @@ public:
         return std::unexpected("more objects than expected");
       auto other = DynObjRef{expectedO.getDialectID(), expectedO.getTyID(),
                              ObjID{1U - expectedO.getObjID()}, 0};
-      auto otherO = ctx.resolve(other);
+      auto otherO = sandbox->resolve(other);
       auto otherDef = otherO.as<FatDynObjRef<InstrDefUse>>()->getSingleDef();
       if (!otherDef)
         return std::unexpected("expected single def");
@@ -154,6 +156,7 @@ public:
   bool execBlock(BlockRef block, Context &sandbox, TwoLevelSet<StringRef> &only,
                  bool verbose) {
     bool pass = true;
+    auto tok = this->sandbox.bind(&sandbox);
 
     for (auto it : Range{block}.no_deref()) {
       if (it->getDialect() != DIALECT_TEST)

@@ -35,7 +35,7 @@ class MemoryMappingPass : public Pass<MemoryMappingPass> {
   struct PortFrag {
     uint32_t dstAddr;
     uint32_t len;
-    UnsizedBitSet<SmallVec<uint64_t, 1>> set = {};
+    Optional<uint32_t> mapping;
 
     PortFrag(const PortFrag &) = default;
     PortFrag(PortFrag &&) = default;
@@ -44,9 +44,7 @@ class MemoryMappingPass : public Pass<MemoryMappingPass> {
 
     PortFrag(uint32_t dstAddr, uint32_t len) : dstAddr(dstAddr), len(len) {}
     PortFrag(uint32_t dstAddr, uint32_t len, uint32_t idx)
-        : dstAddr(dstAddr), len(len) {
-      set.setDyn(idx);
-    };
+        : dstAddr(dstAddr), len(len), mapping(idx) {};
 
     bool overwrites(PortFrag &other) { return true; }
     bool fuses(PortFrag &other) { return false; }
@@ -54,7 +52,7 @@ class MemoryMappingPass : public Pass<MemoryMappingPass> {
 
     PortFrag intersect(PortFrag &other) {
       PortFrag frag = *this;
-      frag.set |= other.set;
+      mapping = other.mapping;
       return frag;
     }
 
@@ -70,18 +68,27 @@ class MemoryMappingPass : public Pass<MemoryMappingPass> {
       if (addr >= getLen())
         return true;
       auto it = getInsertIt(addr);
-      if (it->set.count() == 0)
+      if (!it->mapping)
         return false;
 
       while (it->dstAddr + it->len < addr + len) {
         ++it;
-        if (it->set.count() == 0)
+        if (!it->mapping)
           return false;
       }
 
       return true;
     }
   };
+
+  template <typename RefT> static Optional<uint32_t> getMinFact(RefT ref) {
+    auto facts = ref.terms().transform(
+        [](size_t, AddressGenTermOperand op) { return op.getFact(); });
+    auto min = *facts.min();
+    if (!facts.all([&](uint32_t fact) { return fact % min == 0; }))
+      return nullopt;
+    return min;
+  }
 
   struct BoundPort {
     ObjRef<Pointer> addr = nullref;
@@ -234,8 +241,7 @@ class MemoryMappingPass : public Pass<MemoryMappingPass> {
 
       // Usually the modelWidth is mapping.repeatCount * modelPortWidth. We can
       // slightly reduce it to e.g. implement a 32-bit wide memory with 2x
-      // 18-bit model memories. This is done greedily via this function. We can
-      // only do it once, if there's multiple conflicting values it just fails.
+      // 18-bit model memories. This is done greedily via this function.
       auto setAdjModelWidth = [&](uint32_t index, uint32_t width) {
         mapping.portSizes[index] = width;
 
@@ -270,13 +276,29 @@ class MemoryMappingPass : public Pass<MemoryMappingPass> {
         auto adjActPortLen = actSt.getLen();
 
         auto subPortBoundary = adjActPortLen;
+        auto actFact = getMinFact(actSt);
+        if (!*actFact)
+          return false;
 
         // every port needs access to the full memory array. If a port is too
         // narrow, artifically widen it - we then later add MUXs to reduce it.
         assert(mapping.tgtAdjModelWidth % actSt.getLen() == 0);
-        if (adjActPortLen < mapping.tgtAdjModelWidth)
+        assert(mapping.tgtAdjModelWidth % *actFact == 0);
+        if (subPortBoundary < mapping.tgtAdjModelWidth) {
           adjActPortLen = mapping.tgtAdjModelWidth;
+        }
         part = PortPartition{adjActPortLen};
+        if (*actFact != subPortBoundary) {
+          // if the port doesn't actually access the whole factor size (e.g.
+          // byte enable) mask off.
+          uint32_t undefModelInst = usedModelPort.size();
+          for (uint i = 0; i < (adjActPortLen / *actFact); i++) {
+            auto baseIdx = *actFact * i;
+            part.writeSingle(baseIdx + 0, actSt.base(), undefModelInst);
+            auto idx = actSt.base() + actSt.getLen();
+            part.writeSingle(baseIdx + idx, *actFact - idx, undefModelInst);
+          }
+        }
 
         // operates on conceptual duplicated model stores. one
         // actualStore might need to be covered by multiple modelStores
@@ -314,8 +336,7 @@ class MemoryMappingPass : public Pass<MemoryMappingPass> {
 
             if (lowIdx != highIdx) {
               assert(overflBits);
-              //  if we set adjModelWidth we need to restart from beginning.
-              //  this is not real recursion, can only happen once.
+              //  if we set adjModelWidth we need to restart from beginning
               if (!setAdjModelWidth(repIdx, adjModPortLen - overflBits))
                 return false;
               goto retry;
@@ -374,6 +395,8 @@ class MemoryMappingPass : public Pass<MemoryMappingPass> {
           part.writeSingle(adjAddr,
                            std::min(part.getLen() - adjAddr, adjModPortLen),
                            unsigned(globIdx));
+          if (part.isCovered(0, part.getLen()))
+            break;
         }
 
         if (!part.isCovered(0, part.getLen()))
@@ -397,14 +420,22 @@ class MemoryMappingPass : public Pass<MemoryMappingPass> {
         addr = build.buildUDiv(addr, ConstantRef::fromU32(factor));
       }
 
+      uint32_t adjFragAddr = 0;
       for (auto &frag : part.frags) {
-        auto idx = frag.set.ctz();
+        auto idx = *frag.mapping;
         auto repIdx = idx % mapping.repeatCount;
         RefT modLoad;
-        if constexpr (std::is_same_v<RefT, MemLoadIRef>)
+
+        if constexpr (std::is_same_v<RefT, MemLoadIRef>) {
+          if (idx / mapping.repeatCount == modelLoads.size())
+            continue;
           modLoad = modelLoads[idx / mapping.repeatCount];
-        else
+        } else {
+          if (idx / mapping.repeatCount == modelStores.size())
+            continue;
           modLoad = modelStores[idx / mapping.repeatCount];
+        }
+
         auto &binding =
             mapping
                 .boundPorts[modLoad.addr().template as<PointerRef>()][repIdx];
@@ -427,26 +458,6 @@ class MemoryMappingPass : public Pass<MemoryMappingPass> {
           connect(en, modLoad.en(), repIdx);
         }
 
-        // shift in the address (could also do non pow2 but likely too slow)
-        // int32_t addrShamt = -std::bit_width(factor - 1);
-        // uint32_t len = part.getLen(); // actLoad.getLen(); // TODO mismatch
-
-        // // length of the model port with repeats. this assumes repeats do the
-        // // same thing which might be broken.
-        // uint32_t repLen = mapping.adjModelWidth;//(mapping.repeatCount *
-        // modelPortWidth); if (len < repLen)
-        //   ; // too long, simply truncate, wasting capacity. we can add MUXs
-        //     // here at some point
-        // else if (len > repLen) {
-        //   addrShamt += flog2(len / repLen);
-        //   // TODO: case where we hit this branch but also shrink port size
-        //   // back down bc of adjSize
-        // }
-
-        // if (addrShamt >= 0)
-        //   addr = build.buildSLL(addr, ConstantRef::fromU32(addrShamt));
-        // else
-        //   addr = build.buildSRL(addr, ConstantRef::fromU32(-addrShamt));
         addr = build.buildAdd(addr, ConstantRef::fromU32(binding.idxOffs));
         connect(addr, modLoad.terms().front().getIdx().template as<WireRef>(),
                 repIdx);
@@ -458,9 +469,10 @@ class MemoryMappingPass : public Pass<MemoryMappingPass> {
         } else {
           HWValue wrval = actLoad.value();
           wrval = build.buildRepeat(wrval, factor);
-          wrval = build.buildSplice(wrval, frag.len, frag.dstAddr);
+          wrval = build.buildSplice(wrval, frag.len, adjFragAddr);
           connect(wrval, modLoad.value(), repIdx);
         }
+        adjFragAddr += frag.len;
       }
 
       outSubIdx = subIdx;
@@ -532,7 +544,7 @@ class MemoryMappingPass : public Pass<MemoryMappingPass> {
         OtherVec<HWValue> wires{ctx, 1, part.frags.size()};
         // todo: this needs to be error not assert
         // assert(part.getLen() % actLoad.getLen() == 0);
-        uint32_t factor = part.getLen() / actLoad.getLen();
+        uint32_t factor = part.getLen() / *getMinFact(actLoad);
         // todo: lower score when factor is non pow2
         // assert(std::popcount(factor) == 1 && "expected pow2 factor");
 
@@ -557,7 +569,7 @@ class MemoryMappingPass : public Pass<MemoryMappingPass> {
         build.setInsertPoint(actStore);
 
         assert(part.getLen() % actStore.getLen() == 0);
-        uint32_t factor = part.getLen() / actStore.getLen();
+        uint32_t factor = part.getLen() / *getMinFact(actStore);
         assert(std::popcount(factor) == 1 && "expected pow2 factor");
 
         HWValue subIdx;

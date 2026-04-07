@@ -45,7 +45,7 @@ class MetaPassPipelineInterpreter {
   bool interpretPassPipelineImpl(Context &ctx, BlockRef block,
                                  ArrayRef<void *> passRunArgs) {
     for (auto instr : block) {
-      if (instr.isOpc(OP_FUNCTION_DEF))
+      if (instr.isOpc(OP_FUNCTION_DEF, CORE_EXPORT))
         continue;
       if (instr.isOpc(OP_CALL)) {
         auto asCall = instr.as<CallInstrRef>();

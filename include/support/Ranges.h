@@ -954,7 +954,7 @@ public:
     symb += (-symb) & (WordBits - 1);
     do {
       ++word;
-    } while (getWord() && word != wordsEnd);
+    } while (!getWord() && word != wordsEnd);
 
     if (word == wordsEnd)
       return;

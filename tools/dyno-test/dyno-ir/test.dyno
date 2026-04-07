@@ -607,6 +607,7 @@ FUNCTION_DEF %memoryTestSynthRoundTrip:func, :block {
   CALL symbol("flow_synthLowerControlFlow")
   CALL symbol("flow_synthMemoryFFMuxHandling")
   CALL symbol("flow_synthLowerMemoryFF")
+  meta.DUMP_PASS map("path": "dump.dyno")
   meta.LIFT_STD_CELLS_PASS
   meta.SELECT_MODULES_PASS map("regex": "^(?!.*__inactive$).*")
   meta.MODULE_INLINE_PASS
@@ -627,8 +628,6 @@ FUNCTION_DEF %memoryTestSynthRoundTrip:func, :block {
   meta.INST_COMBINE_PASS
   meta.AGGRESSIVE_DEAD_CODE_ELIMINATION_PASS
   meta.TRIGGER_DEDUPE_PASS
-
-  meta.DUMP_PASS map("path": "dump.dyno")
 }
 
 TEST_SCRIPT :string("test-memory-different-port-widths"), :block {
@@ -751,6 +750,37 @@ TEST_SCRIPT :string("test-memory-basic-sync-read"), :block {
 
     always_ff@(posedge clk)
       OUT_rdata <= mem[IN_raddr];
+
+    endmodule
+  }])
+  CALL %memoryTestSynthRoundTrip
+  meta.RANDOM_EQUIVALENCE_CHECK_PASS map("cycles": "10000", "clockMode": "CLOCK")
+}
+
+TEST_SCRIPT :string("test-memory-byte-write"), :block {
+  PARSE_VERILOG_PASS map("code":[{
+    module Test#(parameter int DEPTH = 16, parameter int WIDTH = 8) (
+      input logic clk,
+      input logic[$clog2(DEPTH) - 1:0] IN_waddr,
+      input logic[WIDTH-1:0] IN_wdata,
+      input logic[WIDTH/2-1:0] IN_wmask,
+
+      input logic[$clog2(DEPTH) - 1:0] IN_raddr,
+      output logic[WIDTH-1:0] OUT_rdata
+    );
+
+    logic[WIDTH-1:0] mem[DEPTH-1:0];
+
+    always_ff@(posedge clk)
+      for (int i = 0; i < WIDTH/2; i++)
+        if (IN_wmask[i])
+          mem[IN_waddr][i*2+:2] <= IN_wdata[i*2+:2];
+
+    // always_ff@(posedge clk)
+    //   OUT_rdata <= mem[IN_raddr];
+
+    always_comb
+      OUT_rdata = mem[IN_raddr];
 
     endmodule
   }])

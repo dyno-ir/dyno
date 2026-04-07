@@ -297,12 +297,14 @@ public:
   }
 };
 
+
+
 class MemLoadIRef : public OpcodeInstrRef<HWInstrRef, HW_MEM_LOAD>,
                     public PointerMixin<MemLoadIRef> {
 public:
-  unsigned forwardsIndex() const { return hasAddr() + addrIndex(); }
-  unsigned addrIndex() const { return hasTrigger() + triggerIndex(); }
-  unsigned triggerIndex() const { return hasEn() ? 2 : 1; }
+  unsigned forwardsIndex() const { return hasTrigger() + triggerIndex(); }
+  unsigned addrIndex() const { return hasEn() ? 2 : 1; }
+  unsigned triggerIndex() const { return hasAddr() + addrIndex(); }
 
 public:
   using OpcodeInstrRef::OpcodeInstrRef;
@@ -347,8 +349,8 @@ public:
 class MemStoreIRef : public OpcodeInstrRef<HWInstrRef, HW_MEM_STORE>,
                      public PointerMixin<MemStoreIRef> {
 public:
-  unsigned addrIndex() const { return hasTrigger() + triggerIndex(); }
-  unsigned triggerIndex() const { return hasEn() ? 3 : 2; }
+  unsigned addrIndex() const { return hasEn() ? 3 : 2; }
+  unsigned triggerIndex() const { return hasAddr() + addrIndex(); }
 
 public:
   using OpcodeInstrRef::OpcodeInstrRef;
