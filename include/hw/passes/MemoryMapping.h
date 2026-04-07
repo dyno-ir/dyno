@@ -146,11 +146,11 @@ class MemoryMappingPass : public Pass<MemoryMappingPass> {
               model.oref().uses().filter(filterLoad).transform(getInstr)),
           mapping{{}, {}, (actualStores.size()), (actualLoads.size()), {},
                   0,  0} {
-      modelPortWidth = modelStores[0].getLen();
+      modelPortWidth = *getMinFact(modelStores[0]);
       assert(Range{modelStores}.all(
-          [&](auto st) { return st.getLen() == modelPortWidth; }));
+          [&](auto st) { return *getMinFact(st) == modelPortWidth; }));
       assert(Range{modelLoads}.all(
-          [&](auto st) { return st.getLen() == modelPortWidth; }));
+          [&](auto ld) { return *getMinFact(ld) == modelPortWidth; }));
       actualStoresWidth =
           Range{actualStores}
               .transform([](size_t, MemStoreIRef st) { return st.getLen(); })
@@ -221,7 +221,7 @@ class MemoryMappingPass : public Pass<MemoryMappingPass> {
                          .findOrInsert(mod, {mapping.repeatCount, nullref})
                          .second.val()[repIdx];
       if (mapped)
-        return {false, {}};
+        return {mapped == act, {}};
       for (unsigned i = 0; i < act->size(); i++) {
         if (mod->getMode(i) != act->getMode(i))
           return {false, {}};
@@ -275,20 +275,20 @@ class MemoryMappingPass : public Pass<MemoryMappingPass> {
         PortPartition &part = partitions[actStIdx];
         auto adjActPortLen = actSt.getLen();
 
-        auto subPortBoundary = adjActPortLen;
         auto actFact = getMinFact(actSt);
         if (!*actFact)
           return false;
+        auto subPortBoundary = *actFact;
 
         // every port needs access to the full memory array. If a port is too
         // narrow, artifically widen it - we then later add MUXs to reduce it.
         assert(mapping.tgtAdjModelWidth % actSt.getLen() == 0);
         assert(mapping.tgtAdjModelWidth % *actFact == 0);
-        if (subPortBoundary < mapping.tgtAdjModelWidth) {
+        if (adjActPortLen < mapping.tgtAdjModelWidth) {
           adjActPortLen = mapping.tgtAdjModelWidth;
         }
         part = PortPartition{adjActPortLen};
-        if (*actFact != subPortBoundary) {
+        if (*actFact != actSt.getLen()) {
           // if the port doesn't actually access the whole factor size (e.g.
           // byte enable) mask off.
           uint32_t undefModelInst = usedModelPort.size();
@@ -314,8 +314,9 @@ class MemoryMappingPass : public Pass<MemoryMappingPass> {
 
           // base address of duplicates is shifted.
           // their factor is implicitly multiplied by repIdx.
-          const auto baseAddr =
-              modSt.base() + Range{mapping.portSizes}.subrange(0, repIdx).sum();
+          const auto repAddr =
+              Range{mapping.portSizes}.subrange(0, repIdx).sum();
+          const auto baseAddr = modSt.base() + repAddr;
           auto adjAddr = baseAddr;
 
           // can't make loads faster, skip.
@@ -327,10 +328,10 @@ class MemoryMappingPass : public Pass<MemoryMappingPass> {
           if constexpr (std::is_same_v<RefT, MemStoreIRef>) {
             // todo: relax this rule for known-fused stores (e.g. capacity
             // increasing repeats)
-            auto lowIdx = baseAddr / subPortBoundary;
-            auto highIdx = (baseAddr + adjModPortLen - 1) / subPortBoundary;
+            auto lowIdx = repAddr / subPortBoundary;
+            auto highIdx = (repAddr + adjModPortLen - 1) / subPortBoundary;
             auto overflBits =
-                (baseAddr + adjModPortLen - 1) - (lowIdx * subPortBoundary);
+                (repAddr + adjModPortLen - 1) - (lowIdx * subPortBoundary);
 
             bool isLast = (adjActPortLen / subPortBoundary) == highIdx;
 
@@ -348,10 +349,13 @@ class MemoryMappingPass : public Pass<MemoryMappingPass> {
           assert(!modSt.addr().template is<ConstantRef>() &&
                  !actSt.addr().template is<ConstantRef>());
 
+          // pretty sure this is not quite right, adjModPortLen is the big
+          // version
+          auto fragAccessLen = std::min(part.getLen() - adjAddr, adjModPortLen);
           // If already covered attempt to move forward and cover more via idx
           // offset. (in general not good, wastes alignment)
           bool cov;
-          while ((cov = part.isCovered(adjAddr, adjModPortLen)) &&
+          while ((cov = part.isCovered(adjAddr, fragAccessLen)) &&
                  (adjAddr - baseAddr) < adjModPortLen) {
             // fixme: correct shift
             if (modSt.terms().front().getFact() != adjModPortLen)
@@ -392,9 +396,7 @@ class MemoryMappingPass : public Pass<MemoryMappingPass> {
           // commit mapping now that we can't fail anymore
           triggerMapping.commit();
           usedModelPort[globIdx] = 1;
-          part.writeSingle(adjAddr,
-                           std::min(part.getLen() - adjAddr, adjModPortLen),
-                           unsigned(globIdx));
+          part.writeSingle(adjAddr, fragAccessLen, unsigned(globIdx));
           if (part.isCovered(0, part.getLen()))
             break;
         }
@@ -413,6 +415,7 @@ class MemoryMappingPass : public Pass<MemoryMappingPass> {
 
       HWValue subIdx = nullref;
       // todo: more than one term
+      assert(actLoad.terms().size() == 1);
       auto addr = actLoad.terms().front().getIdx();
       if (factor != 1) {
         subIdx = build.buildUMod(actLoad.terms().front().getIdx(),
@@ -469,7 +472,8 @@ class MemoryMappingPass : public Pass<MemoryMappingPass> {
         } else {
           HWValue wrval = actLoad.value();
           wrval = build.buildRepeat(wrval, factor);
-          wrval = build.buildSplice(wrval, frag.len, adjFragAddr);
+          wrval = build.buildSplice(
+              wrval, std::min(frag.len, *wrval.getNumBits()), adjFragAddr);
           connect(wrval, modLoad.value(), repIdx);
         }
         adjFragAddr += frag.len;
@@ -490,6 +494,8 @@ class MemoryMappingPass : public Pass<MemoryMappingPass> {
       }
       uint32_t numInputs = numPorts - numOutputs;
 
+      SmallVec<RegisterValue, 16> instanceInputs(mapping.repeatCount *
+                                                 numInputs);
       SmallVec<MutInstr<FatDynObjRef<>>, 16> instances;
       instances.reserve(mapping.repeatCount);
       for (unsigned i = 0; i < mapping.repeatCount; i++) {
@@ -520,12 +526,19 @@ class MemoryMappingPass : public Pass<MemoryMappingPass> {
 
       // connect act to mod in instance #repIdx
       auto connect = [&](HWValue act, WireRef mod, unsigned repIdx) {
+        // todo version of this that tracks bit regions for packed inputs
         auto port = WireVariable::checkIsInputLookthru(mod);
         if (!port)
           report_fatal_error("expected port");
-        auto idx = inputIdxMap.find(port.oref()).val();
-        act = build.buildResize(act, *port.getNumBits());
-        instances[repIdx].others().drop_front()[idx] = act;
+        auto idx = inputIdxMap.find(port->reg.oref()).val();
+        auto &inp = instanceInputs[repIdx * numInputs + idx];
+        if (inp.getLen() == 0)
+          inp = RegisterValue{
+              ConstantBuilder{ctx.getStore<Constant>()}.zeroLike(port->reg),
+              *port->reg.getNumBits()};
+        inp.overwrite(act, 0, port->addr,
+                      std::min(*act.getNumBits(), port->len));
+        assert(inp.getLen() == *port->reg.getNumBits());
       };
       auto connectReverse = [&](WireRef mod, unsigned repIdx) -> WireRef {
         auto port = WireVariable::checkIsPort(mod, HW_OUTPUT_REGISTER_DEF);
@@ -575,6 +588,16 @@ class MemoryMappingPass : public Pass<MemoryMappingPass> {
         HWValue subIdx;
         applyPort(ctx, actStore, part, factor, connect, connectReverse, nullptr,
                   subIdx);
+      }
+
+      // Flatten inputs
+      for (auto [instIdx, inst] : Range{instances}.enumerate()) {
+        for (auto [inpIdx, inp] : inst.others().drop_front().enumerate()) {
+          auto &val = instanceInputs[instIdx * numInputs + inpIdx];
+          if (val.getLen() == 0)
+            continue;
+          inp = val.get(build, false);
+        }
       }
 
       for (auto [modTrigO, actTrigs] : mapping.boundTriggers) {

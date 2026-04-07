@@ -494,6 +494,7 @@ public:
     return buildExt(newSize, value, true);
   }
   HWValue buildTrunc(uint32_t newSize, HWValue value) {
+    assert(newSize <= *value.getNumBits());
     if (newSize == 0)
       return ConstantRef::zeroBitZero();
     if (auto asConst = value.dyn_as<ConstantRef>()) {

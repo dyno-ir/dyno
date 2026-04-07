@@ -6,6 +6,7 @@
 #include "hw/LoadStore.h"
 #include "hw/Register.h"
 #include "hw/Wire.h"
+#include <optional>
 
 namespace dyno {
 
@@ -39,15 +40,57 @@ public:
     return nullref;
   }
 
-  // look thru trunc and zext
-  static RegisterIRef checkIsInputLookthru(HWValue val) {
-    while (val.is<WireRef>() &&
-           val.as<WireRef>().getDefI().isOpc(OP_TRUNC, OP_ZEXT)) {
-      val = val.as<WireRef>().getDefI().other(0)->as<HWValue>();
-    }
+  struct RegSlice {
+    RegisterIRef reg;
+    uint32_t addr;
+    uint32_t len;
+  };
+  static std::optional<RegSlice> checkIsInputRegRemap(HWValue val) {
+    uint32_t addr = 0;
+    uint32_t len = *val.getNumBits();
+    while (1) {
+      if (!val.is<WireRef>())
+        return std::nullopt;
+      auto wire = val.as<WireRef>();
+      auto instr = wire.getDefI();
 
-    return checkIsPort(val, HW_INPUT_REGISTER_DEF, HW_REF_REGISTER_DEF,
-                       HW_INOUT_REGISTER_DEF);
+      switch (*instr.getDialectOpcode()) {
+      case *HW_LOAD: {
+        auto asLoad = instr.as<LoadIRef>();
+        return {{asLoad.reg().iref(), addr, len}};
+      }
+      case *OP_TRUNC: {
+        val = instr.other(0)->as<HWValue>();
+        break;
+      }
+      case *OP_ZEXT: {
+        val = instr.other(0)->as<HWValue>();
+        len = *val.getNumBits();
+        break;
+      }
+      case *HW_SPLICE: {
+        auto asSplice = instr.as<SpliceIRef>();
+        if (!asSplice.isConstantOffs())
+          return std::nullopt;
+        val = asSplice.in()->as<HWValue>();
+        addr += asSplice.getBase();
+        len = std::min(len, asSplice.getLen());
+        break;
+      }
+      default: {
+        return std::nullopt;
+      }
+      }
+    }
+  }
+
+  // look thru trunc and zext
+  static std::optional<RegSlice> checkIsInputLookthru(HWValue val) {
+    auto rv = checkIsInputRegRemap(val);
+    if (rv && rv->reg.isOpc(HW_INPUT_REGISTER_DEF, HW_INOUT_REGISTER_DEF,
+                            HW_REF_REGISTER_DEF))
+      return rv;
+    return std::nullopt;
   }
 
   static RegisterIRef checkIsPort(HWValue val, IsDialectOpcode auto... opc) {

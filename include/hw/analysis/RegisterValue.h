@@ -100,8 +100,8 @@ struct RegisterValue : public RegisterFrags<RegisterValueFragment> {
       : RegisterFrags(
             {Fragment{reg, 0, 0, *reg->numBits, untouched, triggerID}}),
         depth(depth), untouched(untouched) {}
-  RegisterValue(DynObjRef value, uint32_t bits, uint32_t depth, bool untouched,
-                Optional<uint16_t> triggerID)
+  RegisterValue(DynObjRef value, uint32_t bits, uint32_t depth = 0,
+                bool untouched = false, Optional<uint16_t> triggerID = nullopt)
       : RegisterFrags({Fragment{value, 0, 0, bits, untouched, triggerID}}),
         depth(depth), untouched(untouched) {}
 
