@@ -331,11 +331,11 @@ public:
       assert(sel.getNumBits() == 1);
 
       if (sel.allBitsUndef()) {
-        BigInt mask; // mask of unequal bits
-        BigInt::bitsExactEqual4S(mask, trueV, falseV);
+        // mask of unequal bits
+        BigInt mask = BigInt::bitsExactEqual4S(trueV, falseV);
         mask |= PatBigInt::undef(mask.getNumBits());
         // xor in to set unequal bits x
-        BigInt::xorOp4S(val, trueV, mask);
+        BigInt::xnorOp4S(val, trueV, mask);
       } else
         val = !sel.valueEquals(0) ? trueV : falseV;
       break;

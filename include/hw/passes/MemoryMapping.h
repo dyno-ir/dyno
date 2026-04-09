@@ -20,6 +20,7 @@
 #include "support/DenseMap.h"
 #include "support/DynBitSet.h"
 #include "support/ErrorRecovery.h"
+#include "support/Optional.h"
 #include "support/Ranges.h"
 #include "support/SmallVec.h"
 #include <algorithm>
@@ -35,7 +36,7 @@ class MemoryMappingPass : public Pass<MemoryMappingPass> {
   struct PortFrag {
     uint32_t dstAddr;
     uint32_t len;
-    Optional<uint32_t> mapping;
+    Optional<uint32_t> mapping = nullopt;
 
     PortFrag(const PortFrag &) = default;
     PortFrag(PortFrag &&) = default;
@@ -79,6 +80,33 @@ class MemoryMappingPass : public Pass<MemoryMappingPass> {
 
       return true;
     }
+
+    uint32_t getNumCoveredBits(uint32_t addr, uint32_t len) {
+      uint32_t numBits = 0;
+      forActiveRegions(addr, len,
+                       [&](uint32_t, uint32_t actLen) { numBits += actLen; });
+      return numBits;
+    }
+
+    // calls callback(addr, len) for all active regions in the larger addr+:len
+    // range
+    void forActiveRegions(uint32_t addr, uint32_t len, auto &&callback) {
+      if (addr >= getLen() || len == 0)
+        return;
+      auto it = getInsertIt(addr);
+      do {
+        auto overlap = it->len - (addr - it->dstAddr);
+        if (it->mapping) {
+          callback(addr, std::min(overlap, len));
+        }
+        if (overlap >= len)
+          break;
+        addr += overlap;
+        len -= overlap;
+
+        ++it;
+      } while (1);
+    }
   };
 
   template <typename RefT> static Optional<uint32_t> getMinFact(RefT ref) {
@@ -101,15 +129,23 @@ class MemoryMappingPass : public Pass<MemoryMappingPass> {
     // metadata attached to model triggers (small vec for duplicated ports)
     SmallDenseMap<ObjRef<Trigger>, SmallVec<ObjRef<Trigger>, 4>> boundTriggers;
 
+    // maps actual load/store ports to model load/store ports
     SmallVec<PortPartition, 2> storePartitions;
     SmallVec<PortPartition, 4> loadPartitions;
 
-    // indexed by repeatIdx
-    SmallVec<uint32_t, 16> portSizes;
+    // mask on wide model load/store, to disable bits for smaller memories
+    PortPartition modelRangeEnable;
+
     uint32_t repeatCount;
     uint32_t tgtAdjModelWidth;
     // todo efficient
-    uint32_t getAdjModelWidth() const { return Range{portSizes}.sum(); }
+    uint32_t getAdjModelWidth() const {
+      uint32_t sum = 0;
+      for (auto &frag : modelRangeEnable.frags)
+        if (frag.mapping)
+          sum += frag.len;
+      return sum;
+    }
   };
   struct MemoryMapper {
 
@@ -242,8 +278,10 @@ class MemoryMappingPass : public Pass<MemoryMappingPass> {
       // Usually the modelWidth is mapping.repeatCount * modelPortWidth. We can
       // slightly reduce it to e.g. implement a 32-bit wide memory with 2x
       // 18-bit model memories. This is done greedily via this function.
-      auto setAdjModelWidth = [&](uint32_t index, uint32_t width) {
-        mapping.portSizes[index] = width;
+      auto setAdjModelWidth = [&](uint32_t repIdx, uint32_t offs,
+                                  uint32_t numDisable) {
+        mapping.modelRangeEnable.writeSingle(repIdx * modelPortWidth + offs,
+                                             numDisable);
 
         // not enough bits -> downsize stripe count
         if (mapping.getAdjModelWidth() < mapping.tgtAdjModelWidth) {
@@ -278,7 +316,7 @@ class MemoryMappingPass : public Pass<MemoryMappingPass> {
         auto actFact = getMinFact(actSt);
         if (!*actFact)
           return false;
-        auto subPortBoundary = *actFact;
+        auto subPortBoundary = actSt.getLen();
 
         // every port needs access to the full memory array. If a port is too
         // narrow, artifically widen it - we then later add MUXs to reduce it.
@@ -303,20 +341,20 @@ class MemoryMappingPass : public Pass<MemoryMappingPass> {
         // operates on conceptual duplicated model stores. one
         // actualStore might need to be covered by multiple modelStores
         for (const auto globIdx : usedModelPort.unsetBitIdxs()) {
-          uint32_t repIdx = globIdx % mapping.repeatCount;
-
-          if (mapping.portSizes[repIdx] == 0)
-            continue;
-
-          uint32_t modStIdx = globIdx / mapping.repeatCount;
+          uint32_t modStIdx = globIdx % modelPorts.size();
           auto &modSt = modelPorts[modStIdx];
-          auto adjModPortLen = mapping.portSizes[repIdx];
+
+          uint32_t repIdx = globIdx / modelPorts.size();
+          auto adjModPortLen = mapping.modelRangeEnable.getNumCoveredBits(
+              repIdx * modelPortWidth + modSt.base(), modSt.getLen());
+
+          if (adjModPortLen == 0)
+            continue;
 
           // base address of duplicates is shifted.
           // their factor is implicitly multiplied by repIdx.
-          const auto repAddr =
-              Range{mapping.portSizes}.subrange(0, repIdx).sum();
-          const auto baseAddr = modSt.base() + repAddr;
+          const auto baseAddr = mapping.modelRangeEnable.getNumCoveredBits(
+              0, repIdx * modelPortWidth + modSt.base());
           auto adjAddr = baseAddr;
 
           // can't make loads faster, skip.
@@ -328,17 +366,19 @@ class MemoryMappingPass : public Pass<MemoryMappingPass> {
           if constexpr (std::is_same_v<RefT, MemStoreIRef>) {
             // todo: relax this rule for known-fused stores (e.g. capacity
             // increasing repeats)
-            auto lowIdx = repAddr / subPortBoundary;
-            auto highIdx = (repAddr + adjModPortLen - 1) / subPortBoundary;
-            auto overflBits =
-                (repAddr + adjModPortLen - 1) - (lowIdx * subPortBoundary);
+            auto lowIdx = baseAddr / subPortBoundary;
+            auto highIdx = (baseAddr + adjModPortLen - 1) / subPortBoundary;
+            auto overflBits = (baseAddr + adjModPortLen - 1) -
+                              ((lowIdx + 1) * subPortBoundary) + 1;
 
             bool isLast = (adjActPortLen / subPortBoundary) == highIdx;
 
             if (lowIdx != highIdx) {
               assert(overflBits);
               //  if we set adjModelWidth we need to restart from beginning
-              if (!setAdjModelWidth(repIdx, adjModPortLen - overflBits))
+              if (!setAdjModelWidth(repIdx,
+                                    adjModPortLen - overflBits + modSt.base(),
+                                    overflBits))
                 return false;
               goto retry;
             }
@@ -354,6 +394,7 @@ class MemoryMappingPass : public Pass<MemoryMappingPass> {
           auto fragAccessLen = std::min(part.getLen() - adjAddr, adjModPortLen);
           // If already covered attempt to move forward and cover more via idx
           // offset. (in general not good, wastes alignment)
+          // todo: check that this works with byte enable
           bool cov;
           while ((cov = part.isCovered(adjAddr, fragAccessLen)) &&
                  (adjAddr - baseAddr) < adjModPortLen) {
@@ -404,6 +445,19 @@ class MemoryMappingPass : public Pass<MemoryMappingPass> {
         if (!part.isCovered(0, part.getLen()))
           return false;
       }
+
+      if constexpr (std::is_same_v<RefT, MemStoreIRef>) {
+        // Mask off unused ports
+        for (const auto globIdx : usedModelPort.unsetBitIdxs()) {
+          uint32_t modStIdx = globIdx % modelPorts.size();
+          auto &modSt = modelPorts[modStIdx];
+          uint32_t repIdx = globIdx / modelPorts.size();
+          mapping.modelRangeEnable.writeSingle(
+              repIdx * modelPortWidth + modSt.base(), modSt.getLen());
+        }
+      } else {
+        assert(usedModelPort.unsetBitIdxs().empty());
+      }
       return true;
     }
 
@@ -426,19 +480,24 @@ class MemoryMappingPass : public Pass<MemoryMappingPass> {
       uint32_t adjFragAddr = 0;
       for (auto &frag : part.frags) {
         auto idx = *frag.mapping;
-        auto repIdx = idx % mapping.repeatCount;
+        uint32_t repIdx;
         RefT modLoad;
 
         if constexpr (std::is_same_v<RefT, MemLoadIRef>) {
-          if (idx / mapping.repeatCount == modelLoads.size())
+          repIdx = idx / modelLoads.size();
+          if (idx % modelLoads.size() == modelLoads.size())
             continue;
-          modLoad = modelLoads[idx / mapping.repeatCount];
+          modLoad = modelLoads[idx % modelLoads.size()];
         } else {
-          if (idx / mapping.repeatCount == modelStores.size())
+          repIdx = idx / modelStores.size();
+          if (idx % modelStores.size() == modelStores.size())
             continue;
-          modLoad = modelStores[idx / mapping.repeatCount];
+          modLoad = modelStores[idx % modelStores.size()];
         }
 
+        // marked as unused
+        if (repIdx == mapping.repeatCount)
+          continue;
         auto &binding =
             mapping
                 .boundPorts[modLoad.addr().template as<PointerRef>()][repIdx];
@@ -467,13 +526,25 @@ class MemoryMappingPass : public Pass<MemoryMappingPass> {
 
         if constexpr (std::is_same_v<RefT, MemLoadIRef>) {
           HWValue rdval = connectReverse(modLoad.value(), repIdx);
-          rdval = build.buildTrunc(frag.len, rdval);
-          (*outWires).emplace_back(rdval);
+          // unpack bits (some may be unused)
+          // assumes frag starts at port boundary, maybe add src addr to
+          // PortPartition?
+          mapping.modelRangeEnable.forActiveRegions(
+              repIdx * modelPortWidth + modLoad.base(), modLoad.getLen(),
+              [&](uint32_t actAddr, uint32_t actLen) {
+                auto val = build.buildSplice(rdval, actLen,
+                                             actAddr - repIdx * modelPortWidth);
+                assert(!val.is<ConstantRef>() && "oob 'x splice");
+                (*outWires).emplace_back(val);
+              });
         } else {
           HWValue wrval = actLoad.value();
           wrval = build.buildRepeat(wrval, factor);
           wrval = build.buildSplice(
               wrval, std::min(frag.len, *wrval.getNumBits()), adjFragAddr);
+          // todo: remove assert
+          assert(!wrval.is<ConstantRef>() ||
+                 !wrval.as<ConstantRef>().allBitsUndef());
           connect(wrval, modLoad.value(), repIdx);
         }
         adjFragAddr += frag.len;
@@ -672,11 +743,7 @@ class MemoryMappingPass : public Pass<MemoryMappingPass> {
         (canonicalModelWidth / mapper.actualPortsLCM) * mapper.actualPortsLCM;
 
     mapper.mapping.tgtAdjModelWidth = adjModelWidth;
-
-    uint32_t unusedBits = canonicalModelWidth - adjModelWidth;
-
-    mapper.mapping.portSizes = SmallVec<uint32_t, 16>(
-        mapper.mapping.repeatCount, mapper.modelPortWidth);
+    mapper.mapping.modelRangeEnable = PortPartition(canonicalModelWidth, 1u);
 
     if (!mapper.mapPorts(mapper.mapping.storePartitions, mapper.actualStores,
                          mapper.modelStores))

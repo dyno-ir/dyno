@@ -138,7 +138,7 @@ private:
 
           std::print(
               dbgs(),
-              "mismatch (cycle {}) {}actual: {}\nexpected: {}\n\ninputs:\n{}",
+              "mismatch (cycle {}) {}actual:   {}\nexpected: {}\n\ninputs:\n{}",
               i, regS.str(), testInterp.getReg(testOut).toString(),
               modelInterp.getReg(modelOut).toString(), std::move(inpS).str());
 

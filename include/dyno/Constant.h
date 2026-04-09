@@ -64,9 +64,7 @@ struct FourState {
   };
   uint8_t val;
   constexpr FourState(uint8_t i) : val(i) { assert(i <= 4); }
-  constexpr operator uint8_t() {
-    return val;
-  }
+  constexpr operator uint8_t() { return val; }
   explicit constexpr operator bool() {
     assert(!isUnk());
     return val;
@@ -898,9 +896,8 @@ public:
 
   template <typename T0>
   constexpr static uint32_t leadingBits4SExact(const T0 &val, FourState state) {
-    BigInt copy;
-    bitsExactEqual4S(copy, val,
-                     PatBigInt::fromFourState(state, val.getNumBits()));
+    auto copy = bitsExactEqual4S(
+        val, PatBigInt::fromFourState(state, val.getNumBits()));
     notOp4S(copy, copy);
     return leadingZeros(copy);
   }
@@ -1538,6 +1535,8 @@ public:
     uint32_t offs = addr / WordBits;
     uint32_t shamt = addr % WordBits;
 
+    uint32_t rhsSize = rhs.getWords().size();
+
     uint32_t endAddr = addr + rhs.getRawNumBits();
     uint32_t endOffs = endAddr / WordBits;
     if (auto sz = std::min(endOffs + 1, out.getExtNumWords());
@@ -1545,18 +1544,21 @@ public:
       out.expandUntil(sz);
 
     auto mask = shamt == 0 ? 0 : bit_mask_ones<uint32_t>(shamt);
-    if (uint64_t diff = WordBits - (shamt + rhs.getRawNumBits()); diff > 0)
+    if (int64_t diff = int64_t(WordBits) - (shamt + rhs.getRawNumBits());
+        diff > 0)
       mask |= bit_mask_ones<uint32_t>(diff, shamt + rhs.getRawNumBits());
     out.words[offs] &= mask;
-    out.words[offs] |= rhs.getWord(0) << shamt;
+    out.words[offs] |= rhs.getWord(0, rhsSize) << shamt;
 
     for (size_t i = offs + 1; i < out.words.size() && i < endOffs; i++) {
       size_t lowI = i - offs - 1;
       size_t highI = i - offs;
 
       out.words[i] =
-          (shamt == 0 ? 0 : (rhs.getWord(lowI) >> (32 - shamt))) |
-          ((highI >= rhs.getExtNumWords()) ? 0 : (rhs.getWord(highI) << shamt));
+          (shamt == 0 ? 0 : (rhs.getWord(lowI, rhsSize) >> (32 - shamt))) |
+          ((highI >= rhs.getExtNumWords())
+               ? 0
+               : (rhs.getWord(highI, rhsSize) << shamt));
     }
 
     if (endOffs < out.getExtNumWords() && endOffs != offs) {
@@ -1567,7 +1569,7 @@ public:
         auto mask = bit_mask_zeros<uint32_t>(shamtHigh);
         out.words[endOffs] &= mask;
       }
-      out.words[endOffs] |= (rhs.getWord(last) >> (32 - shamt)) &
+      out.words[endOffs] |= (rhs.getWord(last, rhsSize) >> (32 - shamt)) &
                             bit_mask_ones<uint32_t>(shamtHigh);
     }
 
@@ -1644,7 +1646,7 @@ public:
   }
   static constexpr uint32_t xnor_4state(uint32_t lhs, uint32_t rhs) {
     uint32_t val = xor_4state(lhs, rhs);
-    val ^= ~(val >> 1);
+    val ^= ((~val & REP10) >> 1);
     return val;
   }
   static constexpr uint32_t or_4state(uint32_t lhs, uint32_t rhs) {
@@ -1743,17 +1745,41 @@ public:
       return;
     }
 
-    auto lhsNumWords = lhs.getNumWords();
-    auto rhsNumWords = rhs.getNumWords();
+    BigIntBase lhsCopy, rhsCopy;
 
-    out.words.resize(std::max(lhs.getNumWords(), rhs.getNumWords()));
-    out.numBits = std::max(lhs.getRawNumBits(), rhs.getRawNumBits());
+    const T0 *lhsNoAlias = &lhs;
+    if constexpr (std::is_same_v<BigIntBase, T0>) {
+      if (!lhs.getIs4S() && lhsNoAlias == &out) {
+        lhsCopy = lhs;
+        lhsNoAlias = &lhsCopy;
+      }
+    }
+
+    const T1 *rhsNoAlias = &rhs;
+    if constexpr (std::is_same_v<BigIntBase, T1>) {
+      if (!rhs.getIs4S() && rhsNoAlias == &out) {
+        rhsCopy = rhs;
+        rhsNoAlias = &rhsCopy;
+      }
+    }
+
+    auto &lhsR = *lhsNoAlias;
+    auto &rhsR = *rhsNoAlias;
+
+    auto lhsNumWords = lhsR.getNumWords();
+    auto rhsNumWords = rhsR.getNumWords();
+
+    out.numBits = std::max(lhsR.getRawNumBits(), rhsR.getRawNumBits());
+    out.words.resize(
+        std::min(std::max(lhsR.getNumWords() * (lhsR.getIs4S() ? 1 : 2),
+                          rhsR.getNumWords() * (rhsR.getIs4S() ? 1 : 2)),
+                 out.getExtNumWords()));
 
     uint32_t hasUnk = 0;
 
     for (size_t i = 0; i < out.getNumWords(); i++) {
-      uint32_t lhsV = lhs.getWord4S(i, lhsNumWords);
-      uint32_t rhsV = rhs.getWord4S(i, rhsNumWords);
+      uint32_t lhsV = lhsR.getWord4S(i, lhsNumWords);
+      uint32_t rhsV = rhsR.getWord4S(i, rhsNumWords);
       uint32_t outV = Func4S(lhsV, rhsV);
       out.words[i] = outV;
       hasUnk |= outV & REP10;
@@ -1761,8 +1787,9 @@ public:
 
     out.custom() = 1;
     out.extend() =
-        Func4S(lhs.getIs4S() ? lhs.getExtend() : unpack_bits(lhs.getExtend()),
-               rhs.getIs4S() ? rhs.getExtend() : unpack_bits(rhs.getExtend())) &
+        Func4S(
+            lhsR.getIs4S() ? lhsR.getExtend() : unpack_bits(lhsR.getExtend()),
+            rhsR.getIs4S() ? rhsR.getExtend() : unpack_bits(rhsR.getExtend())) &
         0b11;
 
     if (!hasUnk && (!out.isExtended() || !(out.extend() & 0b10)))
@@ -1822,25 +1849,32 @@ public:
   }
 
   template <typename T0, typename T1>
-  static void bitsExactEqual4S(BigIntBase &out, const T0 &lhs, const T1 &rhs) {
-    if (!lhs.getIs4S() && !rhs.getIs4S())
-      return xnorOp(out, lhs, rhs);
+  static BigIntBase bitsExactEqual4S(const T0 &lhs, const T1 &rhs) {
+    if (!lhs.getIs4S() && !rhs.getIs4S()) {
+      BigIntBase out;
+      xnorOp(out, lhs, rhs);
+      return out;
+    }
     auto bits = lhs.getNumBits();
     assert(bits == rhs.getNumBits());
 
-    out.numBits = 2 * bits;
+    BigIntBase out;
+    out.numBits = bits;
     out.words.resize(round_up_div(out.numBits, WordBits));
-    out.custom() = 1;
 
     for (size_t i = 0; i < out.getNumWords(); i++) {
-      uint32_t lhsV = lhs.getWord4S(i);
-      uint32_t rhsV = rhs.getWord4S(i);
-      uint32_t outV = n_equal_mask<2>(lhsV, rhsV) >> 1;
-      out.words[i] = outV;
+      uint32_t lhsV = lhs.getWord4S(2 * i);
+      uint32_t rhsV = rhs.getWord4S(2 * i);
+      uint32_t outV = pack_bits(n_equal_mask<2>(lhsV, rhsV) >> 1);
+      out.words[i] = outV & 0xFFFF;
+      lhsV = lhs.getWord4S(2 * i + 1);
+      rhsV = rhs.getWord4S(2 * i + 1);
+      outV = pack_bits(n_equal_mask<2>(lhsV, rhsV) >> 1);
+      out.words[i] |= outV << 16;
     }
-    // todo: construct as 2 state directly when out doesn't alias operands
-    out.conv4To2State();
+
     out.normalize();
+    return out;
   }
 
 #define LINEAR_OP_4S(ident, func2s)                                            \

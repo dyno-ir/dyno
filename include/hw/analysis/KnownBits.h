@@ -354,10 +354,8 @@ public:
       case *OP_AND: {
         auto propState =
             instr.getDialectOpcode().is(OP_AND) ? FourState::S1 : FourState::S0;
-        BigInt oneBits;
-        BigInt::bitsExactEqual4S(
-            oneBits, *bigInt,
-            PatBigInt::fromFourState(propState, bigInt->getNumBits()));
+        BigInt oneBits = BigInt::bitsExactEqual4S(
+            *bigInt, PatBigInt::fromFourState(propState, bigInt->getNumBits()));
         // nothing to do
         if (oneBits.valueEquals(0))
           break;
@@ -375,10 +373,8 @@ public:
           auto oldV = val;
 
           // check for contradiction
-          BigInt zeroBits;
-          BigInt::bitsExactEqual4S(
-              zeroBits, val,
-              PatBigInt::fromFourState(!propState, val.getNumBits()));
+          BigInt zeroBits = BigInt::bitsExactEqual4S(
+              val, PatBigInt::fromFourState(!propState, val.getNumBits()));
           if (!(zeroBits & oneBits).valueEquals(0))
             return false;
 
