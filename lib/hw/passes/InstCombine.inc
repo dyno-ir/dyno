@@ -2307,33 +2307,28 @@ InstrRef::iterator r2;
 InstrRef::iterator r3;
 InstrRef::iterator r4;
 InstrRef::iterator r5;
-FatDynObjRef<>* r6;
-FatDynObjRef<>* r7;
-FatDynObjRef<>* r8;
-FatDynObjRef<>* r9;
-if (!r0.isOpc(OP_UDIV)) goto fail_52;
+if (!r0.isOpc(OP_SDIV)) goto cont_52_0;
+goto goto_52_0;
+cont_52_0:;
+if (!r0.isOpc(OP_UDIV)) goto cont_52_1;
+goto goto_52_1;
+cont_52_1:;
+if (!r0.isOpc(OP_MUL)) goto fail_52;
+goto_52_1:;
+goto_52_0:;
 if (r0.getNumOperands() > 3) goto fail_52;
 if (r0.getNumOperands() < 3) goto fail_52;
 r1 = r0.begin();
 r2 = r0.end();
 r3 = std::next(r1);
 r4 = std::next(r3);
-if ((*r4)->as<FatDynObjRef<>>().getType() != CORE_CONSTANT) goto fail_52;
-r5 = std::next(r4);
 
-  auto c = RefRange{r4, r5}.begin()->as<ConstantRef>();
-  if (c.getIs4S())
+  if (!Range{r4, std::next(r4)}.begin()->is<ConstantRef>())
     goto fail_52;
-  if (BigInt::countBitsExact(c, 1) != 1)
+  if (!"1'h1"_bv.valueEquals(Range{r4, std::next(r4)}.begin()->as<ConstantRef>()))
     goto fail_52;
-  auto shift = BigInt::trailingZeros(c);
-  FatDynObjRef<> shiftC = cbuild.val(c.getNumBits(), shift).get();
-  RefRange{r8, r9} = shiftC;
-auto r10 = build.buildInstrRaw(OP_SRL, (r3-r1)+(r4-r3)+(r9-r8));
-copyOperands(r10, r1, r3);
-r10.other();
-copyOperands(r10, r3, r4);
-copyOperands(r10, r8, r9);
+r5 = std::next(r4);
+replaceAllUses(replaced, r1, r3);
 deleteF(matched, ctx, r0);
 return true;
 }
@@ -2344,19 +2339,11 @@ InstrRef::iterator r2;
 InstrRef::iterator r3;
 InstrRef::iterator r4;
 InstrRef::iterator r5;
-if (!r0.isOpc(OP_SLL)) goto cont_53_0;
-goto goto_53_0;
-cont_53_0:;
-if (!r0.isOpc(OP_SRL)) goto cont_53_1;
-goto goto_53_1;
-cont_53_1:;
-if (!r0.isOpc(OP_SRA)) goto cont_53_2;
-goto goto_53_2;
-cont_53_2:;
-if (!r0.isOpc(OP_SUB)) goto fail_53;
-goto_53_2:;
-goto_53_1:;
-goto_53_0:;
+FatDynObjRef<>* r6;
+FatDynObjRef<>* r7;
+FatDynObjRef<>* r8;
+FatDynObjRef<>* r9;
+if (!r0.isOpc(OP_UDIV)) goto fail_53;
 if (r0.getNumOperands() > 3) goto fail_53;
 if (r0.getNumOperands() < 3) goto fail_53;
 r1 = r0.begin();
@@ -2364,9 +2351,21 @@ r2 = r0.end();
 r3 = std::next(r1);
 r4 = std::next(r3);
 if ((*r4)->as<FatDynObjRef<>>().getType() != CORE_CONSTANT) goto fail_53;
-if (!(*r4)->as<ConstantRef>().valueEqualsS("1'h0"_bv)) goto fail_53;
 r5 = std::next(r4);
-replaceAllUses(replaced, r1, r3);
+
+  auto c = RefRange{r4, r5}.begin()->as<ConstantRef>();
+  if (c.getIs4S())
+    goto fail_53;
+  if (BigInt::countBitsExact(c, 1) != 1)
+    goto fail_53;
+  auto shift = BigInt::trailingZeros(c);
+  FatDynObjRef<> shiftC = cbuild.val(c.getNumBits(), shift).get();
+  RefRange{r8, r9} = shiftC;
+auto r10 = build.buildInstrRaw(OP_SRL, (r3-r1)+(r4-r3)+(r9-r8));
+copyOperands(r10, r1, r3);
+r10.other();
+copyOperands(r10, r3, r4);
+copyOperands(r10, r8, r9);
 deleteF(matched, ctx, r0);
 return true;
 }
@@ -2379,27 +2378,31 @@ InstrRef::iterator r4;
 InstrRef::iterator r5;
 FatDynObjRef<>* r6;
 FatDynObjRef<>* r7;
-if (!r0.isOpc(OP_SMOD)) goto cont_54_0;
-goto goto_54_0;
-cont_54_0:;
-if (!r0.isOpc(OP_UMOD)) goto fail_54;
-goto_54_0:;
+FatDynObjRef<>* r8;
+FatDynObjRef<>* r9;
+if (!r0.isOpc(OP_MUL)) goto fail_54;
 if (r0.getNumOperands() > 3) goto fail_54;
 if (r0.getNumOperands() < 3) goto fail_54;
 r1 = r0.begin();
 r2 = r0.end();
 r3 = std::next(r1);
 r4 = std::next(r3);
-
-  if (!Range{r4, std::next(r4)}.begin()->is<ConstantRef>())
-    goto fail_54;
-  if (!"1'h1"_bv.valueEquals(Range{r4, std::next(r4)}.begin()->as<ConstantRef>()))
-    goto fail_54;
+if ((*r4)->as<FatDynObjRef<>>().getType() != CORE_CONSTANT) goto fail_54;
 r5 = std::next(r4);
 
-  FatDynObjRef<> zero = cbuild.zero(*RefRange{r1, r3}.begin()->as<WireRef>().getNumBits());
-  RefRange{r6, r7} = zero;
-replaceAllUses(replaced, r1, r6);
+  auto c = RefRange{r4, r5}.begin()->as<ConstantRef>();
+  if (c.getIs4S())
+    goto fail_54;
+  if (BigInt::countBitsExact(c, 1) != 1)
+    goto fail_54;
+  auto shift = BigInt::trailingZeros(c);
+  FatDynObjRef<> shiftC = cbuild.val(c.getNumBits(), shift).get();
+  RefRange{r8, r9} = shiftC;
+auto r10 = build.buildInstrRaw(OP_SLL, (r3-r1)+(r4-r3)+(r9-r8));
+copyOperands(r10, r1, r3);
+r10.other();
+copyOperands(r10, r3, r4);
+copyOperands(r10, r8, r9);
 deleteF(matched, ctx, r0);
 return true;
 }
@@ -2410,10 +2413,18 @@ InstrRef::iterator r2;
 InstrRef::iterator r3;
 InstrRef::iterator r4;
 InstrRef::iterator r5;
-if (!r0.isOpc(OP_SDIV)) goto cont_55_0;
+if (!r0.isOpc(OP_SLL)) goto cont_55_0;
 goto goto_55_0;
 cont_55_0:;
-if (!r0.isOpc(OP_UDIV)) goto fail_55;
+if (!r0.isOpc(OP_SRL)) goto cont_55_1;
+goto goto_55_1;
+cont_55_1:;
+if (!r0.isOpc(OP_SRA)) goto cont_55_2;
+goto goto_55_2;
+cont_55_2:;
+if (!r0.isOpc(OP_SUB)) goto fail_55;
+goto_55_2:;
+goto_55_1:;
 goto_55_0:;
 if (r0.getNumOperands() > 3) goto fail_55;
 if (r0.getNumOperands() < 3) goto fail_55;
@@ -2421,17 +2432,47 @@ r1 = r0.begin();
 r2 = r0.end();
 r3 = std::next(r1);
 r4 = std::next(r3);
-
-  if (!Range{r4, std::next(r4)}.begin()->is<ConstantRef>())
-    goto fail_55;
-  if (!"1'h1"_bv.valueEquals(Range{r4, std::next(r4)}.begin()->as<ConstantRef>()))
-    goto fail_55;
+if ((*r4)->as<FatDynObjRef<>>().getType() != CORE_CONSTANT) goto fail_55;
+if (!(*r4)->as<ConstantRef>().valueEqualsS("1'h0"_bv)) goto fail_55;
 r5 = std::next(r4);
 replaceAllUses(replaced, r1, r3);
 deleteF(matched, ctx, r0);
 return true;
 }
 fail_55:;
+{
+InstrRef::iterator r1;
+InstrRef::iterator r2;
+InstrRef::iterator r3;
+InstrRef::iterator r4;
+InstrRef::iterator r5;
+FatDynObjRef<>* r6;
+FatDynObjRef<>* r7;
+if (!r0.isOpc(OP_SMOD)) goto cont_56_0;
+goto goto_56_0;
+cont_56_0:;
+if (!r0.isOpc(OP_UMOD)) goto fail_56;
+goto_56_0:;
+if (r0.getNumOperands() > 3) goto fail_56;
+if (r0.getNumOperands() < 3) goto fail_56;
+r1 = r0.begin();
+r2 = r0.end();
+r3 = std::next(r1);
+r4 = std::next(r3);
+
+  if (!Range{r4, std::next(r4)}.begin()->is<ConstantRef>())
+    goto fail_56;
+  if (!"1'h1"_bv.valueEquals(Range{r4, std::next(r4)}.begin()->as<ConstantRef>()))
+    goto fail_56;
+r5 = std::next(r4);
+
+  FatDynObjRef<> zero = cbuild.zero(*RefRange{r1, r3}.begin()->as<WireRef>().getNumBits());
+  RefRange{r6, r7} = zero;
+replaceAllUses(replaced, r1, r6);
+deleteF(matched, ctx, r0);
+return true;
+}
+fail_56:;
 {
 InstrRef::iterator r1;
 InstrRef::iterator r2;
@@ -2465,70 +2506,70 @@ FatDynObjRef<>* r29;
 FatDynObjRef<>* r30;
 FatDynObjRef<>* r33;
 FatDynObjRef<>* r34;
-if (!r0.isOpc(HW_CONCAT)) goto fail_56;
-if (r0.getNumOperands() < 3) goto fail_56;
+if (!r0.isOpc(HW_CONCAT)) goto fail_57;
+if (r0.getNumOperands() < 3) goto fail_57;
 r1 = r0.begin();
 r2 = r0.end();
 r3 = std::next(r1);
 for (r4 = r3;; r4++) {
-if (r4 == r2) goto fail_56;
-if ((*r4)->as<FatDynObjRef<>>().getType() != HW_WIRE) goto cont_56_0;
+if (r4 == r2) goto fail_57;
+if ((*r4)->as<FatDynObjRef<>>().getType() != HW_WIRE) goto cont_57_0;
 r6 = getDefInstr(r4);
-if (!r6.isOpc(HW_INSERT)) goto cont_56_0;
-if (r6.getNumOperands() < 4) goto cont_56_0;
+if (!r6.isOpc(HW_INSERT)) goto cont_57_0;
+if (r6.getNumOperands() < 4) goto cont_57_0;
 r7 = r6.begin();
 r8 = r6.end();
 r9 = std::next(r7);
-if ((*r9)->as<FatDynObjRef<>>().getType() != HW_WIRE) goto cont_56_0;
+if ((*r9)->as<FatDynObjRef<>>().getType() != HW_WIRE) goto cont_57_0;
 r10 = getDefInstr(r9);
-if (!r10.isOpc(HW_SPLICE)) goto cont_56_0;
-if (r10.getNumOperands() > 3) goto cont_56_0;
-if (r10.getNumOperands() < 3) goto cont_56_0;
+if (!r10.isOpc(HW_SPLICE)) goto cont_57_0;
+if (r10.getNumOperands() > 3) goto cont_57_0;
+if (r10.getNumOperands() < 3) goto cont_57_0;
 r11 = r10.begin();
 r12 = r10.end();
 r13 = std::next(r11);
 r14 = std::next(r13);
-if ((*r14)->as<FatDynObjRef<>>().getType() != CORE_CONSTANT) goto cont_56_0;
+if ((*r14)->as<FatDynObjRef<>>().getType() != CORE_CONSTANT) goto cont_57_0;
 r15 = std::next(r14);
 r16 = std::next(r9);
-if ((*r9)->fat() != (*r11)->fat()) goto cont_56_0;
+if ((*r9)->fat() != (*r11)->fat()) goto cont_57_0;
 r17 = std::next(r16);
 r18 = std::next(r17);
 for (r19 = r18;; r19++) {
 if (r19 == r8) break;
-loop_56_1_continue:;
+loop_57_1_continue:;
 }
-loop_56_1_break:;
-if (r19 != r8) goto cont_56_0;
+loop_57_1_break:;
+if (r19 != r8) goto cont_57_0;
 r5 = std::next(r4);
-if ((*r4)->fat() != (*r7)->fat()) goto cont_56_0;
-goto loop_56_0_break;
-cont_56_0:;
-loop_56_0_continue:;
+if ((*r4)->fat() != (*r7)->fat()) goto cont_57_0;
+goto loop_57_0_break;
+cont_57_0:;
+loop_57_0_continue:;
 }
-loop_56_0_break:;
+loop_57_0_break:;
 
   if (!(*Range{r5, std::next(r5)}.begin())->is<WireRef>())
-    goto fail_56;
+    goto fail_57;
   if (!(*Range{r14, r15}.begin())->as<ConstantRef>().valueEquals(*(*Range{r5, std::next(r5)}.begin())->as<WireRef>().getNumBits()))
-    goto fail_56;
+    goto fail_57;
 r20 = getDefInstr(r5);
-if (!r20.isOpc(OP_TRUNC)) goto fail_56;
-if (r20.getNumOperands() > 2) goto fail_56;
-if (r20.getNumOperands() < 2) goto fail_56;
+if (!r20.isOpc(OP_TRUNC)) goto fail_57;
+if (r20.getNumOperands() > 2) goto fail_57;
+if (r20.getNumOperands() < 2) goto fail_57;
 r21 = r20.begin();
 r22 = r20.end();
 r23 = std::next(r21);
 r24 = std::next(r23);
-if ((*r23)->fat() != (*r13)->fat()) goto fail_56;
+if ((*r23)->fat() != (*r13)->fat()) goto fail_57;
 r25 = std::next(r5);
-if ((*r5)->fat() != (*r21)->fat()) goto fail_56;
+if ((*r5)->fat() != (*r21)->fat()) goto fail_57;
 for (r26 = r25;; r26++) {
 if (r26 == r2) break;
-loop_56_2_continue:;
+loop_57_2_continue:;
 }
-loop_56_2_break:;
-if (r26 != r2) goto fail_56;
+loop_57_2_break:;
+if (r26 != r2) goto fail_57;
 
   auto offsVal = (*RefRange{r14, r15}.begin())->as<ConstantRef>().getExactVal();
   auto shortSize = *(*RefRange{r11, r13}.begin())->as<WireRef>().getNumBits();
@@ -2562,7 +2603,7 @@ deleteIfSingleUse(matched, ctx, r6);
 deleteF(matched, ctx, r0);
 return true;
 }
-fail_56:;
+fail_57:;
 {
 InstrRef::iterator r1;
 InstrRef::iterator r2;
@@ -2593,62 +2634,62 @@ FatDynObjRef<>* r26;
 FatDynObjRef<>* r27;
 FatDynObjRef<>* r28;
 FatDynObjRef<>* r29;
-if (!r0.isOpc(HW_CONCAT)) goto fail_57;
-if (r0.getNumOperands() < 3) goto fail_57;
+if (!r0.isOpc(HW_CONCAT)) goto fail_58;
+if (r0.getNumOperands() < 3) goto fail_58;
 r1 = r0.begin();
 r2 = r0.end();
 r3 = std::next(r1);
-if ((*r3)->as<FatDynObjRef<>>().getType() != HW_WIRE) goto fail_57;
+if ((*r3)->as<FatDynObjRef<>>().getType() != HW_WIRE) goto fail_58;
 r4 = getDefInstr(r3);
-if (!r4.isOpc(HW_SPLICE)) goto fail_57;
-if (r4.getNumOperands() > 3) goto fail_57;
-if (r4.getNumOperands() < 3) goto fail_57;
+if (!r4.isOpc(HW_SPLICE)) goto fail_58;
+if (r4.getNumOperands() > 3) goto fail_58;
+if (r4.getNumOperands() < 3) goto fail_58;
 r5 = r4.begin();
 r6 = r4.end();
 r7 = std::next(r5);
 r8 = std::next(r7);
 r9 = std::next(r8);
 r10 = std::next(r3);
-if ((*r3)->fat() != (*r5)->fat()) goto fail_57;
+if ((*r3)->fat() != (*r5)->fat()) goto fail_58;
 
   if (!(*Range{r10, std::next(r10)}.begin())->is<WireRef>())
-    goto fail_57;
+    goto fail_58;
   if (!(*Range{r8, r9}.begin())->as<ConstantRef>().valueEquals(*(*Range{r10, std::next(r10)}.begin())->as<WireRef>().getNumBits()))
-    goto fail_57;
+    goto fail_58;
 r11 = getDefInstr(r10);
-if (!r11.isOpc(HW_INSERT)) goto fail_57;
-if (r11.getNumOperands() < 4) goto fail_57;
+if (!r11.isOpc(HW_INSERT)) goto fail_58;
+if (r11.getNumOperands() < 4) goto fail_58;
 r12 = r11.begin();
 r13 = r11.end();
 r14 = std::next(r12);
-if ((*r14)->as<FatDynObjRef<>>().getType() != HW_WIRE) goto fail_57;
+if ((*r14)->as<FatDynObjRef<>>().getType() != HW_WIRE) goto fail_58;
 r15 = getDefInstr(r14);
-if (!r15.isOpc(OP_TRUNC)) goto fail_57;
-if (r15.getNumOperands() > 2) goto fail_57;
-if (r15.getNumOperands() < 2) goto fail_57;
+if (!r15.isOpc(OP_TRUNC)) goto fail_58;
+if (r15.getNumOperands() > 2) goto fail_58;
+if (r15.getNumOperands() < 2) goto fail_58;
 r16 = r15.begin();
 r17 = r15.end();
 r18 = std::next(r16);
 r19 = std::next(r18);
-if ((*r18)->fat() != (*r7)->fat()) goto fail_57;
+if ((*r18)->fat() != (*r7)->fat()) goto fail_58;
 r20 = std::next(r14);
-if ((*r14)->fat() != (*r16)->fat()) goto fail_57;
+if ((*r14)->fat() != (*r16)->fat()) goto fail_58;
 r21 = std::next(r20);
 r22 = std::next(r21);
 for (r23 = r22;; r23++) {
 if (r23 == r13) break;
-loop_57_0_continue:;
+loop_58_0_continue:;
 }
-loop_57_0_break:;
-if (r23 != r13) goto fail_57;
+loop_58_0_break:;
+if (r23 != r13) goto fail_58;
 r24 = std::next(r10);
-if ((*r10)->fat() != (*r12)->fat()) goto fail_57;
+if ((*r10)->fat() != (*r12)->fat()) goto fail_58;
 for (r25 = r24;; r25++) {
 if (r25 == r2) break;
-loop_57_1_continue:;
+loop_58_1_continue:;
 }
-loop_57_1_break:;
-if (r25 != r2) goto fail_57;
+loop_58_1_break:;
+if (r25 != r2) goto fail_58;
 
   auto offsVal = (*RefRange{r8, r9}.begin())->as<ConstantRef>().getExactVal();
   auto highSize = *(*RefRange{r5, r7}.begin())->as<WireRef>().getNumBits();
@@ -2678,28 +2719,28 @@ deleteIfSingleUse(matched, ctx, r4);
 deleteF(matched, ctx, r0);
 return true;
 }
-fail_57:;
+fail_58:;
 {
 InstrRef::iterator r1;
 InstrRef::iterator r2;
 InstrRef::iterator r3;
 InstrRef::iterator r4;
 InstrRef::iterator r5;
-if (!r0.isOpc(HW_ASSUME)) goto fail_58;
-if (r0.getNumOperands() > 3) goto fail_58;
-if (r0.getNumOperands() < 3) goto fail_58;
+if (!r0.isOpc(HW_ASSUME)) goto fail_59;
+if (r0.getNumOperands() > 3) goto fail_59;
+if (r0.getNumOperands() < 3) goto fail_59;
 r1 = r0.begin();
 r2 = r0.end();
 r3 = std::next(r1);
 r4 = std::next(r3);
-if ((*r4)->as<FatDynObjRef<>>().getType() != CORE_CONSTANT) goto fail_58;
-if ((*r4)->as<ConstantRef>() != "1'h1"_bv) goto fail_58;
+if ((*r4)->as<FatDynObjRef<>>().getType() != CORE_CONSTANT) goto fail_59;
+if ((*r4)->as<ConstantRef>() != "1'h1"_bv) goto fail_59;
 r5 = std::next(r4);
 replaceAllUses(replaced, r1, r3);
 deleteF(matched, ctx, r0);
 return true;
 }
-fail_58:;
+fail_59:;
 {
 InstrRef::iterator r1;
 InstrRef::iterator r2;
@@ -2714,24 +2755,24 @@ InstrRef::iterator r10;
 InstrRef::iterator r11;
 FatDynObjRef<>* r13;
 FatDynObjRef<>* r14;
-if (!r0.isOpc(HW_ASSUME)) goto fail_59;
-if (r0.getNumOperands() > 3) goto fail_59;
-if (r0.getNumOperands() < 3) goto fail_59;
+if (!r0.isOpc(HW_ASSUME)) goto fail_60;
+if (r0.getNumOperands() > 3) goto fail_60;
+if (r0.getNumOperands() < 3) goto fail_60;
 r1 = r0.begin();
 r2 = r0.end();
 r3 = std::next(r1);
-if ((*r3)->as<FatDynObjRef<>>().getType() != HW_WIRE) goto fail_59;
+if ((*r3)->as<FatDynObjRef<>>().getType() != HW_WIRE) goto fail_60;
 r4 = getDefInstr(r3);
-if (!r4.isOpc(HW_ASSUME)) goto fail_59;
-if (r4.getNumOperands() > 3) goto fail_59;
-if (r4.getNumOperands() < 3) goto fail_59;
+if (!r4.isOpc(HW_ASSUME)) goto fail_60;
+if (r4.getNumOperands() > 3) goto fail_60;
+if (r4.getNumOperands() < 3) goto fail_60;
 r5 = r4.begin();
 r6 = r4.end();
 r7 = std::next(r5);
 r8 = std::next(r7);
 r9 = std::next(r8);
 r10 = std::next(r3);
-if ((*r3)->fat() != (*r5)->fat()) goto fail_59;
+if ((*r3)->fat() != (*r5)->fat()) goto fail_60;
 r11 = std::next(r10);
 
   FatDynObjRef<> w = ctx.getStore<Wire>().create((*Range{r8, r9}.begin())->as<HWValue>().getNumBits()); RefRange{r13, r14} = w;
@@ -2749,16 +2790,16 @@ deleteIfSingleUse(matched, ctx, r4);
 deleteF(matched, ctx, r0);
 return true;
 }
-fail_59:;
+fail_60:;
 {
 InstrRef::iterator r1;
 InstrRef::iterator r2;
 InstrRef::iterator r3;
 InstrRef::iterator r4;
 InstrRef::iterator r5;
-if (!r0.isOpc(HW_ONEHOT_MUX)) goto fail_60;
-if (r0.getNumOperands() > 3) goto fail_60;
-if (r0.getNumOperands() < 3) goto fail_60;
+if (!r0.isOpc(HW_ONEHOT_MUX)) goto fail_61;
+if (r0.getNumOperands() > 3) goto fail_61;
+if (r0.getNumOperands() < 3) goto fail_61;
 r1 = r0.begin();
 r2 = r0.end();
 r3 = std::next(r1);
@@ -2772,7 +2813,7 @@ copyOperands(r6, r3, r4);
 deleteF(matched, ctx, r0);
 return true;
 }
-fail_60:;
+fail_61:;
 {
 InstrRef::iterator r1;
 InstrRef::iterator r2;
@@ -2781,19 +2822,19 @@ InstrRef::iterator r4;
 InstrRef::iterator r5;
 FatDynObjRef<>* r6;
 FatDynObjRef<>* r7;
-if (!r0.isOpc(OP_SDIV)) goto cont_61_0;
-goto goto_61_0;
-cont_61_0:;
-if (!r0.isOpc(OP_UDIV)) goto fail_61;
-goto_61_0:;
-if (r0.getNumOperands() > 3) goto fail_61;
-if (r0.getNumOperands() < 3) goto fail_61;
+if (!r0.isOpc(OP_SDIV)) goto cont_62_0;
+goto goto_62_0;
+cont_62_0:;
+if (!r0.isOpc(OP_UDIV)) goto fail_62;
+goto_62_0:;
+if (r0.getNumOperands() > 3) goto fail_62;
+if (r0.getNumOperands() < 3) goto fail_62;
 r1 = r0.begin();
 r2 = r0.end();
 r3 = std::next(r1);
 r4 = std::next(r3);
-if ((*r4)->as<FatDynObjRef<>>().getType() != CORE_CONSTANT) goto fail_61;
-if (!(*r4)->as<ConstantRef>().valueEqualsS("1'h0"_bv)) goto fail_61;
+if ((*r4)->as<FatDynObjRef<>>().getType() != CORE_CONSTANT) goto fail_62;
+if (!(*r4)->as<ConstantRef>().valueEqualsS("1'h0"_bv)) goto fail_62;
 r5 = std::next(r4);
 
   FatDynObjRef<> undefStore = cbuild.undef(*((*RefRange{r1, r3}.begin())->as<WireRef>().getNumBits())).get();
@@ -2802,4 +2843,4 @@ replaceAllUses(replaced, r1, r6);
 deleteF(matched, ctx, r0);
 return true;
 }
-fail_61:;
+fail_62:;

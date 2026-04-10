@@ -37,6 +37,17 @@ namespace dyno {
 class MemoryMappingPass : public Pass<MemoryMappingPass> {
   Context &ctx;
 
+public:
+#define CONFIG_STRUCT_LAMBDA(FIELD, ENUM)                                      \
+  /* experimental, combine ports to make wider ports, e.g. 2r memory -> 1 wide \
+   * read. mainly useful for wide ROMs or asymmetric r/w width, otherwise      \
+   * limited by other port */                                                  \
+  FIELD(bool, virtualWidePorts, false)
+  CONFIG_STRUCT(CONFIG_STRUCT_LAMBDA)
+#undef CONFIG_STRUCT_LAMBDA
+  Config config;
+
+private:
   struct PortFrag {
     uint32_t dstAddr;
     uint32_t len;
@@ -160,7 +171,7 @@ class MemoryMappingPass : public Pass<MemoryMappingPass> {
       return op.instr().isOpc(HW_MEM_LOAD);
     };
     static constexpr auto getInstr = [](size_t, auto op) { return op.instr(); };
-
+    Config &config;
     RegisterIRef actual;
     RegisterIRef model;
     uint32_t modelPortWidth, actualStoresWidth, modelStoresWidth,
@@ -174,8 +185,8 @@ class MemoryMappingPass : public Pass<MemoryMappingPass> {
 
     MemoryMapping mapping;
 
-    MemoryMapper(RegisterIRef actual, RegisterIRef model)
-        : actual(actual), model(model),
+    MemoryMapper(Config &config, RegisterIRef actual, RegisterIRef model)
+        : config(config), actual(actual), model(model),
           actualStores(
               actual.oref().uses().filter(filterStore).transform(getInstr)),
           modelStores(
@@ -451,8 +462,6 @@ class MemoryMappingPass : public Pass<MemoryMappingPass> {
           assert(!modSt.addr().template is<ConstantRef>() &&
                  !actSt.addr().template is<ConstantRef>());
 
-          // pretty sure this is not quite right, adjModPortLen is the big
-          // version
           auto fragAccessLen = std::min(part.getLen() - adjAddr, adjModPortLen);
           // If already covered attempt to move forward and cover more via idx
           // offset. (in general not good, wastes alignment)
@@ -460,12 +469,12 @@ class MemoryMappingPass : public Pass<MemoryMappingPass> {
           bool cov;
           while ((cov = part.isCovered(adjAddr, fragAccessLen)) &&
                  (adjAddr - baseAddr) < adjModPortLen) {
-            // fixme: correct shift
-            if (modSt.terms().front().getFact() != adjModPortLen)
+            if (!config.virtualWidePorts)
               break;
-            adjAddr += adjModPortLen * mapping.repeatCount;
+            adjAddr += mapping.modelRangeEnable.getNumCoveredBits(
+                0, mapping.modelRangeEnable.getLen());
           }
-          // can't cover anything new, port is wasted (also not good)
+          // can't cover anything new, port is unused for now
           if (cov)
             continue;
 
@@ -583,8 +592,23 @@ class MemoryMappingPass : public Pass<MemoryMappingPass> {
           connect(en, modLoad.en(), repIdx);
         }
 
-        addr = build.buildAdd(addr, ConstantRef::fromU32(binding.idxOffs));
-        connect(addr, modLoad.terms().front().getIdx().template as<WireRef>(),
+        HWValue adjAddr = addr;
+        if (config.virtualWidePorts) {
+          // reconstruct shift information: if this actPort is larger than
+          // can be implemented with this modPort and its repeat, there must
+          // be supplemental ports. shift/offset to our fraction.
+          uint32_t validBitsInModPort = 0;
+          for (unsigned i = 0; i < mapping.repeatCount; i++)
+            validBitsInModPort += mapping.modelRangeEnable.getNumCoveredBits(
+                i * modelPortWidth + modLoad.base(), modLoad.getLen());
+          assert(actLoad.getLen() % validBitsInModPort == 0);
+          uint32_t multFact = actLoad.getLen() / validBitsInModPort;
+          adjAddr = build.buildMul(adjAddr, ConstantRef::fromU32(multFact));
+          adjAddr =
+              build.buildAdd(adjAddr, ConstantRef::fromU32(binding.idxOffs));
+        }
+        connect(adjAddr,
+                modLoad.terms().front().getIdx().template as<WireRef>(),
                 repIdx);
 
         if constexpr (std::is_same_v<RefT, MemLoadIRef>) {
@@ -767,8 +791,10 @@ class MemoryMappingPass : public Pass<MemoryMappingPass> {
         for (auto [i, use] : inst.others().drop_front().enumerate()) {
           if (use)
             continue;
+          // todo: manually iterate through unused ports and set disabled
+          // rather than just blanket zero.
           use = ConstantBuilder{ctx.getStore<Constant>()}
-                    .undef(*ctx.resolve(cellInputs[i]).getNumBits())
+                    .zero(*ctx.resolve(cellInputs[i]).getNumBits())
                     .get();
         }
 
@@ -777,19 +803,6 @@ class MemoryMappingPass : public Pass<MemoryMappingPass> {
       }
     }
   };
-
-  // Size mismatch
-  /*
-    - Increase size of memory ports
-      OR
-    - Decrease size of std cells.
-      ^ doesn't work, we only want to shrink last cell.
-
-    - artifically make memory ports a multiple of the modelPortSize.
-      -> already doign this but there is no information broadcast which bits are
-    cut off.
-
-  */
 
   bool tryMap(MemoryMapper &mapper, uint32_t repeatCount) {
     mapper.mapping.repeatCount = repeatCount;
@@ -820,7 +833,7 @@ class MemoryMappingPass : public Pass<MemoryMappingPass> {
   }
 
   bool lowerMemory(RegisterIRef actual, RegisterIRef model) {
-    MemoryMapper mapper{actual, model};
+    MemoryMapper mapper{config, actual, model};
     auto origRepCnt = mapper.mapping.repeatCount;
     auto maxRepCnt = origRepCnt * 8;
 
@@ -907,18 +920,3 @@ public:
   auto make(Context &ctx) { return MemoryMappingPass{ctx}; }
 };
 }; // namespace dyno
-
-/*
-You can:
-  - reduce write delay (make observable on all reads)
-  - add read ports (duplicate)
-  - increase width (duplicate)
-  - increase depth (duplicate, split address, guard enable)
-  - add write enable where there is none (loopback read)
-
-
-You can't
-  - reduce read delay
-  - add write ports
-  - make port clocks different if not
-*/
