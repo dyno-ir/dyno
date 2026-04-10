@@ -23,9 +23,13 @@
 #include "support/Optional.h"
 #include "support/Ranges.h"
 #include "support/SmallVec.h"
+#include "support/StringRef.h"
 #include <algorithm>
 #include <bit>
 #include <cstdint>
+#include <ostream>
+#include <print>
+#include <string>
 #include <type_traits>
 
 namespace dyno {
@@ -266,7 +270,68 @@ class MemoryMappingPass : public Pass<MemoryMappingPass> {
       return {true, {&mapped}};
     }
 
+    void visualize(std::ostream &os) {
+      uint32_t totalWidth = mapping.modelRangeEnable.getLen();
+      uint32_t S_max = modelPortWidth;
+      auto getLen = [](size_t, auto p) { return p.getLen(); };
+      uint32_t S_min = std::min(*Range{modelStores}.transform(getLen).min(),
+                                *Range{modelLoads}.transform(getLen).min());
+      auto getNewIdx = [&](uint32_t j) { return j + (j / S_min); };
+
+      auto visualizePorts = [&](StringRef label, auto &partitions,
+                                auto &modelPorts) {
+        std::print(os, "{}:\n", label);
+        for (size_t i = 0; i < modelPorts.size(); ++i) {
+          std::print(os, "  Port {}: ", i);
+          uint32_t rowLen =
+              totalWidth + (totalWidth > 0 ? (totalWidth - 1) / S_min : 0);
+          std::string row(rowLen, ' ');
+          uint32_t portWidth = modelPorts[i].getLen();
+          for (uint32_t j = S_min; j < totalWidth; j += S_min)
+            if (j % portWidth == 0)
+              row[getNewIdx(j) - 1] = '|';
+          for (uint32_t r = 0; r < mapping.repeatCount; ++r) {
+            uint32_t modelBase = r * S_max + modelPorts[i].base();
+            uint32_t portLen = modelPorts[i].getLen();
+            for (uint32_t j = modelBase;
+                 j < modelBase + portLen && j < totalWidth; ++j)
+              row[getNewIdx(j)] = '.';
+            for (size_t actIdx = 0; actIdx < partitions.size(); ++actIdx) {
+              for (auto &frag : partitions[actIdx].frags) {
+                if (frag.mapping &&
+                    *frag.mapping == r * modelPorts.size() + i) {
+                  for (uint32_t j = modelBase;
+                       j < modelBase + portLen && j < totalWidth; ++j) {
+                    if (mapping.modelRangeEnable.isCovered(j, 1))
+                      row[getNewIdx(j)] = '0' + (actIdx % 10);
+                  }
+                }
+              }
+            }
+          }
+          std::print(os, "{}\n", row);
+        }
+      };
+      visualizePorts("Store Mapping", mapping.storePartitions, modelStores);
+      visualizePorts("Load Mapping", mapping.loadPartitions, modelLoads);
+      std::print(os, "Enable:   ");
+      uint32_t rowLen =
+          totalWidth + (totalWidth > 0 ? (totalWidth - 1) / S_min : 0);
+      std::string enableRow(rowLen, '.');
+      for (uint32_t j = S_min; j < totalWidth; j += S_min)
+        enableRow[getNewIdx(j) - 1] = ' ';
+      for (auto &frag : mapping.modelRangeEnable.frags) {
+        if (frag.mapping) {
+          for (uint32_t j = frag.dstAddr; j < frag.dstAddr + frag.len; ++j)
+            if (j < totalWidth)
+              enableRow[getNewIdx(j)] = '_';
+        }
+      }
+      std::print(os, "{}\n", enableRow);
+    }
+
     template <typename RefT>
+
     bool mapPorts(SmallVecImpl<PortPartition> &partitions,
                   SmallVecImpl<RefT> &actualPorts,
                   SmallVecImpl<RefT> &modelPorts) {
@@ -371,10 +436,7 @@ class MemoryMappingPass : public Pass<MemoryMappingPass> {
             auto overflBits = (baseAddr + adjModPortLen - 1) -
                               ((lowIdx + 1) * subPortBoundary) + 1;
 
-            bool isLast = (adjActPortLen / subPortBoundary) == highIdx;
-
             if (lowIdx != highIdx) {
-              assert(overflBits);
               //  if we set adjModelWidth we need to restart from beginning
               if (!setAdjModelWidth(repIdx,
                                     adjModPortLen - overflBits + modSt.base(),
@@ -438,6 +500,8 @@ class MemoryMappingPass : public Pass<MemoryMappingPass> {
           triggerMapping.commit();
           usedModelPort[globIdx] = 1;
           part.writeSingle(adjAddr, fragAccessLen, unsigned(globIdx));
+          visualize(std::cout);
+          std::print(std::cout, "\n");
           if (part.isCovered(0, part.getLen()))
             break;
         }
@@ -455,8 +519,6 @@ class MemoryMappingPass : public Pass<MemoryMappingPass> {
           mapping.modelRangeEnable.writeSingle(
               repIdx * modelPortWidth + modSt.base(), modSt.getLen());
         }
-      } else {
-        assert(usedModelPort.unsetBitIdxs().empty());
       }
       return true;
     }
@@ -509,8 +571,9 @@ class MemoryMappingPass : public Pass<MemoryMappingPass> {
             en = actLoad.en();
           assert(en.getNumBits() == 1);
           if (subIdx) {
-            auto idx = frag.dstAddr / actLoad.getLen();
-            assert(idx == ((frag.dstAddr + frag.len - 1) / actLoad.getLen()) &&
+            auto idx = frag.dstAddr / *getMinFact(actLoad);
+            assert(idx ==
+                       ((frag.dstAddr + frag.len - 1) / *getMinFact(actLoad)) &&
                    "frag overlaps multiple boundary?");
             en = build.buildAnd(en, build.buildICmp(subIdx,
                                                     ConstantRef::fromU32(idx),
@@ -759,7 +822,7 @@ class MemoryMappingPass : public Pass<MemoryMappingPass> {
   bool lowerMemory(RegisterIRef actual, RegisterIRef model) {
     MemoryMapper mapper{actual, model};
     auto origRepCnt = mapper.mapping.repeatCount;
-    auto maxRepCnt = origRepCnt * 4;
+    auto maxRepCnt = origRepCnt * 8;
 
     // We start with a lower bound of the number of repeats required.
     // Bounded exponential search to find the lowest number of repeats to

@@ -1048,20 +1048,14 @@ public:
     uint32_t offs = bitOffs / WordBits;
     uint32_t shamt = bitOffs % WordBits;
 
-    auto getWord = [&](size_t i) {
-      if (i >= inWords)
-        return repeatExtend(src.getExtend());
-      return src.getWords()[i];
-    };
-
     for (uint32_t i = 0; i < outWords; i++) {
       size_t lowI = i + offs;
       size_t highI = i + offs + 1;
 
-      out.words[i] = (getWord(lowI) >> shamt) |
+      out.words[i] = (src.getWord(lowI, inWords) >> shamt) |
                      ((highI >= src.getExtNumWords() || shamt == 0)
                           ? 0
-                          : (getWord(highI) << (32 - shamt)));
+                          : (src.getWord(highI, inWords) << (32 - shamt)));
     }
 
     out.words.resize(outWords);
@@ -1479,8 +1473,10 @@ public:
     auto lhsBits = lhs.getRawNumBits();
     out.numBits = lhsBits + rhsBits;
     uint32_t outNumWords = rhsExtWords + std::max(1u, lhs.getNumWords());
-    if ((rhsBits % 32) && (lhsBits % 32) &&
-        (rhsBits % 32) + (lhsBits % 32) <= 32)
+    // if the remainder of both sides fits into one word, delete one
+    // overprovisioned
+    if (outNumWords == rhsExtWords + lhs.getExtNumWords() && (rhsBits % 32) &&
+        (lhsBits % 32) && (rhsBits % 32) + (lhsBits % 32) <= 32)
       outNumWords--;
 
     // avoid linear behavior on repeat calls
@@ -2776,7 +2772,16 @@ static constexpr CBigInt operator""_b(const char *str) {
 }
 
 static constexpr CBigInt operator""_bv(const char *str, size_t sz) {
+  auto begin = str;
   auto res = CBigInt::parseVlog(str);
+  assert(str == begin + sz);
+  assert(res);
+  return res.value().bigInt;
+}
+static constexpr CBigInt operator""_bd(const char *str, size_t sz) {
+  auto begin = str;
+  auto res = CBigInt::parseDyno(str, str + sz);
+  assert(str == begin + sz);
   assert(res);
   return res.value().bigInt;
 }

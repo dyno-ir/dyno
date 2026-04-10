@@ -37,31 +37,61 @@
 //   }
 // }
 
-STDCELL_DEF %FakeRAM:module("FakeRAM_18k"), %0:block {
+// STDCELL_DEF %FakeRAM:module("FakeRAM_18k"), %0:block {
+//   INPUT_REGISTER_DEF %clk:register(1)
+//   INPUT_REGISTER_DEF %IN_waddr:register(10)
+//   INPUT_REGISTER_DEF %IN_wdata:register(18)
+//   INPUT_REGISTER_DEF %IN_wmask0:register(1)
+//   INPUT_REGISTER_DEF %IN_wmask1:register(1)
+//   INPUT_REGISTER_DEF %IN_raddr:register(10)
+//   OUTPUT_REGISTER_DEF %OUT_rdata:register(18)
+//   REGISTER_DEF %r12:register(18432)
+//   TRIGGER_DEF %1:trigger(pos), %clk
+//   COMB_PROCESS_DEF %2:process, %3:block {
+//     LOAD %w31:wire(10), %IN_raddr  ["config.code:23:17-30"]
+//     ZEXT %w1:wire(32), %w31  ["config.code:23:17-30"]
+//     GEP %4:ptr, #32'd0, %w1, #32'd18, #32'h00000400
+//     MEM_LOAD %w17:wire(18), %5:mem_port(0), %r12, %4
+//     LOAD %w25:wire(10), %IN_waddr
+//     ZEXT %w26:wire(32), %w25  ["config.code:18.5-20.51", "config.code:20:9-22"]
+//     LOAD %w22:wire(18), %IN_wdata
+//     LOAD %w14:wire(1), %IN_wmask1
+//     LOAD %w13:wire(1), %IN_wmask0
+//     TRUNC %w15:wire(9), %w22  ["config.code:18.5-20.51", "config.code:20:9-50", "config.code:20:43-46"]
+//     GEP %6:ptr, #32'd0, %w26, #32'd18, #32'h00000400
+//     MEM_STORE %7:mem_port(1), %w15, %r12, %w13, %6, %1
+//     SPLICE %w35:wire(9), %w22, #32'd9  ["config.code:18.5-20.51", "config.code:20:9-50", "config.code:20:43-46"]
+//     GEP %8:ptr, #32'd9, %w26, #32'd18, #32'h00000400
+//     MEM_STORE %9:mem_port(1), %w35, %r12, %w14, %8, %1
+//     STORE %w17, %OUT_rdata
+//   }
+// }
+
+STDCELL_DEF %FakeRAM:module("FakeRAM_288"), %0:block {
   INPUT_REGISTER_DEF %clk:register(1)
-  INPUT_REGISTER_DEF %IN_waddr:register(10)
+  INPUT_REGISTER_DEF %IN_waddr:register(4)
   INPUT_REGISTER_DEF %IN_wdata:register(18)
   INPUT_REGISTER_DEF %IN_wmask0:register(1)
   INPUT_REGISTER_DEF %IN_wmask1:register(1)
-  INPUT_REGISTER_DEF %IN_raddr:register(10)
+  INPUT_REGISTER_DEF %IN_raddr:register(4)
   OUTPUT_REGISTER_DEF %OUT_rdata:register(18)
-  REGISTER_DEF %r12:register(18432)
+  REGISTER_DEF %r12:register(288)
   TRIGGER_DEF %1:trigger(pos), %clk
   COMB_PROCESS_DEF %2:process, %3:block {
-    LOAD %w31:wire(10), %IN_raddr  ["config.code:23:17-30"]
+    LOAD %w31:wire(4), %IN_raddr  ["config.code:23:17-30"]
     ZEXT %w1:wire(32), %w31  ["config.code:23:17-30"]
-    GEP %4:ptr, #32'd0, %w1, #32'd18, #32'h00000400
+    GEP %4:ptr, #32'd0, %w1, #32'd18, #32'd16
     MEM_LOAD %w17:wire(18), %5:mem_port(0), %r12, %4
-    LOAD %w25:wire(10), %IN_waddr
+    LOAD %w25:wire(4), %IN_waddr
     ZEXT %w26:wire(32), %w25  ["config.code:18.5-20.51", "config.code:20:9-22"]
     LOAD %w22:wire(18), %IN_wdata
     LOAD %w14:wire(1), %IN_wmask1
     LOAD %w13:wire(1), %IN_wmask0
     TRUNC %w15:wire(9), %w22  ["config.code:18.5-20.51", "config.code:20:9-50", "config.code:20:43-46"]
-    GEP %6:ptr, #32'd0, %w26, #32'd18, #32'h00000400
+    GEP %6:ptr, #32'd0, %w26, #32'd18, #32'd16
     MEM_STORE %7:mem_port(1), %w15, %r12, %w13, %6, %1
     SPLICE %w35:wire(9), %w22, #32'd9  ["config.code:18.5-20.51", "config.code:20:9-50", "config.code:20:43-46"]
-    GEP %8:ptr, #32'd9, %w26, #32'd18, #32'h00000400
+    GEP %8:ptr, #32'd9, %w26, #32'd18, #32'd16
     MEM_STORE %9:mem_port(1), %w35, %r12, %w14, %8, %1
     STORE %w17, %OUT_rdata
   }
