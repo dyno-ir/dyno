@@ -481,8 +481,7 @@ public:
   void clearCache() { knownBits.clearCache(); }
 
 public:
-  explicit DeriveBitsAnalysis(Context &ctx, KnownBitsAnalysis &knownBits)
-      : ctx(ctx), knownBits(knownBits) {}
+  explicit DeriveBitsAnalysis(Context &ctx) : ctx(ctx) {}
 };
 
 }; // namespace dyno

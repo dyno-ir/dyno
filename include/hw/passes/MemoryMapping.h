@@ -9,6 +9,7 @@
 #include "hw/HWAbstraction.h"
 #include "hw/HWContext.h"
 #include "hw/HWInstr.h"
+#include "hw/HWPrinter.h"
 #include "hw/IDs.h"
 #include "hw/LoadStore.h"
 #include "hw/Module.h"
@@ -16,7 +17,9 @@
 #include "hw/analysis/WireVariable.h"
 #include "support/Algorithm.h"
 #include "support/Any.h"
+#include "support/ArrayRef.h"
 #include "support/Bits.h"
+#include "support/Debug.h"
 #include "support/DenseMap.h"
 #include "support/DynBitSet.h"
 #include "support/ErrorRecovery.h"
@@ -42,7 +45,8 @@ public:
   /* experimental, combine ports to make wider ports, e.g. 2r memory -> 1 wide \
    * read. mainly useful for wide ROMs or asymmetric r/w width, otherwise      \
    * limited by other port */                                                  \
-  FIELD(bool, virtualWidePorts, false)
+  FIELD(bool, virtualWidePorts, false)                                         \
+  FIELD(uint32_t, maxRepeatCountFactor, 8)
   CONFIG_STRUCT(CONFIG_STRUCT_LAMBDA)
 #undef CONFIG_STRUCT_LAMBDA
   Config config;
@@ -138,10 +142,12 @@ private:
     uint32_t idxOffs = 0;
   };
   struct MemoryMapping {
-    // metadata attached to model ports (small vec for duplicated ports)
+    // metadata attached to model ports (small vec forrepeatCount duplicated
+    // ports)
     SmallDenseMap<ObjRef<Pointer>, SmallVec<BoundPort, 4>> boundPorts;
 
-    // metadata attached to model triggers (small vec for duplicated ports)
+    // metadata attached to model triggers (small vec for repeatCount duplicated
+    // ports)
     SmallDenseMap<ObjRef<Trigger>, SmallVec<ObjRef<Trigger>, 4>> boundTriggers;
 
     // maps actual load/store ports to model load/store ports
@@ -153,6 +159,9 @@ private:
 
     uint32_t repeatCount;
     uint32_t tgtAdjModelWidth;
+
+    uint64_t cost;
+
     // todo efficient
     uint32_t getAdjModelWidth() const {
       uint32_t sum = 0;
@@ -178,6 +187,8 @@ private:
         actualLoadsWidth, modelLoadsWidth, actualPortsLCM;
 
     // for convenience, actual/model store port arrays
+    // actual: RTL memory we want to map
+    // model: primitive memory, conceptually repeated mapping.repeatCount times
     SmallVec<MemStoreIRef, 4> actualStores;
     SmallVec<MemStoreIRef, 4> modelStores;
     SmallVec<MemLoadIRef, 4> actualLoads;
@@ -195,7 +206,7 @@ private:
               actual.oref().uses().filter(filterLoad).transform(getInstr)),
           modelLoads(
               model.oref().uses().filter(filterLoad).transform(getInstr)),
-          mapping{{}, {}, (actualStores.size()), (actualLoads.size()), {},
+          mapping{{}, {}, (actualStores.size()), (actualLoads.size()), {}, 0,
                   0,  0} {
       modelPortWidth = *getMinFact(modelStores[0]);
       assert(Range{modelStores}.all(
@@ -210,7 +221,6 @@ private:
           Range{actualLoads}
               .transform([](size_t, MemLoadIRef ld) { return ld.getLen(); })
               .sum();
-      // this is just a product
       modelStoresWidth =
           Range{modelStores}
               .transform([](size_t, MemStoreIRef st) { return st.getLen(); })
@@ -231,8 +241,8 @@ private:
       actualPortsLCM = std::lcm(storesLCM, loadsLCM);
 
       // How many times to repeat the model memory. This is a lower bound, other
-      // constraints may push this up, if mapping fails we exponential search
-      // upwards. Lower bound is set by bandwidth and/or capacity.
+      // constraints may push this up, if mapping fails we search upwards. Lower
+      // bound is set by bandwidth and/or capacity.
       mapping.repeatCount =
           *InitListRange{
               round_up_div(actualStoresWidth, modelStoresWidth),
@@ -328,9 +338,9 @@ private:
       std::print(os, "Enable:   ");
       uint32_t rowLen =
           totalWidth + (totalWidth > 0 ? (totalWidth - 1) / S_min : 0);
-      std::string enableRow(rowLen, '.');
-      for (uint32_t j = S_min; j < totalWidth; j += S_min)
-        enableRow[getNewIdx(j) - 1] = ' ';
+      std::string enableRow(rowLen, ' ');
+      // for (uint32_t j = S_min; j < totalWidth; j += S_min)
+      //   enableRow[getNewIdx(j) - 1] = ' ';
       for (auto &frag : mapping.modelRangeEnable.frags) {
         if (frag.mapping) {
           for (uint32_t j = frag.dstAddr; j < frag.dstAddr + frag.len; ++j)
@@ -509,8 +519,6 @@ private:
           triggerMapping.commit();
           usedModelPort[globIdx] = 1;
           part.writeSingle(adjAddr, fragAccessLen, unsigned(globIdx));
-          visualize(std::cout);
-          std::print(std::cout, "\n");
           if (part.isCovered(0, part.getLen()))
             break;
         }
@@ -530,6 +538,26 @@ private:
         }
       }
       return true;
+    }
+
+    void computeMappingCost() {
+      // todo: stdcell info area when available
+      double bitsCost = *model.getNumBits() * mapping.repeatCount;
+
+      // simply assume bitcell cost scales linearily for extra accesses.
+      uint32_t totalPortLen = 0;
+      for (auto &ld : modelLoads)
+        totalPortLen += ld.getLen();
+      for (auto &st : modelStores)
+        totalPortLen += st.getLen();
+
+      bitsCost *= totalPortLen;
+      bitsCost /= modelPortWidth;
+
+      // add one for each port to avoid ties
+      uint64_t portsCost = (modelLoads.size() + modelStores.size());
+
+      mapping.cost = bitsCost + portsCost;
     }
 
     template <typename RefT>
@@ -713,11 +741,8 @@ private:
         build.setInsertPoint(actLoad);
 
         OtherVec<HWValue> wires{ctx, 1, part.frags.size()};
-        // todo: this needs to be error not assert
-        // assert(part.getLen() % actLoad.getLen() == 0);
         uint32_t factor = part.getLen() / *getMinFact(actLoad);
         // todo: lower score when factor is non pow2
-        // assert(std::popcount(factor) == 1 && "expected pow2 factor");
 
         HWValue subIdx;
         applyPort(ctx, actLoad, part, factor, connect, connectReverse, &wires,
@@ -739,9 +764,7 @@ private:
            Range{mapping.storePartitions}.zip(actualStores)) {
         build.setInsertPoint(actStore);
 
-        assert(part.getLen() % actStore.getLen() == 0);
         uint32_t factor = part.getLen() / *getMinFact(actStore);
-        assert(std::popcount(factor) == 1 && "expected pow2 factor");
 
         HWValue subIdx;
         applyPort(ctx, actStore, part, factor, connect, connectReverse, nullptr,
@@ -829,6 +852,7 @@ private:
                          mapper.modelLoads))
       return false;
 
+    mapper.computeMappingCost();
     return true;
   }
 
@@ -857,7 +881,71 @@ private:
     mapper.apply(ctx);
     return true;
   }
-  SmallVec<RegisterIRef, 16> memStdCells;
+
+  bool findBestAndMap(RegisterIRef actual) {
+    std::optional<std::pair<ObjRef<Register>, MemoryMapping>> best =
+        std::nullopt;
+
+    // todo: prune search space based on score
+    for (auto modelCand : Range{memStdCells}.resolve(ctx)) {
+      MemoryMapper mapper{config, actual, modelCand.iref()};
+      auto vis = [&]() {
+        DYNO_DBG(passName, {
+          dumpInstr(actual, ctx);
+          std::print(dbgs(), "possible mapping {}x {}, cost = {}\n",
+                     mapper.mapping.repeatCount,
+                     HWInstrRef{modelCand.iref()}.parentMod(ctx).mod()->name,
+                     mapper.mapping.cost);
+          mapper.visualize(dbgs());
+          std::print(dbgs(), "\n");
+        })
+      };
+
+      uint32_t repCount = mapper.mapping.repeatCount;
+      uint32_t maxRepCount = repCount * config.maxRepeatCountFactor;
+
+      // fast path if heuristic repeat count correct
+      if (tryMap(mapper, repCount)) {
+        vis();
+        if (!best || mapper.mapping.cost < best->second.cost) {
+          best.emplace(modelCand, std::move(mapper.mapping));
+        }
+        continue;
+      }
+      repCount += 1;
+
+      // binary search
+      while (repCount != maxRepCount) {
+        uint32_t trial = (repCount + maxRepCount) / 2;
+        if (tryMap(mapper, trial)) {
+          maxRepCount = trial;
+        } else {
+          repCount = trial + 1;
+        }
+      }
+
+      if (mapper.mapping.repeatCount != repCount) {
+        auto rv = tryMap(mapper, repCount);
+        assert(rv);
+      }
+
+      vis();
+      if (!best || mapper.mapping.cost < best->second.cost) {
+        best.emplace(modelCand, std::move(mapper.mapping));
+      }
+    }
+
+    if (!best)
+      return false;
+
+    MemoryMapper mapper{config, actual, ctx.resolve(best->first).iref()};
+    mapper.mapping = std::move(best->second);
+    mapper.apply(ctx);
+
+    return true;
+  }
+
+  SmallVec<ObjRef<Register>, 16> memStdCells;
 
 public:
   void runOnModule(ModuleIRef mod) {
@@ -867,10 +955,11 @@ public:
       auto uses = reg.oref().uses();
       if (uses.empty())
         continue;
-      if (!uses.front().instr().isOpc(HW_MEM_LOAD, HW_MEM_STORE))
+      if (!Range{uses}.all([](auto use) {
+            return use.instr().isOpc(HW_MEM_LOAD, HW_MEM_STORE);
+          }))
         continue;
-      assert(memStdCells.size() == 1);
-      lowerMemory(reg, memStdCells[0]);
+      findBestAndMap(reg);
     }
   }
 
@@ -890,10 +979,12 @@ public:
 
       if (max.oref().getNumUses() == 0)
         continue;
-      if (!max.oref().uses().front().instr().isOpc(HW_MEM_LOAD, HW_MEM_STORE))
+      if (!Range{max.oref().uses()}.all([](auto use) {
+            return use.instr().isOpc(HW_MEM_LOAD, HW_MEM_STORE);
+          }))
         continue;
 
-      memStdCells.emplace_back(max);
+      memStdCells.emplace_back(max.oref());
     }
   }
 

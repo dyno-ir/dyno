@@ -11,6 +11,7 @@
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <iterator>
 #include <memory>
 #include <new>
@@ -22,6 +23,8 @@ class DenseSetMapBase {
 public:
   using size_type = uint32_t;
   using iterator = Iterator;
+  using key = K;
+
   size_type cap;
   size_type sz;
 
@@ -656,6 +659,39 @@ template <typename K, typename size_type = uint32_t> struct DenseSetBucket {
   DenseSetBucket() { setKeysEmpty(); }
 };
 
+namespace detail {
+template <typename Bucket>
+void copyDenseMapBucketValues(Bucket *buckets, Bucket *obuckets, size_t cap,
+                              bool move = false) {
+  using KeyT = std::remove_cvref_t<decltype(buckets->keys[0])>;
+  if constexpr (requires { buckets->values(); }) {
+    if constexpr (!std::is_trivially_copyable_v<
+                      std::remove_cvref_t<decltype(buckets->values()[0])>>) {
+      for (size_t bucketI = 0; bucketI < cap; bucketI++) {
+        Bucket *bucket = &buckets[bucketI];
+        Bucket *oBucket = &obuckets[bucketI];
+
+        memcpy(bucket->keys.data(), oBucket->keys.data(), sizeof(bucket->keys));
+
+        for (size_t i = 0; i < Bucket::entriesPerBucket; i++) {
+          if (bucket->keys[i] != DenseMapInfo<KeyT>::getEmptyKey() &&
+              bucket->keys[i] != DenseMapInfo<KeyT>::getTombstoneKey()) {
+            if (move)
+              std::construct_at(&bucket->values()[i],
+                                std::move(oBucket->values()[i]));
+            else
+              std::construct_at(&bucket->values()[i], oBucket->values()[i]);
+          }
+        }
+      }
+      return;
+    }
+  }
+  memcpy(reinterpret_cast<void *>(buckets), reinterpret_cast<void *>(obuckets),
+         cap * sizeof(Bucket));
+}
+}; // namespace detail
+
 template <typename K, typename V, typename size_type = uint32_t>
 struct DenseMapBucket : public DenseSetBucket<K, size_type> {
   using Base = DenseSetBucket<K, size_type>;
@@ -688,7 +724,9 @@ public:
   LargeSetMap(const LargeSetMap &other) : Base(other.cap, 0) {
     buckets = (Bucket *)::operator new[](sizeof(Bucket) * other.cap,
                                          std::align_val_t(alignof(Bucket)));
-    std::uninitialized_copy_n(other.buckets, other.cap, buckets);
+
+    detail::copyDenseMapBucketValues(buckets, other.buckets, other.cap);
+
     this->cap = other.cap;
     this->sz = other.sz;
   }
@@ -761,7 +799,7 @@ public:
 public:
   bool isSmall() { return buckets == *arr; }
 
-  SmallSetMap() : Base(InlineBuckets, 0), arr() {
+  SmallSetMap() noexcept : Base(InlineBuckets, 0), arr() {
     std::uninitialized_default_construct_n(*arr, InlineBuckets);
     buckets = *arr;
   }
@@ -772,14 +810,16 @@ public:
     } else {
       buckets = *arr;
     }
-    std::uninitialized_copy_n(other.buckets, other.cap, buckets);
+
+    detail::copyDenseMapBucketValues(buckets, other.buckets, other.cap);
+
     this->cap = other.cap;
     this->sz = other.sz;
   }
-  SmallSetMap(SmallSetMap &&other) : Base(InlineBuckets, 0), arr() {
+  SmallSetMap(SmallSetMap &&other) noexcept : Base(InlineBuckets, 0), arr() {
     if (other.isSmall()) {
       buckets = *arr;
-      std::uninitialized_copy_n(other.buckets, other.cap, buckets);
+      detail::copyDenseMapBucketValues(buckets, other.buckets, other.cap, true);
     } else {
       this->buckets = other.buckets;
     }
@@ -797,24 +837,8 @@ public:
     return *this;
   }
   SmallSetMap &operator=(SmallSetMap &&other) {
-    if (!this->buckets) {
-      // moved-from state
-      std::construct_at(this);
-    }
-
-    if (other.isSmall()) {
-      std::uninitialized_copy_n(other.buckets, other.cap, buckets);
-    } else {
-      deleteArr(buckets);
-      this->buckets = other.buckets;
-    }
-
-    this->cap = other.cap;
-    this->sz = other.sz;
-
-    other.buckets = nullptr;
-    other.sz = 0;
-    other.cap = 0;
+    std::destroy_at(this);
+    std::construct_at(this, std::move(other));
     return *this;
   }
   SmallSetMap(size_t cap)

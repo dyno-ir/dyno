@@ -1993,7 +1993,7 @@ public:
 public:
   explicit InstCombinePass(Context &ctx)
       : ctx(ctx), cbuild(ConstantBuilder{ctx.getStore<Constant>()}),
-        bitAlias(ctx), deriveBits(ctx, knownBits) {}
+        bitAlias(ctx), deriveBits(ctx) {}
   static InstCombinePass make(Context &ctx) { return InstCombinePass{ctx}; }
 };
 
