@@ -1,7 +1,6 @@
 #pragma once
 
 #include "dyno/Context.h"
-#include "hw/HWContext.h"
 namespace dyno {
 
 // Maintains a debug info stack and automatically adds debug info(s) on the top

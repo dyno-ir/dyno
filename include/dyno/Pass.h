@@ -67,27 +67,9 @@ CONFIG_STRUCT_TYPES(LAMBDA)
   Func(reinterpret_cast<void *>(&this->name), ConfigStructTypeToEnum<type>::v, \
        #name);
 
-#define STR_IMPL(x) #x
-#define STR(x) STR_IMPL(x)
-#define QUOTE_1(x) STR(x)
-#define QUOTE_2(x, ...) STR(x), QUOTE_1(__VA_ARGS__)
-#define QUOTE_3(x, ...) STR(x), QUOTE_2(__VA_ARGS__)
-#define QUOTE_4(x, ...) STR(x), QUOTE_3(__VA_ARGS__)
-#define QUOTE_5(x, ...) STR(x), QUOTE_4(__VA_ARGS__)
-#define QUOTE_6(x, ...) STR(x), QUOTE_5(__VA_ARGS__)
-#define QUOTE_7(x, ...) STR(x), QUOTE_6(__VA_ARGS__)
-#define QUOTE_8(x, ...) STR(x), QUOTE_7(__VA_ARGS__)
-#define GET_NTH_ARG(_1, _2, _3, _4, _5, _6, _7, _8, N, ...) N
-#define COUNT_ARGS(...) GET_NTH_ARG(__VA_ARGS__, 8, 7, 6, 5, 4, 3, 2, 1)
-#define GLUE_IMPL(x, y) x##y
-#define GLUE(x, y) GLUE_IMPL(x, y)
-
-// quote each element in list
-#define QUOTE_LIST(...) GLUE(QUOTE_, COUNT_ARGS(__VA_ARGS__))(__VA_ARGS__)
-
 #define CONFIG_EXPAND_ENUM_CALL(name, defaultV, ...)                           \
   EnumFunc(reinterpret_cast<void *>(&this->name), #name,                       \
-           Vec<const char *>{QUOTE_LIST(__VA_ARGS__)});
+           Vec<const char *>{DYNO_QUOTE_LIST(__VA_ARGS__)});
 
 #define CONFIG_STRUCT(lambda)                                                  \
   struct Config {                                                              \
@@ -181,7 +163,8 @@ struct ConfigParser {
   }
 };
 
-template <typename Derived> class Pass {
+struct PassTag {};
+template <typename Derived> class Pass : public PassTag {
   static constexpr std::string_view getName() {
     for (auto t : Tokenizer{__PRETTY_FUNCTION__, ": <>"}) {
       // there's probably better logic, but format is different between
@@ -316,5 +299,9 @@ public:
   bool runGenericPtr(FatDynObjRef<> *ref) { return runGeneric(*ref); }
 
   static constexpr std::string_view passName = getName();
+  static inline uint32_t passID = 0;
+
+  static inline const uint32_t &debugID{passID};
+  static inline const std::string_view &debugName{passName};
 };
 }; // namespace dyno

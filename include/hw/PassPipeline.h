@@ -155,16 +155,15 @@ public:
       mod->ignore = true;
     }
 
-    auto old = std::pair(printAfterAll, debugType);
+    auto old = printAfterAll;
     printAfterAll = false;
-    debugType = 0;
     runPass(parseLiberty);
     runPass(aggressiveDCE);
     runPass(cse, true);
     runPass(orderInstrs);
     runPass(instCombine);
     runPass(aggressiveDCE);
-    std::tie(printAfterAll, debugType) = old;
+    printAfterAll = old;
 
     // todo properly
     for (auto mod : ctx.getStore<Module>())

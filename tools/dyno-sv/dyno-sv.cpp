@@ -20,6 +20,7 @@
 #include "meta/PassPipelineInterpreter.h"
 #include "op/OpContext.h"
 #include "support/CmdLineArgs.h"
+#include "support/Debug.h"
 #include "support/ErrorRecovery.h"
 #include "support/SubCommand.h"
 #include "support/TwoLevelSet.h"
@@ -71,6 +72,14 @@ CmdLineArg<Vec<StringRef>> argTestOnly{
 CmdLineArg<bool> argDebug{
     'd', "debug", "Run in debug mode (only has effect for debug builds).", 0,
     false};
+
+CmdLineArg<Vec<StringRef>> argDebugPasses{
+    std::nullopt,
+    "debug-passes",
+    "Run passes in debug mode (only has effect for debug builds), can be "
+    "specified multiple times.",
+    CmdLineArgFlags::VALUE_REQUIRED | CmdLineArgFlags::MULTIPLE,
+    {}};
 
 CmdLineArg<bool> argPrintAfterAll{std::nullopt, "print-after-all",
                                   "Print IR after all passes.", false};
@@ -165,7 +174,7 @@ void test(FatContext &ctx) {
   // todo: pass registry sharing. ideally make context not own this so we can
   // just share the ref.
   sandbox.getPassRegistry().registerPass<ParseVerilogPass>();
-  TestPrinter print{ctx, std::cout};
+  TestPrinter print{sandbox, std::cout};
   TestInterpreter interp{sandbox, print};
   auto pass = interp.execBlock(block, sandbox, only, *argPrintAfterAll);
   if (!pass)
@@ -186,15 +195,18 @@ int main(int argc, char **argv) {
     synth.registerArg(argSlangArgs);
     synth.registerArg(argFlowScript);
     synth.registerArg(argDebug);
+    synth.registerArg(argDebugPasses);
     synth.registerArg(argPrintAfterAll);
 
     script.registerArg(argScriptFileName);
     script.registerArg(argDebug);
+    script.registerArg(argDebugPasses);
     script.registerArg(argPrintAfterAll);
 
     test.registerArg(argScriptFileName);
     test.registerArg(argTestOnly);
     test.registerArg(argDebug);
+    test.registerArg(argDebugPasses);
     test.registerArg(argPrintAfterAll);
 
     SubCommandHandler handler(&synth);
@@ -215,7 +227,11 @@ int main(int argc, char **argv) {
 
   ctx.getCtx<CoreDialectContext>().setSymbols(symbols);
 
-  debugType = *argDebug;
+#ifdef DYNO_ENABLE_DEBUG
+  if (*argDebug)
+    dbg_enable_all();
+  ctx.getPassRegistry().setDebugEnForPasses(*argDebugPasses, true);
+#endif
 
   switch (sc) {
   case SC_SYNTH:
@@ -234,3 +250,4 @@ int main(int argc, char **argv) {
   }
   }
 }
+\

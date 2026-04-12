@@ -1,41 +1,41 @@
 
-// STDCELL_DEF %Test:module("fakemem_16x2_3r1w_async_read"), %0:block {
-//   INPUT_REGISTER_DEF %clk:register(1)
-//   INPUT_REGISTER_DEF %IN_waddr:register(4)
-//   INPUT_REGISTER_DEF %IN_wdata:register(2)
-//   INPUT_REGISTER_DEF %IN_wmask:register(1)
-//   INPUT_REGISTER_DEF %IN_raddr:register(4)
-//   OUTPUT_REGISTER_DEF %OUT_rdata:register(2)
-//   INPUT_REGISTER_DEF %IN_raddr2:register(4)
-//   OUTPUT_REGISTER_DEF %OUT_rdata2:register(2)
-//   INPUT_REGISTER_DEF %IN_raddr3:register(4)
-//   OUTPUT_REGISTER_DEF %OUT_rdata3:register(2)
-//   REGISTER_DEF %r11:register(32)
-//   TRIGGER_DEF %1:trigger(pos), %clk
-//   COMB_PROCESS_DEF %2:process, %3:block {
-//     LOAD %w15:wire(4), %IN_raddr  ["test/tools/dyno-sv/testMemSmol3R.sv:23:25-38"]
-//     ZEXT %w12:wire(32), %w15  ["test/tools/dyno-sv/testMemSmol3R.sv:23:25-38"]
-//     GEP %4:ptr, #32'd0, %w12, #32'd2, #32'd16
-//     MEM_LOAD %w21:wire(2), %5:mem_port(0), %r11, %4
-//     LOAD %w11:wire(4), %IN_raddr2  ["test/tools/dyno-sv/testMemSmol3R.sv:24:26-40"]
-//     ZEXT %w5:wire(32), %w11  ["test/tools/dyno-sv/testMemSmol3R.sv:24:26-40"]
-//     GEP %6:ptr, #32'd0, %w5, #32'd2, #32'd16
-//     MEM_LOAD %w2:wire(2), %7:mem_port(0), %r11, %6
-//     LOAD %w9:wire(4), %IN_raddr3  ["test/tools/dyno-sv/testMemSmol3R.sv:25:26-40"]
-//     ZEXT %w8:wire(32), %w9  ["test/tools/dyno-sv/testMemSmol3R.sv:25:26-40"]
-//     GEP %8:ptr, #32'd0, %w8, #32'd2, #32'd16
-//     MEM_LOAD %w22:wire(2), %9:mem_port(0), %r11, %8
-//     LOAD %w6:wire(1), %IN_wmask  ["test/tools/dyno-sv/testMemSmol3R.sv:20.3-21.31"]
-//     LOAD %w1:wire(4), %IN_waddr  ["test/tools/dyno-sv/testMemSmol3R.sv:21:5-18"]
-//     ZEXT %w13:wire(32), %w1  ["test/tools/dyno-sv/testMemSmol3R.sv:21:5-18"]
-//     LOAD %w4:wire(2), %IN_wdata  ["test/tools/dyno-sv/testMemSmol3R.sv:21:5-30"]
-//     GEP %10:ptr, #32'd0, %w13, #32'd2, #32'd16
-//     MEM_STORE %11:mem_port(1), %w4, %r11, %w6, %10, %1
-//     STORE %w21, %OUT_rdata
-//     STORE %w2, %OUT_rdata2
-//     STORE %w22, %OUT_rdata3
-//   }
-// }
+STDCELL_DEF %Test:module("fakemem_16x2_3r1w_async_read"), %0:block {
+  INPUT_REGISTER_DEF %clk:register(1)
+  INPUT_REGISTER_DEF %IN_waddr:register(4)
+  INPUT_REGISTER_DEF %IN_wdata:register(2)
+  INPUT_REGISTER_DEF %IN_wmask:register(1)
+  INPUT_REGISTER_DEF %IN_raddr:register(4)
+  OUTPUT_REGISTER_DEF %OUT_rdata:register(2)
+  INPUT_REGISTER_DEF %IN_raddr2:register(4)
+  OUTPUT_REGISTER_DEF %OUT_rdata2:register(2)
+  INPUT_REGISTER_DEF %IN_raddr3:register(4)
+  OUTPUT_REGISTER_DEF %OUT_rdata3:register(2)
+  REGISTER_DEF %r11:register(32)
+  TRIGGER_DEF %1:trigger(pos), %clk
+  COMB_PROCESS_DEF %2:process, %3:block {
+    LOAD %w15:wire(4), %IN_raddr
+    ZEXT %w12:wire(32), %w15
+    GEP %4:ptr, #32'd0, %w12, #32'd2, #32'd16
+    MEM_LOAD %w21:wire(2), %5:mem_port(0), %r11, %4
+    LOAD %w11:wire(4), %IN_raddr2
+    ZEXT %w5:wire(32), %w11
+    GEP %6:ptr, #32'd0, %w5, #32'd2, #32'd16
+    MEM_LOAD %w2:wire(2), %7:mem_port(0), %r11, %6
+    LOAD %w9:wire(4), %IN_raddr3
+    ZEXT %w8:wire(32), %w9
+    GEP %8:ptr, #32'd0, %w8, #32'd2, #32'd16
+    MEM_LOAD %w22:wire(2), %9:mem_port(0), %r11, %8
+    LOAD %w6:wire(1), %IN_wmask
+    LOAD %w1:wire(4), %IN_waddr
+    ZEXT %w13:wire(32), %w1
+    LOAD %w4:wire(2), %IN_wdata
+    GEP %10:ptr, #32'd0, %w13, #32'd2, #32'd16
+    MEM_STORE %11:mem_port(1), %w4, %r11, %w6, %10, %1
+    STORE %w21, %OUT_rdata
+    STORE %w2, %OUT_rdata2
+    STORE %w22, %OUT_rdata3
+  }
+}
 
 // STDCELL_DEF %FakeRAM:module("FakeRAM_18k"), %0:block {
 //   INPUT_REGISTER_DEF %clk:register(1)
@@ -48,19 +48,19 @@
 //   REGISTER_DEF %r12:register(18432)
 //   TRIGGER_DEF %1:trigger(pos), %clk
 //   COMB_PROCESS_DEF %2:process, %3:block {
-//     LOAD %w31:wire(10), %IN_raddr  ["config.code:23:17-30"]
-//     ZEXT %w1:wire(32), %w31  ["config.code:23:17-30"]
+//     LOAD %w31:wire(10), %IN_raddr
+//     ZEXT %w1:wire(32), %w31
 //     GEP %4:ptr, #32'd0, %w1, #32'd18, #32'h00000400
 //     MEM_LOAD %w17:wire(18), %5:mem_port(0), %r12, %4
 //     LOAD %w25:wire(10), %IN_waddr
-//     ZEXT %w26:wire(32), %w25  ["config.code:18.5-20.51", "config.code:20:9-22"]
+//     ZEXT %w26:wire(32), %w25
 //     LOAD %w22:wire(18), %IN_wdata
 //     LOAD %w14:wire(1), %IN_wmask1
 //     LOAD %w13:wire(1), %IN_wmask0
-//     TRUNC %w15:wire(9), %w22  ["config.code:18.5-20.51", "config.code:20:9-50", "config.code:20:43-46"]
+//     TRUNC %w15:wire(9), %w22
 //     GEP %6:ptr, #32'd0, %w26, #32'd18, #32'h00000400
 //     MEM_STORE %7:mem_port(1), %w15, %r12, %w13, %6, %1
-//     SPLICE %w35:wire(9), %w22, #32'd9  ["config.code:18.5-20.51", "config.code:20:9-50", "config.code:20:43-46"]
+//     SPLICE %w35:wire(9), %w22, #32'd9
 //     GEP %8:ptr, #32'd9, %w26, #32'd18, #32'h00000400
 //     MEM_STORE %9:mem_port(1), %w35, %r12, %w14, %8, %1
 //     STORE %w17, %OUT_rdata
@@ -78,22 +78,60 @@ STDCELL_DEF %FakeRAM:module("FakeRAM_288"), %0:block {
   REGISTER_DEF %r12:register(288)
   TRIGGER_DEF %1:trigger(pos), %clk
   COMB_PROCESS_DEF %2:process, %3:block {
-    LOAD %w31:wire(4), %IN_raddr  ["config.code:23:17-30"]
-    ZEXT %w1:wire(32), %w31  ["config.code:23:17-30"]
+    LOAD %w31:wire(4), %IN_raddr
+    ZEXT %w1:wire(32), %w31
     GEP %4:ptr, #32'd0, %w1, #32'd18, #32'd16
     MEM_LOAD %w17:wire(18), %5:mem_port(0), %r12, %4
     LOAD %w25:wire(4), %IN_waddr
-    ZEXT %w26:wire(32), %w25  ["config.code:18.5-20.51", "config.code:20:9-22"]
+    ZEXT %w26:wire(32), %w25
     LOAD %w22:wire(18), %IN_wdata
     LOAD %w14:wire(1), %IN_wmask1
     LOAD %w13:wire(1), %IN_wmask0
-    TRUNC %w15:wire(9), %w22  ["config.code:18.5-20.51", "config.code:20:9-50", "config.code:20:43-46"]
+    TRUNC %w15:wire(9), %w22
     GEP %6:ptr, #32'd0, %w26, #32'd18, #32'd16
     MEM_STORE %7:mem_port(1), %w15, %r12, %w13, %6, %1
-    SPLICE %w35:wire(9), %w22, #32'd9  ["config.code:18.5-20.51", "config.code:20:9-50", "config.code:20:43-46"]
+    SPLICE %w35:wire(9), %w22, #32'd9
     GEP %8:ptr, #32'd9, %w26, #32'd18, #32'd16
     MEM_STORE %9:mem_port(1), %w35, %r12, %w14, %8, %1
     STORE %w17, %OUT_rdata
+  }
+}
+
+STDCELL_DEF %FakeMem_3r1w_1x16:module("FakeMem_3r1w_1x16"), %0:block {
+  INPUT_REGISTER_DEF %clk:register(1)
+  INPUT_REGISTER_DEF %IN_waddr:register(4)
+  INPUT_REGISTER_DEF %IN_wdata:register(1)
+  INPUT_REGISTER_DEF %IN_wmask:register(1)
+  INPUT_REGISTER_DEF %IN_raddr:register(4)
+  OUTPUT_REGISTER_DEF %OUT_rdata:register(1)
+  INPUT_REGISTER_DEF %IN_raddr2:register(4)
+  OUTPUT_REGISTER_DEF %OUT_rdata2:register(1)
+  INPUT_REGISTER_DEF %IN_raddr3:register(4)
+  OUTPUT_REGISTER_DEF %OUT_rdata3:register(1)
+  REGISTER_DEF %r11:register(16)
+  TRIGGER_DEF %1:trigger(pos), %clk
+  COMB_PROCESS_DEF %2:process, %3:block {
+    LOAD %w20:wire(4), %IN_raddr
+    ZEXT %w12:wire(32), %w20
+    GEP %4:ptr, #32'd0, %w12, #32'd1, #32'd16
+    MEM_LOAD %w21:wire(1), %5:mem_port(0), %r11, %4
+    LOAD %w19:wire(4), %IN_raddr2
+    ZEXT %w5:wire(32), %w19
+    GEP %6:ptr, #32'd0, %w5, #32'd1, #32'd16
+    MEM_LOAD %w2:wire(1), %7:mem_port(0), %r11, %6
+    LOAD %w18:wire(4), %IN_raddr3
+    ZEXT %w8:wire(32), %w18
+    GEP %8:ptr, #32'd0, %w8, #32'd1, #32'd16
+    MEM_LOAD %w22:wire(1), %9:mem_port(0), %r11, %8
+    LOAD %w16:wire(1), %IN_wmask
+    LOAD %w3:wire(4), %IN_waddr
+    ZEXT %w13:wire(32), %w3
+    LOAD %w0:wire(1), %IN_wdata
+    GEP %10:ptr, #32'd0, %w13, #32'd1, #32'd16
+    MEM_STORE %11:mem_port(1), %w0, %r11, %w16, %10, %1
+    STORE %w21, %OUT_rdata
+    STORE %w2, %OUT_rdata2
+    STORE %w22, %OUT_rdata3
   }
 }
 
@@ -109,14 +147,14 @@ STDCELL_DEF %Test:module("fakemem_16x2_1r1w_sync_read"), %0:block {
   REGISTER_DEF %r11:register(32)
   TRIGGER_DEF %1:trigger(pos), %clk
   COMB_PROCESS_DEF %2:process, %3:block {
-    LOAD %w15:wire(4), %IN_raddr  ["test/tools/dyno-sv/testMemSmol3R.sv:23:25-38"]
-    ZEXT %w12:wire(32), %w15  ["test/tools/dyno-sv/testMemSmol3R.sv:23:25-38"]
+    LOAD %w15:wire(4), %IN_raddr
+    ZEXT %w12:wire(32), %w15
     GEP %4:ptr, #32'd0, %w12, #32'd2, #32'd16
     MEM_LOAD %w21:wire(2), %5:mem_port(1), %r11, %1, %4
-    LOAD %w6:wire(1), %IN_wmask  ["test/tools/dyno-sv/testMemSmol3R.sv:20.3-21.31"]
-    LOAD %w1:wire(4), %IN_waddr  ["test/tools/dyno-sv/testMemSmol3R.sv:21:5-18"]
-    ZEXT %w13:wire(32), %w1  ["test/tools/dyno-sv/testMemSmol3R.sv:21:5-18"]
-    LOAD %w4:wire(2), %IN_wdata  ["test/tools/dyno-sv/testMemSmol3R.sv:21:5-30"]
+    LOAD %w6:wire(1), %IN_wmask
+    LOAD %w1:wire(4), %IN_waddr
+    ZEXT %w13:wire(32), %w1
+    LOAD %w4:wire(2), %IN_wdata
     GEP %10:ptr, #32'd0, %w13, #32'd2, #32'd16
     MEM_STORE %11:mem_port(1), %w4, %r11, %w6, %1, %10
     STORE %w21, %OUT_rdata
@@ -134,14 +172,14 @@ STDCELL_DEF %Test:module("fakemem_16x32_1r1w_async_read"), %0:block {
   REGISTER_DEF %r11:register(512)
   TRIGGER_DEF %1:trigger(pos), %clk
   COMB_PROCESS_DEF %2:process, %3:block {
-    LOAD %w15:wire(4), %IN_raddr  ["test/tools/dyno-sv/testMemSmol3R.sv:23:25-38"]
-    ZEXT %w12:wire(32), %w15  ["test/tools/dyno-sv/testMemSmol3R.sv:23:25-38"]
+    LOAD %w15:wire(4), %IN_raddr
+    ZEXT %w12:wire(32), %w15
     GEP %4:ptr, #32'd0, %w12, #32'd32, #32'd16
     MEM_LOAD %w21:wire(32), %5:mem_port(0), %r11, %4
-    LOAD %w6:wire(1), %IN_wmask  ["test/tools/dyno-sv/testMemSmol3R.sv:20.3-21.31"]
-    LOAD %w1:wire(4), %IN_waddr  ["test/tools/dyno-sv/testMemSmol3R.sv:21:5-18"]
-    ZEXT %w13:wire(32), %w1  ["test/tools/dyno-sv/testMemSmol3R.sv:21:5-18"]
-    LOAD %w4:wire(32), %IN_wdata  ["test/tools/dyno-sv/testMemSmol3R.sv:21:5-30"]
+    LOAD %w6:wire(1), %IN_wmask
+    LOAD %w1:wire(4), %IN_waddr
+    ZEXT %w13:wire(32), %w1
+    LOAD %w4:wire(32), %IN_wdata
     GEP %10:ptr, #32'd0, %w13, #32'd32, #32'd16
     MEM_STORE %11:mem_port(1), %w4, %r11, %w6, %1, %10
     STORE %w21, %OUT_rdata
@@ -159,14 +197,14 @@ STDCELL_DEF %Test:module("fakemem_16x16_1r1w_async_read"), %0:block {
   REGISTER_DEF %r11:register(256)
   TRIGGER_DEF %1:trigger(pos), %clk
   COMB_PROCESS_DEF %2:process, %3:block {
-    LOAD %w15:wire(4), %IN_raddr  ["test/tools/dyno-sv/testMemSmol3R.sv:23:25-38"]
-    ZEXT %w12:wire(32), %w15  ["test/tools/dyno-sv/testMemSmol3R.sv:23:25-38"]
+    LOAD %w15:wire(4), %IN_raddr
+    ZEXT %w12:wire(32), %w15
     GEP %4:ptr, #32'd0, %w12, #32'd16, #32'd16
     MEM_LOAD %w21:wire(16), %5:mem_port(0), %r11, %4
-    LOAD %w6:wire(1), %IN_wmask  ["test/tools/dyno-sv/testMemSmol3R.sv:20.3-21.31"]
-    LOAD %w1:wire(4), %IN_waddr  ["test/tools/dyno-sv/testMemSmol3R.sv:21:5-18"]
-    ZEXT %w13:wire(32), %w1  ["test/tools/dyno-sv/testMemSmol3R.sv:21:5-18"]
-    LOAD %w4:wire(16), %IN_wdata  ["test/tools/dyno-sv/testMemSmol3R.sv:21:5-30"]
+    LOAD %w6:wire(1), %IN_wmask
+    LOAD %w1:wire(4), %IN_waddr
+    ZEXT %w13:wire(32), %w1
+    LOAD %w4:wire(16), %IN_wdata
     GEP %10:ptr, #32'd0, %w13, #32'd16, #32'd16
     MEM_STORE %11:mem_port(1), %w4, %r11, %w6, %1, %10
     STORE %w21, %OUT_rdata
@@ -184,14 +222,14 @@ STDCELL_DEF %Test:module("fakemem_16x18_1r1w_async_read"), %0:block {
   REGISTER_DEF %r11:register(288)
   TRIGGER_DEF %1:trigger(pos), %clk
   COMB_PROCESS_DEF %2:process, %3:block {
-    LOAD %w15:wire(4), %IN_raddr  ["test/tools/dyno-sv/testMemSmol3R.sv:23:25-38"]
-    ZEXT %w12:wire(32), %w15  ["test/tools/dyno-sv/testMemSmol3R.sv:23:25-38"]
+    LOAD %w15:wire(4), %IN_raddr
+    ZEXT %w12:wire(32), %w15
     GEP %4:ptr, #32'd0, %w12, #32'd18, #32'd16
     MEM_LOAD %w21:wire(18), %5:mem_port(0), %r11, %4
-    LOAD %w6:wire(1), %IN_wmask  ["test/tools/dyno-sv/testMemSmol3R.sv:20.3-21.31"]
-    LOAD %w1:wire(4), %IN_waddr  ["test/tools/dyno-sv/testMemSmol3R.sv:21:5-18"]
-    ZEXT %w13:wire(32), %w1  ["test/tools/dyno-sv/testMemSmol3R.sv:21:5-18"]
-    LOAD %w4:wire(18), %IN_wdata  ["test/tools/dyno-sv/testMemSmol3R.sv:21:5-30"]
+    LOAD %w6:wire(1), %IN_wmask
+    LOAD %w1:wire(4), %IN_waddr
+    ZEXT %w13:wire(32), %w1
+    LOAD %w4:wire(18), %IN_wdata
     GEP %10:ptr, #32'd0, %w13, #32'd18, #32'd16
     MEM_STORE %11:mem_port(1), %w4, %r11, %w6, %1, %10
     STORE %w21, %OUT_rdata

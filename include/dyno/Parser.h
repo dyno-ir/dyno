@@ -248,9 +248,12 @@ protected:
       ;
 
     auto endLineCol = lexer->getEndOfTokenLineCol();
-    ctx.getCtx<CoreDialectContext>().instrSourceLocInfo.addSrcLoc(
-        instr, lexer->path, startLineCol.first, startLineCol.second,
-        endLineCol.first, endLineCol.second);
+    if (ctx.getCtx<CoreDialectContext>()
+            .instrSourceLocInfo.getSourceLocs(instr)
+            .empty())
+      ctx.getCtx<CoreDialectContext>().instrSourceLocInfo.addSrcLoc(
+          instr, lexer->path, startLineCol.first, startLineCol.second,
+          endLineCol.first, endLineCol.second);
     return instr;
   }
 

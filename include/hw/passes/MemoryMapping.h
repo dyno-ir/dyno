@@ -29,6 +29,7 @@
 #include "support/StringRef.h"
 #include <algorithm>
 #include <bit>
+#include <cmath>
 #include <cstdint>
 #include <ostream>
 #include <print>
@@ -555,9 +556,14 @@ private:
       bitsCost /= modelPortWidth;
 
       // add one for each port to avoid ties
-      uint64_t portsCost = (modelLoads.size() + modelStores.size());
+      uint64_t portsCost =
+          mapping.repeatCount * (modelLoads.size() + modelStores.size());
 
-      mapping.cost = bitsCost + portsCost;
+      // penalty on higher repeat count
+      double decoderCost = 10 * mapping.repeatCount *
+                           log2(double(*model.getNumBits()) / modelPortWidth);
+
+      mapping.cost = bitsCost + portsCost + decoderCost;
     }
 
     template <typename RefT>
@@ -890,7 +896,7 @@ private:
     for (auto modelCand : Range{memStdCells}.resolve(ctx)) {
       MemoryMapper mapper{config, actual, modelCand.iref()};
       auto vis = [&]() {
-        DYNO_DBG(passName, {
+        DYNO_DBG({
           dumpInstr(actual, ctx);
           std::print(dbgs(), "possible mapping {}x {}, cost = {}\n",
                      mapper.mapping.repeatCount,

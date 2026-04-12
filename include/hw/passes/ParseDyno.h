@@ -34,6 +34,7 @@ public:
     ctx.getStore<Module>().createHooks.emplace_back(
         [&](ModuleRef ref) { ref->ignore = !config.newModulesActive; });
     parser.parse(mmap, config.fileName);
+    ctx.getStore<Module>().createHooks.pop_back();
   }
 
   constexpr static auto runFuncs = mk_tuple(&ParseDynoPass::run);

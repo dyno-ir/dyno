@@ -15,12 +15,12 @@ public:
   Wire(DynObjRef, FatObjRef<Wire> other) : numBits(other->numBits) {}
 
   static bool isInitialized(const Wire *wire) {
-    return !(reinterpret_cast<const char *>(wire)[0] &&
-             reinterpret_cast<const char *>(wire)[1]);
+    return !(reinterpret_cast<const unsigned char *>(wire)[0] == 0xFF &
+             reinterpret_cast<const unsigned char *>(wire)[1] == 0xFF);
   }
   static void setUninitialized(Wire *wire) {
-    reinterpret_cast<char *>(wire)[0] = 0xFF;
-    reinterpret_cast<char *>(wire)[1] = 0xFF;
+    reinterpret_cast<unsigned char *>(wire)[0] = 0xFF;
+    reinterpret_cast<unsigned char *>(wire)[1] = 0xFF;
   }
 };
 

@@ -122,8 +122,14 @@ public:
     return *this;
   }
 
-  Vec(const SmallVecImpl<T> &o) : SmallVecImpl<T>(nullptr, 0, o) {}
-  Vec(const Vec<T> &o) : SmallVecImpl<T>(nullptr, 0, o) {}
+  Vec(const SmallVecImpl<T> &o)
+      : SmallVecImpl<T>(reinterpret_cast<T *>(::operator new[](
+                            (o.size() ?: InitialAlloc) * sizeof(T))),
+                        o.size() ?: InitialAlloc, o) {}
+  Vec(const Vec<T> &o)
+      : SmallVecImpl<T>(reinterpret_cast<T *>(::operator new[](
+                            (o.size() ?: InitialAlloc) * sizeof(T))),
+                        o.size() ?: InitialAlloc, o) {}
 
   Vec &operator=(const Vec &o) {
     // recover from moved-from state.

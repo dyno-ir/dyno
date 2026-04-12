@@ -33,9 +33,10 @@
 #include "support/ErrorRecovery.h"
 #include "support/Ranges.h"
 #include "support/SmallVec.h"
+#include "support/Tuple.h"
 #include "support/Utility.h"
 #include <algorithm>
-#include "support/Tuple.h"
+#include <type_traits>
 namespace dyno {
 
 bool generated(Context &ctx, SmallVecImpl<InstrRef> &matched,
@@ -1882,7 +1883,7 @@ private:
 
     anyMatchHook();
 
-    DYNO_DBG("instcombine", {
+    DYNO_DBG({
       HWPrinter print{dbgs()};
       dbgs() << "initial instructions:\n";
 
@@ -1900,6 +1901,7 @@ private:
         } else
           dbgs() << "<none>\n";
       }
+      dbgs() << "\n";
     })
 
     auto newInstrs =
@@ -1988,7 +1990,7 @@ public:
 
   static constexpr auto runFuncs =
       mk_tuple(&InstCombinePass::runModule, &InstCombinePass::runInstr,
-                      &InstCombinePass::runBlock, &InstCombinePass::run);
+               &InstCombinePass::runBlock, &InstCombinePass::run);
 
 public:
   explicit InstCombinePass(Context &ctx)

@@ -5,8 +5,7 @@
 
 namespace dyno {
 template <>
-inline void
-registerDialectPasses<DialectID{DIALECT_CORE}>(PassRegistry &passRegistry) {
-  passRegistry.registerPass<ResolveImportsPass>();
+inline void registerDialectPasses<DIALECT_CORE>(PassRegistry &passRegistry) {
+  passRegistry.registerPass<ResolveImportsPass>(DIALECT_CORE);
 }
 }; // namespace dyno

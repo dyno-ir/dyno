@@ -312,7 +312,7 @@ private:
     if (matchingPrefixes.size() == 0)
       return false;
 
-    DYNO_DBG(passName, {
+    DYNO_DBG({
       dbgs() << "matched instrs:\n";
       HWPrinter print{dbgs()};
       print.printInstr(lhsAbstr.ref, ctx);
@@ -342,7 +342,7 @@ private:
         Range{candidates}.find_if([&](auto &cand) {
           return cand.ref == newInstrAbstr.ref;
         }) != candidates.end()) {
-      DYNO_DBG(passName, { dbgs() << "builder folded, bailing\n"; })
+      DYNO_DBG({ dbgs() << "builder folded, bailing\n"; })
       // we may have created a couple of zexts, leave these for DCE to clean up
       return false;
     }
@@ -377,7 +377,7 @@ private:
     auto newRHS =
         rebuildInstr(rhsAbstr, matchingPrefixes, rhsCovered, rhsIdxs, defW);
 
-    DYNO_DBG(passName, {
+    DYNO_DBG({
       dbgs() << "replaced with:\n";
       HWPrinter print{dbgs()};
       dbgs() << "shared: ";
@@ -471,7 +471,7 @@ private:
 
       if (!candidate.ref)
         continue;
-      DYNO_DBG(passName, {
+      DYNO_DBG({
         dbgs() << "inspecting: ";
         dumpInstr(candidate.ref, ctx);
       });

@@ -2,6 +2,7 @@
 
 #include "Frontend.h"
 #include "dyno/Context.h"
+#include "dyno/DialectInfo.h"
 #include "dyno/Pass.h"
 #include "hw/Module.h"
 #include "slang/driver/Driver.h"
@@ -16,6 +17,7 @@ class ParseVerilogPass : public Pass<ParseVerilogPass> {
   Context &ctx;
 
 public:
+  static constexpr DialectID dialect{DIALECT_HW};
   // no argument lists currently, so hack around it.
   static constexpr size_t NumArgs = 8;
 #define CONFIG_STRUCT_LAMBDA(FIELD, ENUM)                                      \

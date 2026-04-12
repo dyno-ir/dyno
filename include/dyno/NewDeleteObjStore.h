@@ -177,8 +177,6 @@ public:
     destroyAll();
     freeIds.clear();
     map.clear();
-    createHooks.clear();
-    destroyHooks.clear();
   }
 };
 

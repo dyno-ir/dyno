@@ -7,7 +7,21 @@
 
 namespace dyno {
 
+#define ADD_OP(x) x##_ENUM,
 #include "DialectIDs.inc"
+#undef ADD_OP
+
+constexpr size_t NUM_DIALECTS = NUM_DIALECTS_ENUM;
+
+#define HEADER
+#define FOOTER
+#define LAST
+#define ADD_OP(x) constexpr DialectID x{x##_ENUM};
+#include "DialectIDs.inc"
+#undef ADD_OP
+#undef HEADER
+#undef FOOTER
+#undef LAST
 
 static constexpr size_t MAX_NUM_DIALECTS = 256;
 
