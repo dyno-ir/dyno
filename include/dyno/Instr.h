@@ -259,7 +259,7 @@ public:
   template <typename T> void replace(FatObjRef<T> newRef) {
     return replace(newRef.template as<FatDynObjRef<>>());
   }
-  template <typename T> void replace(FatDynObjRef<T> newRef);
+  template <typename T> void replace(FatDynObjRef<T> newRef) const;
 
   void destroy();
 
@@ -840,7 +840,7 @@ inline void GenericOperand::setLinkedPos(uint16_t pos) {
 }
 #endif
 
-template <typename T> void OperandRef::replace(FatDynObjRef<T> newRef) {
+template <typename T> void OperandRef::replace(FatDynObjRef<T> newRef) const {
   auto &op = (**this);
   if (Operand::isDefUseOperand(op.ref)) {
     assert(this->isDef() ==

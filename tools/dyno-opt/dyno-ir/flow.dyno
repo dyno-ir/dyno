@@ -186,6 +186,8 @@ FUNCTION_DEF %synthLowerMemoryFF:func, :block {
 
   // map flip flops
   meta.FLIP_FLOP_MAPPING_PASS
+  meta.MUX_TREE_FLATTEN_PASS // todo: instead gen one hot mux in flip flop mapping?
+  meta.TRIGGER_DEDUPE_PASS
   meta.INST_COMBINE_PASS
   meta.PROCESS_LINEARIZE_PASS
   meta.ORDER_INSTRS_PASS

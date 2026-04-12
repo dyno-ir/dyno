@@ -24,8 +24,10 @@
 #include "hw/analysis/DemandedBits.h"
 #include "hw/analysis/KnownBits.h"
 #include "hw/analysis/RegisterValue.h"
+#include "hw/passes/FlipFlopInference.h"
 #include "op/IDs.h"
 #include "op/StructuredControlFlow.h"
+#include "support/ArrayRef.h"
 #include "support/Bits.h"
 #include "support/Debug.h"
 #include "support/DenseMap.h"
@@ -36,6 +38,7 @@
 #include "support/Tuple.h"
 #include "support/Utility.h"
 #include <algorithm>
+#include <iterator>
 #include <type_traits>
 namespace dyno {
 
@@ -125,6 +128,158 @@ private:
       knownBits.recomputeAt(def->as<HWValue>());
       bitAlias.recomputeAt(def->as<HWValue>());
     }
+  }
+
+  bool simplifyFlipFlopResets(FlipFlopIRef instr) {
+    auto compare = [](auto lhs, auto rhs) {
+      auto lhsV = std::get<1>(lhs);
+      auto rhsV = std::get<1>(rhs);
+      if (lhsV.template is<WireRef>() && rhsV.template is<WireRef>())
+        return lhsV.getObjID() < rhsV.getObjID();
+      else if (lhsV.template is<WireRef>() || rhsV.template is<WireRef>())
+        return !lhsV.template is<WireRef>();
+      else {
+        // run 2 state compare on possibly 2 state numbers, we just want an
+        // order
+        if (lhsV.template as<ConstantRef>().getIs4S() !=
+            rhsV.template as<ConstantRef>().getIs4S())
+          return !lhsV.template as<ConstantRef>().getIs4S();
+        return BigInt::icmpUnsignedLessOp(lhsV.template as<ConstantRef>(),
+                                          rhsV.template as<ConstantRef>());
+      }
+    };
+
+    HWInstrBuilder build{ctx, instr};
+    auto rebuild = [&](MutArrayRef<std::tuple<HWValue, HWValue>> rstVals) {
+      auto ib =
+          build.buildInstrRaw(instr.getDialectOpcode(), instr.getNumOperands());
+      ib.addRef(instr.def()->fat()).other();
+      instr.def().replace(FatDynObjRef{nullref});
+      ib.addRefs(instr.others()
+                     .subrange(0, FlipFlopIRef::numBaseOperands)
+                     .as<HWValue>());
+      Range{rstVals}.sort(compare);
+      for (auto [rstEn, rstVal] : rstVals)
+        ib.addRef(rstEn).addRef(rstVal);
+      deleteMatchedInstr(instr);
+    };
+
+    if (!instr.rsts().is_sorted(compare)) {
+      SmallVec<std::tuple<HWValue, HWValue>, 4> rstVals(instr.rsts());
+      rebuild(rstVals);
+      return true;
+    }
+
+    SmallDenseMap<DynObjRef, SmallVec<uint32_t, 2>, 4> map;
+    for (auto [i, pair] : Range{instr.rsts()}.enumerate()) {
+      if (auto asConst = std::get<0>(pair).dyn_as<ConstantRef>();
+          asConst && asConst.valueEquals(0))
+        continue;
+      map[std::get<1>(pair)].emplace_back(i);
+    }
+    if (map.size() == instr.numRsts())
+      return false;
+
+    SmallVec<std::tuple<HWValue, HWValue>, 4> rstVals;
+    for (auto [val, idxs] : map) {
+      auto sel = instr.rstRaw(idxs.front());
+      for (auto other : Range{idxs}.drop_front()) {
+        sel = build.buildOr(instr.rstRaw(other));
+      }
+      rstVals.emplace_back(sel, ctx.resolve(val));
+    }
+    rebuild(rstVals);
+    return true;
+  }
+
+  bool simplifyFlipFlopEnable(FlipFlopIRef instr) {
+    // constant zero enable
+    // could still be used as latch with multiple
+    // rests (or change state away from init with single)
+    if (instr.numRsts() == 0)
+      if (auto c = instr.clkEn().dyn_as<ConstantRef>(); c && c.valueEquals(0)) {
+        auto w = instr.def()->as<WireRef>();
+        // todo: init val
+        w.replaceAllUsesWith(cbuild.undef(*w.getNumBits()));
+        deleteMatchedInstr(instr);
+        return true;
+      }
+
+    auto d = instr.d().dyn_as<WireRef>();
+    if (!d)
+      return false;
+
+    HWInstrBuilder build{ctx, instr};
+    auto rebuildWithEn = [&](HWValue newEn) {
+      newEn = build.buildAnd(newEn, instr.clkEnRaw());
+      auto d = instr.d();
+      // todo: ff en as implicit assume rather than explicit
+      d = build.buildAssume(d, newEn);
+
+      auto ib =
+          build.buildInstrRaw(instr.getDialectOpcode(), instr.getNumOperands());
+      ib.addRef(instr.def()->fat()).other();
+      instr.def().replace(FatDynObjRef{nullref});
+      ib.addRef(instr.clk());
+      ib.addRef(d);
+      ib.addRef(newEn);
+      ib.addRefs(
+          instr.others().subrange(FlipFlopIRef::numBaseOperands).as<HWValue>());
+      deleteMatchedInstr(instr);
+    };
+
+    RegisterIRef qReg = nullref;
+    for (auto use : instr.q().uses()) {
+      if (auto asSt = use.instr().dyn_as<StoreIRef>();
+          asSt && !asSt.isOpc(HW_STORE_DEFER) &&
+          asSt.reg().iref().getSingleStore()) {
+        // not valid with full control flow, assuming there's no flip flops
+        // while there's stil control flow.
+        qReg = asSt.reg().iref();
+      }
+    }
+
+    if (d.getDefI().isOpc(HW_MUX)) {
+      auto mux = d.getDefI();
+
+      auto range = mux.others().drop_front().as<HWValue>();
+
+      // try plain wire loopback, then register loopback
+      auto idx = range.find(instr.q()) - range.begin();
+      if (qReg && idx == range.size()) {
+        idx = range.find_if([&](auto val) {
+          return FlipFlopInferencePass::isQLoad(qReg, val);
+        }) - range.begin();
+      }
+      if (idx == range.size())
+        return false;
+      auto val = mux.other(0)->as<HWValue>();
+      if (idx == 0)
+        val = build.buildNot(val);
+      rebuildWithEn(val);
+      return true;
+    }
+
+    if (d.getDefI().isOpc(HW_ONEHOT_MUX)) {
+      auto mux = d.getDefI();
+
+      auto range = mux.others().drop_front().step(2).as<HWValue>();
+
+      // try plain wire loopback, then register loopback
+      auto idx = range.find(instr.q()) - range.begin();
+      if (qReg && idx == range.size()) {
+        idx = range.find_if([&](auto val) {
+          return FlipFlopInferencePass::isQLoad(qReg, val);
+        }) - range.begin();
+      }
+      if (idx == range.size())
+        return false;
+      auto val = mux.other(2 * idx)->as<HWValue>();
+      rebuildWithEn(build.buildNot(val));
+      return true;
+    }
+
+    return false;
   }
 
   bool boolExprSimplifySub(OperandRef root) {
@@ -1412,14 +1567,6 @@ private:
         break;
       }
 
-      case *HW_FLIP_FLOP: {
-        auto asFF = instr.as<FlipFlopIRef>();
-        asFF.flipPolarity(use);
-        break;
-      }
-
-      case *HW_LATCH: // todo;
-
       default:
         dyno_unreachable("register use polarity can't be inverted");
       }
@@ -1741,6 +1888,16 @@ private:
     case *HW_ASSUME: {
       if (simplifyAssume(instr))
         return true;
+      break;
+    }
+
+    case *HW_FLIP_FLOP:
+    case *HW_FLIP_FLOP_SRST: {
+      if (simplifyFlipFlopEnable(instr))
+        return true;
+      if (simplifyFlipFlopResets(instr))
+        return true;
+      break;
     }
 
     default:

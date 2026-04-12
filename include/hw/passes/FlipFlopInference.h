@@ -93,7 +93,8 @@ class FlipFlopInferencePass : public Pass<FlipFlopInferencePass> {
     return std::make_pair(nullref, 0);
   }
 
-  bool isQLoad(RegisterIRef q, HWValue value) {
+public:
+  static bool isQLoad(RegisterIRef q, HWValue value) {
     if (!value.is<WireRef>())
       return false;
     auto wire = value.as<WireRef>();
@@ -106,6 +107,7 @@ class FlipFlopInferencePass : public Pass<FlipFlopInferencePass> {
     return true;
   }
 
+private:
   Optional<unsigned> findClockEnable(RegisterIRef q, StoreIRef store,
                                      MuxTree *muxTree) {
     if (!muxTree)
@@ -199,12 +201,10 @@ class FlipFlopInferencePass : public Pass<FlipFlopInferencePass> {
     };
 
     HWValue clkEnVal = findClockEnable2(storeI.reg().iref(), storeI);
-    RegisterRef clkEnReg;
-    if (clkEnVal)
-      clkEnReg = build.buildRegister(1);
 
     build.pushInsertPoint(storeI);
-    HWValue rstInactive;
+    HWValue rstVal;
+    HWValue rstValInv;
 
     if (hasReset) {
       SmallVec<std::pair<RegisterRef, bool>, 2> resetCandidates;
@@ -220,46 +220,39 @@ class FlipFlopInferencePass : public Pass<FlipFlopInferencePass> {
       rstReg = resetCandidates[resetIndex];
       clkReg = hasIFF ? resetCandidates[0] : (resetCandidates[1 - resetIndex]);
 
-      rstInactive = build.buildLoad(rstReg.first);
-      if (rstReg.second)
-        rstInactive = build.buildNot(rstInactive);
-    }
+      rstVal = build.buildLoad(rstReg.first);
+      rstValInv = build.buildNot(rstVal);
+      if (!rstReg.second)
+        std::swap(rstVal, rstValInv);
 
-    if (clkEnVal) {
-      if (hasReset)
-        build.buildStore(clkEnReg, build.buildAssume(clkEnVal, rstInactive));
-      else
-        build.buildStore(clkEnReg, clkEnVal);
-
-      dValue = build.buildAssume(dValue, build.buildNot(clkEnVal));
-    }
-
-    if (hasReset) {
-      dValue = build.buildAssume(dValue, rstInactive);
+      dValue = build.buildAssume(dValue, rstValInv);
     } else
       clkReg = get(0);
 
-    build.popInsertPoint();
-    auto dReg = build.buildRegister(reg.getNumBits());
+    if (clkEnVal) {
+      if (hasReset)
+        clkEnVal = build.buildAssume(clkEnVal, rstValInv);
+      dValue = build.buildAssume(dValue, build.buildNot(clkEnVal));
+    }
 
-    auto ib =
-        build.buildInstrRaw(HW_FLIP_FLOP, 4 + !!clkEnVal * 2 + hasReset * 3);
-    ib.other()
-        .addRef(clkReg.first)
-        .addRef(ConstantRef::fromBool(clkReg.second))
-        .addRef(dReg)
-        .addRef(reg.oref());
-    if (clkEnVal)
-      ib.addRef(clkEnReg).addRef(ConstantRef::fromBool(0));
+    HWValue clkVal = build.buildLoad(clkReg.first);
+    if (!clkReg.second)
+      clkVal = build.buildNot(clkVal);
+
+    WireRef qWire = ctx.getStore<Wire>().create(dValue.getNumBits());
+
+    auto ib = build.buildInstrRaw(HW_FLIP_FLOP, 4 + hasReset * 2);
+    ib.addRef(qWire).other().addRef(clkVal).addRef(dValue);
+
+    ib.addRef(clkEnVal ? build.buildNot(clkEnVal) : ConstantRef::fromU32(1));
+
     if (hasReset)
-      ib.addRef(rstReg.first)
-          .addRef(ConstantRef::fromBool(rstReg.second))
-          .addRef(resetValue);
+      ib.addRef(rstVal).addRef(resetValue);
 
-    build.setInsertPoint(storeI);
-    build.buildStore(dReg, dValue);
+    build.buildStore(storeI.reg(), qWire);
     build.destroyInstr(storeI);
 
+    build.popInsertPoint();
     return true;
   }
 
@@ -280,11 +273,11 @@ public:
   }
   void runModule(ModuleIRef mod) { runOnModule(mod); }
 
-  static constexpr auto runFuncs = mk_tuple(
-      &FlipFlopInferencePass::runModule, &FlipFlopInferencePass::run);
+  static constexpr auto runFuncs =
+      mk_tuple(&FlipFlopInferencePass::runModule, &FlipFlopInferencePass::run);
 
   explicit FlipFlopInferencePass(Context &ctx)
       : ctx(ctx), build(ctx), cbuild(ctx.getStore<Constant>()) {}
   static auto make(Context &ctx) { return FlipFlopInferencePass{ctx}; }
-}; // namespace dyno
+};
 }; // namespace dyno

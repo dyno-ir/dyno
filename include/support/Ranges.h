@@ -287,9 +287,9 @@ class transform_iterator
 
 public:
   using iterator_category = std::iterator_traits<T>::iterator_category;
-  using value_type = decltype(transformF(i, *it));
+  using reference = decltype(transformF(i, *it));
+  using value_type = std::remove_cvref_t<reference>;
   using pointer = value_type *;
-  using reference = value_type &;
   using difference_type = std::iterator_traits<T>::difference_type;
 
 private:
@@ -319,6 +319,13 @@ public:
     ++i;
     return *this;
   }
+  // for some reason the base_iterator version can't be resolved
+  transform_iterator operator++(int) {
+    transform_iterator tmp(*this);
+    ++(*this);
+    return tmp;
+  }
+
   transform_iterator &operator--()
     requires(isBidir)
   {
@@ -907,6 +914,12 @@ public:
     std::advance(it, N);
     return *this;
   }
+  // for some reason the base_iterator version can't be resolved
+  tuple_iterator operator++(int) {
+    tuple_iterator tmp(*this);
+    ++(*this);
+    return tmp;
+  }
 
   difference_type operator-(tuple_iterator other)
     requires(isRandom)
@@ -1116,7 +1129,7 @@ public:
   template <typename T> T for_each(T func) {
     return std::for_each(begin(), end(), func);
   }
-  template <typename T> T is_sorted(T func) {
+  template <typename T> bool is_sorted(T func) {
     return std::is_sorted(begin(), end(), func);
   }
   auto max() { return std::max_element(begin(), end()); }

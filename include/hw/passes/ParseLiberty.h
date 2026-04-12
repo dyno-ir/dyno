@@ -15,11 +15,6 @@ namespace dyno {
 
 class LibertyLexer : public Lexer<false, true> {
 public:
-  // #define FOR_KEYWORDS(x) x(library) x(define)
-  // #define FUNC(x) #x,
-  //   constexpr static auto Keywords = std::to_array({FOR_KEYWORDS(FUNC)});
-  // #undef FUNC
-  // #define FUNC(x) kw_##x,
   constexpr static std::array<const char *, 0> Keywords;
 
   constexpr static auto Operators =
@@ -299,10 +294,6 @@ class LibertyToDyno {
     if (!ff.val_clocked_on)
       err();
 
-    auto clkReg = regBuild.buildRegister(1);
-    build.buildStore(clkReg, ff.val_clocked_on);
-    auto dReg = regBuild.buildRegister(1);
-
     if (ff.val_clocked_on_also)
       report_fatal_error("liberty format: clocked_on_also unsupported");
 
@@ -324,33 +315,24 @@ class LibertyToDyno {
               "liberty parse: unsupported val_clear_preset_var2");
     }
 
-    build.buildStore(dReg, val);
-
-    auto ib = regBuild.buildInstrRaw(HW_FLIP_FLOP, 4 + 3 * !!ff.val_clear +
-                                                       3 * !!ff.val_preset);
-    regBuild.setInsertPoint(ib.instr());
-    ib.other()
-        .addRef(clkReg)
-        .addRef(ConstantRef::fromBool(1))
-        .addRef(dReg)
-        .addRef(outs[0]);
+    auto ib = build.buildInstrRaw(HW_FLIP_FLOP,
+                                  4 + 2 * !!ff.val_clear + 2 * !!ff.val_preset);
+    auto qWire = ctx.getStore<Wire>().create(val.getNumBits());
+    ib.addRef(qWire)
+        .other()
+        .addRef(ff.val_clocked_on)
+        .addRef(ff.val_next_state)
+        // clk en is always 1, possible en mux fused by instcombine later
+        .addRef(ConstantRef::fromBool(1));
 
     auto addClear = [&]() {
       if (ff.val_clear) {
-        auto clrReg = regBuild.buildRegister(1);
-        build.buildStore(clrReg, ff.val_clear);
-        ib.addRef(clrReg)
-            .addRef(ConstantRef::fromBool(1))
-            .addRef(ConstantRef::fromBool(0));
+        ib.addRef(ff.val_clear).addRef(ConstantRef::fromBool(0));
       }
     };
     auto addPreset = [&]() {
       if (ff.val_preset) {
-        auto presetReg = regBuild.buildRegister(1);
-        build.buildStore(presetReg, ff.val_preset);
-        ib.addRef(presetReg)
-            .addRef(ConstantRef::fromBool(1))
-            .addRef(ConstantRef::fromBool(1));
+        ib.addRef(ff.val_preset).addRef(ConstantRef::fromBool(1));
       }
     };
 
@@ -361,6 +343,8 @@ class LibertyToDyno {
       addPreset();
       addClear();
     }
+
+    build.buildStore(outs[0], qWire);
 
     build.popInsertPoint();
     if (outs.size() == 2) {

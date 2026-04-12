@@ -422,27 +422,30 @@ TEST_CASE :string("flip-flop-inference-rst-clk-en"), :block, :block, :block {
     }
   }
 }{
-  hw.MODULE_DEF %mod:module("mod"), %0:core.block {
-    hw.INPUT_REGISTER_DEF %clk:register(1)
-    hw.INPUT_REGISTER_DEF %rst:register(1)
-    hw.INPUT_REGISTER_DEF %in_a:register(32)
-    hw.INPUT_REGISTER_DEF %in_en:register(1)
-    hw.OUTPUT_REGISTER_DEF %out_a:register(32)
-    hw.REGISTER_DEF %r5:register(1)
-    hw.REGISTER_DEF %r6:register(32)
-    hw.FLIP_FLOP %clk, #1'd1, %r6, %out_a, %r5, #1'd0, %rst, #1'd1, #32'd0
-    hw.TRIGGER_DEF %1:trigger(pos, pos), %clk, %rst
-    hw.COMB_PROCESS_DEF %2:process, %3:core.block {
-      hw.LOAD %w0:wire(32), %in_a
-      hw.LOAD %w1:wire(1), %in_en
-      hw.LOAD %w2:wire(1), %rst
-      op.NOT %w4:wire(1), %w1
-      op.NOT %w5:wire(1), %w2
-      hw.ASSUME %w11:wire(1), %w4, %w5
-      hw.STORE %w11, %r5
-      op.AND %w17:wire(1), %w1, %w5
-      hw.ASSUME %w14:wire(32), %w0, %w17
-      hw.STORE %w14, %r6
+hw.MODULE_DEF :module("mod"), :core.block {
+    hw.INPUT_REGISTER_DEF %r5:register(1)
+    hw.INPUT_REGISTER_DEF %r6:register(1)
+    hw.INPUT_REGISTER_DEF %r7:register(32)
+    hw.INPUT_REGISTER_DEF %r8:register(1)
+    hw.OUTPUT_REGISTER_DEF %r9:register(32)
+    hw.TRIGGER_DEF :trigger(pos, pos), %r5, %r6
+    hw.COMB_PROCESS_DEF :process, :core.block {
+      hw.LOAD %w9:wire(32), %r7
+      hw.LOAD %w10:wire(1), %r8
+      hw.LOAD %w11:wire(1), %r6
+      hw.LOAD %w12:wire(32), %r9
+      op.NOT %w13:wire(1), %w11
+      op.OR %w14:wire(1), %w10, %w11
+      op.NOT %w15:wire(1), %w14
+      hw.ONEHOT_MUX %w16:wire(32), %w10, %w9, %w15, %w12
+      hw.ASSUME %w17:wire(1), %w15, %w13
+      op.NOT %w18:wire(1), %w17
+      op.OR %w19:wire(1), %w11, %w17
+      op.NOT %w20:wire(1), %w19
+      hw.ASSUME %w21:wire(32), %w16, %w20
+      hw.LOAD %w22:wire(1), %r5
+      hw.FLIP_FLOP %w23:wire(32), %w22, %w21, %w18, %w11, #32'd0
+      hw.STORE %w23, %r9
     }
   }
 }{

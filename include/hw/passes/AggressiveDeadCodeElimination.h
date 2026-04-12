@@ -383,22 +383,6 @@ class AggressiveDeadCodeEliminationPass
       break;
     }
 
-    case *HW_FLIP_FLOP: {
-      if (instrMap[instr])
-        break;
-      auto asFF = instr.as<FlipFlopIRef>();
-      pushInstr(asFF.clk().iref());
-      pushInstr(asFF.d().iref());
-      if (asFF.hasClkEn()) {
-        pushInstr(asFF.clkEn().iref());
-      }
-      for (unsigned i = 0; i < asFF.numRsts(); i++) {
-        pushInstr(asFF.rst(i).iref());
-        visitHWValue(asFF.rstVal(i));
-      }
-      break;
-    }
-
     case *HW_MEMORY_DEF: {
       if (instrMap[instr])
         break;

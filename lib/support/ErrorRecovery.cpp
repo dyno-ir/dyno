@@ -11,7 +11,8 @@ __attribute__((noreturn)) void report_fatal_error(const char *reason) {
   fputs(reason, stderr);
   fputc('\n', stderr);
   fflush(stderr);
-  DYNO_DBG(abort());
+  using namespace dyno;
+  DYNO_DBG_RUN(abort());
   exit(-1);
 }
 

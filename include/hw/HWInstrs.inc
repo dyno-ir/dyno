@@ -64,6 +64,7 @@ ADD_OP(GEP)
 
 // clk d q | en en_pol | rst rst_pol rst_val
 ADD_OP(FLIP_FLOP)
+ADD_OP(FLIP_FLOP_SRST)
 ADD_OP(LATCH)
 
 ADD_OP(ONEHOT_MUX)

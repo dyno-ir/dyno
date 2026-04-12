@@ -4,6 +4,7 @@
 #include "hw/HWContext.h"
 #include "hw/HWParser.h"
 #include "hw/HWPrinter.h"
+#include "hw/SensList.h"
 #include "hw/passes/AggressiveDeadCodeElimination.h"
 #include "hw/passes/CommonSubexpressionElimination.h"
 #include "hw/passes/FuzzyCSE.h"
@@ -11,6 +12,7 @@
 #include "hw/passes/InstCombine.h"
 #include "hw/passes/OrderInstrs.h"
 #include "hw/passes/ParseLiberty.h"
+#include "hw/passes/TriggerDedupe.h"
 #include "meta/MetaContext.h"
 #include "meta/MetaParser.h"
 #include "meta/PassPipelineInterpreter.h"
@@ -87,6 +89,7 @@ int main(int argc, char **argv) {
     orderInstrs.run();
     instCombine.run();
     aggressiveDCE.run();
+    instCombine.config.removeAssumes = true;
   }
 
   std::ofstream str{std::string(*argOutFile)};

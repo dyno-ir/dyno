@@ -102,6 +102,7 @@ public:
             auto bits = instr.def(0)->as<WireRef>().getNumBits();
             if (op->as<HWValue>().getNumBits() != bits)
               error(instr, "operand width mismatch");
+            break;
           }
 
 #define LAMBDA(opc, bi) case *opc:
@@ -113,6 +114,7 @@ public:
             auto bits = instr.other(0)->as<HWValue>().getNumBits();
             if (op->as<HWValue>().getNumBits() != bits)
               error(instr, "operand width mismatch");
+            break;
           }
         }
       }

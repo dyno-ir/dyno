@@ -1,5 +1,4 @@
 #pragma once
-#include "dyno/CFG.h"
 #include "dyno/Context.h"
 #include "dyno/Pass.h"
 #include "hw/FlipFlop.h"
@@ -18,37 +17,36 @@ class LiftFlipFlopsPass : public Pass<LiftFlipFlopsPass> {
   void runOnInstance(FlipFlopIRef instr) {
     HWInstrBuilder pbuild{ctx};
 
-    auto proc = build.buildProcess(HW_COMB_PROCESS_DEF);
-    build.setInsertPoint(proc);
-    pbuild.setInsertPoint(proc.block().end());
+    pbuild.setInsertPoint(instr);
 
     auto state = build.buildRegister(instr.q().getNumBits());
     auto stateVal = pbuild.buildLoad(state);
-    pbuild.buildStore(instr.q(), stateVal);
+    instr.q().replaceAllUsesWith(stateVal);
 
-    HWValue dVal = pbuild.buildLoad(instr.d());
+    HWValue dVal = instr.d();
     if (instr.hasClkEn()) {
       if (instr.clkEnPolarity() == 1)
-        dVal = pbuild.buildMux(pbuild.buildLoad(instr.clkEn()), dVal, stateVal);
+        dVal = pbuild.buildMux(instr.clkEn(), dVal, stateVal);
       else
-        dVal = pbuild.buildMux(pbuild.buildLoad(instr.clkEn()), stateVal, dVal);
+        dVal = pbuild.buildMux(instr.clkEn(), stateVal, dVal);
     }
 
+    auto clkReg = build.buildRegister(1);
+    pbuild.buildStore(clkReg, instr.clk());
     SensList sens;
-    sens.signals.emplace_back(instr.clk(), instr.clkPolarity()
-                                               ? SensMode::POSEDGE
-                                               : SensMode::NEGEDGE);
+    sens.signals.emplace_back(clkReg, instr.clkPol() ? SensMode::POSEDGE
+                                                     : SensMode::NEGEDGE);
     for (auto rstIdx : IntRange{instr.numRsts()}) {
-      if (instr.rstPolarity(rstIdx) == 1)
-        dVal = pbuild.buildMux(pbuild.buildLoad(instr.rst(rstIdx)),
-                               instr.rstVal(rstIdx), dVal);
-      else
-        dVal = pbuild.buildMux(pbuild.buildLoad(instr.rst(rstIdx)), dVal,
-                               instr.rstVal(rstIdx));
+      auto rstReg = build.buildRegister(1);
+      pbuild.buildStore(rstReg, instr.rst(rstIdx));
 
-      sens.signals.emplace_back(instr.rst(rstIdx), instr.rstPolarity(rstIdx)
-                                                       ? SensMode::POSEDGE
-                                                       : SensMode::NEGEDGE);
+      if (instr.rstPol(rstIdx) == 1)
+        dVal = pbuild.buildMux(instr.rst(rstIdx), instr.rstVal(rstIdx), dVal);
+      else
+        dVal = pbuild.buildMux(instr.rst(rstIdx), dVal, instr.rstVal(rstIdx));
+
+      sens.signals.emplace_back(
+          rstReg, instr.rstPol(rstIdx) ? SensMode::POSEDGE : SensMode::NEGEDGE);
     }
 
     auto trig = build.buildTrigger(sens);
@@ -60,9 +58,10 @@ class LiftFlipFlopsPass : public Pass<LiftFlipFlopsPass> {
 
   void runOnModule(ModuleIRef mod) {
     build.setInsertPoint(mod.regs_end());
-    for (auto instr : Range{mod.block()}.earlyincr())
-      if (instr.isOpc(HW_FLIP_FLOP))
-        runOnInstance(instr);
+    for (auto proc : mod.procs())
+      for (auto instr : Range{proc.block()}.earlyincr())
+        if (instr.isOpc(HW_FLIP_FLOP))
+          runOnInstance(instr);
   }
 
 public:

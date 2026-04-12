@@ -231,7 +231,12 @@ public:
   }
 
   void introduceAndPrintDef(FatDynObjRef<> ref) {
-    introduce(ref);
+    if (!Operand::isDefUseOperand(ref) ||
+        ref.as<FatDynObjRef<InstrDefUse>>()->getNumUses() != 0) {
+      introduce(ref);
+    } else {
+      str << ":";
+    }
     printDef(ref);
   }
 

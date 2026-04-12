@@ -1178,6 +1178,7 @@ public:
       //   abort();
       // handle_expr(asPAssign.assignment);
       // break;
+      abort();
     }
 
     case slang::ast::StatementKind::ProceduralDeassign:
