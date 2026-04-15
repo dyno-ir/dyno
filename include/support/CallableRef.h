@@ -10,7 +10,7 @@ template <typename Ret, typename... Params> class CallableRef<Ret(Params...)> {
   void *callable;
 
   template <typename Callable>
-  static Ret callOnObject(void *callable, Params &&...params) {
+  static Ret callOnObject(void *callable, Params... params) {
     return (*reinterpret_cast<Callable *>(callable))(
         std::forward<Params>(params)...);
   }

@@ -99,6 +99,62 @@ public:
       return nullref;
     return rv;
   }
+
+  struct EnableSignal {
+    WireRef wire;
+    uint32_t addr;
+    bool polarity;
+  };
+  static bool
+  connectEnSignal(EnableSignal signal,
+                  CallableRef<void(LoadIRef, EnableSignal)> connect) {
+    SmallVec<EnableSignal, 8> stack{signal};
+    while (!stack.empty()) {
+      EnableSignal cur = stack.pop_back_val();
+      auto instr = cur.wire.getDefI();
+      switch (*instr.getDialectOpcode()) {
+      case *HW_LOAD: {
+        auto asLoad = instr.as<LoadIRef>();
+        if (!asLoad.isConstantOffs())
+          return false;
+        connect(asLoad, EnableSignal{cur.wire, cur.addr + asLoad.getBase(),
+                                     cur.polarity});
+        break;
+      }
+      case *OP_OR:
+      case *OP_AND: {
+        if (cur.polarity == instr.isOpc(OP_OR))
+          return false;
+        for (auto op : instr.others().as<HWValue>()) {
+          assert(op.is<WireRef>());
+          stack.emplace_back(op.as<WireRef>(), cur.addr, cur.polarity);
+        }
+        break;
+      }
+      case *OP_NOT: {
+        stack.emplace_back(instr.other(0).as<WireRef>(), cur.addr,
+                           !cur.polarity);
+        break;
+      }
+      case *HW_SPLICE: {
+        auto asSplice = instr.as<SpliceIRef>();
+        if (!asSplice.isConstantOffs())
+          return false;
+        stack.emplace_back(asSplice.in()->as<WireRef>(),
+                           cur.addr + asSplice.getBase(), cur.polarity);
+        break;
+      }
+      case *OP_TRUNC: {
+        stack.emplace_back(instr.other(0).as<WireRef>(), cur.addr,
+                           cur.polarity);
+        break;
+      }
+      default:
+        return false;
+      }
+    }
+    return true;
+  }
 };
 
 }; // namespace dyno

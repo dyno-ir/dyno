@@ -139,7 +139,7 @@ private:
       else if (lhsV.template is<WireRef>() || rhsV.template is<WireRef>())
         return !lhsV.template is<WireRef>();
       else {
-        // run 2 state compare on possibly 2 state numbers, we just want an
+        // run 2 state compare on possibly 4 state numbers, we just want an
         // order
         if (lhsV.template as<ConstantRef>().getIs4S() !=
             rhsV.template as<ConstantRef>().getIs4S())

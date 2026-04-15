@@ -219,9 +219,12 @@ struct RegisterValue : public RegisterFrags<RegisterValueFragment> {
     bool rv = false;
     for (unsigned i = 0; i < frags.size(); i++) {
       auto &low = frags[i];
-      if (low.ref.is<ObjRef<Constant>>() && low.srcAddr != 0) {
+      if (low.ref.is<ObjRef<Constant>>() &&
+          (low.srcAddr != 0 ||
+           low.len != ctx.getStore<Constant>().resolve(low.ref).getNumBits())) {
         auto newConst = ConstantBuilder{ctx.getStore<Constant>()}
-                            .val(ctx.getStore<Constant>().resolve(low.ref))
+                            .valRange(ctx.getStore<Constant>().resolve(low.ref),
+                                      low.srcAddr, low.len)
                             .get();
         low.srcAddr = 0;
         low.ref = newConst;
@@ -294,6 +297,7 @@ struct RegisterValue : public RegisterFrags<RegisterValueFragment> {
     uint32_t addrB = addr;
 
     RegisterValue range;
+    range.depth = 0;
 
     bool allUntouched = true;
 

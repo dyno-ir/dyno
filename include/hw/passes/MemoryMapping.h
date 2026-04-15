@@ -10,6 +10,7 @@
 #include "hw/HWContext.h"
 #include "hw/HWInstr.h"
 #include "hw/HWPrinter.h"
+#include "hw/HWValue.h"
 #include "hw/IDs.h"
 #include "hw/LoadStore.h"
 #include "hw/Module.h"
@@ -716,9 +717,44 @@ private:
       SmallDenseMap<ObjRef<Register>, uint32_t> outputIdxMap(
           Range(cellOutputs).transform(makeMapPair));
 
+      auto connectEn = [&](HWValue act, unsigned repIdx, LoadIRef ld,
+                           WireVariable::EnableSignal sig) {
+        auto reg = ld.reg();
+        auto idx = inputIdxMap.find(reg).val();
+        auto &inp = instanceInputs[repIdx * numInputs + idx];
+        if (inp.getLen() == 0)
+          inp = RegisterValue{
+              ConstantBuilder{ctx.getStore<Constant>()}.zeroLike(reg),
+              *reg.getNumBits()};
+        auto old = inp.getRange(sig.addr, 1);
+        old.defragmentValues(ctx); // normalize constants
+        assert(old.frags.size() == 1 && old.frags.front().srcAddr == 0);
+        auto oldVal = ctx.resolve(old.frags.front().ref).as<HWValue>();
+        auto newV = build.buildCommutative(sig.polarity ? OP_OR : OP_AND,
+                                           InitListRange{act, oldVal});
+        inp.overwrite(newV, 0, sig.addr, 1);
+      };
+
       // connect act to mod in instance #repIdx
       auto connect = [&](HWValue act, WireRef mod, unsigned repIdx) {
-        // todo version of this that tracks bit regions for packed inputs
+        // use connect enable for 1 bit signals. this is strictly more powerful,
+        // so no problem running this on data signals in case those are 1 bit
+        // too.
+        if (mod.getNumBits() == 1) {
+          // handle or/and for single bit signals, there might be something
+          // like we && wmask[0]
+          auto rv = WireVariable::connectEnSignal(
+              {mod, 0, 1}, [&](LoadIRef ld, WireVariable::EnableSignal sig) {
+                connectEn(act, repIdx, ld, sig);
+              });
+          if (!rv)
+            report_fatal_error(
+                "ill-formed model memory: {}\ncannot resolve 1-bit "
+                "inputs, too complex enable logic?",
+                HWInstrRef{model}.parentMod(ctx).mod()->name);
+          return;
+        }
+
         auto port = WireVariable::checkIsInputLookthru(mod);
         if (!port)
           report_fatal_error("expected port");
@@ -730,7 +766,6 @@ private:
               *port->reg.getNumBits()};
         inp.overwrite(act, 0, port->addr,
                       std::min(*act.getNumBits(), port->len));
-        assert(inp.getLen() == *port->reg.getNumBits());
       };
       auto connectReverse = [&](WireRef mod, unsigned repIdx) -> WireRef {
         auto port = WireVariable::checkIsPort(mod, HW_OUTPUT_REGISTER_DEF);
