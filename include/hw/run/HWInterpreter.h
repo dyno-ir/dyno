@@ -512,6 +512,14 @@ public:
       report_fatal_error("unsupported opcode");
     }
     }
+
+    if (fstWriter)
+      for (auto def : instr.defs()) {
+        if (def->is<WireRef>()) {
+          fstWriter->updateValue(def->as<WireRef>(),
+                                 wireVals[def->as<WireRef>()]);
+        }
+      }
   }
 
   void evalBlock(BlockRef block) {
@@ -555,8 +563,12 @@ public:
   }
 
   void eval() {
-    evalActive();
-    evalNBA();
+    while (!evalStack.empty() || !firedTriggers.empty()) {
+      if (!evalStack.empty())
+        evalActive();
+      else if (!firedTriggers.empty())
+        evalNBA();
+    }
   }
 
   void initialEval() {
@@ -638,28 +650,57 @@ public:
       regVals[reg] = PatBigInt::undef(*reg.getNumBits());
     }
   }
-
 #ifdef ENABLE_FST
   void fstInitHierarchy() {
     for (auto [ref, val] : regVals) {
-      if (!ref)
+      if (!ctx.getStore<Register>().exists(ref))
         continue;
       auto reg = ctx.getStore<Register>().resolve(ref);
+      if (!reg.hasSingleDef() ||
+          HWInstrRef{reg.iref()}.parentMod(ctx) != module)
+        continue;
       auto names = ctx.getCtx<HWDialectContext>().regNameInfo.getNames(reg);
       auto name = names.empty() ? "reg" + std::to_string(reg.getObjID())
                                 : (*names.begin());
-      fstWriter->createVar(reg, RegWireFSTWriter::VarType::INTEGER,
+      fstWriter->createVar(reg, RegWireFSTWriter::VarType::LOGIC,
                            RegWireFSTWriter::VarDir::INPUT, *reg.getNumBits(),
+                           name.c_str());
+    }
+
+    for (auto [ref, val] : wireVals) {
+      if (!ctx.getStore<Wire>().exists(ref))
+        continue;
+      auto wire = ctx.getStore<Wire>().resolve(ref);
+      if (!wire.hasSingleDef() ||
+          HWInstrRef{wire.getDefI()}.parentMod(ctx) != module)
+        continue;
+      auto name = std::string("w") + std::to_string(wire.getObjID().num);
+      fstWriter->createVar(wire, RegWireFSTWriter::VarType::LOGIC,
+                           RegWireFSTWriter::VarDir::INPUT, *wire.getNumBits(),
                            name.c_str());
     }
 
     fstWriter->endDefinitions();
 
     for (auto [ref, val] : regVals) {
-      if (!ref)
+      if (!ctx.getStore<Register>().exists(ref))
         continue;
       auto reg = ctx.getStore<Register>().resolve(ref);
+      if (!reg.hasSingleDef() ||
+          HWInstrRef{reg.iref()}.parentMod(ctx) != module)
+        continue;
       fstWriter->updateValue(reg, regVals[reg]);
+    }
+    for (auto [ref, val] : wireVals) {
+      if (!ctx.getStore<Wire>().exists(ref))
+        continue;
+      auto wire = ctx.getStore<Wire>().resolve(ref);
+      if (!wire.hasSingleDef() ||
+          HWInstrRef{wire.getDefI()}.parentMod(ctx) != module)
+        continue;
+      fstWriter->updateValue(wire, wireVals[wire].getNumBits() == 0
+                                       ? PatBigInt::undef(*wire.getNumBits())
+                                       : wireVals[wire]);
     }
   }
 #endif

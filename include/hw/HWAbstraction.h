@@ -1114,6 +1114,19 @@ public:
     }
   }
 
+  WireRef buildFlipFlop(HWValue clk, HWValue d,
+                        HWValue en = ConstantRef::fromBool(1),
+                        HWValue rst = nullref, HWValue rstval = nullref) {
+    auto defW = ctx.getStore<Wire>().create(d.getNumBits());
+    auto ib = buildInstrRaw(HW_FLIP_FLOP, 4 + !!rst * 2);
+    ib.addRef(defW).other().addRef(clk).addRef(d).addRef(en);
+    if (rst) {
+      assert(rstval);
+      ib.addRef(rst).addRef(rstval);
+    }
+    return defW;
+  }
+
   RegisterRef buildRegister(Optional<uint32_t> bitSize = nullopt) {
     auto regRef = RegisterRef{ctx.getStore<Register>().create(bitSize)};
     auto regInstr = InstrRef{ctx.getStore<Instr>().create(1, HW_REGISTER_DEF)};

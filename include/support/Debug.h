@@ -47,7 +47,7 @@ namespace dyno {
 
 constexpr uint32_t debugID = 0;
 constexpr const char *debugName = "GlobalDebug";
-inline uint8_t _debugEnable[1024] = {1};
+inline uint8_t _debugEnable[2048] = {1};
 inline uint32_t lastDebugID = 0;
 // 0 is default ID, 1-255 are custom.
 //

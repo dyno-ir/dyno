@@ -256,7 +256,7 @@ public:
   template <typename T> T dyn_as() const { return (*this)->dyn_as<T>(); }
   template <typename T> bool is() const { return (*this)->is<T>(); }
 
-  template <typename T> void replace(FatObjRef<T> newRef) {
+  template <typename T> void replace(FatObjRef<T> newRef) const {
     return replace(newRef.template as<FatDynObjRef<>>());
   }
   template <typename T> void replace(FatDynObjRef<T> newRef) const;

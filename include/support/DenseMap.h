@@ -521,6 +521,7 @@ public:
       return;
     for (size_t i = 0; i < cap; i++)
       getBuckets()[i].setKeysEmpty();
+    sz = 0;
   }
   iterator erase(iterator it) {
     assert(it != end());

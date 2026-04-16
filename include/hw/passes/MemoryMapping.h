@@ -14,6 +14,7 @@
 #include "hw/IDs.h"
 #include "hw/LoadStore.h"
 #include "hw/Module.h"
+#include "hw/analysis/PipelineAnalysis.h"
 #include "hw/analysis/RegisterValue.h"
 #include "hw/analysis/WireVariable.h"
 #include "support/Algorithm.h"
@@ -25,6 +26,7 @@
 #include "support/DynBitSet.h"
 #include "support/ErrorRecovery.h"
 #include "support/Optional.h"
+#include "support/RTTI.h"
 #include "support/Ranges.h"
 #include "support/SmallVec.h"
 #include "support/StringRef.h"
@@ -450,6 +452,17 @@ private:
           if (modSt.port()->delay > modSt.port()->delay)
             continue;
 
+          // load output pipelining
+          if constexpr (std::is_same_v<RefT, MemLoadIRef>) {
+            // model dictates required number of stages
+            // but provides en/rst/init etc on stages
+            auto modPipe = PipelineAnalysis::getOutPipeline(modSt.value());
+            auto actPipe = PipelineAnalysis::getOutPipeline(actSt.value());
+
+            if (!PipelineAnalysis::isImplementableWithPipe(actPipe, modPipe))
+              return false;
+          }
+
           // sub instance stores may not cross the striping boundaries
           if constexpr (std::is_same_v<RefT, MemStoreIRef>) {
             // todo: relax this rule for known-fused stores (e.g. capacity
@@ -570,7 +583,7 @@ private:
     template <typename RefT>
     void applyPort(Context &ctx, RefT actLoad, PortPartition &part,
                    uint32_t factor, auto &&connect, auto &&connectReverse,
-                   OtherVec<HWValue> *outWires, HWValue &outSubIdx) {
+                   OperandVec<HWValue> *outWires, HWValue &outSubIdx) {
       HWInstrBuilder build{ctx, actLoad};
 
       HWValue subIdx = nullref;
@@ -647,7 +660,16 @@ private:
                 repIdx);
 
         if constexpr (std::is_same_v<RefT, MemLoadIRef>) {
-          HWValue rdval = connectReverse(modLoad.value(), repIdx);
+          auto modPipe =
+              PipelineAnalysis::getOutPipeline(modLoad.value(), false);
+          auto actPipe =
+              PipelineAnalysis::getOutPipeline(actLoad.value(), false);
+
+          auto ldValPostPipe = ctx.resolve(modPipe.slice.wire);
+          assert(modPipe.slice.addr == 0 &&
+                 modPipe.slice.len == ldValPostPipe.getNumBits() && "todo");
+          HWValue rdval = connectReverse(ldValPostPipe, repIdx);
+
           // unpack bits (some may be unused)
           // assumes frag starts at port boundary, maybe add src addr to
           // PortPartition?
@@ -780,8 +802,9 @@ private:
       for (auto [part, actLoad] :
            Range{mapping.loadPartitions}.zip(actualLoads)) {
         build.setInsertPoint(actLoad);
+        OperandVec<HWValue> wires{ctx, 1, part.frags.size()};
+        wires.pushPlaceholderDefs();
 
-        OtherVec<HWValue> wires{ctx, 1, part.frags.size()};
         uint32_t factor = part.getLen() / *getMinFact(actLoad);
         // todo: lower score when factor is non pow2
 
@@ -792,13 +815,29 @@ private:
         wires.others().do_reverse();
         auto val = build.buildConcat(std::move(wires));
 
+        auto defWire = actLoad.def()->as<WireRef>();
+        auto delay =
+            PipelineAnalysis::getOutPipeline(modelLoads.front().value())
+                .totalDelay;
+        auto pipe = PipelineAnalysis::getOutPipeline(actLoad.value(), false);
+        if (delay != 0) {
+          defWire = pipe.stages[delay - 1].ff.q();
+        }
+
         if (factor != 1) {
+          if (delay != 0) {
+            auto clk = pipe.stages.front().ff.clk();
+            for (unsigned i = 0; i < delay; i++) {
+              subIdx = build.buildFlipFlop(clk, subIdx);
+            }
+          }
+
           val = build.buildSplice(
               val, actLoad.getLen(), 0,
               AddressGenTerm{subIdx, actLoad.getLen(), factor});
         }
 
-        actLoad.def()->as<WireRef>().replaceAllUsesWith(val);
+        defWire.replaceAllUsesWith(val);
       }
 
       for (auto [part, actStore] :

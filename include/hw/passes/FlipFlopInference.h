@@ -244,7 +244,7 @@ private:
     auto ib = build.buildInstrRaw(HW_FLIP_FLOP, 4 + hasReset * 2);
     ib.addRef(qWire).other().addRef(clkVal).addRef(dValue);
 
-    ib.addRef(clkEnVal ? build.buildNot(clkEnVal) : ConstantRef::fromU32(1));
+    ib.addRef(clkEnVal ? build.buildNot(clkEnVal) : ConstantRef::fromBool(1));
 
     if (hasReset)
       ib.addRef(rstVal).addRef(resetValue);

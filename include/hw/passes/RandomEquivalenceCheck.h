@@ -42,7 +42,7 @@ private:
     if (config.swapTestAndModel)
       std::swap(test, model);
 
-    HWInterpreter modelInterp{ctx, test, std::cout, std::cerr};
+    HWInterpreter modelInterp{ctx, model, std::cout, std::cerr};
     modelInterp.setup();
     HWInterpreter testInterp{ctx, test, std::cout, std::cerr};
     testInterp.setup();

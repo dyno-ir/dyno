@@ -86,7 +86,7 @@ class LowerMemAccessPass : public Pass<LowerMemAccessPass> {
       return;
     assert(reg.loads().empty() && reg.stores().empty());
 
-    HWValue memFlat = nullref;
+    HWValue memFlat = nullref, memFlatQ = nullref;
     TriggerRef trig = nullref;
 
     for (auto [front, access] :
@@ -95,8 +95,10 @@ class LowerMemAccessPass : public Pass<LowerMemAccessPass> {
              .transform([](size_t, auto use) { return use.instr(); })
              .mark_front()) {
       build.setInsertPoint(access);
-      if (front)
+      if (front) {
         memFlat = build.buildLoad(reg.oref());
+        memFlatQ = memFlat;
+      }
 
       switch (*access.getDialectOpcode()) {
       case *HW_MEM_STORE: {
@@ -110,7 +112,7 @@ class LowerMemAccessPass : public Pass<LowerMemAccessPass> {
         destroyList.emplace_back(access);
       } break;
       case *HW_MEM_LOAD: {
-        auto ldVal = runOnLoad(access.as<MemLoadIRef>(), memFlat);
+        auto ldVal = runOnLoad(access.as<MemLoadIRef>(), memFlatQ);
         auto t = access.as<MemLoadIRef>().trigger();
         if (t) {
           if (trig && trig != t)
