@@ -513,6 +513,7 @@ public:
     }
     }
 
+#ifdef ENABLE_FST
     if (fstWriter)
       for (auto def : instr.defs()) {
         if (def->is<WireRef>()) {
@@ -520,6 +521,7 @@ public:
                                  wireVals[def->as<WireRef>()]);
         }
       }
+#endif
   }
 
   void evalBlock(BlockRef block) {
