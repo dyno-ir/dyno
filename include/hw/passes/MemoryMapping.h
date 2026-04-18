@@ -588,6 +588,12 @@ private:
                            log2(double(*model.getNumBits()) / modelPortWidth);
 
       mapping.cost = bitsCost + portsCost + decoderCost;
+
+      // reduce cost by 10% for each stage to account for improved timing
+      // (todo: tune)
+      auto modStages = modLoadPipelines.front().stages.size();
+      for (unsigned i = 0; i < modStages; i++)
+        mapping.cost *= 0.9;
     }
 
     template <typename RefT>
@@ -1013,14 +1019,13 @@ private:
           maxRepCount = trial;
         } else {
           repCount = trial + 1;
-          if (repCount == maxRepCount)
-            return false;
         }
       }
 
       if (mapper.mapping.repeatCount != repCount) {
         auto rv = tryMap(mapper, repCount);
-        assert(rv);
+        if (!rv)
+          continue;
       }
 
       vis();

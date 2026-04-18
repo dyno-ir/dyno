@@ -231,11 +231,13 @@ public:
       self.config = typename Derived::Config{};
 
       ConfigParser parser{lexer};
+      uint32_t cnt = 0;
       self.config.for_fields(
           [&](void *ptr, ConfigStructType ty, const char *nm) {
             auto it = config.find(std::string(nm));
             if (it == config.end())
               return;
+            cnt++;
             if (!parser.parseConfigType(ptr, ty, it->second))
               report_fatal_error("invalid setting {}: {}", nm, it->second);
           },
@@ -243,6 +245,7 @@ public:
             auto it = config.find(std::string(nm));
             if (it == config.end())
               return;
+            cnt++;
             auto it2 = Range{labels}.find_if(
                 [&](const char *elem) { return it->second == elem; });
             if (it2 == labels.end())
@@ -250,6 +253,8 @@ public:
             auto idx = it2 - labels.begin();
             *reinterpret_cast<int *>(ptr) = idx;
           });
+      if (cnt != config.size())
+        report_fatal_error("invalid keys in pass {} config", passName);
     } else {
       if (!config.empty())
         report_fatal_error("pass {} is not configurable", passName);

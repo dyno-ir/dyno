@@ -1,9 +1,10 @@
+#define ENABLE_FST
 
 #pragma once
 #include <cassert>
 #include <optional>
 #ifdef ENABLE_FST
-#include "FST.h"
+#include "../../../tools/dyno-sim/include/FST.h"
 #endif
 #include "dyno/Instr.h"
 #include "dyno/ObjMap.h"
@@ -50,7 +51,7 @@ public:
   // register to operand in TriggerIRef
   ObjMapVec<Register, SmallVec<OperandRef, 1>> triggers;
   ObjMapVec<Trigger, SmallVec<DeferredStore, 16>> deferredStores;
-  SmallDenseSet<TriggerRef, 4> firedTriggers;
+  SmallDenseSet<ObjRef<Trigger>, 4> firedTriggers;
   std::optional<Range<InstrRef::iterator>> loopYieldVals;
 
   bool trace = false;
@@ -63,14 +64,14 @@ private:
       switch (instr.oref()->getMode(idx)) {
       case SensMode::POSEDGE:
         if (regVals[reg.oref()].valueEquals(1))
-          firedTriggers.insert(instr.oref());
+          firedTriggers.findOrInsert(instr.oref());
         break;
       case SensMode::NEGEDGE:
         if (regVals[reg.oref()].valueEquals(0))
-          firedTriggers.insert(instr.oref());
+          firedTriggers.findOrInsert(instr.oref());
         break;
       case SensMode::ANYEDGE:
-        firedTriggers.insert(instr.oref());
+        firedTriggers.findOrInsert(instr.oref());
         break;
       default:
       case SensMode::IFF:
@@ -502,7 +503,7 @@ public:
       }
 
       if (!found)
-        val = PatBigInt::undef(val.getNumBits());
+        val = PatBigInt::undef(*instr.def(0)->as<WireRef>().getNumBits());
 
       break;
     }
@@ -554,7 +555,7 @@ public:
 
   void evalNBA() {
     // deferred stores
-    for (auto trigger : firedTriggers) {
+    for (auto trigger : Range{firedTriggers}.resolve(ctx)) {
       for (auto deferred : deferredStores[trigger]) {
         runStore(deferred.store.reg().iref(), GenericBigIntRef{deferred.value},
                  deferred.addr);

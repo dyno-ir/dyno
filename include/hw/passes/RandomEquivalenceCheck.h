@@ -103,6 +103,8 @@ private:
       if (config.clockMode == Config::COMB) {
         testInterp.eval();
         modelInterp.eval();
+        testInterp.forwardTime(1);
+        modelInterp.forwardTime(1);
       }
 
       for (auto [testOut, modelOut] :
@@ -153,6 +155,8 @@ private:
 
         testInterp.eval();
         modelInterp.eval();
+        testInterp.forwardTime(1);
+        modelInterp.forwardTime(1);
 
         clk = ~clk;
         testInterp.setReg(testClk, clk);
@@ -160,6 +164,8 @@ private:
 
         testInterp.eval();
         modelInterp.eval();
+        testInterp.forwardTime(1);
+        modelInterp.forwardTime(1);
       }
     }
     return true;

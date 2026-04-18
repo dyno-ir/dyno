@@ -1738,6 +1738,7 @@ public:
   static void bitwiseOp4S(BigIntBase &out, const T0 &lhs, const T1 &rhs) {
     if (!lhs.getIs4S() && !rhs.getIs4S()) {
       Func2S(out, lhs, rhs);
+      out.custom() = 0;
       return;
     }
 

@@ -597,12 +597,11 @@ TEST_EQUIVALENCE :string("test-icmp-lower"), :block, :block {
   meta.LOWER_OPS_PASS
   meta.INST_COMBINE_PASS
   meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS
-  meta.DUMP_PASS map("path": "slt.dyno")
   meta.RANDOM_EQUIVALENCE_CHECK_PASS map("cycles": "10000")
 }
 
-// Normal synth pipeline down to memory mapping, then lift for simulation.
-FUNCTION_DEF %memoryTestSynthRoundTrip:func, :block {
+// lower down to memory mapping
+FUNCTION_DEF %memoryTestSynth:func, :block {
   CALL symbol("flow_earlyCanonFlow")
   meta.INACTIVE_COPY_PASS
   CALL symbol("flow_synthCanonicalize")
@@ -610,12 +609,15 @@ FUNCTION_DEF %memoryTestSynthRoundTrip:func, :block {
   CALL symbol("flow_synthLowerControlFlow")
   CALL symbol("flow_synthMemoryFFMuxHandling")
   CALL symbol("flow_synthLowerMemoryFF")
-  meta.DUMP_PASS map("path": "dump.dyno")
+}
+// lift back up for sim
+FUNCTION_DEF %memoryTestLift:func, :block {
   meta.LIFT_STD_CELLS_PASS
   meta.SELECT_MODULES_PASS map("regex": "^(?!.*__inactive$).*")
   meta.MODULE_INLINE_PASS
   meta.SELECT_MODULES_PASS map("regex": "Test")
   meta.LOWER_MEM_ACCESS_PASS
+
   meta.LIFT_FLIP_FLOPS_PASS
   meta.TRIGGER_DEDUPE_PASS
 
@@ -631,6 +633,12 @@ FUNCTION_DEF %memoryTestSynthRoundTrip:func, :block {
   meta.INST_COMBINE_PASS
   meta.AGGRESSIVE_DEAD_CODE_ELIMINATION_PASS
   meta.TRIGGER_DEDUPE_PASS
+}
+
+// Normal synth pipeline down to memory mapping, then lift for simulation.
+FUNCTION_DEF %memoryTestSynthRoundTrip:func, :block {
+  CALL %memoryTestSynth
+  CALL %memoryTestLift
 }
 
 TEST_SCRIPT :string("test-memory-different-port-widths"), :block {
@@ -659,7 +667,11 @@ TEST_SCRIPT :string("test-memory-different-port-widths"), :block {
 
     endmodule
   }])
-  CALL %memoryTestSynthRoundTrip
+
+  CALL %memoryTestSynth
+  meta.ASSERT_EXISTS_PASS map("regex": "STDCELL_INSTANCE.+%FakeMem_3r1w_1x16.+#4'd0, #4'd0", "num": "16")
+  CALL %memoryTestLift
+
   meta.RANDOM_EQUIVALENCE_CHECK_PASS map("cycles": "10000", "clockMode": "CLOCK")
 }
 
@@ -686,7 +698,9 @@ TEST_SCRIPT :string("test-memory-basic"), :block {
 
     endmodule
   }])
-  CALL %memoryTestSynthRoundTrip
+  CALL %memoryTestSynth
+  meta.ASSERT_EXISTS_PASS map("regex": "STDCELL_INSTANCE.+%FakeRAM_288", "num": "4")
+  CALL %memoryTestLift
   meta.RANDOM_EQUIVALENCE_CHECK_PASS map("cycles": "10000", "clockMode": "CLOCK")
 }
 
@@ -705,11 +719,15 @@ TEST_SCRIPT :string("test-ff-clken"), :block {
 
     endmodule
   }])
-  CALL %memoryTestSynthRoundTrip
+  CALL %memoryTestSynth
+  meta.ASSERT_EXISTS_PASS map("regex":
+    "STDCELL_INSTANCE %[_a-zA-Z0-9]+:wire\(1\), %sky130_fd_sc_hd__edfxtp_1",
+    "num": "32")
+  CALL %memoryTestLift
   meta.RANDOM_EQUIVALENCE_CHECK_PASS map("cycles": "10000", "clockMode": "CLOCK")
 }
 
-TEST_SCRIPT :string("test-ff-rst-clken"), :block {
+TEST_SCRIPT :string("test-ff-srst-clken"), :block {
   PARSE_VERILOG_PASS map("code":[{
     module Test#(parameter int WIDTH = 32) (
       input logic clk,
@@ -729,8 +747,41 @@ TEST_SCRIPT :string("test-ff-rst-clken"), :block {
 
     endmodule
   }])
-  CALL %memoryTestSynthRoundTrip
+  CALL %memoryTestSynth
+  meta.ASSERT_EXISTS_PASS map("regex":
+    "STDCELL_INSTANCE %[_a-zA-Z0-9]+:wire\(1\), %sky130_fd_sc_hd__edfxtp_1",
+    "num": "32")
+  CALL %memoryTestLift
   meta.RANDOM_EQUIVALENCE_CHECK_PASS map("cycles": "10000", "clockMode": "CLOCK")
+}
+
+TEST_SCRIPT :string("test-ff-arst-clken"), :block {
+  PARSE_VERILOG_PASS map("code":[{
+    module Test#(parameter int WIDTH = 32) (
+      input logic clk,
+      input logic rst,
+      input logic en,
+
+      input logic[WIDTH-1:0] d,
+      output logic[WIDTH-1:0] q
+    );
+
+    always_ff@(posedge clk or posedge rst) begin
+      if (rst)
+        q <= '0;
+      else if (en)
+        q <= d;
+    end
+
+    endmodule
+  }])
+  CALL %memoryTestSynth
+  meta.ASSERT_EXISTS_PASS map("regex":
+    "STDCELL_INSTANCE %[_a-zA-Z0-9]+:wire\(1\), %sky130_fd_sc_hd__dfrtp_1",
+    "num": "32")
+  CALL %memoryTestLift
+  // run as comb to cover async rst
+  meta.RANDOM_EQUIVALENCE_CHECK_PASS map("cycles": "10000", "clockMode": "COMB")
 }
 
 TEST_SCRIPT :string("test-memory-basic-sync-read"), :block {
@@ -741,6 +792,7 @@ TEST_SCRIPT :string("test-memory-basic-sync-read"), :block {
       input logic[WIDTH-1:0] IN_wdata,
       input logic[0:0] IN_wmask,
 
+      input logic IN_re,
       input logic[$clog2(DEPTH) - 1:0] IN_raddr,
       output logic[WIDTH-1:0] OUT_rdata
     );
@@ -752,11 +804,14 @@ TEST_SCRIPT :string("test-memory-basic-sync-read"), :block {
         mem[IN_waddr] <= IN_wdata;
 
     always_ff@(posedge clk)
-      OUT_rdata <= mem[IN_raddr];
+      if (IN_re)
+        OUT_rdata <= mem[IN_raddr];
 
     endmodule
   }])
-  CALL %memoryTestSynthRoundTrip
+  CALL %memoryTestSynth
+  meta.ASSERT_EXISTS_PASS map("regex": "STDCELL_INSTANCE.+%FakeRAM_288_syncread", "num": "4")
+  CALL %memoryTestLift
   meta.RANDOM_EQUIVALENCE_CHECK_PASS map("cycles": "10000", "clockMode": "CLOCK")
 }
 
@@ -779,15 +834,16 @@ TEST_SCRIPT :string("test-memory-byte-write"), :block {
         if (IN_wmask[i])
           mem[IN_waddr][i*BYTE+:BYTE] <= IN_wdata[i*BYTE+:BYTE];
 
-    // always_ff@(posedge clk)
-    //   OUT_rdata <= mem[IN_raddr];
-
     always_comb
       OUT_rdata = mem[IN_raddr];
 
     endmodule
   }])
-  CALL %memoryTestSynthRoundTrip
+  CALL %memoryTestSynth
+  meta.ASSERT_EXISTS_PASS map("regex":
+    "STDCELL_INSTANCE.+%FakeRAM_288",
+    "num": "1")
+  CALL %memoryTestLift
   meta.RANDOM_EQUIVALENCE_CHECK_PASS map("cycles": "10000", "clockMode": "CLOCK")
 }
 
@@ -810,15 +866,16 @@ TEST_SCRIPT :string("test-memory-byte-write2"), :block {
         if (IN_wmask[i])
           mem[IN_waddr][i*BYTE+:BYTE] <= IN_wdata[i*BYTE+:BYTE];
 
-    // always_ff@(posedge clk)
-    //   OUT_rdata <= mem[IN_raddr];
-
     always_comb
       OUT_rdata = mem[IN_raddr];
 
     endmodule
   }])
-  CALL %memoryTestSynthRoundTrip
+  CALL %memoryTestSynth
+  meta.ASSERT_EXISTS_PASS map("regex":
+    "STDCELL_INSTANCE.+%FakeRAM_288",
+    "num": "2")
+  CALL %memoryTestLift
   meta.RANDOM_EQUIVALENCE_CHECK_PASS map("cycles": "10000", "clockMode": "CLOCK")
 }
 
@@ -841,15 +898,50 @@ TEST_SCRIPT :string("test-memory-byte-write3"), :block {
         if (IN_wmask[i])
           mem[IN_waddr][i*BYTE+:BYTE] <= IN_wdata[i*BYTE+:BYTE];
 
-    // always_ff@(posedge clk)
-    //   OUT_rdata <= mem[IN_raddr];
-
     always_comb
       OUT_rdata = mem[IN_raddr];
 
     endmodule
   }])
-  CALL %memoryTestSynthRoundTrip
+  CALL %memoryTestSynth
+  meta.ASSERT_EXISTS_PASS map("regex":
+    "STDCELL_INSTANCE.+%FakeRAM_288",
+    "num": "3")
+  CALL %memoryTestLift
+  meta.RANDOM_EQUIVALENCE_CHECK_PASS map("cycles": "10000", "clockMode": "CLOCK")
+}
+
+TEST_SCRIPT :string("test-memory-byte-write-sync-read-en"), :block {
+  PARSE_VERILOG_PASS map("code":[{
+    module Test#(parameter int DEPTH = 32, parameter int WIDTH = 15, parameter BYTE = 5) (
+      input logic clk,
+      input logic[$clog2(DEPTH) - 1:0] IN_waddr,
+      input logic[WIDTH-1:0] IN_wdata,
+      input logic[WIDTH/BYTE-1:0] IN_wmask,
+
+      input logic[$clog2(DEPTH) - 1:0] IN_raddr,
+      input logic IN_re,
+      output logic[WIDTH-1:0] OUT_rdata
+    );
+
+    logic[WIDTH-1:0] mem[DEPTH-1:0];
+
+    always_ff@(posedge clk)
+      for (int i = 0; i < WIDTH/BYTE; i++)
+        if (IN_wmask[i])
+          mem[IN_waddr][i*BYTE+:BYTE] <= IN_wdata[i*BYTE+:BYTE];
+
+    always_ff@(posedge clk)
+      if (IN_re)
+        OUT_rdata <= mem[IN_raddr];
+
+    endmodule
+  }])
+  CALL %memoryTestSynth
+  meta.ASSERT_EXISTS_PASS map("regex":
+    "STDCELL_INSTANCE.+%FakeRAM_288_syncread",
+    "num": "3")
+  CALL %memoryTestLift
   meta.RANDOM_EQUIVALENCE_CHECK_PASS map("cycles": "10000", "clockMode": "CLOCK")
 }
 

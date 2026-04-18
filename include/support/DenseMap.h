@@ -613,7 +613,6 @@ template <typename K, typename size_type = uint32_t> struct DenseSetBucket {
     return findVec<true>(cur, DenseMapInfo<K>::getEmptyKey(),
                          DenseMapInfo<K>::getTombstoneKey());
 #else
-    // todo: vectorize manually
     for (size_type i = cur + 1; i < keys.size(); i++) {
       if (!DenseMapInfo<K>::isEqual(keys[i], DenseMapInfo<K>::getEmptyKey()) &&
           !DenseMapInfo<K>::isEqual(keys[i],
@@ -629,7 +628,6 @@ template <typename K, typename size_type = uint32_t> struct DenseSetBucket {
 #if defined(__clang__) && SIMD_DENSE_MAP
     return findVec<false>(cur, k);
 #else
-    // todo: vectorize manually
     for (size_type i = cur + 1; i < keys.size(); i++) {
       if (DenseMapInfo<K>::isEqual(keys[i], k))
         return i;
@@ -643,7 +641,6 @@ template <typename K, typename size_type = uint32_t> struct DenseSetBucket {
     return findVec<false>(cur, DenseMapInfo<K>::getEmptyKey(),
                           DenseMapInfo<K>::getTombstoneKey());
 #else
-    // todo: vectorize manually
     for (size_type i = cur + 1; i < keys.size(); i++) {
       if (DenseMapInfo<K>::isEqual(keys[i], DenseMapInfo<K>::getEmptyKey()) ||
           DenseMapInfo<K>::isEqual(keys[i], DenseMapInfo<K>::getTombstoneKey()))

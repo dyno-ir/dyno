@@ -26,6 +26,7 @@
 #include "support/TwoLevelSet.h"
 #include "test/IDs.h"
 #include "test/TestInterpreter.h"
+#include "test/passes/AssertExists.h"
 #include <iterator>
 #include <optional>
 
@@ -174,8 +175,11 @@ void test(FatContext &ctx) {
   // todo: pass registry sharing. ideally make context not own this so we can
   // just share the ref.
   sandbox.getPassRegistry().registerPass<ParseVerilogPass>();
+  sandbox.getPassRegistry().registerPass<AssertExistsPass<TestPrinter>>();
+  sandbox.getCtx<MetaDialectContext>().reRegister(sandbox);
+
   TestPrinter print{sandbox, std::cout};
-  TestInterpreter interp{sandbox, print};
+  TestInterpreter interp{ctx, print};
   auto pass = interp.execBlock(block, sandbox, only, *argPrintAfterAll);
   if (!pass)
     exit(-1);
@@ -244,10 +248,10 @@ int main(int argc, char **argv) {
     break;
   case SC_TEST: {
     ctx.add<TestDialectContext>();
+    ctx.getPassRegistry().registerPass<AssertExistsPass<TestPrinter>>();
     ctx.add<MetaDialectContext>();
     test(ctx);
     break;
   }
   }
 }
-\

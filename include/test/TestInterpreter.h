@@ -16,6 +16,8 @@
 #include <sstream>
 namespace dyno {
 class TestInterpreter {
+  // parent context, we copy tests out of this into sandbox. not touched
+  // otherwise.
   Context &ctx;
   TempBindPtr<Context> sandbox;
   PrinterBase &print;
@@ -90,7 +92,7 @@ public:
       expected = instr.def(1)->as<BlockRef>();
       passes = instr.def(2)->as<BlockRef>();
     } else
-      return std::unexpected("a");
+      return std::unexpected("invalid instr format");
 
     std::array<void *, 1> ctorArgs = {reinterpret_cast<void *>(&*sandbox)};
     MetaPassPipelineInterpreter pipeline{*sandbox, ctorArgs};
@@ -98,7 +100,7 @@ public:
     FatDynObjRef<> n = nullref;
     std::array<void *, 1> args = {reinterpret_cast<void *>(&n)};
     if (!pipeline.interpretPassPipeline(passes, args))
-      return std::unexpected("failed to run passes");
+      return std::unexpected("failed to run pass");
 
     if (instr.getNumDefs() == 3) {
       if (expected.size() != 1)
@@ -140,7 +142,7 @@ public:
     }
     case *TEST_TEST_SCRIPT: {
       if (auto rv = execTestScript(instr, verbose); !rv) {
-        os << rv.error() << "\n";
+        os << "test script failed: " << rv.error() << "\n";
         return false;
       }
       return true;
