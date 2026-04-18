@@ -1,5 +1,3 @@
-#define ENABLE_FST
-
 #pragma once
 #include <cassert>
 #include <optional>
