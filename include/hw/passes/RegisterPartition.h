@@ -95,13 +95,17 @@ class RegisterPartitionPass : public Pass<RegisterPartitionPass> {
         getStoreRegions(part, instr.as<StoreIRef>());
     }
 
-    DYNO_DBG("RegisterPartition", {
+    DYNO_DBG({
       dumpInstr(reg, ctx);
-      dbgs() << "found partitions:\n";
+      dbgs() << "found store partitions:";
+      if (part.frags.empty())
+        dbgs() << " <none>\n";
       for (auto [back, frag] : Range{part.frags}.mark_back()) {
         dbgs() << "[" << frag.dstAddr << "+:" << frag.len << "]";
         dbgs() << (back ? "\n" : ", ");
       }
+
+      dbgs() << "\n";
     });
 
     auto cbuild = ConstantBuilder{ctx.getStore<Constant>()};
@@ -163,9 +167,9 @@ public:
     runOnRegister(reg);
   }
 
-  static constexpr auto runFuncs = mk_tuple(
-      &RegisterPartitionPass::runRegister, &RegisterPartitionPass::runModule,
-      &RegisterPartitionPass::run);
+  static constexpr auto runFuncs =
+      mk_tuple(&RegisterPartitionPass::runRegister,
+               &RegisterPartitionPass::runModule, &RegisterPartitionPass::run);
 
   auto make(Context &ctx) { return RegisterPartitionPass(ctx); }
   explicit RegisterPartitionPass(Context &ctx) : ctx(ctx), bitAlias(ctx) {}

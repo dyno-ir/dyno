@@ -47,6 +47,12 @@ public:
       return cself().end();
     return cself().begin() + idx;
   }
+  template <typename T> const char *find(T &&other) {
+    auto idx = std::string_view(self()).find(std::string_view(other));
+    if (idx == std::string_view::npos)
+      return cself().end();
+    return cself().begin() + idx;
+  }
   bool contains(char c) const { return find(c) != cself().end(); }
 };
 

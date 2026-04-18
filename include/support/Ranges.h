@@ -1,6 +1,7 @@
 #pragma once
 
 #include "support/Bits.h"
+#include "support/TemplateUtil.h"
 #include "support/Tuple.h"
 #include <algorithm>
 #include <cassert>
@@ -374,7 +375,7 @@ public:
   enumerate_iterator() = default;
   enumerate_iterator(T it) : it(it), i(0) {}
 
-  value_type operator*() { return {i, *it}; }
+  value_type operator*() const { return {i, *it}; }
 
   enumerate_iterator &operator++() {
     ++it;
@@ -413,6 +414,9 @@ public:
   zip_iterator() = default;
   zip_iterator(T it, U it2) : it(it), it2(it2) {}
 
+  value_type operator*() const {
+    return std::pair<decltype(*it), decltype(*it2)>(*it, *it2);
+  }
   value_type operator*() {
     return std::pair<decltype(*it), decltype(*it2)>(*it, *it2);
   }
@@ -860,15 +864,6 @@ public:
   }
 };
 
-template <typename T, typename Seq> struct tuple_n_helper;
-template <typename T, std::size_t... Is>
-struct tuple_n_helper<T, std::index_sequence<Is...>> {
-  template <std::size_t> using wrap = T;
-  using type = std::tuple<wrap<Is>...>;
-};
-template <typename T, std::size_t N>
-using tuple_n_t = typename tuple_n_helper<T, std::make_index_sequence<N>>::type;
-
 template <unsigned N, typename T>
 class tuple_iterator
     : public base_iterator<tuple_iterator<N, T>,
@@ -932,6 +927,82 @@ public:
   }
 
   friend auto operator<=>(const tuple_iterator &a, const tuple_iterator &b)
+    requires(isRandom)
+  {
+    return a.it <=> b.it;
+  }
+};
+
+template <typename T>
+class flatten_iterator
+    : public base_iterator<flatten_iterator<T>,
+                           typename std::iterator_traits<T>::iterator_category,
+                           typename std::iterator_traits<T>::difference_type> {
+  T it;
+
+  template <typename U> static auto flatten_nested(U &&u) {
+    if constexpr (is_pair_v<std::remove_cvref_t<U>>) {
+      return std::tuple_cat(flatten_nested(u.first), flatten_nested(u.second));
+    } else if constexpr (is_tuple_v<std::remove_cvref_t<U>>) {
+      return [&]<std::size_t... Is>(std::index_sequence<Is...>) {
+        return std::tuple_cat(flatten_nested(std::get<Is>(u))...);
+      }(std::make_index_sequence<std::tuple_size_v<std::remove_cvref_t<U>>>{});
+    } else {
+      return std::make_tuple(u);
+    }
+  }
+
+public:
+  using iterator_category = std::iterator_traits<T>::iterator_category;
+  using underlying_value_type = typename std::iterator_traits<T>::value_type;
+  using value_type =
+      decltype(flatten_nested(std::declval<const underlying_value_type &>()));
+  using pointer = void;
+  using reference = void;
+  using difference_type = std::iterator_traits<T>::difference_type;
+
+private:
+  static constexpr bool isRandom =
+      std::is_same_v<iterator_category, std::random_access_iterator_tag>;
+  static constexpr bool isBidir =
+      std::is_same_v<iterator_category, std::bidirectional_iterator_tag> ||
+      isRandom;
+
+public:
+  flatten_iterator() = default;
+  flatten_iterator(T it) : it(it) {}
+
+  value_type operator*() const { return flatten_nested(*it); }
+
+  flatten_iterator &operator+=(difference_type d)
+    requires(isRandom)
+  {
+    it += d;
+    return *this;
+  }
+
+  flatten_iterator &operator++() {
+    ++it;
+    return *this;
+  }
+  // for some reason the base_iterator version can't be resolved
+  flatten_iterator operator++(int) {
+    flatten_iterator tmp(*this);
+    ++(*this);
+    return tmp;
+  }
+
+  difference_type operator-(flatten_iterator other)
+    requires(isRandom)
+  {
+    return (it - other.it);
+  }
+
+  friend bool operator==(const flatten_iterator &a, const flatten_iterator &b) {
+    return a.it == b.it;
+  }
+
+  friend auto operator<=>(const flatten_iterator &a, const flatten_iterator &b)
     requires(isRandom)
   {
     return a.it <=> b.it;
@@ -1036,6 +1107,10 @@ public:
 
   auto enumerate() {
     return ::Range{enumerate_iterator{beginIt}, enumerate_iterator{endIt}};
+  }
+
+  auto flat() {
+    return ::Range{flatten_iterator{beginIt}, flatten_iterator{endIt}};
   }
 
   auto discard_optional() {

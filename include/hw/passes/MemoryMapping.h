@@ -18,7 +18,6 @@
 #include "hw/analysis/PipelineAnalysis.h"
 #include "hw/analysis/RegisterValue.h"
 #include "hw/analysis/WireVariable.h"
-#include "support/Algorithm.h"
 #include "support/Any.h"
 #include "support/ArrayRef.h"
 #include "support/Bits.h"
@@ -199,6 +198,12 @@ private:
     SmallVec<MemLoadIRef, 4> actualLoads;
     SmallVec<MemLoadIRef, 4> modelLoads;
 
+    SmallVec<PipelineAnalysis::Pipeline, 4> actLoadPipelines;
+    SmallVec<PipelineAnalysis::Pipeline, 4> modLoadPipelines;
+
+    // interesting state goes in mapping so we can save/restore. idea is explore
+    // multiple mappings and restore the best. state that's directly in
+    // here is easy to recompute (done in constructor).
     MemoryMapping mapping;
 
     MemoryMapper(Config &config, RegisterIRef actual, RegisterIRef model)
@@ -244,6 +249,14 @@ private:
               .transform([](size_t, MemLoadIRef ld) { return ld.getLen(); })
               .lcm();
       actualPortsLCM = std::lcm(storesLCM, loadsLCM);
+
+      for (auto ld : modelLoads)
+        modLoadPipelines.emplace_back(
+            PipelineAnalysis::getOutPipeline(ld.value()));
+
+      for (auto ld : actualLoads)
+        actLoadPipelines.emplace_back(
+            PipelineAnalysis::getOutPipeline(ld.value()));
 
       // How many times to repeat the model memory. This is a lower bound, other
       // constraints may push this up, if mapping fails we search upwards. Lower
@@ -344,8 +357,6 @@ private:
       uint32_t rowLen =
           totalWidth + (totalWidth > 0 ? (totalWidth - 1) / S_min : 0);
       std::string enableRow(rowLen, ' ');
-      // for (uint32_t j = S_min; j < totalWidth; j += S_min)
-      //   enableRow[getNewIdx(j) - 1] = ' ';
       for (auto &frag : mapping.modelRangeEnable.frags) {
         if (frag.mapping) {
           for (uint32_t j = frag.dstAddr; j < frag.dstAddr + frag.len; ++j)
@@ -457,11 +468,9 @@ private:
           if constexpr (std::is_same_v<RefT, MemLoadIRef>) {
             // model dictates required number of stages
             // but provides en/rst/init etc on stages
-            auto modPipe = PipelineAnalysis::getOutPipeline(modSt.value());
-            auto actPipe = PipelineAnalysis::getOutPipeline(actSt.value());
-
-            if (!PipelineAnalysis::isImplementableWithPipe(actPipe, modPipe))
-              return false;
+            if (!PipelineAnalysis::isImplementableWithPipe(
+                    actLoadPipelines[actStIdx], modLoadPipelines[modStIdx]))
+              continue;
           }
 
           // sub instance stores may not cross the striping boundaries
@@ -582,9 +591,10 @@ private:
     }
 
     template <typename RefT>
-    void applyPort(Context &ctx, RefT actLoad, PortPartition &part,
-                   uint32_t factor, auto &&connect, auto &&connectReverse,
-                   OperandVec<HWValue> *outWires, HWValue &outSubIdx) {
+    void applyPort(Context &ctx, uint32_t actLoadIdx, RefT actLoad,
+                   PortPartition &part, uint32_t factor, auto &&connect,
+                   auto &&connectReverse, OperandVec<HWValue> *outWires,
+                   HWValue &outSubIdx) {
       HWInstrBuilder build{ctx, actLoad};
 
       HWValue subIdx = nullref;
@@ -602,17 +612,20 @@ private:
         auto idx = *frag.mapping;
         uint32_t repIdx;
         RefT modLoad;
+        uint32_t modLoadIdx;
 
         if constexpr (std::is_same_v<RefT, MemLoadIRef>) {
           repIdx = idx / modelLoads.size();
           if (idx % modelLoads.size() == modelLoads.size())
             continue;
-          modLoad = modelLoads[idx % modelLoads.size()];
+          modLoadIdx = idx % modelLoads.size();
+          modLoad = modelLoads[modLoadIdx];
         } else {
           repIdx = idx / modelStores.size();
           if (idx % modelStores.size() == modelStores.size())
             continue;
-          modLoad = modelStores[idx % modelStores.size()];
+          modLoadIdx = idx % modelStores.size();
+          modLoad = modelStores[modLoadIdx];
         }
 
         // marked as unused
@@ -661,14 +674,10 @@ private:
                 repIdx);
 
         if constexpr (std::is_same_v<RefT, MemLoadIRef>) {
-          auto modPipe =
-              PipelineAnalysis::getOutPipeline(modLoad.value(), false);
-          auto actPipe =
-              PipelineAnalysis::getOutPipeline(actLoad.value(), false);
-
+          const auto &modPipe = modLoadPipelines[modLoadIdx];
           SmallDenseMap<ObjRef<Wire>, ObjRef<Wire>, 8> assignments;
-          auto rv = PipelineAnalysis::isImplementableWithPipe(actPipe, modPipe,
-                                                              assignments);
+          auto rv = PipelineAnalysis::isImplementableWithPipe(
+              actLoadPipelines[actLoadIdx], modPipe, assignments);
           assert(rv && "should have passed during mapping");
 
           // Connect clock enables/resets mapped by isImplementableWithPipe
@@ -824,8 +833,8 @@ private:
         return w;
       };
 
-      for (auto [part, actLoad] :
-           Range{mapping.loadPartitions}.zip(actualLoads)) {
+      for (auto [actLoadIdx, part, actLoad] :
+           Range{mapping.loadPartitions}.zip(actualLoads).enumerate().flat()) {
         build.setInsertPoint(actLoad);
         OperandVec<HWValue> wires{ctx, 1, part.frags.size()};
         wires.pushPlaceholderDefs();
@@ -834,16 +843,17 @@ private:
         // todo: lower score when factor is non pow2
 
         HWValue subIdx;
-        applyPort(ctx, actLoad, part, factor, connect, connectReverse, &wires,
-                  subIdx);
+        applyPort(ctx, actLoadIdx, actLoad, part, factor, connect,
+                  connectReverse, &wires, subIdx);
 
         wires.others().do_reverse();
         auto val = build.buildConcat(std::move(wires));
 
         auto defWire = actLoad.def()->as<WireRef>();
-        auto delay =
-            PipelineAnalysis::getOutPipeline(modelLoads.front().value())
-                .totalDelay;
+        auto delay = modLoadPipelines.front().totalDelay;
+        assert(Range{modLoadPipelines}.all([&](auto &stage) {
+          return stage.totalDelay == delay;
+        }) && "delay for all load ports in model must be equal");
         auto pipe = PipelineAnalysis::getOutPipeline(actLoad.value(), false);
         if (delay != 0) {
           defWire = pipe.stages[delay - 1].ff.q();
@@ -866,15 +876,17 @@ private:
         defWire.replaceAllUsesWith(val);
       }
 
-      for (auto [part, actStore] :
-           Range{mapping.storePartitions}.zip(actualStores)) {
+      for (auto [actStoreIdx, part, actStore] : Range{mapping.storePartitions}
+                                                    .zip(actualStores)
+                                                    .enumerate()
+                                                    .flat()) {
         build.setInsertPoint(actStore);
 
         uint32_t factor = part.getLen() / *getMinFact(actStore);
 
         HWValue subIdx;
-        applyPort(ctx, actStore, part, factor, connect, connectReverse, nullptr,
-                  subIdx);
+        applyPort(ctx, actStoreIdx, actStore, part, factor, connect,
+                  connectReverse, nullptr, subIdx);
       }
 
       // Flatten inputs
@@ -959,32 +971,6 @@ private:
       return false;
 
     mapper.computeMappingCost();
-    return true;
-  }
-
-  bool lowerMemory(RegisterIRef actual, RegisterIRef model) {
-    MemoryMapper mapper{config, actual, model};
-    auto origRepCnt = mapper.mapping.repeatCount;
-    auto maxRepCnt = origRepCnt * 8;
-
-    // We start with a lower bound of the number of repeats required.
-    // Bounded exponential search to find the lowest number of repeats to
-    // make it work (or fail).
-    IntRange universe(0u, maxRepCnt + 1);
-    auto searchSpace = universe.subrange(origRepCnt);
-    auto it = exp_search(universe, searchSpace,
-                         [&](auto cnt) { return tryMap(mapper, cnt); });
-
-    if (it == searchSpace.end())
-      return false;
-
-    // best value may not have been the last one we tried
-    if (mapper.mapping.repeatCount != *it) {
-      auto rv = tryMap(mapper, *it);
-      assert(rv);
-    }
-
-    mapper.apply(ctx);
     return true;
   }
 

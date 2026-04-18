@@ -72,7 +72,7 @@ private:
 
 struct PassRegistry {
   Vec<OpcodeInfo> metaOpcodeInfoArr;
-  SlabAllocator<TypeErasedPass> typeErasedPasses;
+  Vec<TypeErasedPass> typeErasedPasses;
   MixedSizeSlabAllocator<> stringAlloc;
 #ifdef DYNO_ENABLE_DEBUG
   Vec<uint16_t, MAX_NUM_DIALECTS> dialectPassIDCounter = (MAX_NUM_DIALECTS);

@@ -1,6 +1,6 @@
 #pragma once
-#include <cstdint>
 #include "support/Tuple.h"
+#include <cstdint>
 #include <type_traits>
 #include <utility>
 
@@ -72,8 +72,7 @@ template <typename M> using function_args_t = typename function_info<M>::args;
 template <typename M> using function_ret_t = typename function_info<M>::ret;
 
 template <auto fn, typename Tuple> struct BindMethodImpl;
-template <auto fn, typename... Args>
-struct BindMethodImpl<fn, Tuple<Args...>> {
+template <auto fn, typename... Args> struct BindMethodImpl<fn, Tuple<Args...>> {
   static auto f(member_obj_t<decltype(fn)> &obj, Args... args) {
     return (obj.*fn)(std::forward<decltype(args)>(args)...);
   }
@@ -95,3 +94,22 @@ template <auto Fn> struct BoundMethodCallable {
                               std::forward<decltype(args)>(args)...);
   }
 };
+
+template <typename T> struct is_pair : std::false_type {};
+template <typename T, typename U>
+struct is_pair<std::pair<T, U>> : std::true_type {};
+template <typename T> inline constexpr bool is_pair_v = is_pair<T>::value;
+
+template <typename T> struct is_tuple : std::false_type {};
+template <typename... Ts>
+struct is_tuple<std::tuple<Ts...>> : std::true_type {};
+template <typename T> inline constexpr bool is_tuple_v = is_tuple<T>::value;
+
+template <typename T, typename Seq> struct tuple_n_helper;
+template <typename T, std::size_t... Is>
+struct tuple_n_helper<T, std::index_sequence<Is...>> {
+  template <std::size_t> using wrap = T;
+  using type = std::tuple<wrap<Is>...>;
+};
+template <typename T, std::size_t N>
+using tuple_n_t = typename tuple_n_helper<T, std::make_index_sequence<N>>::type;

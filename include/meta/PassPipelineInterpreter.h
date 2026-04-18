@@ -91,11 +91,8 @@ class MetaPassPipelineInterpreter {
       bool res = pass.run(passRunArgs);
       pop_fatal_error_callback();
       if (!res) {
-        std::print(
-            dbgs(), "failed to run pass: ",
-            ContextPrinterWrapper<CoreDialectPrinter, OpDialectPrinter,
-                                  MetaDialectPrinter>{ctx, OStreamWrapper{}}
-                .toString(instr));
+        errorCB();
+        std::print(std::cerr, "error: failed to run pass (returned false)\n");
         return false;
       }
     }

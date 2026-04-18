@@ -71,19 +71,19 @@ struct SmallBoolExprCNF {
     uint32_t idx;
     uint32_t len;
 
-    uint32_t size() { return len; }
+    uint32_t size() const { return len; }
 
-    BoolExprLiteral &front() { return parent->literals[idx]; }
-    BoolExprLiteral &back() { return parent->literals[idx + len - 1]; }
-    BoolExprLiteral *begin() { return &front(); }
-    BoolExprLiteral *end() { return &back() + 1; }
+    BoolExprLiteral &front() const { return parent->literals[idx]; }
+    BoolExprLiteral &back() const { return parent->literals[idx + len - 1]; }
+    BoolExprLiteral *begin() const { return &front(); }
+    BoolExprLiteral *end() const { return &back() + 1; }
 
-    BoolExprLiteral &operator[](uint32_t i) {
+    BoolExprLiteral &operator[](uint32_t i) const {
       assert(i < len);
       return begin()[i];
     }
 
-    void dump() {
+    void dump() const {
       dbgs() << "(";
       for (auto [j, lit] : Range{*this}.enumerate()) {
         if (j != 0)
@@ -119,8 +119,8 @@ struct SmallBoolExprCNF {
       return copy;
     }
 
-    ClauseRef &operator*() { return current; }
-    ClauseRef *operator->() { return &current; }
+    const ClauseRef &operator*() const { return current; }
+    const ClauseRef *operator->() const { return &current; }
 
     ClauseIterator(ClauseRef ref) : current(ref) { findLen(); }
 
