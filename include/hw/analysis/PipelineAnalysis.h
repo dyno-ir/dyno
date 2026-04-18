@@ -129,6 +129,10 @@ public:
         curr = ff.q();
         continue;
       }
+      case *HW_ASSUME: {
+        curr = instr.def()->as<WireRef>();
+        continue;
+      }
       // todo: remap
       default:
         break;
@@ -175,15 +179,15 @@ public:
   }
 
   // model pipeline dictates #stages, actual pipeline dictates rst/en
-  static bool isImplementableWithPipe(const Pipeline &act,
-                                      const Pipeline &mod) {
+  static bool isImplementableWithPipe(
+      const Pipeline &act, const Pipeline &mod,
+      SmallDenseMap<ObjRef<Wire>, ObjRef<Wire>, 8> &assignments) {
     auto actIt = act.stages.begin();
     auto modIt = mod.stages.begin();
 
     uint32_t actSub = 0;
     uint32_t modSub = 0;
 
-    SmallDenseMap<ObjRef<Wire>, ObjRef<Wire>, 8> assignments;
     auto checkAssign = [&assignments](WireRef act, WireRef mod) -> bool {
       auto [found, it] = assignments.findOrInsert(act, mod);
       if (found) {
@@ -199,17 +203,17 @@ public:
         return false;
 
       if (modIt->ff.hasClkEn()) {
-        if (checkAssign(actIt->ff.hasClkEn()
-                            ? nullref
-                            : actIt->ff.clkEnRaw().as<WireRef>(),
-                        modIt->ff.clkEnRaw().as<WireRef>()))
+        if (!checkAssign(!actIt->ff.hasClkEn()
+                             ? nullref
+                             : actIt->ff.clkEnRaw().as<WireRef>(),
+                         modIt->ff.clkEnRaw().as<WireRef>()))
           return false;
       }
       for (unsigned i = 0; i < modIt->ff.numRsts(); i++) {
-        if (checkAssign(i >= actIt->ff.numRsts()
-                            ? nullref
-                            : actIt->ff.rstRaw(i).as<WireRef>(),
-                        modIt->ff.rstRaw(i).as<WireRef>()))
+        if (!checkAssign(i >= actIt->ff.numRsts()
+                             ? nullref
+                             : actIt->ff.rstRaw(i).as<WireRef>(),
+                         modIt->ff.rstRaw(i).as<WireRef>()))
           return false;
       }
 
@@ -226,6 +230,12 @@ public:
     }
 
     return modIt == mod.stages.end();
+  }
+
+  static bool isImplementableWithPipe(const Pipeline &act,
+                                      const Pipeline &mod) {
+    SmallDenseMap<ObjRef<Wire>, ObjRef<Wire>, 8> assignments;
+    return isImplementableWithPipe(act, mod, assignments);
   }
 };
 

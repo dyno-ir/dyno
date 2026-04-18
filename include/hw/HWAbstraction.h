@@ -219,15 +219,14 @@ public:
       cbuild.val(bits, 0);                                                     \
                                                                                \
       size_t index = operands.size() - 1;                                      \
-      while (operands.size() != 0) {                                           \
+      while (index != 0) {                                                     \
         auto last = operands[index].dyn_as<ConstantRef>();                     \
-        cbuild.constFunc(last);                                                \
         if (!last)                                                             \
           break;                                                               \
+        cbuild.constFunc(last);                                                \
         index--;                                                               \
       }                                                                        \
-      index++;                                                                 \
-      operands = MutArrayRef{operands.data(), index};                          \
+      operands = MutArrayRef{operands.data(), index + 2};                      \
       operands.back() = cbuild.get();                                          \
     }                                                                          \
     if (auto asConst = operands.back().dyn_as<ConstantRef>()) {                \

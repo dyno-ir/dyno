@@ -6,6 +6,7 @@
 #include "dyno/MutInstr.h"
 #include "dyno/Obj.h"
 #include "dyno/Pass.h"
+#include "hw/FlipFlop.h"
 #include "hw/HWAbstraction.h"
 #include "hw/HWContext.h"
 #include "hw/HWInstr.h"
@@ -665,6 +666,30 @@ private:
           auto actPipe =
               PipelineAnalysis::getOutPipeline(actLoad.value(), false);
 
+          SmallDenseMap<ObjRef<Wire>, ObjRef<Wire>, 8> assignments;
+          auto rv = PipelineAnalysis::isImplementableWithPipe(actPipe, modPipe,
+                                                              assignments);
+          assert(rv && "should have passed during mapping");
+
+          // Connect clock enables/resets mapped by isImplementableWithPipe
+          for (auto [act, mod] : assignments) {
+            auto modW = ctx.resolve(mod);
+            HWValue actualVal;
+            if (act)
+              actualVal = ctx.resolve(act);
+            else {
+              assert(!modW.uses().empty());
+              const OperandRef *use = modW.uses().find_if([](auto use) {
+                return use.instr().isOpc(HW_FLIP_FLOP, HW_FLIP_FLOP_SRST);
+              });
+              assert(use);
+              // if not present on actual, tie enables to 1, resets to 0.
+              auto type = use->instr().as<FlipFlopIRef>().classifyUse(*use);
+              actualVal = ConstantRef::fromBool(type == FlipFlopIRef::ENABLE);
+            }
+            connect(actualVal, modW, repIdx);
+          }
+
           auto ldValPostPipe = ctx.resolve(modPipe.slice.wire);
           assert(modPipe.slice.addr == 0 &&
                  modPipe.slice.len == ldValPostPipe.getNumBits() && "todo");
@@ -828,7 +853,8 @@ private:
           if (delay != 0) {
             auto clk = pipe.stages.front().ff.clk();
             for (unsigned i = 0; i < delay; i++) {
-              subIdx = build.buildFlipFlop(clk, subIdx);
+              subIdx = build.buildFlipFlop(clk, subIdx,
+                                           pipe.stages[i].ff.clkEnRaw());
             }
           }
 
@@ -1001,6 +1027,8 @@ private:
           maxRepCount = trial;
         } else {
           repCount = trial + 1;
+          if (repCount == maxRepCount)
+            return false;
         }
       }
 
