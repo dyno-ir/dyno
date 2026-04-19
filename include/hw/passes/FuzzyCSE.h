@@ -15,6 +15,7 @@
 #include "support/Debug.h"
 #include "support/DynBitSet.h"
 #include "support/Tuple.h"
+#include "support/Utility.h"
 #include <cassert>
 
 namespace dyno {
@@ -269,10 +270,11 @@ private:
       }
       maxPrefixSize = std::max(maxPrefixSize, prefix.getLen());
       if (prefix.frags.empty()) {
-        return false;
         matchingPrefixes.pop_back();
         it = intersectOps.erase(it);
         continue;
+        // or bail?
+        // return false;
       }
       lhsCovered[lhsOpIdx] = 1;
       rhsCovered[rhsOpIdx] = 1;
@@ -309,7 +311,8 @@ private:
     if (config.opToShare == OP_ADD)
       sharedInstSize += 1;
 
-    if (matchingPrefixes.size() == 0)
+    // if we end up with less than one shared op prefix, bail
+    if (matchingPrefixes.size() <= 1)
       return false;
 
     DYNO_DBG({
@@ -334,23 +337,29 @@ private:
       auto val = prefix.get(build, false);
       sharedOperands.emplace_back(build.buildZExt(sharedInstSize, val));
     }
-    auto defW = build.buildCommutative(opc, sharedOperands).as<WireRef>();
-    newInstrAbstr.ref = defW.getDefI();
+    // assert(Range{sharedOperands}.any([](HWValue v) {
+    //   return v.is<WireRef>();
+    // }) && "only constants?");
+    auto defVal = build.buildCommutative(opc, sharedOperands);
+    auto defW = defVal.dyn_as<WireRef>();
 
-    if (!newInstrAbstr.ref.isOpc(opc) ||
+    // bail if the builder folded the instruction, can probably
+    // be done a bit better
+    if (!defW || !defW.getDefI().isOpc(opc) ||
         // todo: more efficient
         Range{candidates}.find_if([&](auto &cand) {
-          return cand.ref == newInstrAbstr.ref;
+          return cand.ref == defW.getDefI();
         }) != candidates.end()) {
       DYNO_DBG({ dbgs() << "builder folded, bailing\n"; })
       // we may have created a couple of zexts, leave these for DCE to clean up
       return false;
     }
+    newInstrAbstr.ref = defW.getDefI();
 
     for (auto [idx, prefix] : Range{matchingPrefixes}.enumerate()) {
       auto ref = prefix.frags.front().ref;
       if (ref.is<ObjRef<Wire>>()) {
-        auto it = operands.find(ref);
+        auto [_, it] = operands.findOrInsert(ref, operands.size());
         newInstrAbstr.operands.emplace_back(idx, it.val());
         auto &uses = operandUses[it.val()];
         uses.emplace_back(newInstrAbstr.idx);
@@ -418,6 +427,9 @@ private:
     // we use the first fragment's ref as the operand for heuristic
     // matching. higher fragments (if any) will be checked during detailed
     // matching.
+
+    // todo: do not include trailing zeros in here, we don't want to match
+    // everything that has a trailing zero fragment.
     auto [found, id] = operands.findOrInsert(front.ref, operands.size());
 
     abstr.operands.emplace_back(uint16_t(opIdx),
@@ -471,10 +483,6 @@ private:
 
       if (!candidate.ref)
         continue;
-      DYNO_DBG({
-        dbgs() << "inspecting: ";
-        dumpInstr(candidate.ref, ctx);
-      });
 
       for (auto op : candidate.operands) {
         auto &arr = operandUses[op.second.id];

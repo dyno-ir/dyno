@@ -1597,6 +1597,9 @@ public:
   HWValue buildOneHotMux(MutArrayRef<std::pair<HWValue, HWValue>> cases) {
     assert(!cases.empty());
 
+    if (cases.size() == 1)
+      return buildAssume(cases.front().second, cases.front().first);
+
     Range{cases}.sort([](auto &lhs, auto &rhs) {
       return commutativeOpOperandOrder(lhs.second, rhs.second);
     });
@@ -1614,12 +1617,20 @@ public:
     if (!templ[0])
       templ[0] = ctx.getStore<Wire>().create();
 
+    auto val = templ.def(0).as<WireRef>();
+    val->numBits = templ.other(1).getNumBits();
+
+    if (templ.getNumOthers() == 2) {
+      // assume has value first, then assumption
+      std::swap(templ.other(0), templ.other(1));
+      insertInstr(templ.build(HW_ASSUME));
+      return val;
+    }
+
     templ.others().pairwise().sort([](auto lhs, auto rhs) {
       return commutativeOpOperandOrder(lhs.second, rhs.second);
     });
 
-    auto val = templ.def(0).as<WireRef>();
-    val->numBits = templ.other(1).getNumBits();
     insertInstr(templ.build(HW_ONEHOT_MUX));
     return val;
   }

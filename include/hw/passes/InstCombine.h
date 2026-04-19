@@ -366,6 +366,7 @@ private:
 
       deriveBits.clearCache();
     }
+    deriveBits.clearCache();
     currentMatched.emplace_back(instr);
     return change;
   }
@@ -496,7 +497,8 @@ private:
       auto mergedSel = build.buildOr(rng);
       entries.emplace_back(mergedSel, ctx.resolve(val));
     }
-    auto newVal = build.buildOneHotMux(entries);
+
+    HWValue newVal = build.buildOneHotMux(entries);
     replaceUses(instr.def(0)->as<WireRef>(), newVal);
     deleteMatchedInstr(instr);
     return true;

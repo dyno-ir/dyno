@@ -27,6 +27,9 @@ namespace dyno {
 void dumpCtx(Context &ctx);
 void dumpInstr(InstrRef instr);
 void dumpInstr(InstrRef instr, Context &ctx);
+void dumpInstr(InstrRef instr, Context &ctx, bool trailingNewline);
+void dumpInstr(InstrRef instr, Context &ctx, bool trailingNewline,
+               bool expandBlocks);
 void dumpDeps(InstrRef instr);
 void dumpDeps(InstrRef instr, Context &ctx);
 void dumpDeps(InstrRef instr, Context &ctx, unsigned depth);
@@ -84,9 +87,10 @@ public:
     }
   }
   using PrinterWrapper::printInstr;
-  void printInstr(InstrRef instr, Context &ctx) {
+  void printInstr(InstrRef instr, Context &ctx, bool trailingNewline = true,
+                  bool expandBlocks = true) {
     auto tok = bindCtx(ctx);
-    PrinterBase::printInstr(instr);
+    PrinterBase::printInstr(instr, trailingNewline, expandBlocks);
   }
   using HWPrinterImpl::printDeps;
   void printDeps(InstrRef instr, Context &ctx, unsigned maxDepth = -1) {

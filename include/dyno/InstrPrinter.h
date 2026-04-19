@@ -282,7 +282,8 @@ public:
       str << "]";
   }
 
-  void printInstr(InstrRef instr, bool trailingNewline = true) {
+  void printInstr(InstrRef instr, bool trailingNewline = true,
+                  bool expandBlocks = true) {
     printOpcodeDefault(instr);
     str << ' ';
 
@@ -305,7 +306,8 @@ public:
           first = 0;
           str << ' ';
         }
-        printBlock(asBlock);
+        if (expandBlocks)
+          printBlock(asBlock);
       }
     }
 

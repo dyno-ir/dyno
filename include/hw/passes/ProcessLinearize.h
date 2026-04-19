@@ -285,8 +285,7 @@ public:
             size_t i = 0;
             for (auto it2 = stack.end() - 1; it2 >= it.base(); --it2, ++i) {
               dbgs() << "Process " << (i + 1) << " of " << length << "\n";
-              dumpInstr(it2->proc.iref());
-              dbgs() << "\n";
+              dumpInstr(it2->proc.iref(), ctx, true, false);
             }
           });
 

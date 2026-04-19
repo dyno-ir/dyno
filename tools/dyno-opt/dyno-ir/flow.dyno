@@ -150,6 +150,12 @@ FUNCTION_DEF %synthMemoryFFMuxHandling:func, :block {
   // lift MUXs up the dep chain for reg partition
   // (s.t. regs with e.g. concat input can be split)
   meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS
+
+  // re-flatten. todo: generate OH muxes in lower ops
+  meta.INST_COMBINE_PASS
+  meta.MUX_TREE_FLATTEN_PASS
+  meta.INST_COMBINE_PASS
+
   meta.INST_COMBINE_PASS map("liftMUX" : "1")
   meta.REGISTER_PARTITION_PASS
   meta.INST_COMBINE_PASS map("liftMUX" : "1")
@@ -196,6 +202,9 @@ FUNCTION_DEF %synthLowerMemoryFF:func, :block {
   meta.SSA_CONSTRUCT_PASS
   meta.INST_COMBINE_PASS
   meta.AGGRESSIVE_DEAD_CODE_ELIMINATION_PASS
+
+  // lower unmapped memories back to load/store
+  meta.LOWER_MEM_ACCESS_PASS
 }
 
 FUNCTION_DEF %synthTechmap:func, :block {

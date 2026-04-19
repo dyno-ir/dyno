@@ -20,6 +20,16 @@ __attribute__((used)) void dumpInstr(InstrRef instr, Context &ctx) {
   print.reset();
   print.printInstr(instr, ctx);
 }
+__attribute__((used)) void dumpInstr(InstrRef instr, Context &ctx,
+                                     bool trailingNewline) {
+  print.reset();
+  print.printInstr(instr, ctx, trailingNewline);
+}
+__attribute__((used)) void dumpInstr(InstrRef instr, Context &ctx,
+                                     bool trailingNewline, bool expandBlocks) {
+  print.reset();
+  print.printInstr(instr, ctx, trailingNewline, expandBlocks);
+}
 
 __attribute__((used)) void dumpDeps(InstrRef instr) {
   print.reset();

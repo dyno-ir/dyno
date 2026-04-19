@@ -331,7 +331,7 @@ public:
 
 class DeriveBitsAnalysis {
   Context &ctx;
-  SmallVec<std::pair<WireRef, BigInt *>, 64> stack;
+  SmallVec<std::pair<WireRef, BigInt>, 16> stack;
   struct Change {
     BigInt bigInt;
     ObjRef<Wire> wire;
@@ -341,12 +341,15 @@ public:
   KnownBitsAnalysis knownBits;
   // returns false if the assignment is contradictory
   bool propKnownValueUp(WireRef wire, BigInt &&value) {
+    assert(wire.getNumBits() == value.getNumBits());
     auto &ref = knownBits.cache.insertOrAssign(wire, std::move(value));
-    stack.emplace_back(wire, &ref);
+    stack.emplace_back(wire, ref);
 
     while (!stack.empty()) {
       auto [obj, bigInt] = stack.pop_back_val();
       auto curWire = ctx.resolve(obj);
+      assert(curWire.getNumBits() == bigInt.getNumBits());
+
       auto instr = curWire.getDefI();
 
       switch (*instr.getDialectOpcode()) {
@@ -355,7 +358,9 @@ public:
         auto propState =
             instr.getDialectOpcode().is(OP_AND) ? FourState::S1 : FourState::S0;
         BigInt oneBits = BigInt::bitsExactEqual4S(
-            *bigInt, PatBigInt::fromFourState(propState, bigInt->getNumBits()));
+            bigInt, PatBigInt::fromFourState(propState, bigInt.getNumBits()));
+        assert(oneBits.getNumBits() == instr.def()->as<WireRef>().getNumBits());
+
         // nothing to do
         if (oneBits.valueEquals(0))
           break;
@@ -369,6 +374,7 @@ public:
           auto asWire = op->as<WireRef>();
           auto &val = knownBits.cache.findOrInsert(
               asWire, PatBigInt::undef(*asWire.getNumBits()));
+          assert(val.getNumBits() == wire.getNumBits());
 
           auto oldV = val;
 
@@ -387,7 +393,7 @@ public:
           assert(val.getNumBits() == wire.getNumBits());
 
           if (val != oldV) {
-            stack.emplace_back(asWire, &val);
+            stack.emplace_back(asWire, val);
             // todo: recompute uses, but without pessimizing other results...
           }
         }
@@ -396,14 +402,14 @@ public:
       case *OP_NOT: {
         if (auto asConst = instr.other(0)->dyn_as<ConstantRef>()) {
           BigInt rev;
-          BigInt::notOp4S(rev, *bigInt);
+          BigInt::notOp4S(rev, bigInt);
           if (!BigInt::icmpOp4S(asConst, rev, BigInt::ICMP_CXEQ))
             return false;
         } else if (auto asWire = instr.other(0)->dyn_as<WireRef>()) {
           auto &val = knownBits.cache.findOrInsert(
               asWire, PatBigInt::undef(*asWire.getNumBits()));
 
-          if (!BigInt::icmpOp4S(~*bigInt, val, BigInt::ICMP_CXEQ))
+          if (!BigInt::icmpOp4S(~bigInt, val, BigInt::ICMP_CXEQ))
             return false;
 
           static constexpr auto lambda = [](uint32_t lhs, uint32_t rhs) {
@@ -426,10 +432,11 @@ public:
           BigInt newV;
           BigInt::bitwiseOp4S<lambda,
                               BigInt::bitwise2S4SAdapt<lambda, BigInt, BigInt>>(
-              newV, val, *bigInt);
+              newV, val, bigInt);
+          assert(newV.getNumBits() == asWire.getNumBits());
           if (val != newV) {
             val = std::move(newV);
-            stack.emplace_back(asWire, &val);
+            stack.emplace_back(asWire, val);
           }
         } else
           dyno_unreachable("invalid operand type");
@@ -437,7 +444,7 @@ public:
       }
       case *OP_ICMP_NE:
       case *OP_ICMP_EQ: {
-        if (bigInt->valueEquals(instr.isOpc(OP_ICMP_EQ) ? 0 : 1))
+        if (bigInt.valueEquals(instr.isOpc(OP_ICMP_EQ) ? 0 : 1))
           break;
         if (!(instr.other(0)->is<WireRef>() &&
               instr.other(1)->is<ConstantRef>()))
@@ -466,9 +473,10 @@ public:
         BigInt::bitwiseOp4S<lambda,
                             BigInt::bitwise2S4SAdapt<lambda, BigInt, BigInt>>(
             newV, val, constVal);
+        assert(newV.getNumBits() == asWire.getNumBits());
         if (val != newV) {
           val = std::move(newV);
-          stack.emplace_back(asWire, &val);
+          stack.emplace_back(asWire, val);
         }
         break;
       }

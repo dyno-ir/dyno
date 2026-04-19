@@ -44,11 +44,13 @@ public:
     auto numArgs = Range{args}.find(StringRef::emptyRef()) - args.begin();
     args = ArrayRef<StringRef>(args.data(), numArgs);
 
-    std::array<std::string, NumArgs + 1> argStore{"dyno-sv"};
-    std::array<char *, NumArgs + 2> argv{argStore[0].data()};
-    for (auto [i, str] : Range{args}.enumerate()) {
-      argStore[i + 1] = std::string(str.begin(), str.end());
-      argv[i + 1] = argStore[i + 1].data();
+    SmallVec<std::string, 16> argStore{"dyno-sv"};
+    argStore.reserve(args.size() + 1);
+    SmallVec<char *, 16> argv{argStore[0].data()};
+    argv.reserve(args.size() + 1);
+    for (auto str : args) {
+      auto &elem = argStore.emplace_back(std::string(str.begin(), str.end()));
+      argv.emplace_back(elem.data());
     }
 
     if (!driver.parseCommandLine(1 + numArgs, argv.data()))

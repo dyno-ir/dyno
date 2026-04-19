@@ -142,20 +142,22 @@ private:
     BlockRef otherBl = HWInstrRef{other}.parentBlock(ctx);
     BlockRef instrBl = HWInstrRef{instr}.parentBlock(ctx);
     if (otherBl == instrBl) {
-      DYNO_DBG("CSE", {
+      DYNO_DBG({
         dbgs() << "merging in same block:\n";
         dumpInstr(instr, ctx);
         dumpInstr(other, ctx);
+        dbgs() << "\n";
       })
       return;
     }
 
     auto block = controlFlowAnalysis.findSharedParentBlock(instrBl, otherBl);
 
-    DYNO_DBG("CSE", {
+    DYNO_DBG({
       dbgs() << "merging in different blocks:\n";
       dumpInstr(instr, ctx);
       dumpInstr(other, ctx);
+      dbgs() << "\n";
     })
 
     ctx.getCtx<CoreDialectContext>().cfg[other].erase();
@@ -227,8 +229,8 @@ public:
 
   static constexpr auto runFuncs =
       mk_tuple(&CommonSubexpressionEliminationPass::runProcess,
-                      &CommonSubexpressionEliminationPass::runModule,
-                      &CommonSubexpressionEliminationPass::run);
+               &CommonSubexpressionEliminationPass::runModule,
+               &CommonSubexpressionEliminationPass::run);
 
   explicit CommonSubexpressionEliminationPass(Context &ctx)
       : ctx(ctx), map(ctx), controlFlowAnalysis(ctx) {}

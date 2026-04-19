@@ -53,9 +53,9 @@ CmdLineArg<Vec<StringRef>>
                  "Slang arguments. Use multiple times for multiple args.",
                  CmdLineArgFlags::VALUE_REQUIRED | CmdLineArgFlags::MULTIPLE);
 
-CmdLineArg<StringRef> argFlowScript{'s', "script",
-                                    "Dyno-IR flow script file name.",
-                                    CmdLineArgFlags::VALUE_REQUIRED, ""};
+CmdLineArg<Vec<StringRef>> argFlowScript{
+    's', "script", "Dyno-IR flow script file name.",
+    CmdLineArgFlags::VALUE_REQUIRED | CmdLineArgFlags::MULTIPLE};
 
 // Flow/Test Args
 CmdLineArg<Vec<StringRef>> argScriptFileName{
@@ -134,8 +134,10 @@ void synth(Context &ctx) {
     pipeline.dumpDyno(of);
 
   } else {
-    auto arr = std::to_array({*argFlowScript});
-    runScript(ctx, ArrayRef<StringRef>{arr});
+    runScript(ctx, *argFlowScript);
+    DumpVerilogPass dumpVlog{ctx};
+    dumpVlog.config.fileName = *argOutFile;
+    dumpVlog.run();
   }
 }
 
