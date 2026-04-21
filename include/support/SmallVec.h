@@ -14,6 +14,9 @@
 template <typename T, unsigned N> class SmallVec;
 template <typename T> class SmallVecImpl;
 
+struct reserve_tag_t {};
+constexpr reserve_tag_t reserve_tag;
+
 template <typename T, unsigned N> class SmallVec : public SmallVecImpl<T> {
   friend class SmallVecImpl<T>;
   InlineStorageArr<T, N> storage;
@@ -72,6 +75,12 @@ public:
     this->resize(size);
   }
 
+  SmallVec(reserve_tag_t, size_t size)
+      : SmallVecImpl<T>(std::launder(reinterpret_cast<T *>(storage.storage)),
+                        N) {
+    this->reserve(size);
+  }
+
   SmallVec(size_t size, const T &templ)
       : SmallVecImpl<T>(std::launder(reinterpret_cast<T *>(storage.storage)),
                         N) {
@@ -100,6 +109,9 @@ public:
             reinterpret_cast<T *>(::operator new[](size * sizeof(T))), size) {
     this->resize(size);
   }
+  Vec(reserve_tag_t, size_t size)
+      : SmallVecImpl<T>(
+            reinterpret_cast<T *>(::operator new[](size * sizeof(T))), size) {}
   Vec(size_t size, const T &templ)
       : SmallVecImpl<T>(
             reinterpret_cast<T *>(::operator new[](size * sizeof(T))), size) {

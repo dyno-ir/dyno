@@ -151,19 +151,7 @@ FUNCTION_DEF %synthMemoryFFMuxHandling:func, :block {
   // (s.t. regs with e.g. concat input can be split)
   meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS
 
-  // re-flatten. todo: generate OH muxes in lower ops
-  meta.INST_COMBINE_PASS
-  meta.MUX_TREE_FLATTEN_PASS
-  meta.INST_COMBINE_PASS
-
-  meta.INST_COMBINE_PASS map("liftMUX" : "1")
-  meta.REGISTER_PARTITION_PASS
-  meta.INST_COMBINE_PASS map("liftMUX" : "1")
-
-  meta.PROCESS_LINEARIZE_PASS
-  meta.INST_COMBINE_PASS
-  meta.SSA_CONSTRUCT_PASS
-  meta.INST_COMBINE_PASS
+  meta.INST_COMBINE_PASS map("muxToOneHotMux": "1")
   meta.AGGRESSIVE_DEAD_CODE_ELIMINATION_PASS
 
   // flip flop inference
@@ -171,9 +159,9 @@ FUNCTION_DEF %synthMemoryFFMuxHandling:func, :block {
   meta.FLIP_FLOP_INFERENCE_PASS
   meta.TRIGGER_DEDUPE_PASS
   meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS
-  meta.INST_COMBINE_PASS
+  meta.INST_COMBINE_PASS map("findFlipFlopEnables": "1")
   meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS
-  meta.INST_COMBINE_PASS
+  meta.INST_COMBINE_PASS map("findFlipFlopEnables": "1")
 }
 
 FUNCTION_DEF %synthLowerMemoryFF:func, :block {
@@ -195,7 +183,7 @@ FUNCTION_DEF %synthLowerMemoryFF:func, :block {
   meta.MUX_TREE_FLATTEN_PASS // todo: instead gen one hot mux in flip flop mapping?
   meta.TRIGGER_DEDUPE_PASS
   meta.INST_COMBINE_PASS
-  meta.PROCESS_LINEARIZE_PASS
+  meta.PROCESS_LINEARIZE_PASS map("retainIODeps": "0", "retainInnerDeps": "0")
   meta.ORDER_INSTRS_PASS
   meta.INST_COMBINE_PASS
   meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS

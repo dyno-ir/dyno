@@ -881,7 +881,6 @@ template <typename Frag, size_t NumInline = 4> struct GenericPartitions {
     assert(it != frags.end() && dstAddr >= it->dstAddr);
 
     uint32_t originalDstAddr = dstAddr;
-    uint32_t originalLen = len;
 
     uint32_t originalTotalLen = getLen();
 
@@ -916,6 +915,7 @@ template <typename Frag, size_t NumInline = 4> struct GenericPartitions {
       assert(it->dstAddr == dstAddr);
       Frag frag{dstAddr, len, std::forward<Args>(args)...};
 
+      // intersects: result frag depends on both, determined via intersect
       if (frag.intersects(*it)) {
         auto temp = it->len;
         *it = frag.intersect(*it);
@@ -936,6 +936,7 @@ template <typename Frag, size_t NumInline = 4> struct GenericPartitions {
         continue;
       }
 
+      // overwrites: overwrite with new value
       else if (frag.overwrites(*it)) {
         auto temp = it->len;
         *it = frag;
@@ -950,6 +951,7 @@ template <typename Frag, size_t NumInline = 4> struct GenericPartitions {
         continue;
       }
 
+      // fuses: keep old value ("fuses into")
       else if (frag.fuses(*it)) {
         dstAddr += it->len;
         len -= it->len;
@@ -1000,12 +1002,142 @@ template <typename Frag, size_t NumInline = 4> struct GenericPartitions {
     assert(originalTotalLen == getLen());
   }
 
+  void write(GenericPartitions &src, uint32_t srcAddr, uint32_t dstAddr,
+             uint32_t len) {
+    auto it = getInsertIt(dstAddr);
+    auto itO = src.getInsertIt(srcAddr);
+
+    constexpr bool hasSrcAddr = requires { it->srcAddr; };
+
+    // if not aligned with destination
+    if (dstAddr != it->dstAddr) {
+      auto diff = dstAddr - it->dstAddr;
+      it = frags.insert(it, *it);
+      it->len = diff;
+
+      if constexpr (hasSrcAddr)
+        (it + 1)->srcAddr += diff;
+      (it + 1)->dstAddr += diff;
+      (it + 1)->len -= diff;
+
+      ++it;
+    }
+
+    // if not aligned with source
+    if (srcAddr != itO->dstAddr) {
+      auto diff = srcAddr - itO->dstAddr;
+      itO = frags.insert(itO, *itO);
+      itO->len = diff;
+
+      if constexpr (hasSrcAddr)
+        (itO + 1)->srcAddr += diff;
+      (itO + 1)->dstAddr += diff;
+      (itO + 1)->len -= diff;
+
+      ++itO;
+    }
+
+    // todo: normalize
+    while (len != 0) {
+      auto thisRemLen = it->len - (dstAddr - it->dstAddr);
+      auto otherRemLen = itO->len - (srcAddr - itO->dstAddr);
+      auto pieceLen = std::min(std::min(thisRemLen, otherRemLen), len);
+
+      // other frag limiting -> split ours in half
+      if (pieceLen != thisRemLen) {
+        it = frags.insert(it, *it);
+        it->len = pieceLen;
+
+        if constexpr (hasSrcAddr)
+          (it + 1)->srcAddr += pieceLen;
+        (it + 1)->dstAddr += pieceLen;
+        (it + 1)->len -= pieceLen;
+      }
+
+      auto oldDstLen = std::make_pair(it->dstAddr, it->len);
+      if (it->intersects(*itO)) {
+        *it = it->intersect(*itO);
+      } else if (it->fuses(*itO)) {
+        ; // new fuses into old, keep old
+      } else {
+        assert(it->overwrites(*itO));
+        *it = *itO;
+      }
+      std::tie(it->dstAddr, it->len) = oldDstLen;
+
+      if constexpr (hasSrcAddr)
+        it->srcAddr = itO->srcAddr + (srcAddr - itO->dstAddr);
+
+      if constexpr (hasSrcAddr)
+        srcAddr += pieceLen;
+      dstAddr += pieceLen;
+      len -= pieceLen;
+
+      ++it;
+      // if perfect match
+      if (pieceLen == otherRemLen)
+        ++itO;
+    }
+  }
+
+  GenericPartitions getRange(uint32_t addr, uint32_t len) {
+    auto it = getInsertIt(addr);
+
+    uint32_t end = addr + len;
+    uint32_t lenB = len;
+    uint32_t addrB = addr;
+
+    GenericPartitions range;
+
+    while (it != frags.end() && len != 0) {
+      uint32_t itEnd = it->dstAddr + it->len;
+
+      if (addr < itEnd && it->dstAddr < end) {
+
+        uint32_t start = addr - it->dstAddr;
+        if (it->dstAddr > addr)
+          start = 0;
+
+        uint32_t pieceLen = std::min(end, itEnd) - std::max(addr, it->dstAddr);
+        auto frag = *it;
+
+        if constexpr (requires { frag.srcAddr; })
+          frag.srcAddr += start;
+
+        frag.dstAddr = addr - addrB;
+        frag.len = pieceLen;
+        range.frags.emplace_back(frag);
+
+        addr += pieceLen;
+        len -= pieceLen;
+        it++;
+      } else
+        break;
+    }
+
+    assert(range.getLen() == lenB);
+    return range;
+  }
+
+  template <typename... Args>
+
+  void append(uint32_t len, Args &&...args) {
+    frags.emplace_back(getLen(), len, std::forward<Args>(args)...);
+  }
+  void append(const GenericPartitions &other) {
+    auto offs = getLen();
+    for (auto &frag : other.frags) {
+      auto &copy = frags.emplace_back(frag);
+      copy.dstAddr += offs;
+    }
+  }
+
   uint32_t getLen() const {
     return frags.empty() ? 0 : frags.back().dstAddr + frags.back().len;
   }
 
   template <typename... Args>
-  GenericPartitions(uint32_t len, Args... args)
+  GenericPartitions(uint32_t len, Args &&...args)
       : frags{{0, len, std::forward<Args>(args)...}} {}
 
   GenericPartitions() = default;

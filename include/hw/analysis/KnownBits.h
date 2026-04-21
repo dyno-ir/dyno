@@ -341,8 +341,11 @@ public:
   KnownBitsAnalysis knownBits;
   // returns false if the assignment is contradictory
   bool propKnownValueUp(WireRef wire, BigInt &&value) {
+    stack.clear();
+
     assert(wire.getNumBits() == value.getNumBits());
     auto &ref = knownBits.cache.insertOrAssign(wire, std::move(value));
+    assert(wire.hasSingleDef());
     stack.emplace_back(wire, ref);
 
     while (!stack.empty()) {
@@ -393,6 +396,7 @@ public:
           assert(val.getNumBits() == wire.getNumBits());
 
           if (val != oldV) {
+            assert(asWire.hasSingleDef());
             stack.emplace_back(asWire, val);
             // todo: recompute uses, but without pessimizing other results...
           }
@@ -436,6 +440,7 @@ public:
           assert(newV.getNumBits() == asWire.getNumBits());
           if (val != newV) {
             val = std::move(newV);
+            assert(asWire.hasSingleDef());
             stack.emplace_back(asWire, val);
           }
         } else
@@ -476,6 +481,7 @@ public:
         assert(newV.getNumBits() == asWire.getNumBits());
         if (val != newV) {
           val = std::move(newV);
+          assert(asWire.hasSingleDef());
           stack.emplace_back(asWire, val);
         }
         break;

@@ -70,8 +70,12 @@ static void replaceAllUses(SmallVecImpl<OperandRef> &replaced,
       newOp, [&replaced](OperandRef r) { replaced.emplace_back(r); });
 }
 
-bool dyno::generated(Context &ctx, SmallVecImpl<InstrRef> &matched,
-                     SmallVecImpl<OperandRef> &replaced, HWInstrRef r0) {
+bool dyno::InstCombinePass::generated(Context &ctx,
+                                      InstCombinePass::Config &config
+                                      [[maybe_unused]],
+                                      SmallVecImpl<InstrRef> &matched,
+                                      SmallVecImpl<OperandRef> &replaced,
+                                      HWInstrRef r0) {
 
   HWInstrBuilder build{ctx};
   build.setInsertPoint(r0.iter(ctx));

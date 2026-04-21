@@ -40,7 +40,7 @@ class RegisterPartitionPass : public Pass<RegisterPartitionPass> {
     }
 
     auto wire = store.value().as<WireRef>();
-    auto [val, change] = bitAlias.getReprAliases(wire);
+    auto val = bitAlias.getReprAliases(wire);
     for (auto frag : val.frags) {
       part.addPartition(frag.dstAddr + store.getBase(), frag.len);
     }

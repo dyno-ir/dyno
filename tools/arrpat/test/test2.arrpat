@@ -806,9 +806,20 @@ replace {
 match {
   HW_ONEHOT_MUX $out, $sel, $val
 }
-//replace $out -> $val
 replace {
   HW_ASSUME $out, $val, $sel
+}
+
+match {
+  HW_MUX $out, $sel, $trueV, $falseV
+}
+with [{
+  if (!config.muxToOneHotMux)
+    goto $fail;
+}]
+replace {
+  OP_NOT $nsel:wire_like($sel), $sel
+  HW_ONEHOT_MUX $out, $sel, $trueV, $nsel, $falseV
 }
 
 match {

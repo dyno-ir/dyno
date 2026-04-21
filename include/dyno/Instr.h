@@ -585,7 +585,7 @@ private:
     }
 #endif
     unsigned pos;
-    if (opRef.isDef()) {
+    if (opRef.isDef()) [[unlikely]] {
       pos = numDefs++;
       auto it = refs.begin() + pos;
       if (it != refs.end()) {

@@ -23,6 +23,7 @@
 #include "hw/analysis/BitAliasAnalysis.h"
 #include "hw/analysis/DemandedBits.h"
 #include "hw/analysis/KnownBits.h"
+#include "hw/analysis/LoopbackAnalysis.h"
 #include "hw/analysis/RegisterValue.h"
 #include "hw/passes/FlipFlopInference.h"
 #include "op/IDs.h"
@@ -42,9 +43,6 @@
 #include <type_traits>
 namespace dyno {
 
-bool generated(Context &ctx, SmallVecImpl<InstrRef> &matched,
-               SmallVecImpl<OperandRef> &replaced, HWInstrRef);
-
 class InstCombinePass : public Pass<InstCombinePass> {
   Context &ctx;
   SmallVec<InstrRef, 128> worklist;
@@ -57,28 +55,46 @@ class InstCombinePass : public Pass<InstCombinePass> {
   DemandedBitsAnalysis demandedBits;
   BitAliasAnalysis bitAlias;
   DeriveBitsAnalysis deriveBits;
+  LoopbackAnalysis loopbackAnalysis;
 
 public:
   using TaggedIRef = CustomInstrRef<InstrRef, uint64_t>;
 
-  // struct Config {
-  //   bool fuseCommutative = true;
-  //   bool liftMUX = false;
-  // };
-  // Config config;
+  // this is a bool that contains information on what pattern matched (function)
+  struct PatBool {
+    const char *function;
+    explicit operator bool() { return !!function; }
+    PatBool() = default;
+    explicit PatBool(const char *function) : function(function) {}
+
+    // allow bool construction only from false
+    consteval PatBool(bool b) : function(nullptr) { assert(!b); }
+  };
+
+#define PAT_TRUE PatBool{__FUNCTION__}
+#define PAT_FALSE PatBool{nullptr}
+#define PAT_BOOL(x) ((x) ? PAT_TRUE : PAT_FALSE)
+
+#define PAT_LIST
 
 #define CONFIG_STRUCT_LAMBDA(FIELD, ENUM)                                      \
   FIELD(bool, fuseCommutative, true)                                           \
   FIELD(bool, liftMUX, false)                                                  \
   FIELD(bool, simplifyDeMorgan, true)                                          \
   FIELD(bool, boolExprSimplify, true)                                          \
-  FIELD(bool, removeAssumes, false)
+  FIELD(bool, removeAssumes, false)                                            \
+  FIELD(bool, findFlipFlopEnables, false)                                      \
+  FIELD(bool, muxToOneHotMux, false)
   CONFIG_STRUCT(CONFIG_STRUCT_LAMBDA)
 #undef CONFIG_STRUCT_LAMBDA
   Config config;
 
 private:
-  bool knownBitsConstProp(InstrRef instr) {
+  static bool generated(Context &ctx, Config &config,
+                        SmallVecImpl<InstrRef> &matched,
+                        SmallVecImpl<OperandRef> &replaced, HWInstrRef);
+
+  PatBool knownBitsConstProp(InstrRef instr) {
     auto wire = instr.def(0)->as<WireRef>();
     auto known = knownBits.getKnownBits(wire);
     if (known.getIs4S())
@@ -86,7 +102,7 @@ private:
     assert(known.getNumBits() == wire.getNumBits());
     replaceUses(wire, cbuild.val(known).get());
     deleteMatchedInstr(instr);
-    return true;
+    return PAT_TRUE;
   }
 
   void deleteMatchedInstr(InstrRef instr) {
@@ -130,7 +146,56 @@ private:
     }
   }
 
-  bool simplifyFlipFlopResets(FlipFlopIRef instr) {
+  PatBool findFlipFlopEnables(FlipFlopIRef instr) {
+    if (!config.findFlipFlopEnables)
+      return false;
+    auto use = instr.q().getSingleUse();
+    if (!use || !use->instr().isOpc(HW_STORE))
+      return false;
+    auto store = use->instr().as<StoreIRef>();
+    if (!store.isFullReg())
+      return false;
+    auto load = store.reg().iref().getSingleLoad();
+    if (!load || !load.as<LoadIRef>().isFullReg())
+      return false;
+
+    auto part = loopbackAnalysis.get(instr.d(), load.as<LoadIRef>().value());
+    if (Range{part.frags}.all([](auto frag) { return !frag; }))
+      return false;
+
+    HWInstrBuilder build{ctx, instr};
+    OperandVec<HWValue> concat(ctx, 1, part.frags.size());
+    concat.emplace_back(instr.q());
+
+    for (auto &frag : part.frags) {
+      HWValue d = build.buildSplice(instr.d(), frag.len, frag.dstAddr);
+      HWValue en = instr.clkEnRaw();
+
+      if (frag) {
+        if (frag.size() == 0) {
+          // loopback always active. todo: delete FF here or somewhere else assuming
+          // no initval/rst behavior.
+          en = ConstantRef::fromBool(false);
+        } else {
+          auto newEn = build.buildNot(build.buildAnd(Range{frag}.resolve(ctx)));
+          d = build.buildAssume(d, newEn);
+          en = build.buildAnd(en, newEn);
+        }
+      }
+
+      auto val = build.buildFlipFlop(instr.clk(), d, en, instr.rsts());
+      concat.emplace_back(val);
+    }
+    concat.others().do_reverse();
+
+    instr.def().replace(FatDynObjRef<>{nullref});
+    deleteMatchedInstr(instr);
+    build.buildConcat(std::move(concat));
+
+    return PAT_TRUE;
+  }
+
+  PatBool simplifyFlipFlopResets(FlipFlopIRef instr) {
     auto compare = [](auto lhs, auto rhs) {
       auto lhsV = std::get<1>(lhs);
       auto rhsV = std::get<1>(rhs);
@@ -167,7 +232,7 @@ private:
     if (!instr.rsts().is_sorted(compare)) {
       SmallVec<std::tuple<HWValue, HWValue>, 4> rstVals(instr.rsts());
       rebuild(rstVals);
-      return true;
+      return PAT_TRUE;
     }
 
     SmallDenseMap<DynObjRef, SmallVec<uint32_t, 2>, 4> map;
@@ -189,10 +254,10 @@ private:
       rstVals.emplace_back(sel, ctx.resolve(val));
     }
     rebuild(rstVals);
-    return true;
+    return PAT_TRUE;
   }
 
-  bool simplifyFlipFlopEnable(FlipFlopIRef instr) {
+  PatBool simplifyFlipFlopEnable(FlipFlopIRef instr) {
     // constant zero enable
     // could still be used as latch with multiple
     // rests (or change state away from init with single)
@@ -202,7 +267,7 @@ private:
         // todo: init val
         w.replaceAllUsesWith(cbuild.undef(*w.getNumBits()));
         deleteMatchedInstr(instr);
-        return true;
+        return PAT_TRUE;
       }
 
     auto d = instr.d().dyn_as<WireRef>();
@@ -257,7 +322,7 @@ private:
       if (idx == 0)
         val = build.buildNot(val);
       rebuildWithEn(val);
-      return true;
+      return PAT_TRUE;
     }
 
     if (d.getDefI().isOpc(HW_ONEHOT_MUX)) {
@@ -276,7 +341,7 @@ private:
         return false;
       auto val = mux.other(2 * idx)->as<HWValue>();
       rebuildWithEn(build.buildNot(val));
-      return true;
+      return PAT_TRUE;
     }
 
     return false;
@@ -314,7 +379,7 @@ private:
 
   // Optimize and/or operands under assumption all other operands are 1/0
   // respectively.
-  bool boolExprSimplify(InstrRef instr) {
+  PatBool boolExprSimplify(InstrRef instr) {
     if (!config.boolExprSimplify)
       return false;
 
@@ -347,7 +412,7 @@ private:
         replaceUses(instr.def(0)->as<WireRef>(), ConstantRef::fromBool(!trueV));
         deleteMatchedInstr(instr);
         deriveBits.clearCache();
-        return true;
+        return PAT_TRUE;
       } //  operand is known but not short circuit -> delete
       else if (known.valueEquals(trueV)) {
         auto newV = build.buildCommutative(
@@ -359,7 +424,7 @@ private:
         replaceUses(instr.def(0)->as<WireRef>(), newV);
         deleteMatchedInstr(instr);
         deriveBits.clearCache();
-        return true;
+        return PAT_TRUE;
       } else {
         change |= boolExprSimplifySub(op);
       }
@@ -368,14 +433,14 @@ private:
     }
     deriveBits.clearCache();
     currentMatched.emplace_back(instr);
-    return change;
+    return PAT_BOOL(change);
   }
 
-  bool simplifyAssume(InstrRef instr) {
+  PatBool simplifyAssume(InstrRef instr) {
     if (config.removeAssumes) {
       replaceUses(instr.def()->as<WireRef>(), instr.other(0)->as<HWValue>());
       deleteMatchedInstr(instr);
-      return true;
+      return PAT_TRUE;
     }
 
     if (!instr.other(0)->is<WireRef>() || !instr.other(1)->is<WireRef>())
@@ -390,10 +455,10 @@ private:
     deriveBits.clearCache();
     if (rv)
       currentMatched.emplace_back(instr);
-    return rv;
+    return PAT_BOOL(rv);
   }
 
-  bool optimizeOneHotMuxUndef(InstrRef instr) {
+  PatBool optimizeOneHotMuxUndef(InstrRef instr) {
     uint32_t idx;
     for (auto [sel, val] : Range{instr.others()}.pairwise()) {
       if (auto asConst = val->dyn_as<ConstantRef>()) {
@@ -424,10 +489,10 @@ private:
     cases.push_back_range(range);
     replaceUses(instr.def()->as<WireRef>(), build.buildOneHotMux(cases));
     deleteMatchedInstr(instr);
-    return true;
+    return PAT_TRUE;
   }
 
-  bool mergeOneHotMux(InstrRef root) {
+  PatBool mergeOneHotMux(InstrRef root) {
     SmallVec<std::pair<InstrRef, HWValue>, 4> stack{{root, nullref}};
     SmallVec<std::pair<HWValue, HWValue>, 32> cases;
     auto oldDefW = root.def(0)->as<WireRef>();
@@ -464,10 +529,10 @@ private:
     auto newVal = build.buildOneHotMux(cases);
     replaceUses(oldDefW, newVal);
     deleteMatchedInstr(root);
-    return true;
+    return PAT_TRUE;
   }
 
-  bool optimizeOneHotMux(InstrRef instr) {
+  PatBool optimizeOneHotMux(InstrRef instr) {
     // hash to find duplicates
     SmallDenseMap<DynObjRef, SmallVec<uint32_t, 2>, 16> map;
     for (auto [sel, val] : Range{instr.others()}.pairwise()) {
@@ -477,7 +542,7 @@ private:
         // found a one entry, remove the instr
         replaceUses(instr.def(0)->as<WireRef>(), val->as<HWValue>());
         deleteMatchedInstr(instr);
-        return true;
+        return PAT_TRUE;
       } else if (known.valueEquals(0)) {
         continue;
       }
@@ -501,10 +566,10 @@ private:
     HWValue newVal = build.buildOneHotMux(entries);
     replaceUses(instr.def(0)->as<WireRef>(), newVal);
     deleteMatchedInstr(instr);
-    return true;
+    return PAT_TRUE;
   }
 
-  bool reduceBitWidth(InstrRef instr) {
+  PatBool reduceBitWidth(InstrRef instr) {
     // todo: this only handles a leading bits known region. should be
     // generalized to arbitrary regions.
     // todo: div and mod?
@@ -643,10 +708,10 @@ private:
 
     // instr.def(0).replace(FatDynObjRef<>{nullref});
     deleteMatchedInstr(instr);
-    return true;
+    return PAT_TRUE;
   }
 
-  bool liftMUX(InstrRef instr) {
+  PatBool liftMUX(InstrRef instr) {
     if (!config.liftMUX)
       return false;
     auto selV = instr.other(0)->as<HWValue>();
@@ -655,8 +720,8 @@ private:
 
     auto bits = *trueV.getNumBits();
 
-    auto [trueRepr, _] = bitAlias.getReprAliases(trueV);
-    auto [falseRepr, __] = bitAlias.getReprAliases(falseV);
+    auto trueRepr = bitAlias.getReprAliases(trueV);
+    auto falseRepr = bitAlias.getReprAliases(falseV);
 
     // auto diffs =
     //     diffRegisterValues(std::to_array({&trueRepr, &falseRepr}), false,
@@ -702,19 +767,19 @@ private:
     auto out = build.buildConcat(outFrags);
     replaceUses(instr.def(0)->as<WireRef>(), out);
     deleteMatchedInstr(instr);
-    return true;
+    return PAT_TRUE;
   }
 
-  bool liftOneHotMUX(InstrRef instr) {
+  PatBool liftOneHotMUX(InstrRef instr) {
     if (!config.liftMUX)
       return false;
 
     // todo: remove when regular MUX version retired
-    SmallVec<RegisterValue *, 16> reprsPtrs;
-    SmallVec<RegisterValue, 16> reprs;
+    SmallVec<RegisterValue *, 16> reprsPtrs(reserve_tag,
+                                            instr.getNumOthers() / 2);
+    SmallVec<RegisterValue, 16> reprs(reserve_tag, instr.getNumOthers() / 2);
     for (auto [sel, val] : instr.others().deref().as<HWValue>().pairwise()) {
-      reprsPtrs.emplace_back(
-          &reprs.emplace_back(bitAlias.getReprAliases(val).first));
+      reprsPtrs.emplace_back(&reprs.emplace_back(bitAlias.getReprAliases(val)));
     }
 
     auto bits = *instr.other(1)->as<HWValue>().getNumBits();
@@ -757,10 +822,10 @@ private:
     auto out = build.buildConcat(outFrags);
     replaceUses(instr.def(0)->as<WireRef>(), out);
     deleteMatchedInstr(instr);
-    return true;
+    return PAT_TRUE;
   }
 
-  bool sinkMUX(InstrRef instr) {
+  PatBool sinkMUX(InstrRef instr) {
     if (config.liftMUX)
       return false;
     assert(instr.isOpc(HW_CONCAT));
@@ -841,10 +906,10 @@ private:
     auto val = build.buildConcat(vals);
     replaceUses(instr.def(0)->as<WireRef>(), val);
     deleteMatchedInstr(instr);
-    return true;
+    return PAT_TRUE;
   }
 
-  bool sinkOneHotMUX(InstrRef instr) {
+  PatBool sinkOneHotMUX(InstrRef instr) {
     if (config.liftMUX)
       return false;
     assert(instr.isOpc(HW_CONCAT));
@@ -929,10 +994,10 @@ private:
     auto val = build.buildConcat(std::move(vals));
     replaceUses(instr.def(0)->as<WireRef>(), val);
     deleteMatchedInstr(instr);
-    return true;
+    return PAT_TRUE;
   }
 
-  bool fuseInserts(InsertIRef insert) {
+  PatBool fuseInserts(InsertIRef insert) {
     // todo: directly fuse all in chain instead of just two
     auto inWire = insert.in()->dyn_as<WireRef>();
     while (inWire && inWire.getNumUses() == 1 &&
@@ -975,12 +1040,12 @@ private:
       replaceUses(other.out()->as<WireRef>(), other.in()->as<HWValue>());
       deleteMatchedInstr(other);
       deleteMatchedInstr(insert);
-      return true;
+      return PAT_TRUE;
     }
     return false;
   }
 
-  bool simplifyDeMorgan(InstrRef instr) {
+  PatBool simplifyDeMorgan(InstrRef instr) {
     if (!config.simplifyDeMorgan)
       return false;
     unsigned inverted = 0;
@@ -1015,10 +1080,10 @@ private:
 
     replaceUses(instr.def(0)->as<WireRef>(), build.buildNot(val));
     deleteMatchedInstr(instr);
-    return true;
+    return PAT_TRUE;
   }
 
-  bool simplifyBitAliases(InstrRef instr) {
+  PatBool simplifyBitAliases(InstrRef instr) {
     // Main function for canoncializing addressing. This gets quite ugly, we
     // have to match instrs to see if the existing canonical pattern exists
     // already (return false if it does) and else build it. Currently doing all
@@ -1026,7 +1091,7 @@ private:
     // build abstract instructions and check if equal to actual) in the future.
 
     auto defW = instr.def(0)->as<WireRef>();
-    auto [aliases, change] = bitAlias.getReprAliases(defW);
+    auto aliases = bitAlias.getReprAliases(defW);
     assert(aliases.frags.size() != 0);
     HWInstrBuilder build{ctx, instr};
 
@@ -1060,7 +1125,7 @@ private:
         return false;
       replaceUses(defW, repl);
       deleteMatchedInstr(instr);
-      return true;
+      return PAT_TRUE;
     }
 
     auto matchInsert = [&]() -> Optional<int> {
@@ -1098,7 +1163,7 @@ private:
     };
     if (aliases.frags.size() == 3)
       if (auto rv = matchInsert())
-        return *rv;
+        return PAT_BOOL(*rv);
 
     SmallVec<HWValue, 16> operands;
     bool anyMismatch = false;
@@ -1109,7 +1174,6 @@ private:
             : nullref;
     for (unsigned i = 0; i < aliases.frags.size(); i++) {
       auto &frag = aliases.frags[aliases.frags.size() - i - 1];
-      auto ref = ctx.resolve(frag.ref);
       auto existing = concat ? concat.other(i)->as<HWValue>() : nullref;
       auto op = operandEqualsFrag(existing, frag);
       if (!op) {
@@ -1129,10 +1193,10 @@ private:
     ib.addRef(instr.def(0)->as<WireRef>()).other();
     ib.addRefs(operands);
     deleteMatchedInstr(instr);
-    return true;
+    return PAT_TRUE;
   }
 
-  bool coalesceConcatOfLoads(InstrRef concat) {
+  PatBool coalesceConcatOfLoads(InstrRef concat) {
     SmallVec<HWValue, 8> outOps;
 
     RegisterRef current = nullref;
@@ -1204,10 +1268,10 @@ private:
     auto out = build.buildConcat(outOps);
     replaceUses(concat.def(0)->as<WireRef>(), out);
     deleteMatchedInstr(concat);
-    return true;
+    return PAT_TRUE;
   }
 
-  bool reduceBitWidthICMP(InstrRef instr) {
+  PatBool reduceBitWidthICMP(InstrRef instr) {
     uint32_t minLeading = UINT32_MAX;
 
     WireRef outWire = instr.def(0)->as<WireRef>();
@@ -1253,7 +1317,7 @@ private:
     if (!equal) {
       if (instr.isOpc(OP_ICMP_EQ, OP_ICMP_NE)) {
         replaceUses(outWire, ConstantRef::fromBool(instr.isOpc(OP_ICMP_NE)));
-        return true;
+        return PAT_TRUE;
       }
       BigInt::ICmpPred pred =
           BigInt::ICmpPred(instr.getOpcode().num - OP_ICMP_EQ.opc.num);
@@ -1261,7 +1325,7 @@ private:
              pred <= BigInt::ICmpPred::ICMP_SGE);
       replaceUses(outWire, ConstantRef::fromBool(BigInt::icmpOp(
                                inputKnownBits[0], inputKnownBits[1], pred)));
-      return true;
+      return PAT_TRUE;
     }
 
     HWInstrBuilder build{ctx};
@@ -1279,10 +1343,10 @@ private:
 
     // instr.def(0).replace(FatDynObjRef<>{nullref});
     deleteMatchedInstr(instr);
-    return true;
+    return PAT_TRUE;
   }
 
-  bool simplifyAndCanonicalizeCommOps(InstrRef root) {
+  PatBool simplifyAndCanonicalizeCommOps(InstrRef root) {
     SmallVec<WireRef, 8> operands;
     SmallVec<ConstantRef, 8> constants;
     SmallVec<InstrRef, 4> stack{root};
@@ -1364,7 +1428,7 @@ private:
         if (constants[0].valueEqualsS(-1)) {
           deleteMatchedInstr(root);
           replaceUses(oldDefW, cbuild.ones(*oldDefW->numBits).get());
-          return true;
+          return PAT_TRUE;
         }
         [[fallthrough]];
       case *OP_XOR:
@@ -1378,7 +1442,7 @@ private:
         if (constants[0].valueEquals(0)) {
           deleteMatchedInstr(root);
           replaceUses(oldDefW, cbuild.zero(*oldDefW->numBits).get());
-          return true;
+          return PAT_TRUE;
         }
         if (constants[0].valueEqualsS(-1)) {
           change |= 1;
@@ -1397,17 +1461,17 @@ private:
         case *OP_OR: {
           deleteMatchedInstr(root);
           replaceUses(oldDefW, cbuild.zero(*oldDefW->numBits).get());
-          return true;
+          return PAT_TRUE;
         }
         case *OP_MUL: {
           deleteMatchedInstr(root);
           replaceUses(oldDefW, cbuild.one(*oldDefW->numBits).get());
-          return true;
+          return PAT_TRUE;
         }
         case *OP_AND: {
           deleteMatchedInstr(root);
           replaceUses(oldDefW, cbuild.ones(*oldDefW->numBits).get());
-          return true;
+          return PAT_TRUE;
         }
         default:
           break;
@@ -1425,7 +1489,7 @@ private:
           replaceUses(oldDefW, constants[0]);
         else
           replaceUses(oldDefW, operands[0]);
-        return true;
+        return PAT_TRUE;
       }
       dyno_unreachable("no 1-ary output value");
     }
@@ -1456,10 +1520,10 @@ private:
     if (!constants.empty())
       ibuild.addRef(constants[0]);
 
-    return true;
+    return PAT_TRUE;
   }
 
-  bool nonTemporalLoadElim(LoadIRef load) {
+  PatBool nonTemporalLoadElim(LoadIRef load) {
     auto proc = load.parentProc(ctx);
     if (!proc.isOpc(HW_NETLIST_PROCESS_DEF))
       return false;
@@ -1482,10 +1546,10 @@ private:
       deleteMatchedInstr(store);
     }
 
-    return true;
+    return PAT_TRUE;
   }
 
-  bool storeValConstProp(StoreIRef instr) {
+  PatBool storeValConstProp(StoreIRef instr) {
     if (!instr.isFullReg())
       return false;
     HWValueOrReg ref = nullref;
@@ -1546,7 +1610,7 @@ private:
         return false;
       ref.as<RegisterRef>().replaceAllUsesWith(reg);
       deleteMatchedInstr(instr);
-      return true;
+      return PAT_TRUE;
     }
 
     auto inverseUse = [&](OperandRef use) {
@@ -1596,10 +1660,10 @@ private:
     }
 
     deleteMatchedInstr(instr);
-    return true;
+    return PAT_TRUE;
   }
 
-  template <typename Ref> bool simplifyYieldValues(Ref instr) {
+  template <typename Ref> PatBool simplifyYieldValues(Ref instr) {
     SmallVec<HWValue, 32> yieldValues;
     if (instr.getNumYieldValues() == 0)
       return false;
@@ -1680,10 +1744,10 @@ private:
         [](size_t, OperandRef ref) { return ref->fat(); }));
 
     deleteMatchedInstr(instr);
-    return true;
+    return PAT_TRUE;
   }
 
-  template <typename RefT> bool simplifyAddressing(RefT instr) {
+  template <typename RefT> PatBool simplifyAddressing(RefT instr) {
     HWInstrBuilder build{ctx, instr};
     if (instr.getNumTerms() == 0) {
       if (instr.hasBase() && instr.getBase() == 0) {
@@ -1701,7 +1765,7 @@ private:
           ib.addRef(use->fat());
         }
         deleteMatchedInstr(instr);
-        return true;
+        return PAT_TRUE;
       }
       return false;
     }
@@ -1788,48 +1852,48 @@ private:
           .addRef(ConstantRef::fromU32(term.getMax().value_or(~0)));
 
     deleteMatchedInstr(instr);
-    return true;
+    return PAT_TRUE;
   }
 
-  bool manual(InstrRef instr) {
+  PatBool manual(InstrRef instr) {
     if (instr.getNumDefs() == 1 && instr.def(0)->is<WireRef>())
-      if (knownBitsConstProp(instr))
-        return true;
+      if (auto trueV = knownBitsConstProp(instr))
+        return trueV;
 
     if (instr.isOpc(HW_SPLICE))
-      if (simplifyAddressing(instr.as<SpliceIRef>()))
-        return true;
+      if (auto trueV = simplifyAddressing(instr.as<SpliceIRef>()))
+        return trueV;
     if (instr.isOpc(HW_INSERT))
-      if (simplifyAddressing(instr.as<InsertIRef>()))
-        return true;
+      if (auto trueV = simplifyAddressing(instr.as<InsertIRef>()))
+        return trueV;
     if (instr.isOpc(HW_LOAD))
-      if (simplifyAddressing(instr.as<LoadIRef>()))
-        return true;
+      if (auto trueV = simplifyAddressing(instr.as<LoadIRef>()))
+        return trueV;
     if (instr.isOpc(HW_STORE, HW_STORE_DEFER))
-      if (simplifyAddressing(instr.as<StoreIRef>()))
-        return true;
+      if (auto trueV = simplifyAddressing(instr.as<StoreIRef>()))
+        return trueV;
     if (instr.isOpc(HW_GEP))
-      if (simplifyAddressing(instr.as<GEPIRef>()))
-        return true;
+      if (auto trueV = simplifyAddressing(instr.as<GEPIRef>()))
+        return trueV;
 
     switch (*instr.getDialectOpcode()) {
 #define LAMBDA(opc, ib, cb, bib) case *opc:
       FOR_HW_COMM_OPS(LAMBDA)
 #undef LAMBDA
-      if (simplifyAndCanonicalizeCommOps(instr))
-        return true;
+      if (auto trueV = simplifyAndCanonicalizeCommOps(instr))
+        return trueV;
       break;
 
     case *HW_STORE:
     case *HW_STORE_DEFER: {
-      if (storeValConstProp(instr.as<StoreIRef>()))
-        return true;
+      if (auto trueV = storeValConstProp(instr.as<StoreIRef>()))
+        return trueV;
       break;
     }
 
     case *HW_LOAD: {
-      if (nonTemporalLoadElim(instr.as<LoadIRef>()))
-        return true;
+      if (auto trueV = nonTemporalLoadElim(instr.as<LoadIRef>()))
+        return trueV;
       break;
     }
 
@@ -1837,68 +1901,70 @@ private:
     case *OP_TRUNC:
     case *HW_SPLICE:
     case *HW_INSERT: {
-      if (simplifyBitAliases(instr))
-        return true;
+      if (auto trueV = simplifyBitAliases(instr))
+        return trueV;
       break;
     }
 
     case *OP_YIELD: {
       auto parent = HWInstrRef{instr}.parentBlock(ctx).defI();
       if (parent.isOpc(OP_IF)) {
-        if (simplifyYieldValues(instr.as<IfInstrRef>()))
-          return true;
+        if (auto trueV = simplifyYieldValues(instr.as<IfInstrRef>()))
+          return trueV;
       } else if (parent.isOpc(OP_CASE, OP_CASE_DEFAULT, HW_CASE_Z, HW_CASE_X)) {
         auto swInstr =
             HWInstrRef{parent}.parentBlock(ctx).defI().as<SwitchInstrRef>();
         assert(swInstr.isOpc(OP_SWITCH));
-        if (simplifyYieldValues(swInstr))
-          return true;
+        if (auto trueV = simplifyYieldValues(swInstr))
+          return trueV;
       }
       break;
     }
 
     case *OP_IF: {
-      if (simplifyYieldValues(instr.as<IfInstrRef>()))
-        return true;
+      if (auto trueV = simplifyYieldValues(instr.as<IfInstrRef>()))
+        return trueV;
       break;
     }
 
     case *OP_SWITCH: {
-      if (simplifyYieldValues(instr.as<SwitchInstrRef>()))
-        return true;
+      if (auto trueV = simplifyYieldValues(instr.as<SwitchInstrRef>()))
+        return trueV;
       break;
     }
 
     case *HW_MUX: {
-      if (liftMUX(instr))
-        return true;
+      if (auto trueV = liftMUX(instr))
+        return trueV;
       break;
     }
 
     case *HW_ONEHOT_MUX: {
-      if (mergeOneHotMux(instr))
-        return true;
-      if (optimizeOneHotMux(instr))
-        return true;
-      if (optimizeOneHotMuxUndef(instr))
-        return true;
-      if (liftOneHotMUX(instr))
-        return true;
+      if (auto trueV = mergeOneHotMux(instr))
+        return trueV;
+      if (auto trueV = optimizeOneHotMux(instr))
+        return trueV;
+      if (auto trueV = optimizeOneHotMuxUndef(instr))
+        return trueV;
+      if (auto trueV = liftOneHotMUX(instr))
+        return trueV;
       break;
     }
 
     case *HW_ASSUME: {
-      if (simplifyAssume(instr))
-        return true;
+      if (auto trueV = simplifyAssume(instr))
+        return trueV;
       break;
     }
 
     case *HW_FLIP_FLOP:
     case *HW_FLIP_FLOP_SRST: {
-      if (simplifyFlipFlopEnable(instr))
-        return true;
-      if (simplifyFlipFlopResets(instr))
-        return true;
+      if (auto trueV = simplifyFlipFlopEnable(instr))
+        return trueV;
+      if (auto trueV = simplifyFlipFlopResets(instr))
+        return trueV;
+      if (auto trueV = findFlipFlopEnables(instr))
+        return trueV;
       break;
     }
 
@@ -1907,17 +1973,17 @@ private:
     }
 
     if (instr.isOpc(OP_ADD, OP_MUL, OP_AND, OP_OR, OP_XOR)) {
-      if (reduceBitWidth(instr))
-        return true;
+      if (auto trueV = reduceBitWidth(instr))
+        return trueV;
     }
 
     if (instr.isOpc(OP_AND, OP_OR)) {
-      if (simplifyDeMorgan(instr))
-        return true;
+      if (auto trueV = simplifyDeMorgan(instr))
+        return trueV;
 
       if (instr.def(0)->as<WireRef>().getNumBits() == 1)
-        if (boolExprSimplify(instr))
-          return true;
+        if (auto trueV = boolExprSimplify(instr))
+          return trueV;
     }
 
     if (instr.isOpc(OP_ICMP_EQ, OP_ICMP_NE, /*OP_ICMP_CEQ, OP_ICMP_CNE,
@@ -1925,29 +1991,29 @@ private:
                     OP_ICMP_CXEQ, OP_ICMP_CXNE,*/
                     OP_ICMP_ULT, OP_ICMP_SLT, OP_ICMP_ULE, OP_ICMP_SLE,
                     OP_ICMP_UGT, OP_ICMP_SGT, OP_ICMP_UGE, OP_ICMP_SGE)) {
-      if (reduceBitWidthICMP(instr))
-        return true;
+      if (auto trueV = reduceBitWidthICMP(instr))
+        return trueV;
     }
 
     if (instr.isOpc(HW_CONCAT))
-      if (coalesceConcatOfLoads(instr))
-        return true;
+      if (auto trueV = coalesceConcatOfLoads(instr))
+        return trueV;
 
     if (instr.isOpc(HW_CONCAT)) {
-      if (sinkMUX(instr))
-        return true;
-      if (sinkOneHotMUX(instr))
-        return true;
+      if (auto trueV = sinkMUX(instr))
+        return trueV;
+      if (auto trueV = sinkOneHotMUX(instr))
+        return trueV;
     }
 
     if (instr.isOpc(HW_INSERT))
-      if (fuseInserts(instr.as<InsertIRef>()))
-        return true;
+      if (auto trueV = fuseInserts(instr.as<InsertIRef>()))
+        return trueV;
 
     return false;
   }
 
-  bool matchPatternsOnInstr(InstrRef instr) {
+  PatBool matchPatternsOnInstr(InstrRef instr) {
     currentMatched.clear();
     currentReplaced.clear();
 
@@ -1957,19 +2023,20 @@ private:
       if (instr.def(0)->as<WireRef>().getNumUses() == 0) {
         // DCE unused instruction
         deleteMatchedInstr(instr);
-        return true;
+        return PatBool{"deleteDeadInstr"};
       }
     }
 
-    if (manual(instr))
-      return true;
+    if (auto trueV = manual(instr))
+      return trueV;
 
     currentMatched.clear();
     currentReplaced.clear();
 
     if (instr.getNumDefs() > 1)
       return false;
-    return generated(ctx, currentMatched, currentReplaced, instr);
+    return PAT_BOOL(
+        generated(ctx, config, currentMatched, currentReplaced, instr));
   }
 
   void recomputeAnalysesAtDefWire(WireRef wire) {
@@ -2037,14 +2104,15 @@ private:
       return;
     auto lastWorklistSize = worklist.size();
 
-    if (!matchPatternsOnInstr(instr))
+    PatBool result = matchPatternsOnInstr(instr);
+    if (!result)
       return;
 
     anyMatchHook();
 
     DYNO_DBG({
       HWPrinter print{dbgs()};
-      dbgs() << "initial instructions:\n";
+      dbgs() << "initial instructions (" << result.function << "):\n";
 
       for (auto instr : currentMatched)
         print.printInstr(instr, ctx);
@@ -2115,6 +2183,19 @@ private:
   }
 
 public:
+  void runOnly(DialectOpcode opc, SmallVecImpl<InstrRef> &&_worklist) {
+    this->worklist = std::move(_worklist);
+    bitAlias.clearCache();
+    knownBits.clearCache();
+
+    while (!worklist.empty()) {
+      auto instr = worklist.pop_back_val();
+      if (!instr.isOpc(opc))
+        continue;
+      runOnInstr(instr);
+    }
+  }
+
   void runWrapper(auto &&runFunc) {
     for (auto instr : ctx.getStore<Instr>())
       TaggedIRef{instr}.get() = 0;
@@ -2154,7 +2235,7 @@ public:
 public:
   explicit InstCombinePass(Context &ctx)
       : ctx(ctx), cbuild(ConstantBuilder{ctx.getStore<Constant>()}),
-        bitAlias(ctx), deriveBits(ctx) {}
+        bitAlias(ctx), deriveBits(ctx), loopbackAnalysis(ctx) {}
   static InstCombinePass make(Context &ctx) { return InstCombinePass{ctx}; }
 };
 

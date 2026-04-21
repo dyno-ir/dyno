@@ -722,7 +722,7 @@ private:
     SmallVec<HWValue, 64> oneHotBits;
     oneHotBits.reserve(elemCount);
 
-    for (unsigned i = elemCount - 1; i-- > 0;) {
+    for (unsigned i = elemCount; i-- > 0;) {
       for (unsigned j = 0; j < bits; j++) {
         operands[j] = (i & (1ULL << j)) ? trueBits[j] : falseBits[j];
       }
@@ -743,9 +743,7 @@ private:
 
     HWValue cur = pad;
 
-    auto oneHot = // buildDecoder(address, elemCount);
-        build.buildSLL(cbuild.val(elemCount, 1).get(),
-                       build.buildResize(address, elemCount, false));
+    auto oneHot = buildDecoder(address, elemCount);
 
     for (unsigned i = 0; i < elemCount; i++) {
       auto size = std::min(elemSize, *pad.getNumBits() - i * fact);
@@ -757,13 +755,7 @@ private:
       if (enable)
         sel = build.buildAnd(sel, enable);
       auto newWord = build.buildMux(sel, value, word);
-
-      // uint32_t numHigh = *cur.getNumBits() - curAddr - elemSize;
       cur = build.buildInsert(cur, newWord, curAddr);
-      // cur =
-      //     build.buildConcat(build.buildSplice(cur, numHigh, curAddr +
-      //     elemSize),
-      //                       newWord, build.buildTrunc(curAddr, cur));
     }
 
     assert(cur.getNumBits() == pad.getNumBits());

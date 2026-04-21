@@ -30,6 +30,7 @@
 #include "support/ArrayRef.h"
 #include "support/ErrorRecovery.h"
 #include "support/RTTI.h"
+#include "support/Ranges.h"
 #include "support/Utility.h"
 #include <algorithm>
 #include <dyno/NewDeleteObjStore.h>
@@ -998,7 +999,7 @@ public:
   WireRef buildLoad(RegisterRef reg, uint32_t numBits, uint32_t baseAddr = 0,
                     Ts... addressGenTerms) {
     HWInstrRef ref;
-    if (baseAddr == 0 && sizeof...(addressGenTerms) == 0)
+    if (baseAddr == 0 && getNumOperands<Ts...>(addressGenTerms...) == 0)
       ref = buildInstr(HW_LOAD, true, reg);
     else
       ref = buildInstr(HW_LOAD, true, reg, ConstantRef::fromU32(baseAddr),
@@ -1098,7 +1099,7 @@ public:
                        Ts... addressGenTerms) {
     assert(!(!defer && trigger) && "trigger on non-deferred store");
     auto opc = defer ? HW_STORE_DEFER : HW_STORE;
-    if (sizeof...(addressGenTerms) > 0 || baseAddr != 0) {
+    if (getNumOperands<Ts...>(addressGenTerms...) > 0 || baseAddr != 0) {
       if (trigger) {
         return buildInstr(opc, false, value, reg, trigger.oref(),
                           ConstantRef::fromU32(baseAddr), addressGenTerms...);
@@ -1114,13 +1115,24 @@ public:
   }
 
   WireRef buildFlipFlop(HWValue clk, HWValue d,
-                        HWValue en = ConstantRef::fromBool(1),
-                        HWValue rst = nullref, HWValue rstval = nullref) {
+                        HWValue en = ConstantRef::fromBool(1), auto... resets) {
     auto defW = ctx.getStore<Wire>().create(d.getNumBits());
-    auto ib = buildInstrRaw(HW_FLIP_FLOP, 4 + !!rst * 2);
+    auto ib = buildInstrRaw(HW_FLIP_FLOP, 4 + sizeof...(resets) * 2);
     ib.addRef(defW).other().addRef(clk).addRef(d).addRef(en);
-    if (rst) {
-      assert(rstval);
+    if constexpr (sizeof...(resets) != 0)
+      for (auto [rst, rstval] : InitListRange{resets...}.pairwise()) {
+        ib.addRef(rst).addRef(rstval);
+      }
+    return defW;
+  }
+  template <typename T>
+  WireRef buildFlipFlop(HWValue clk, HWValue d,
+                        HWValue en = ConstantRef::fromBool(1),
+                        Range<T> resets = Range<T>::emptyRange()) {
+    auto defW = ctx.getStore<Wire>().create(d.getNumBits());
+    auto ib = buildInstrRaw(HW_FLIP_FLOP, 4 + resets.size());
+    ib.addRef(defW).other().addRef(clk).addRef(d).addRef(en);
+    for (auto [rst, rstval] : resets) {
       ib.addRef(rst).addRef(rstval);
     }
     return defW;
@@ -1597,8 +1609,12 @@ public:
   HWValue buildOneHotMux(MutArrayRef<std::pair<HWValue, HWValue>> cases) {
     assert(!cases.empty());
 
-    if (cases.size() == 1)
-      return buildAssume(cases.front().second, cases.front().first);
+    if (Range{cases}.drop_front().all(
+            [&](auto &&p) { return p.second == cases.front().second; })) {
+      return buildAssume(cases.front().second,
+                         buildOr(Range{cases}.transform(
+                             [](size_t, auto &&p) { return p.first; })));
+    }
 
     Range{cases}.sort([](auto &lhs, auto &rhs) {
       return commutativeOpOperandOrder(lhs.second, rhs.second);
@@ -1620,11 +1636,9 @@ public:
     auto val = templ.def(0).as<WireRef>();
     val->numBits = templ.other(1).getNumBits();
 
-    if (templ.getNumOthers() == 2) {
-      // assume has value first, then assumption
-      std::swap(templ.other(0), templ.other(1));
-      insertInstr(templ.build(HW_ASSUME));
-      return val;
+    if (templ.others().pairwise().drop_front().all(
+            [&](auto &&p) { return p.second == templ.other(1); })) {
+      return buildAssume(templ.other(1), buildOr(templ.others().step(2)));
     }
 
     templ.others().pairwise().sort([](auto lhs, auto rhs) {

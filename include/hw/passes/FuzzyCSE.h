@@ -244,8 +244,8 @@ private:
       auto lhsV = lhsOp->as<HWValue>();
       auto rhsV = rhsOp->as<HWValue>();
 
-      auto [lhsRepr, lhsChange] = bitAlias.getReprAliases(lhsV);
-      auto [rhsRepr, rhsChange] = bitAlias.getReprAliases(rhsV);
+      auto lhsRepr = bitAlias.getReprAliases(lhsV);
+      auto rhsRepr = bitAlias.getReprAliases(rhsV);
 
       auto &prefix = matchingPrefixes.emplace_back();
       prefix.untouched = false;
@@ -422,7 +422,7 @@ private:
   void convertToAbstractOperand(WireRef wire, uint16_t opIdx,
                                 AbstractInstr &abstr) {
 
-    auto [aliases, change] = bitAlias.getReprAliases(wire);
+    auto aliases = bitAlias.getReprAliases(wire);
     auto &front = aliases.frags.front();
     // we use the first fragment's ref as the operand for heuristic
     // matching. higher fragments (if any) will be checked during detailed

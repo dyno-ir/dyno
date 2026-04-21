@@ -18,6 +18,7 @@
 #include "hw/passes/InactiveCopy.h"
 #include "hw/passes/InstCombine.h"
 #include "hw/passes/LiftFlipFlops.h"
+#include "hw/passes/LiftMUXs.h"
 #include "hw/passes/LiftStdCells.h"
 #include "hw/passes/LinearizeControlFlow.h"
 #include "hw/passes/LoadCoalesce.h"
@@ -87,5 +88,6 @@ inline void registerDialectPasses<DIALECT_HW>(PassRegistry &passRegistry) {
   passRegistry.registerPass<SelectModulesPass>(DIALECT_HW);
   passRegistry.registerPass<LiftFlipFlopsPass>(DIALECT_HW);
   passRegistry.registerPass<LowerMemAccessPass>(DIALECT_HW);
+  passRegistry.registerPass<LiftMuxPass>(DIALECT_HW);
 }
 }; // namespace dyno

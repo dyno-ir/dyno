@@ -22,8 +22,8 @@
 #include "op/IDs.h"
 #include "op/StructuredControlFlow.h"
 #include "support/Debug.h"
-#include "support/Utility.h"
 #include "support/Tuple.h"
+#include "support/Utility.h"
 namespace dyno {
 
 // todo: function support
@@ -518,8 +518,6 @@ class AggressiveDeadCodeEliminationPass
   }
 
   void runOnModule(ModuleIRef module) {
-    if (module.mod()->ignore)
-      return;
     instrMap[module] = 1;
     initialWorklist(module);
     while (!worklist.empty()) {
@@ -593,6 +591,8 @@ public:
     runWrapper([&] {
       markLiveInstructions();
       for (auto mod : ctx.getCtx<HWDialectContext>().activeModules()) {
+        if (mod->ignore)
+          continue;
         runOnModule(mod.iref());
       }
     });
@@ -607,7 +607,7 @@ public:
 
   static constexpr auto runFuncs =
       mk_tuple(&AggressiveDeadCodeEliminationPass::runModule,
-                      &AggressiveDeadCodeEliminationPass::run);
+               &AggressiveDeadCodeEliminationPass::run);
 
   auto make(Context &ctx) { return AggressiveDeadCodeEliminationPass(ctx); }
   explicit AggressiveDeadCodeEliminationPass(Context &ctx)

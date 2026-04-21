@@ -20,7 +20,6 @@
 namespace dyno {
 class BitAliasAnalysis : public CacheInvalidation<BitAliasAnalysis> {
   Context &ctx;
-  bool change;
 
   class BitAliasAcc : public RegisterValue {
   public:
@@ -54,17 +53,12 @@ class BitAliasAnalysis : public CacheInvalidation<BitAliasAnalysis> {
       frame.acc = BitAliasAcc{};
       frame.ref = *instr.other_begin();
     }
-    bool nested = stack.size() >= 3;
-    bool notRoot = stack.size() >= 2;
-    bool rootIsConcatOrInsert =
-        stack[0].ref.instr().isOpc(HW_CONCAT, HW_INSERT);
 
     switch (*instr.getDialectOpcode()) {
     case *HW_CONCAT: {
       if (!first) {
         frame.acc.appendTop(retVal);
         frame.ref += 1;
-        change |= notRoot;
       }
 
       // reverse order to avoid copying
@@ -101,17 +95,13 @@ class BitAliasAnalysis : public CacheInvalidation<BitAliasAnalysis> {
       if (addr >= retVal.getLen()) {
         frame.acc =
             BitAliasAcc{ConstantBuilder{ctx.getStore<Constant>()}.undef(len)};
-        change = 1;
       } else if (oobLen > 0) {
         frame.acc = retVal.getRange(addr, len - oobLen);
         frame.acc.frags.emplace_back(
             ConstantBuilder{ctx.getStore<Constant>()}.undef(oobLen).get(), 0,
             len - oobLen, oobLen, false, nullopt);
-        change = 1;
       } else {
         frame.acc = retVal.getRange(addr, len);
-        change |= nested;
-        change |= notRoot && !rootIsConcatOrInsert;
       }
       assert(frame.acc.getLen() == asSplice.getLen());
       return std::nullopt;
@@ -123,8 +113,6 @@ class BitAliasAnalysis : public CacheInvalidation<BitAliasAnalysis> {
         break;
       auto len = *instr.def(0)->as<WireRef>().getNumBits();
       frame.acc = retVal.getRange(0, len);
-      change |= nested;
-      change |= notRoot && !rootIsConcatOrInsert;
       return std::nullopt;
     }
 
@@ -138,8 +126,6 @@ class BitAliasAnalysis : public CacheInvalidation<BitAliasAnalysis> {
           ConstantBuilder{ctx.getStore<Constant>()}.zero(outLen - inLen).get(),
           0, outLen - inLen);
       frame.acc = std::move(retVal);
-      change |= nested;
-      change |= notRoot && !rootIsConcatOrInsert;
       return std::nullopt;
     }
 
@@ -153,8 +139,6 @@ class BitAliasAnalysis : public CacheInvalidation<BitAliasAnalysis> {
           ConstantBuilder{ctx.getStore<Constant>()}.undef(outLen - inLen).get(),
           0, outLen - inLen);
       frame.acc = std::move(retVal);
-      change |= nested;
-      change |= notRoot && !rootIsConcatOrInsert;
       return std::nullopt;
     }
 
@@ -168,12 +152,10 @@ class BitAliasAnalysis : public CacheInvalidation<BitAliasAnalysis> {
       frame.acc = retVal;
       if (cnt == 0) {
         frame.acc = ConstantRef::zeroBitZero();
-        change = true;
         return std::nullopt;
       }
       for (unsigned i = 0; i < cnt - 1; i++)
         frame.acc.appendTop(retVal);
-      change |= nested;
       return std::nullopt;
     }
 
@@ -187,8 +169,6 @@ class BitAliasAnalysis : public CacheInvalidation<BitAliasAnalysis> {
       auto signBit = frame.acc.getRange(inLen - 1, 1);
       for (unsigned i = 0; i < (outLen - inLen); i++)
         frame.acc.appendTop(signBit);
-      change |= nested;
-      change |= notRoot && !rootIsConcatOrInsert;
       return std::nullopt;
     }
 
@@ -218,7 +198,6 @@ class BitAliasAnalysis : public CacheInvalidation<BitAliasAnalysis> {
         });
 
         frame.acc.overwriteNoMaterialize(retVal, 0, addr, len);
-        change |= nested;
 
         assert(frame.acc.getLen() == asInsert.getMemoryLen());
         return std::nullopt;
@@ -242,19 +221,16 @@ public:
   AnalysisCache<ObjRef<Wire>, BitAliasAcc> cache;
 
   BitAliasAnalysis(Context &ctx) : ctx(ctx) {}
-  std::pair<RegisterValue, bool> getReprAliases(HWValue root) {
+  RegisterValue getReprAliases(HWValue root) {
     if (auto asConst = root.dyn_as<ConstantRef>()) {
-      return {BitAliasAcc{asConst}, false};
+      return BitAliasAcc{asConst};
     }
     auto rootWire = root.as<WireRef>();
     stack.emplace_back(rootWire.getDef());
 
-    unsigned maxLevel = 0;
     retVal = BitAliasAcc{};
-    change = false;
 
     while (!stack.empty()) {
-      maxLevel = std::max(maxLevel, stack.size());
       auto &frame = stack.back();
 
       if (auto asWire = frame.initialRef->dyn_as<WireRef>()) {
@@ -281,8 +257,6 @@ public:
       }
     }
     assert(retVal.getLen() == *rootWire.getNumBits());
-    change |= retVal.defragmentValues(ctx);
-    assert(retVal.getLen() == *rootWire.getNumBits());
     if (retVal.frags.size() == 1) {
       // if the result is just a single HWValue (that's not the root wire),
       // we can just do replace all uses on the root wire, so always change
@@ -290,14 +264,12 @@ public:
           rootWire.getNumBits()) {
         assert(retVal.frags.front().srcAddr == 0);
         assert(retVal.frags.front().len == *rootWire.getNumBits());
-        change = true;
       }
-      change &= retVal.frags.front().ref != rootWire;
     }
-    return std::make_pair(RegisterValue{retVal}, change);
+    return RegisterValue{retVal};
   }
 
-  RegisterValue get(HWValue root) { return getReprAliases(root).first; }
+  RegisterValue get(HWValue root) { return getReprAliases(root); }
 
   void clearCache() { cache.clearAll(); }
 };
