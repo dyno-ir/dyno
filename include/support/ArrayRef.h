@@ -1,12 +1,12 @@
 #pragma once
 
+#include "support/SmallVec.h"
 #include <algorithm>
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
 #include <iterator>
 #include <type_traits>
-#include "support/SmallVec.h"
 
 template <typename T>
 concept CArrayRef = requires {
@@ -168,7 +168,11 @@ public:
   MutArrayRef<T> resolve(MutArrayRef<T> storage) {
     return MutArrayRef<T>{&storage[idx], len};
   }
+  template <typename Storage> ArrayRef<T> resolve(Storage &storage) {
+    return MutArrayRef<T>{&storage[idx], len};
+  }
   size_type size() const { return len; }
+  size_type index() const { return idx; }
 
   constexpr static ThinArrayRef emptyRef() { return ThinArrayRef{0, 0}; }
 

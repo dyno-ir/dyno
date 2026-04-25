@@ -92,7 +92,8 @@ class AggressiveDeadCodeEliminationPass
     } else {
       auto asWire = value.as<WireRef>();
       for (auto def : asWire.defs()) {
-        worklist.emplace_back(def.instr());
+        if (!instrMap[def.instr()])
+          worklist.emplace_back(def.instr());
       }
       wireMap[asWire] = 1;
     }
@@ -136,7 +137,8 @@ class AggressiveDeadCodeEliminationPass
   }
 
   void visitInstr(InstrRef instr) {
-    markParentBlockDef(instr);
+    if (!instrMap[instr])
+      markParentBlockDef(instr);
     switch (*instr.getDialectOpcode()) {
     case *HW_REGISTER_DEF:
     case *HW_INPUT_REGISTER_DEF:
@@ -351,12 +353,18 @@ class AggressiveDeadCodeEliminationPass
     }
 
     case *AIG_OUTPUT: {
-      pushInstr(
-          instr.other(0)->as<AIGObjRef>()->defUse.getSingleDef()->instr());
+      if (instrMap[instr])
+        break;
+      auto aigInstr =
+          instr.other(0)->as<AIGObjRef>()->defUse.getSingleDef()->instr();
+      if (!instrMap[aigInstr])
+        pushInstr(aigInstr);
       break;
     }
 
     case *AIG_INPUT: {
+      if (instrMap[instr])
+        break;
       visitHWValue(instr.other(0)->as<HWValue>());
       break;
     }

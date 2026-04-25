@@ -41,6 +41,7 @@
 #include <algorithm>
 #include <iterator>
 #include <type_traits>
+#include <variant>
 namespace dyno {
 
 class InstCombinePass : public Pass<InstCombinePass> {
@@ -84,7 +85,8 @@ public:
   FIELD(bool, boolExprSimplify, true)                                          \
   FIELD(bool, removeAssumes, false)                                            \
   FIELD(bool, findFlipFlopEnables, false)                                      \
-  FIELD(bool, muxToOneHotMux, false)
+  FIELD(bool, muxToOneHotMux, false)                                           \
+  FIELD(bool, inferMuxs, true)
   CONFIG_STRUCT(CONFIG_STRUCT_LAMBDA)
 #undef CONFIG_STRUCT_LAMBDA
   Config config;
@@ -129,6 +131,11 @@ private:
       }
     }
   }
+  void replaceUses(RegisterRef oldR, RegisterRef newR) {
+    oldR.replaceAllUsesWith(newR);
+  }
+#define replaceAllUsesWith static_assert(0, "use this->replaceUses")
+
   void replaceUse(OperandRef ref, HWValue newVal) {
     assert(newVal.getNumBits() == ref->as<WireRef>().getNumBits());
     knownBits.replaceAt(ref->as<WireRef>(), newVal);
@@ -173,8 +180,8 @@ private:
 
       if (frag) {
         if (frag.size() == 0) {
-          // loopback always active. todo: delete FF here or somewhere else assuming
-          // no initval/rst behavior.
+          // loopback always active. todo: delete FF here or somewhere else
+          // assuming no initval/rst behavior.
           en = ConstantRef::fromBool(false);
         } else {
           auto newEn = build.buildNot(build.buildAnd(Range{frag}.resolve(ctx)));
@@ -265,7 +272,7 @@ private:
       if (auto c = instr.clkEn().dyn_as<ConstantRef>(); c && c.valueEquals(0)) {
         auto w = instr.def()->as<WireRef>();
         // todo: init val
-        w.replaceAllUsesWith(cbuild.undef(*w.getNumBits()));
+        replaceUses(w, cbuild.undef(*w.getNumBits()).get());
         deleteMatchedInstr(instr);
         return PAT_TRUE;
       }
@@ -304,6 +311,8 @@ private:
       }
     }
 
+    // simple enable inference, more complex in findFlipFlopEnables (via
+    // loopback analysis)
     if (d.getDefI().isOpc(HW_MUX)) {
       auto mux = d.getDefI();
 
@@ -328,7 +337,7 @@ private:
     if (d.getDefI().isOpc(HW_ONEHOT_MUX)) {
       auto mux = d.getDefI();
 
-      auto range = mux.others().drop_front().step(2).as<HWValue>();
+      auto range = mux.others().step(2).as<HWValue>();
 
       // try plain wire loopback, then register loopback
       auto idx = range.find(instr.q()) - range.begin();
@@ -411,7 +420,8 @@ private:
       if (contradiction || known.valueEquals(!trueV)) {
         replaceUses(instr.def(0)->as<WireRef>(), ConstantRef::fromBool(!trueV));
         deleteMatchedInstr(instr);
-        deriveBits.clearCache();
+        std::destroy_at(&deriveBits);
+        std::construct_at(&deriveBits, ctx);
         return PAT_TRUE;
       } //  operand is known but not short circuit -> delete
       else if (known.valueEquals(trueV)) {
@@ -423,15 +433,16 @@ private:
                 .as<HWValue>());
         replaceUses(instr.def(0)->as<WireRef>(), newV);
         deleteMatchedInstr(instr);
-        deriveBits.clearCache();
+        std::destroy_at(&deriveBits);
+        std::construct_at(&deriveBits, ctx);
         return PAT_TRUE;
       } else {
         change |= boolExprSimplifySub(op);
       }
 
-      deriveBits.clearCache();
+      std::destroy_at(&deriveBits);
+      std::construct_at(&deriveBits, ctx);
     }
-    deriveBits.clearCache();
     currentMatched.emplace_back(instr);
     return PAT_BOOL(change);
   }
@@ -1197,7 +1208,12 @@ private:
   }
 
   PatBool coalesceConcatOfLoads(InstrRef concat) {
-    SmallVec<HWValue, 8> outOps;
+    struct OutLoad {
+      ObjRef<Register> reg;
+      uint32_t addr;
+      uint32_t len;
+    };
+    SmallVec<std::variant<OutLoad, HWValue>, 8> outOps;
 
     RegisterRef current = nullref;
     uint32_t currentDst = 0;
@@ -1209,8 +1225,7 @@ private:
     auto flush = [&]() {
       if (!current)
         return;
-      outOps.emplace_back(
-          build.buildLoad(current, bits - currentDst, currentSrc));
+      outOps.emplace_back(OutLoad(current, currentSrc, bits - currentDst));
       current = nullref;
     };
 
@@ -1261,12 +1276,25 @@ private:
     }
     flush();
 
-    if (outOps.size() == concat.getNumOthers())
+    if (outOps.size() >= concat.getNumOthers())
       return false;
 
-    std::reverse(outOps.begin(), outOps.end());
-    auto out = build.buildConcat(outOps);
-    replaceUses(concat.def(0)->as<WireRef>(), out);
+    OperandVec<HWValue> concatOut{ctx, 1, outOps.size()};
+    concatOut.emplace_back(concat.def()->as<WireRef>());
+    concat.def().replace(FatDynObjRef<>{nullref});
+
+    for (auto &op : outOps) {
+      if (auto outLoad = std::get_if<OutLoad>(&op)) {
+        concatOut.emplace_back(build.buildLoad(ctx.resolve(outLoad->reg),
+                                               outLoad->len, outLoad->addr));
+      } else if (auto hwVal = std::get_if<HWValue>(&op)) {
+        concatOut.emplace_back(*hwVal);
+      } else
+        unreachable();
+    }
+
+    concatOut.others().do_reverse();
+    build.buildConcat(std::move(concatOut));
     deleteMatchedInstr(concat);
     return PAT_TRUE;
   }
@@ -1608,7 +1636,7 @@ private:
         return false; // nothing to be done if both are ports.
       if (inverse)
         return false;
-      ref.as<RegisterRef>().replaceAllUsesWith(reg);
+      replaceUses(ref.as<RegisterRef>(), reg);
       deleteMatchedInstr(instr);
       return PAT_TRUE;
     }
@@ -2105,8 +2133,11 @@ private:
     auto lastWorklistSize = worklist.size();
 
     PatBool result = matchPatternsOnInstr(instr);
-    if (!result)
+    if (!result) {
+      assert(worklist.size() == lastWorklistSize &&
+             "generated instrs but no match");
       return;
+    }
 
     anyMatchHook();
 
@@ -2120,7 +2151,7 @@ private:
       dbgs() << "replaced with:\n";
 
       for (size_t i = lastWorklistSize, sz = worklist.size(); i < sz; i++)
-        print.printInstr(worklist[i], ctx);
+        print.printInstr(worklist[i], ctx, true, false);
       if (lastWorklistSize == worklist.size()) {
         if (!currentReplaced.empty()) {
           dumpObj(currentReplaced[0]->fat());
@@ -2237,6 +2268,7 @@ public:
       : ctx(ctx), cbuild(ConstantBuilder{ctx.getStore<Constant>()}),
         bitAlias(ctx), deriveBits(ctx), loopbackAnalysis(ctx) {}
   static InstCombinePass make(Context &ctx) { return InstCombinePass{ctx}; }
+#undef replaceAllUsesWith
 };
 
 }; // namespace dyno

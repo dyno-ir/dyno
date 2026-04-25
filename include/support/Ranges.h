@@ -2,7 +2,6 @@
 
 #include "support/Bits.h"
 #include "support/TemplateUtil.h"
-#include <tuple>
 #include <algorithm>
 #include <cassert>
 #include <concepts>
@@ -10,6 +9,7 @@
 #include <iterator>
 #include <numeric>
 #include <optional>
+#include <tuple>
 #include <type_traits>
 #include <utility>
 
@@ -1038,10 +1038,9 @@ public:
     symb += (-symb) & (WordBits - 1);
     do {
       ++word;
-    } while (!getWord() && word != wordsEnd);
-
-    if (word == wordsEnd)
-      return;
+      if (word == wordsEnd)
+        return;
+    } while (!getWord());
 
     symb += std::countr_zero(getWord());
 

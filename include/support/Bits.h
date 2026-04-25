@@ -141,6 +141,10 @@ constexpr uint64_t hash_u64(uint64_t a) {
   return a ^ (a >> 32);
 }
 
+constexpr uint32_t hash_reduce_64_to_32(uint64_t a) {
+  return hash_combine(a, a >> 32);
+}
+
 constexpr uint32_t strhash_u32(const char *data, size_t len) {
   uint32_t hash = 0x811c9dc5;
   uint32_t prime = 0x01000193;

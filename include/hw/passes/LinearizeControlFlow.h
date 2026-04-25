@@ -3,6 +3,7 @@
 #include "dyno/Constant.h"
 #include "dyno/Context.h"
 #include "dyno/DeepCopy.h"
+#include "dyno/InstrPrinter.h"
 #include "dyno/Pass.h"
 #include "hw/AutoDebugInfo.h"
 #include "hw/HWAbstraction.h"
@@ -295,7 +296,12 @@ private:
         instr = loopSimplify.runOnLoop(instr);
         if (!instr /*|| !instr.isOpc(OP_FOR)*/)
           continue;
-        assert(instr.isOpc(OP_FOR));
+        if (!instr.isOpc(OP_FOR)) {
+          std::stringstream str;
+          HWCtxPrinter print{ctx, str};
+          print.printInstr(instr, false, false);
+          report_fatal_error("failed to simplify loop: ", std::move(str).str());
+        }
       }
         [[fallthrough]];
       case *OP_FOR:

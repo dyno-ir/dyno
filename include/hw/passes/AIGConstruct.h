@@ -25,24 +25,25 @@ namespace dyno {
 
 class AIGBuilder {
   Context &ctx [[maybe_unused]];
-  ObjMapVec<Wire, ThinArrayRef<AIGNodeTRef>> wireToAIGNode;
+  ObjMapVec<Wire, uint32_t> wireToAIGNode;
   Vec<AIGNodeTRef> wireToAIGNodeStorage;
 
 public:
   AIG &aig;
   AIGBuilder(Context &ctx, AIG &aig) : ctx(ctx), aig(aig) {
+    wireToAIGNodeStorage.emplace_back(0); // sentinel
     wireToAIGNode.resize(ctx.getStore<Wire>().numIDs());
   }
   ArrayRef<AIGNodeTRef> resolveWire(WireRef wire) {
-    if (wireToAIGNode[wire].size() == 0) {
+    if (wireToAIGNode[wire] == 0) {
       DYNO_DBG("AIGBuilder", {
         dbgs() << "undefined wire, def instr:\n";
         dumpInstr(wire.getDefI());
       })
       dyno_unreachable("");
     }
-    return wireToAIGNode[wire].resolve(
-        ArrayRef{wireToAIGNodeStorage.begin(), wireToAIGNodeStorage.end()});
+    return ThinArrayRef<AIGNodeTRef>(wireToAIGNode[wire], *wire.getNumBits())
+        .resolve(wireToAIGNodeStorage);
   }
 
   AIGNodeTRef resolveBit(HWValue val, unsigned bit) {
@@ -66,7 +67,7 @@ public:
       auto node = buildFunc(lhsNode, rhsNode);
       wireToAIGNodeStorage.emplace_back(node);
     }
-    wireToAIGNode[out] = ThinArrayRef<AIGNodeTRef>{pos, numBits};
+    wireToAIGNode[out] = pos;
   }
   void buildNOT(WireRef out, HWValue val) {
     uint32_t pos = wireToAIGNodeStorage.size();
@@ -75,7 +76,7 @@ public:
       AIGNodeTRef node = resolveBit(val, i).inverted();
       wireToAIGNodeStorage.emplace_back(node);
     }
-    wireToAIGNode[out] = ThinArrayRef<AIGNodeTRef>{pos, numBits};
+    wireToAIGNode[out] = pos;
   }
 
   void buildAND(WireRef out, HWValue lhs, HWValue rhs) {
@@ -115,9 +116,7 @@ public:
       wireToAIGNodeStorage.emplace_back(resolveBit(val, low + j));
     }
 
-    uint32_t numBits = wireToAIGNodeStorage.size() - pos;
-    wireToAIGNode[instr.def(0)->as<WireRef>()] =
-        ThinArrayRef<AIGNodeTRef>{pos, numBits};
+    wireToAIGNode[instr.def(0)->as<WireRef>()] = pos;
   }
   void buildConcat(InstrRef instr) {
     uint32_t pos = wireToAIGNodeStorage.size();
@@ -127,9 +126,7 @@ public:
         wireToAIGNodeStorage.emplace_back(resolveBit(val, j));
       }
     }
-    uint32_t numBits = wireToAIGNodeStorage.size() - pos;
-    wireToAIGNode[instr.def(0)->as<WireRef>()] =
-        ThinArrayRef<AIGNodeTRef>{pos, numBits};
+    wireToAIGNode[instr.def(0)->as<WireRef>()] = pos;
   }
   void buildInsert(InsertIRef insert) {
     assert(insert.isConstantOffs());
@@ -146,8 +143,7 @@ public:
     }
     uint32_t numBits = wireToAIGNodeStorage.size() - pos;
     assert(numBits == insert.getMemoryLen());
-    wireToAIGNode[insert.out()->as<WireRef>()] =
-        ThinArrayRef<AIGNodeTRef>{pos, numBits};
+    wireToAIGNode[insert.out()->as<WireRef>()] = pos;
   }
   void buildRepeat(InstrRef instr) {
     uint32_t pos = wireToAIGNodeStorage.size();
@@ -159,9 +155,7 @@ public:
         wireToAIGNodeStorage.emplace_back(resolveBit(val, j));
       }
     }
-    uint32_t numBits = wireToAIGNodeStorage.size() - pos;
-    wireToAIGNode[instr.def(0)->as<WireRef>()] =
-        ThinArrayRef<AIGNodeTRef>{pos, numBits};
+    wireToAIGNode[instr.def(0)->as<WireRef>()] = pos;
   }
 
   void buildNOP(WireRef out, HWValue in) {
@@ -170,15 +164,13 @@ public:
     for (unsigned i = 0; i < *val.getNumBits(); i++) {
       wireToAIGNodeStorage.emplace_back(resolveBit(val, i));
     }
-    uint32_t numBits = wireToAIGNodeStorage.size() - pos;
-    wireToAIGNode[out] = ThinArrayRef<AIGNodeTRef>{pos, numBits};
+    wireToAIGNode[out] = pos;
   }
 
   void buildExtTrunc(WireRef out, WireRef in, bool sign = false) {
     auto inNumBits = *in.getNumBits();
     auto outNumBits = *out.getNumBits();
-    wireToAIGNode[out] = ThinArrayRef<AIGNodeTRef>{
-        (uint32_t)wireToAIGNodeStorage.size(), outNumBits};
+    wireToAIGNode[out] = wireToAIGNodeStorage.size();
     for (unsigned i = 0; i < std::min(inNumBits, outNumBits); i++) {
       AIGNodeTRef node = resolveBit(in, i);
       wireToAIGNodeStorage.emplace_back(node);
@@ -186,6 +178,19 @@ public:
     AIGNodeTRef extBit = sign ? resolveBit(in, inNumBits - 1) : aig.getZero();
     for (unsigned i = inNumBits; i < outNumBits; i++)
       wireToAIGNodeStorage.emplace_back(extBit);
+  }
+
+  bool existingIO(WireRef wire) {
+    assert(wire.getNumBits() != 0);
+    if (auto it = wireToAIGNode[wire]) {
+      auto nodes = ThinArrayRef<AIGNodeTRef>(it, *wire.getNumBits())
+                       .resolve(wireToAIGNodeStorage);
+
+      assert(!aig.store.resolve(nodes.front()).isOutput() &&
+             "impossible, map only stores input and interior");
+      return aig.store.resolve(nodes.front()).isInput();
+    }
+    return false;
   }
 
   MutArrayRef<AIGNodeTRef> buildInput(WireRef wire) {
@@ -196,7 +201,7 @@ public:
       auto node = aig.createInput();
       wireToAIGNodeStorage.emplace_back(node.as<AIGNodeRef>());
     }
-    wireToAIGNode[wire] = arr;
+    wireToAIGNode[wire] = arr.index();
     return arr.resolve(
         MutArrayRef{wireToAIGNodeStorage.begin(), wireToAIGNodeStorage.end()});
   }
@@ -217,8 +222,17 @@ class AIGConstructPass : public Pass<AIGConstructPass> {
   HWInstrBuilder build;
   AIGObjRef aigRef;
   ObjMapVec<Instr, bool> destroyMap;
+  ObjMapVec<Wire, bool> isInputWire;
 
   void buildAIGInputInstr(WireRef wire, AIGBuilder &abuild) {
+    assert(!abuild.existingIO(wire) &&
+           "should not happen w/o multi def and forward refs");
+
+    // we need this at per-wire granularity, splices etc may map to
+    // input AIG nodes but their output wire is not strictly an AIG
+    // input.
+    isInputWire.get_ensure(wire) = 1;
+
     auto &aig = abuild.aig;
     auto arr = abuild.buildInput(wire);
     auto ibuild = build.buildInstrRaw(AIG_INPUT, arr.size() + 2);
@@ -229,12 +243,11 @@ class AIGConstructPass : public Pass<AIGConstructPass> {
     ibuild.addRef(aigRef);
   }
   void buildAIGOutputInstr(WireRef wire, AIGBuilder &abuild) {
-    for (auto def : wire.defs())
-      if (def.instr().isOpc(AIG_OUTPUT))
-        return;
-    for (auto use : wire.uses())
-      if (use.instr().isOpc(AIG_INPUT))
-        return;
+    if (isInputWire.get_ensure(wire))
+      // keep using wire connection for direct I->O paths
+      return;
+    if (wire.getSingleDef()->instr().isOpc(AIG_OUTPUT))
+      return;
 
     // auto nodes = abuild.resolveWire(wire);
     // if (std::all_of(nodes.begin(), nodes.end(),
@@ -255,6 +268,10 @@ class AIGConstructPass : public Pass<AIGConstructPass> {
     // }
 
     auto &aig = abuild.aig;
+
+    // steal the wire, will be deleted anyways as long as not AIG I/O
+    wire.getSingleDef()->replace(FatDynObjRef{nullref});
+
     auto arr = abuild.buildOutput(wire);
     auto ibuild = build.buildInstrRaw(AIG_OUTPUT, arr.size() + 2);
     ibuild.addRef(wire);
@@ -298,7 +315,7 @@ class AIGConstructPass : public Pass<AIGConstructPass> {
     // AIG as IOs.
     case *AIG_INPUT:
     case *AIG_OUTPUT:
-      return;
+      dyno_unreachable("unreachable in forward pass");
 
     default: {
       build.setInsertPoint(instr);
@@ -309,6 +326,7 @@ class AIGConstructPass : public Pass<AIGConstructPass> {
 
       build.insert = std::next(build.insert);
 
+      // todo: make sure we don't generate buffers thru AIG when possible.
       for (auto def : instr.defs()) {
         if (auto asWire = def->dyn_as<WireRef>())
           buildAIGInputInstr(asWire, abuild);
@@ -386,7 +404,6 @@ class AIGConstructPass : public Pass<AIGConstructPass> {
       // default:
       //   return;
     }
-    instr.def(0).replace(FatDynObjRef<>{nullref});
     destroyMap[instr] = 1;
   }
 
@@ -397,7 +414,7 @@ class AIGConstructPass : public Pass<AIGConstructPass> {
     build.setInsertPoint(proc.block().begin());
     build.buildInstrRaw(AIG_GRAPH, 1).addRef(aigRef);
 
-    for (auto instr : proc.block()) {
+    for (auto instr : Range{proc.block()}.earlyincr()) {
       handleInstr(instr, abuild);
     }
   }

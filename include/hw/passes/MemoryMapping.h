@@ -987,6 +987,13 @@ private:
     // todo: prune search space based on score
     for (auto modelCand : Range{memStdCells}.resolve(ctx)) {
       MemoryMapper mapper{config, actual, modelCand.iref()};
+
+      if (mapper.actualPortsLCM == 0) {
+        DYNO_DBG(dumpInstr(actual, ctx);
+                 dbgs() << ": no read or no write ports, ROM todo\n");
+        return false;
+      }
+
       auto vis = [&]() {
         DYNO_DBG({
           dumpInstr(actual, ctx);

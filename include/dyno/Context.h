@@ -32,6 +32,16 @@ static auto castToSpecificRef(void *obj, FatDynObjRef<> ref) {
   else
     return Func(obj, ref.as<ArgT>());
 }
+template <auto Func>
+
+static auto castToSpecificRefThin(void *obj, DynObjRef ref) {
+  using ArgT = std::remove_reference_t<
+      tuple_element_t<1, function_args_t<decltype(Func)>>>;
+  if constexpr (requires { FatDynObjRef<>{Func(obj, ref.as<ArgT>())}; })
+    return FatDynObjRef<>{Func(obj, ref.as<ArgT>())};
+  else
+    return Func(obj, ref.as<ArgT>());
+}
 }; // namespace detail
 
 template <> struct InterfaceTraits<TypeErasedCtx> {
@@ -83,7 +93,8 @@ template <typename Derived> class ContextMixin {
             auto &store = self().stores.template get<Is>();
             using StoreT = std::remove_reference_t<decltype(store)>;
             arr[ObjTraits<typename StoreT::value_type>::ty.getTypeID() & 127] =
-                CallableRef{&store, BindMethod<&StoreT::resolveGeneric>::fv};
+                CallableRef{&store, detail::castToSpecificRefThin<
+                                        BindMethod<&StoreT::resolve>::fv>};
           }(),
           ...);
     }(std::make_index_sequence<numStores>{});

@@ -532,6 +532,22 @@ public:
     refs.downsize(numDefs);
   }
 
+  template <std::invocable<OperandRef> Callback>
+  void replaceAllUsesWithRaw(FatDynObjRef<> newRef, Callback &&func) {
+    if (Operand::isDefUseOperand(newRef)) {
+      auto &other = *reinterpret_cast<InstrDefUse *>(newRef.getPtr());
+      assert(&other != this);
+      for (OperandRef use : uses()) {
+        func(use);
+      }
+    } else {
+      for (OperandRef use : uses()) {
+        func(use);
+      }
+    }
+    refs.downsize(numDefs);
+  }
+
   void replaceAllUsesWith(FatDynObjRef<> newRef) {
     return replaceAllUsesWith(newRef, [](OperandRef) {});
   }

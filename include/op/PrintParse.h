@@ -84,7 +84,6 @@ public:
 
     case OP_STRING.type: {
       lexer.popEnsure(DynoLexer::op_rbropen);
-      std::map<std::string, std::string> map;
       std::string val{lexer.popEnsure(Token::STRING_LITERAL).strLit.value};
       lexer.popEnsure(DynoLexer::op_rbrclose);
       return base->ctx.getStore<StringObj>().create(std::move(val));

@@ -28,7 +28,7 @@ namespace dyno {
 class ParserBase {
 protected:
   VectorLUT<FatDynObjRef<>> identMap;
-  VectorLUT<uint8_t> forwardDef;
+  UnsizedBitSet<Vec<uint64_t>> forwardDef;
 
 public:
   TempBindVal<DynoLexer> lexer;
@@ -82,17 +82,28 @@ protected:
     identStr = identStr.substr(1);
 
     if (lexer->popIf(DynoLexer::op_colon)) {
-      isDef = !lexer->popIf(DynoLexer::op_qmark);
-      UNWRAP(newObj, parseObject(ArrayRef{identStr}, isDef))
-      obj = newObj;
-      auto isFwdDef = forwardDef.find(ident.ident.idx);
-      if (!(isFwdDef.has() && *isFwdDef))
+      auto isFwdDef = forwardDef.getDyn(ident.ident.idx);
+      if (!isFwdDef) {
+        isDef = !lexer->popIf(DynoLexer::op_qmark);
+
+        UNWRAP(newObj, parseObject(ArrayRef{identStr}, isDef))
+        obj = newObj;
+
         identMap.insertOrAssign(ident.ident.idx, FatDynObjRef{obj});
-      else {
-        // todo: delete object or don't parse at all
+
+        if (!isDef)
+          forwardDef.setDyn(ident.ident.idx);
+      } else {
+
+        // todo: remove (legacy format support)
+        if (lexer->peekType()) {
+          UNWRAP(unusedObj, parseObject(ArrayRef{identStr}, true))
+          ctx.destroy(unusedObj);
+        }
+
+        isDef = true;
         obj = *ref;
       }
-      forwardDef.insertOrAssign(ident.ident.idx, !isDef);
     } else {
       if (!ref)
         return std::unexpected{lexer->makeErrorOnPeekToken("undefined value")};
@@ -102,6 +113,7 @@ protected:
     return ParseOperand{obj, isDef};
   }
 
+public:
   std::expected<ParseOperand, ParseError> parseOperand() {
     auto tok = lexer->Peek();
     if (tok.type == DynoLexer::op_hash)
@@ -136,6 +148,7 @@ protected:
     return {};
   }
 
+protected:
   std::expected<void, ParseError> parseSourceLoc(InstrRef instr) {
     UNWRAP(tok, lexer->tryPeekEnsure(Token::STRING_LITERAL))
     auto pos = tok.strLit.value.find_first_of(':');

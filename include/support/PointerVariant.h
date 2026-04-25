@@ -35,14 +35,22 @@ template <> struct PointerIntTraits<void *> {
   // assuming malloc alignment
   static constexpr unsigned numLowBitsAvail = 2;
 };
-template <typename T> struct PointerIntTraits<T *> {
+
+template <typename T>
+concept HasOffset = requires { alignof(T); };
+
+template <HasOffset T> struct PointerIntTraits<T *> {
   static constexpr unsigned numLowBitsAvail = clog2(alignof(T) - 1);
 };
+template <typename T> struct PointerIntTraits<T *> {
+  // assuming malloc alignment
+  static constexpr unsigned numLowBitsAvail = 2;
+};
 
-// template <typename Ptr, unsigned IntBits>
-// class PointerIntPair
-//     : public PointerIntPairBase<Ptr, PointerIntTraits<Ptr>::numLowBitsAvail,
-//                                 IntBits> {};
+template <typename Ptr, unsigned IntBits>
+class PointerIntPair
+    : public PointerIntPairBase<Ptr, PointerIntTraits<Ptr>::numLowBitsAvail,
+                                IntBits> {};
 
 template <typename Head, typename... Tail> struct PointerIntsVariantTraits {
   static constexpr size_t MinNumLowBitsAvail =
@@ -103,6 +111,7 @@ public:
 
   template <typename T> PointersIntsVariant(T t) { *this = t; }
   PointersIntsVariant(std::nullptr_t) { base.base = 0; }
+  PointersIntsVariant() {}
 
   template <typename T> bool is() const {
     return base.getInt() == type_index<T>();

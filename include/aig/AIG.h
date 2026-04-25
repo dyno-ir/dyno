@@ -430,13 +430,13 @@ public:
       std::swap(lhs, rhs);
     AIGNodeTRef simple = simplify(lhs, rhs);
     if (simple) {
-      DYNO_DBGV(dbgs() << "[AIG Node] " << lhs << ", " << rhs
-                       << " -> simplified to " << simple << "\n");
+      // DYNO_DBGV(dbgs() << "[AIG Node] " << lhs << ", " << rhs
+      //                  << " -> simplified to " << simple << "\n");
       return store.resolve(simple);
     }
     AIGNodeRef node = store.create(lhs.getObjID(), rhs.getObjID());
-    DYNO_DBGV(dbgs() << "[AIG Node] " << lhs << ", " << rhs << " -> " << node
-                     << "\n");
+    // DYNO_DBGV(dbgs() << "[AIG Node] " << lhs << ", " << rhs << " -> " << node
+    //                  << "\n");
     return node;
   }
 

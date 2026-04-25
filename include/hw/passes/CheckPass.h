@@ -9,6 +9,7 @@
 #include "hw/IDs.h"
 #include "op/IDs.h"
 #include "support/Debug.h"
+#include "support/ErrorRecovery.h"
 namespace dyno {
 
 class CheckPass : public Pass<CheckPass> {
@@ -51,8 +52,8 @@ public:
   // }
 
   template <typename... Ts> void error(InstrRef instr, Ts... ts) {
-    dumpInstr(HWInstrRef{instr}.parentBlock(ctx).defI(), ctx);
-    dumpInstr(instr, ctx);
+    dumpInstr(HWInstrRef{instr}.parentBlock(ctx).defI(), ctx, true, false);
+    dumpInstr(instr, ctx, true, false);
     dbgs() << "error: ";
     ((dbgs() << ts), ...);
     dbgs() << "\n";
@@ -71,7 +72,7 @@ public:
     dumpObj(block);
     dbgs() << ": {\n";
     for (auto instr : block)
-      dumpInstr(instr, ctx);
+      dumpInstr(instr, ctx, true, false);
     dbgs() << "}\n";
     dbgs() << "error: ";
     ((dbgs() << ts), ...);
@@ -183,7 +184,7 @@ public:
         HWPrinter print{str};
         print.printCtx(ctx);
       }
-      abort();
+      report_fatal_error("check pass failed");
     }
   }
   void runModule(ModuleIRef mod) { runOnModule(mod); }

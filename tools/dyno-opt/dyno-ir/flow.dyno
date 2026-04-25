@@ -147,21 +147,30 @@ FUNCTION_DEF %synthMemoryFFMuxHandling:func, :block {
     "lowerOneHotMux"         : "0",
   )
 
+  meta.DUMP_PASS map("path": "post_lower.dyno")
+
   // lift MUXs up the dep chain for reg partition
   // (s.t. regs with e.g. concat input can be split)
+  meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS
+
+  meta.INST_COMBINE_PASS
+  // dedicated pass to avoid squared behavior in instcombine
+  meta.MUX_TREE_FLATTEN_PASS
   meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS
 
   meta.INST_COMBINE_PASS map("muxToOneHotMux": "1")
   meta.AGGRESSIVE_DEAD_CODE_ELIMINATION_PASS
 
   // flip flop inference
-  meta.INST_COMBINE_PASS
+  meta.INST_COMBINE_PASS map("muxToOneHotMux": "1")
   meta.FLIP_FLOP_INFERENCE_PASS
   meta.TRIGGER_DEDUPE_PASS
   meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS
-  meta.INST_COMBINE_PASS map("findFlipFlopEnables": "1")
+  meta.INST_COMBINE_PASS map("muxToOneHotMux": "1")
   meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS
-  meta.INST_COMBINE_PASS map("findFlipFlopEnables": "1")
+  meta.INST_COMBINE_PASS map("muxToOneHotMux": "1", "findFlipFlopEnables": "1")
+  meta.DUMP_PASS map("path": "post_critical.dyno")
+
 }
 
 FUNCTION_DEF %synthLowerMemoryFF:func, :block {
@@ -173,26 +182,37 @@ FUNCTION_DEF %synthLowerMemoryFF:func, :block {
 
   // map memories
   meta.MEMORY_MAPPING_PASS
-  meta.INST_COMBINE_PASS
+  // fix up possible wire forward references after mem map
+  meta.NETLIST_TO_PROC_PASS
+
+  // lower unmapped memories back to load/store
+  meta.LOWER_MEM_ACCESS_PASS
+  // and map flip flops
+  meta.INST_COMBINE_PASS map("muxToOneHotMux": "1")
+  meta.FLIP_FLOP_INFERENCE_PASS
+
+  meta.CHECK_PASS
+
+  meta.INST_COMBINE_PASS map("muxToOneHotMux": "1")
   meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS
-  meta.INST_COMBINE_PASS
+  meta.INST_COMBINE_PASS map("muxToOneHotMux": "1")
   meta.AGGRESSIVE_DEAD_CODE_ELIMINATION_PASS
 
   // map flip flops
   meta.FLIP_FLOP_MAPPING_PASS
+
   meta.MUX_TREE_FLATTEN_PASS // todo: instead gen one hot mux in flip flop mapping?
   meta.TRIGGER_DEDUPE_PASS
-  meta.INST_COMBINE_PASS
-  meta.PROCESS_LINEARIZE_PASS map("retainIODeps": "0", "retainInnerDeps": "0")
+  meta.INST_COMBINE_PASS map("muxToOneHotMux": "1")
+
   meta.ORDER_INSTRS_PASS
-  meta.INST_COMBINE_PASS
+  meta.PROCESS_LINEARIZE_PASS map("retainIODeps": "0", "retainInnerDeps": "0")
+
+  meta.INST_COMBINE_PASS map("muxToOneHotMux": "1")
   meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS
   meta.SSA_CONSTRUCT_PASS
-  meta.INST_COMBINE_PASS
+  meta.INST_COMBINE_PASS map("muxToOneHotMux": "1")
   meta.AGGRESSIVE_DEAD_CODE_ELIMINATION_PASS
-
-  // lower unmapped memories back to load/store
-  meta.LOWER_MEM_ACCESS_PASS
 }
 
 FUNCTION_DEF %synthTechmap:func, :block {
@@ -212,19 +232,22 @@ FUNCTION_DEF %synthTechmap:func, :block {
     "lowerOneHotMux"         : "1",
   )
 
-  meta.INST_COMBINE_PASS map("fuseCommutative": "0", "removeAssumes": "1")
+  meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS
+  meta.INST_COMBINE_PASS
+    map("fuseCommutative": "0", "removeAssumes": "1", "boolExprSimplify": "0", "inferMuxs" : "0")
+  meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS
   meta.AGGRESSIVE_DEAD_CODE_ELIMINATION_PASS
 
   // AIG opt & techmap
   meta.AIG_CONSTRUCT_PASS
   meta.AGGRESSIVE_DEAD_CODE_ELIMINATION_PASS
+
   meta.ABC_PASS map("path": "sky130_fd_sc_hd__tt_025C_1v80.lib")
   meta.AGGRESSIVE_DEAD_CODE_ELIMINATION_PASS
   meta.REMOVE_BUFFERS_PASS
 
   meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS
   meta.INST_COMBINE_PASS
-  meta.AGGRESSIVE_DEAD_CODE_ELIMINATION_PASS
 
   meta.CONSTANT_MAPPING_PASS
   meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS
@@ -237,10 +260,17 @@ FUNCTION_DEF %synthTechmap:func, :block {
 
 FUNCTION_DEF %completeFlow:func, :block {
   CALL %earlyCanonFlow
+  meta.DUMP_PASS map("path": "post_early_canon.dyno")
   CALL %synthCanonicalize
+  meta.DUMP_PASS map("path": "post_canon.dyno")
   CALL %synthEarlyOpt
+  meta.DUMP_PASS map("path": "post_early_opt.dyno")
   CALL %synthLowerControlFlow
+  meta.DUMP_PASS map("path": "post_lower_cfg.dyno")
   CALL %synthMemoryFFMuxHandling
+  meta.DUMP_PASS map("path": "post_memory_mux.dyno")
   CALL %synthLowerMemoryFF
+  meta.DUMP_PASS map("path": "post_lower_memory.dyno")
   CALL %synthTechmap
+  meta.DUMP_PASS map("path": "post_techmap.dyno")
 }

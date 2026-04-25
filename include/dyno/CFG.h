@@ -63,7 +63,9 @@ public:
   void renumber(BlockRef block);
   void insert(InstrRef instr, BlockRef_iterator_base it);
   void replace(InstrRef oldI, InstrRef newI);
-  uint64_t operator[](InstrRef instr) const { return numbers[instr.getObjID() + 1]; }
+  uint64_t operator[](InstrRef instr) const {
+    return numbers[instr.getObjID() + 1];
+  }
   uint64_t get(InstrRef instr) { return numbers[instr.getObjID() + 1]; }
 };
 
@@ -154,6 +156,7 @@ public:
   }
 
   auto blockRef() const;
+  uint32_t getPos() const { return pos; }
 
 protected:
   CFG &cfg() const { return *block->cfg; }
@@ -265,6 +268,8 @@ public:
   CFG &getCFG() { return *ptr->cfg; }
 
   void sort() {
+    if ((*this)->sorted)
+      return;
     // think copy is faster than in place, just guess though.
     auto &instrsOld = (*this)->instrs;
     SmallVec<Block::Node, 16> instrsNew{instrsOld.size()};
@@ -287,6 +292,8 @@ public:
   }
 
   void sort_inplace() {
+    if ((*this)->sorted)
+      return;
     // might still be broken
     size_t idx = 1;
     auto &instrs = (*this)->instrs;
@@ -350,8 +357,7 @@ inline void InstrNumbering::renumber(BlockRef block) {
 }
 
 inline void InstrNumbering::insert(InstrRef instr, BlockRef_iterator_base it) {
-  numbers.reserve_safe(instr.getObjID() + 2);
-  numbers.resize(std::max(instr.getObjID() + 2, numbers.size()));
+  numbers.resize_safe(std::max(instr.getObjID() + 2, numbers.size()));
 
   auto itO = BlockRef_iterator<true>(it);
   auto prev = std::prev(itO).instr();
@@ -376,8 +382,7 @@ inline void InstrNumbering::insert(InstrRef instr, BlockRef_iterator_base it) {
 }
 
 inline void InstrNumbering::replace(InstrRef oldI, InstrRef newI) {
-  numbers.reserve_safe(newI.getObjID() + 2);
-  numbers.resize(newI.getObjID() + 2);
+  numbers.resize_safe(std::max(newI.getObjID() + 2, numbers.size()));
 
   assert(newI != nullref);
   numbers[newI.getObjID() + 1] = numbers[oldI.getObjID() + 1];

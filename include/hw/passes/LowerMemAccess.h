@@ -88,12 +88,22 @@ class LowerMemAccessPass : public Pass<LowerMemAccessPass> {
 
     HWValue memFlat = nullref, memFlatQ = nullref;
     TriggerRef trig = nullref;
+    bool anyStore = false;
 
-    for (auto [front, access] :
-         reg.oref()
-             .uses()
-             .transform([](size_t, auto use) { return use.instr(); })
-             .mark_front()) {
+    SmallVec<InstrRef, 16> accesses(reg.oref().uses().transform(
+        [](size_t, auto use) { return use.instr(); }));
+    assert(Range{accesses}.drop_front().all([&](auto instr) {
+      return ctx.getCFG()[instr].blockRef() ==
+             ctx.getCFG()[accesses.front()].blockRef();
+    }) && "expected all in same block");
+
+    ctx.getCFG()[accesses.front()].blockRef().sort();
+
+    Range{accesses}.sort([&](auto lhs, auto rhs) {
+      return ctx.getCFG()[lhs].getPos() < ctx.getCFG()[rhs].getPos();
+    });
+
+    for (auto [front, access] : Range{accesses}.mark_front()) {
       build.setInsertPoint(access);
       if (front) {
         memFlat = build.buildLoad(reg.oref());
@@ -110,6 +120,7 @@ class LowerMemAccessPass : public Pass<LowerMemAccessPass> {
           trig = t;
         }
         destroyList.emplace_back(access);
+        anyStore = true;
       } break;
       case *HW_MEM_LOAD: {
         auto ldVal = runOnLoad(access.as<MemLoadIRef>(), memFlatQ);
@@ -125,7 +136,11 @@ class LowerMemAccessPass : public Pass<LowerMemAccessPass> {
       }
     }
 
-    build.buildStore(reg.oref(), memFlat, true, trig.iref());
+    if (anyStore) {
+      if (!trig)
+        report_fatal_error("expected synchronous store");
+      build.buildStore(reg.oref(), memFlat, true, trig.iref());
+    }
     for (auto e : Range{destroyList}.resolve(ctx))
       build.destroyInstr(e);
     destroyList.clear();

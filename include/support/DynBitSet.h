@@ -330,13 +330,14 @@ public:
 
   void resizeBits(size_t i) { this->resizeSymbs(i); }
   void ensureBits(size_t i) { this->ensureSymbs(i); }
+  void ensureBitsExp(size_t i) { this->ensureSymbsExp(i); }
 
   void setDyn(size_t i) {
-    ensureBits(i + 1);
+    ensureBitsExp(i + 1);
     set(i);
   }
   void clearDyn(size_t i) {
-    ensureBits(i + 1);
+    ensureBitsExp(i + 1);
     clear(i);
   }
   bool getDyn(size_t i) const {
@@ -346,7 +347,7 @@ public:
     return storage[word] & symbMask(i);
   }
   void modifyRangeDyn(size_t i, size_t len, word_t value) {
-    ensureBits(i + len);
+    ensureBitsExp(i + len);
     modifyRange(i, len, value);
   }
   void setRangeDyn(size_t i, size_t len) { modifyRangeDyn(i, len, ~word_t(0)); }

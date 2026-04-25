@@ -137,7 +137,11 @@ public:
     return iterator(map.insert(HashFunc(k), std::make_pair(k, t)));
   }
   iterator insertOrAssign(const K &k, const T &t) {
-    return findOrInsert(k, [&]() { return T{t}; }).second;
+    auto [h, it] = find_raw(k);
+    if (it == map.end())
+      return iterator(map.insert(h, std::pair<K, T>(k, t)));
+    it.val().second = t;
+    return iterator(it);
   }
   auto findOrInsert(const K &k, auto &&func) {
     auto [h, it] = find_raw(k);

@@ -124,14 +124,6 @@ class FlipFlopMappingPass : public Pass<FlipFlopMappingPass> {
   void runOnInstr(FlipFlopIRef instr) {
     auto bits = *instr.q()->numBits;
     AbstractFF abstr;
-    auto mod = instr.parentMod(ctx);
-    auto proc = mod.getSingleProcess();
-    if (!proc) {
-      build.setInsertPoint(mod.block().end());
-      proc = build.buildProcess();
-      regBuild.setInsertPoint(mod.regs_end());
-    }
-    build.setInsertPoint(proc.block().end());
     FFWires wires;
 
     wires.qReg = regBuild.buildRegister(instr.q().getNumBits());
@@ -141,8 +133,8 @@ class FlipFlopMappingPass : public Pass<FlipFlopMappingPass> {
     qConcat.emplace_back(instr.q());
     instr.q().getDef().replace(FatDynObjRef{nullref});
 
-    wires.clk = instr.clk().as<WireRef>();
-    wires.en = instr.hasClkEn() ? instr.clkEn().as<WireRef>() : nullref;
+    wires.clk = instr.clk();
+    wires.en = instr.hasClkEn() ? instr.clkEn() : nullref;
 
     abstr.clkPol() = instr.clkPol();
     abstr.hasEn() = instr.hasClkEn();
@@ -156,8 +148,9 @@ class FlipFlopMappingPass : public Pass<FlipFlopMappingPass> {
     for (unsigned i = 0; i < instr.numRsts(); i++)
       rstWires.emplace_back(instr.rst(i));
 
+    build.setInsertPoint(instr);
     for (unsigned i = 0; i < bits; i++) {
-      wires.d = build.buildSplice(dWire, 1, i).as<WireRef>();
+      wires.d = build.buildSplice(dWire, 1, i);
       wires.bitIdx = i;
       qConcat.emplace_back(wires.q = ctx.getStore<Wire>().create(1));
 
@@ -196,14 +189,15 @@ class FlipFlopMappingPass : public Pass<FlipFlopMappingPass> {
 
     qConcat.others().do_reverse();
     auto qVal = build.buildConcat(std::move(qConcat));
+    assert(qVal);
     build.buildStore(wires.qReg, qVal);
 
     destroyMap.mark(instr);
   }
 
   struct FFWires {
-    WireRef clk;
-    WireRef d;
+    HWValue clk;
+    HWValue d;
     HWValue q;
     HWValue en;
     HWValue rst;
@@ -317,20 +311,20 @@ class FlipFlopMappingPass : public Pass<FlipFlopMappingPass> {
           // if we directly use wires.q we build a cyclic dependency, better
           // avoid that while we can.
           auto qIndirect = build.buildLoad(wires.qReg, 1, wires.bitIdx);
-          wires.d = build.buildMux(wires.en, qIndirect, wires.d).as<WireRef>();
+          wires.d = build.buildMux(wires.en, qIndirect, wires.d);
           abstr.hasEn() = 0;
           abstr.enPol() = 0;
           break;
         }
         case FixupType::ADD_EN1_MUX: {
           auto qIndirect = build.buildLoad(wires.qReg, 1, wires.bitIdx);
-          wires.d = build.buildMux(wires.en, wires.d, qIndirect).as<WireRef>();
+          wires.d = build.buildMux(wires.en, wires.d, qIndirect);
           abstr.hasEn() = 0;
           abstr.enPol() = 0;
           break;
         }
         case FixupType::INVERT_CLK:
-          wires.clk = build.buildNot(wires.clk).as<WireRef>();
+          wires.clk = build.buildNot(wires.clk);
           abstr.clkPol() = !abstr.clkPol();
           break;
 

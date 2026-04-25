@@ -22,7 +22,9 @@ class MuxTreeFlattenPass : public Pass<MuxTreeFlattenPass> {
                               bool matchMultiUse = false) {
     SmallVec<Frame, 32> worklist{{root.def(0)->as<WireRef>(), 1u}};
 
-    SmallVec<HWValue, 4> prefixes;
+    // SmallVec<HWValue, 4> prefixes;
+    SmallVec<HWValue, 4> prefixAnds;
+
     SmallVec<std::pair<HWValue, HWValue>, 4> cases;
     HWInstrBuilder build{ctx, root};
 
@@ -33,15 +35,7 @@ class MuxTreeFlattenPass : public Pass<MuxTreeFlattenPass> {
            (!val.as<WireRef>().getDefI().isOpc(HW_MUX) ||
             (!matchMultiUse && val.as<WireRef>().getDefI() != root &&
              !val.as<WireRef>().hasSingleUse())))) {
-        SmallVec<HWValue, 4> copy;
-        copy.reserve(cases.size());
-        copy.push_back_range(Range{prefixes});
-        for (auto [val, wire] : Range{copy}.zip(prefixes)) {
-          val.setCustom(0);
-          if (wire.getCustom())
-            val = build.buildNot(val);
-        }
-        cases.emplace_back(build.buildAnd(copy), val);
+        cases.emplace_back(prefixAnds.back(), val);
         worklist.pop_back();
         continue;
       }
@@ -51,7 +45,7 @@ class MuxTreeFlattenPass : public Pass<MuxTreeFlattenPass> {
       auto operand = *(instr.other_begin() + idx);
       if (operand == instr.other_end()) {
         worklist.pop_back();
-        prefixes.pop_back();
+        prefixAnds.pop_back();
         continue;
       }
 
@@ -59,7 +53,9 @@ class MuxTreeFlattenPass : public Pass<MuxTreeFlattenPass> {
       if (operand == instr.other(1)) {
         visitedCallback(instr);
         assert(instr.other(0)->as<HWValue>().getNumBits() == 1);
-        prefixes.emplace_back(instr.other(0)->as<HWValue>());
+        auto val = instr.other(0)->as<HWValue>();
+        prefixAnds.emplace_back(
+            prefixAnds.empty() ? val : build.buildAnd(prefixAnds.back(), val));
       }
 
       switch (*instr.getDialectOpcode()) {
@@ -67,7 +63,11 @@ class MuxTreeFlattenPass : public Pass<MuxTreeFlattenPass> {
         worklist.back().idx += 1;
         worklist.emplace_back(operand->as<HWValue>(), 1);
         if (operand != instr.other(1)) {
-          prefixes.back().setCustom(1);
+          prefixAnds.pop_back();
+          auto inv = build.buildNot(instr.other(0)->as<HWValue>());
+          prefixAnds.emplace_back(prefixAnds.empty()
+                                      ? inv
+                                      : build.buildAnd(prefixAnds.back(), inv));
         }
         break;
       }

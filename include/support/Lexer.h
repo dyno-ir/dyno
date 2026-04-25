@@ -155,7 +155,8 @@ struct Lexer {
     size_t columnStartI = 0;
     unsigned lineNumber = 1;
   };
-  State state, lastState;
+  State state, lastState, preWhitespaceState;
+
   SlabAllocator<dyno::BigInt> bigIntLiterals;
 
   ArrayRef<const char *> operators;
@@ -197,6 +198,7 @@ public:
 
     size_t len = src.size();
     const char *srcC = src.data();
+    preWhitespaceState = state;
 
     while (1) {
       // Skip whitespace
@@ -505,9 +507,10 @@ public:
                           lastState.i - lastState.columnStartI);
   }
   std::pair<uint32_t, uint32_t> getEndOfTokenLineCol() {
-    // not strictly correct bc of whitespace but better than nothing
     if (peekToken)
-      return getStartOfPeekTokenLineCol();
+      return std::make_pair(preWhitespaceState.lineNumber,
+                            preWhitespaceState.i -
+                                preWhitespaceState.columnStartI);
     return std::make_pair(state.lineNumber, state.i - state.columnStartI);
   }
 };

@@ -600,6 +600,55 @@ TEST_EQUIVALENCE :string("test-icmp-lower"), :block, :block {
   meta.RANDOM_EQUIVALENCE_CHECK_PASS map("cycles": "10000")
 }
 
+TEST_CASE :string("test-extract"), :block, :block, :block {
+  MODULE_DEF :module("Test"), :block {
+    INPUT_REGISTER_DEF %addr:register(2)
+    INPUT_REGISTER_DEF %data:register(4)
+    OUTPUT_REGISTER_DEF %out:register(1)
+
+    COMB_PROCESS_DEF :process, :block {
+      LOAD %addr_v:wire(2), %addr
+      ZEXT %addr32:wire(32), %addr_v
+
+      LOAD %data_v:wire(4), %data
+
+      SPLICE %out_v:wire(1), %data_v, #32'd0, %addr32, #32'd1, #32'd4
+
+      STORE %out_v, %out
+    }
+  }
+}{
+  hw.MODULE_DEF %Test:module("Test"), %4:core.block {
+    hw.INPUT_REGISTER_DEF %r0:register(2)
+    hw.INPUT_REGISTER_DEF %r1:register(4)
+    hw.OUTPUT_REGISTER_DEF %r2:register(1)
+    hw.COMB_PROCESS_DEF %5:process, %6:core.block {
+      hw.LOAD %w0:wire(2), %r0
+      hw.LOAD %w2:wire(4), %r1
+      op.TRUNC %w8:wire(1), %w2
+      hw.SPLICE %w9:wire(1), %w2, #32'd1
+      hw.SPLICE %w10:wire(1), %w2, #32'd2
+      hw.SPLICE %w11:wire(1), %w2, #32'd3
+      op.TRUNC %w12:wire(1), %w0
+      hw.SPLICE %w25:wire(1), %w0, #32'd1
+      op.AND %w3:wire(1), %w12, %w25
+      op.NOT %w17:wire(1), %w12
+      op.AND %w18:wire(1), %w17, %w25
+      op.NOT %w19:wire(1), %w25
+      op.AND %w20:wire(1), %w12, %w19
+      op.OR %w21:wire(1), %w12, %w25
+      op.NOT %w24:wire(1), %w21
+      hw.ONEHOT_MUX %w23:wire(1), %w24, %w8, %w20, %w9, %w18, %w10, %w3, %w11
+      hw.STORE %w23, %r2
+    }
+  }
+}{
+  meta.LOWER_OPS_PASS
+  meta.MUX_TREE_FLATTEN_PASS
+  meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS
+  meta.INST_COMBINE_PASS
+}
+
 TEST_CASE :string("test-reg-split"), :block, :block, :block {
   MODULE_DEF :module("Test"), :block {
     INPUT_REGISTER_DEF %clk:register(1)

@@ -47,6 +47,11 @@ private:
     HWInterpreter testInterp{ctx, test, std::cout, std::cerr};
     testInterp.setup();
 
+#ifdef ENABLE_FST
+    testInterp.fstWriter.emplace("out.fst");
+    testInterp.fstInitHierarchy();
+#endif
+
     testInterp.trace = config.trace;
 
     auto testClk = test.ports().front();
@@ -60,9 +65,11 @@ private:
     };
     std::mt19937 rand(42);
     BigInt clk = "1'b0"_bv;
-    // set these to avoid initial x -> 0 transition
-    testInterp.getReg(testClk) = clk;
-    modelInterp.getReg(modelClk) = clk;
+    if (config.clockMode == Config::CLOCK) {
+      // set these to avoid initial x -> 0 transition
+      testInterp.getReg(testClk) = clk;
+      modelInterp.getReg(modelClk) = clk;
+    }
     for (uint64_t i = 0; i < config.cycles || config.exhaustive; i++) {
       bool carry = true;
       for (auto [testIn, modelIn] :

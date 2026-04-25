@@ -41,6 +41,8 @@ public:
                                    entries.data())));
   }
 
+  std::array<std::remove_const_t<Dispatch1T>, 256> &getRaw() { return entries; }
+
   constexpr void registerDialect(DialectID dialect, const Dispatch1T val) {
     entries[dialect] = val;
   }

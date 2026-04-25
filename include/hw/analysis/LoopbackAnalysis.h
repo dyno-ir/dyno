@@ -8,6 +8,7 @@
 #include "hw/Wire.h"
 #include "hw/analysis/RegisterValue.h"
 #include "op/IDs.h"
+#include "support/DenseMap.h"
 #include "support/RTTI.h"
 #include "support/SmallVec.h"
 #include <limits>
@@ -97,9 +98,11 @@ class LoopbackAnalysis {
 public:
   LoopbackPartition get(HWValue value, HWValue loopback) {
     stack.emplace_back(value, 0);
+    SmallDenseMap<ObjRef<Wire>, LoopbackPartition> map;
 
     while (!stack.empty()) {
       auto &[val, idx, acc] = stack.back();
+      addr = 0;
 
       if (auto asConst = val.dyn_as<ConstantRef>()) {
         if (auto loopbackConst = loopback.dyn_as<ConstantRef>()) {
@@ -115,6 +118,12 @@ public:
 
       auto wire = val.as<WireRef>();
       auto instr = wire.getDefI();
+
+      if (auto it = map.find(wire); it != map.end()) {
+        retVal = it.val();
+        stack.pop_back();
+        continue;
+      }
 
       switch (*instr.getDialectOpcode()) {
       case *HW_SPLICE: {
@@ -188,8 +197,9 @@ public:
           FRAME_CALL(asInsert.in()->as<HWValue>());
         }
 
-        assert(acc.getLen() == asInsert.in()->as<HWValue>().getNumBits());
+        assert(acc.getLen() == asInsert.val()->as<HWValue>().getNumBits());
         retVal.write(acc, 0, asInsert.getBase(), acc.getLen());
+        stack.pop_back();
         break;
       }
 
@@ -211,12 +221,10 @@ public:
         if (idx == instr.getNumOthers() / 2) {
           retVal = std::move(acc);
           stack.pop_back();
-          addr -= *instr.def()->as<WireRef>().getNumBits();
           break;
         }
         auto nextVal = instr.other(2 * idx + 1)->as<HWValue>();
         ++idx;
-        addr += *nextVal.getNumBits();
         FRAME_CALL(nextVal)
       }
 
@@ -226,6 +234,8 @@ public:
         FRAME_RET();
       }
       }
+
+      map.insert(wire, retVal);
     }
 
     return retVal;

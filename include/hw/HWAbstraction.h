@@ -1190,6 +1190,25 @@ public:
     return procInstRef;
   }
 
+  ProcessIRef changeProcessType(HWOpcode type, ProcessIRef proc) {
+    if (proc.isOpc(type))
+      return proc;
+    auto ib =
+        InstrBuilder{ctx.getStore<Instr>().create(proc.getNumOperands(), type)};
+    for (auto def : proc.defs()) {
+      ib.addRef(def->fat());
+      def.replace(FatDynObjRef<>{nullref});
+    }
+    ib.other();
+    for (auto use : proc.others()) {
+      ib.addRef(use->fat());
+    }
+    ctx.getCtx<CoreDialectContext>().instrSourceLocInfo.copyDebugInfo(
+        proc, ib.instr());
+    ctx.getCFG()[proc].replace(ib.instr());
+    return ib.instr();
+  }
+
   // HWInstrRef buildEventDelay(RegisterRef dReg, RegisterRef qReg,
   //                            const SensList &sens) {
   //   auto instrRef = ProcessIRef{

@@ -256,6 +256,8 @@ public:
         stack.pop_back();
       }
     }
+
+    retVal.defragmentValues(ctx);
     assert(retVal.getLen() == *rootWire.getNumBits());
     if (retVal.frags.size() == 1) {
       // if the result is just a single HWValue (that's not the root wire),

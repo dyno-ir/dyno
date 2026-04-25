@@ -10,6 +10,7 @@
 #include <support/Bits.h>
 #include <support/InlineStorage.h>
 #include <utility>
+#include <array>
 
 template <typename T, unsigned N> class SmallVec;
 template <typename T> class SmallVecImpl;
@@ -325,6 +326,11 @@ public:
     }
   }
 
+  void resize_safe(size_type n) {
+    reserve_safe(n);
+    resize(n);
+  }
+
   void downsize(size_type n) {
     assert(n <= sz);
     if (n < sz)
@@ -586,6 +592,31 @@ public:
     assert(sz < NumInline);
     arr[sz] = val;
     ++sz;
+  }
+
+  constexpr iterator insert(iterator it, const T &val) {
+    return insert(it, T{val});
+  }
+  constexpr iterator insert(iterator it, T &&val) {
+    assert(it <= end());
+    if (it == end()) {
+      push_back(std::move(val));
+      return end() - 1;
+    }
+    size_t pos = it - begin();
+    assert(sz + 1 <= NumInline);
+
+    std::construct_at(end(), *(end() - 1));
+    std::move_backward(begin() + pos, end() - 1, end());
+
+    arr[pos] = std::move(val);
+    ++sz;
+    return begin() + pos;
+  }
+
+  template <typename U> constexpr void push_back_range(Range<U> range) {
+    for (auto &&elem : range)
+      push_back(elem);
   }
 
   bool erase_unordered(iterator it) {

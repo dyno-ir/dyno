@@ -314,11 +314,13 @@ public:
         assert(reg.getNumBits() != 0);
         val = reg;
         assert(val.getNumBits() != 0);
+        assert(val.getNumBits() == load.getLen());
         break;
       }
       BigInt::rangeSelectOp4S(val, reg, *evalAddress(load.base()),
                               load.getLen());
       assert(val.getNumBits() != 0);
+      assert(val.getNumBits() == load.getLen());
       break;
     }
 

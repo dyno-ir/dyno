@@ -110,6 +110,9 @@ public:
   Interface<DialectInfo> dialectI;
   Interface<TyInfo> tyI;
   Interface<OpcodeInfo> opcodeI;
+  // may be unset, printers must be able to handle both.
+  // can print with more fidelity when set though.
+  Context *ctx = nullptr;
 
 public:
   struct type {
@@ -225,19 +228,22 @@ public:
     }
   }
 
-  void introduce(FatDynObjRef<> ref) {
+  bool introduce(FatDynObjRef<> ref) {
     auto [found, name] = introduceNameFor(ref);
     str << '%' << name.str() << ":";
+    return found;
   }
 
   void introduceAndPrintDef(FatDynObjRef<> ref) {
-    if (!Operand::isDefUseOperand(ref) ||
+    bool found = false;
+    if (1 || !Operand::isDefUseOperand(ref) ||
         ref.as<FatDynObjRef<InstrDefUse>>()->getNumUses() != 0) {
-      introduce(ref);
+      found = introduce(ref);
     } else {
       str << ":";
     }
-    printDef(ref);
+    if (!found)
+      printDef(ref);
   }
 
   void reset() { introduced.clear(); }

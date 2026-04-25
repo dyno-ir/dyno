@@ -180,8 +180,10 @@ public:
   SSOStringRef(const char *begin, const char *end)
       : SSOStringRef(begin, end - begin) {}
 
-  SSOStringRef(const std::string &str)
-      : SSOStringRef(str.data(), str.length()) {}
+  constexpr SSOStringRef(std::basic_string<char> &str)
+      : SSOStringRef(str.data(), str.size()) {}
+  constexpr SSOStringRef(const std::basic_string<char> &str)
+      : SSOStringRef(str.data(), str.size()) {}
   template <typename T>
   SSOStringRef(T &&t) : SSOStringRef(t.begin(), t.end()) {}
   SSOStringRef(const char *data)

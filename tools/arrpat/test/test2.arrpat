@@ -474,6 +474,10 @@ match {
   OP_AND $a, anyorder($val_a, $sel)
   OP_OR $out, $a:chk_wire(#32'b1), $b:HW_WIRE
 }
+with [{
+  if (!config.inferMuxs)
+    goto $fail;
+}]
 replace {
   HW_MUX $out, $sel, $val_a, $val_b
 }
@@ -484,6 +488,10 @@ match {
   OP_AND $a, anyorder($val_a, $sel)
   OP_OR $out, $b:chk_wire(#32'b1), $a:HW_WIRE
 }
+with [{
+  if (!config.inferMuxs)
+    goto $fail;
+}]
 replace {
   HW_MUX $out, $sel, $val_a, $val_b
 }

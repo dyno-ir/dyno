@@ -28,15 +28,18 @@
 #include "hw/passes/MemoryMapping.h"
 #include "hw/passes/ModuleInline.h"
 #include "hw/passes/MuxTreeFlatten.h"
+#include "hw/passes/NetlistToProc.h"
 #include "hw/passes/OrderInstrs.h"
 #include "hw/passes/ParseDyno.h"
 #include "hw/passes/ParseLiberty.h"
+#include "hw/passes/ProcToNetlist.h"
 #include "hw/passes/ProcessLinearize.h"
 #include "hw/passes/RandomEquivalenceCheck.h"
 #include "hw/passes/RebuildCache.h"
 #include "hw/passes/RegisterPartition.h"
 #include "hw/passes/RemoveBuffers.h"
 #include "hw/passes/RemoveInitProcs.h"
+#include "hw/passes/ResolveModules.h"
 #include "hw/passes/SSAConstruct.h"
 #include "hw/passes/SelectModules.h"
 #include "hw/passes/SeqToComb.h"
@@ -89,5 +92,8 @@ inline void registerDialectPasses<DIALECT_HW>(PassRegistry &passRegistry) {
   passRegistry.registerPass<LiftFlipFlopsPass>(DIALECT_HW);
   passRegistry.registerPass<LowerMemAccessPass>(DIALECT_HW);
   passRegistry.registerPass<LiftMuxPass>(DIALECT_HW);
+  passRegistry.registerPass<NetlistToProcPass>(DIALECT_HW);
+  passRegistry.registerPass<ProcToNetlistPass>(DIALECT_HW);
+  passRegistry.registerPass<ResolveModulesPass>(DIALECT_HW);
 }
 }; // namespace dyno

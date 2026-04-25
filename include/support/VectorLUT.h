@@ -23,14 +23,13 @@ public:
     }
     if (idx < base) {
       Container newVec;
-      newVec.reserve(data.size() + (base - idx));
-      newVec.resize(data.size() + base - idx);
+      newVec.resize_safe(data.size() + base - idx);
       std::move(data.begin(), data.end(), newVec.begin() + base - idx);
 
       data = std::move(newVec);
       base = idx;
     } else if (idx - base >= data.size()) {
-      data.resize(idx - base + 1);
+      data.resize_safe(idx - base + 1);
     }
   }
 

@@ -300,8 +300,8 @@ public:
         }
 
         // skip values if not selected
-        stack.emplace_back(instr.other(frame.idx)->as<HWValue>());
         frame.idx += 2;
+        stack.emplace_back(instr.other(frame.idx - 2)->as<HWValue>());
         break;
       }
 
