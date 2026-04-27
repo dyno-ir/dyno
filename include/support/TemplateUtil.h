@@ -1,6 +1,7 @@
 #pragma once
-#include <cstdint>
+#include "support/Tuple.h"
 #include <tuple>
+#include <cstdint>
 #include <type_traits>
 #include <utility>
 
@@ -39,31 +40,31 @@ template <typename T> struct function_info;
 template <typename R, typename C, typename... Args>
 struct function_info<R (C::*)(Args...)> {
   using type = C;
-  using args = std::tuple<Args...>;
+  using args = Tuple<Args...>;
   using ret = R;
 };
 template <typename R, typename C, typename... Args>
 struct function_info<R (C::*)(Args...) const> {
   using type = C;
-  using args = std::tuple<Args...>;
+  using args = Tuple<Args...>;
   using ret = R;
 };
 template <typename R, typename C, typename... Args>
 struct function_info<R (C::*)(Args...) volatile> {
   using type = C;
-  using args = std::tuple<Args...>;
+  using args = Tuple<Args...>;
   using ret = R;
 };
 
 template <typename R, typename C, typename... Args>
 struct function_info<R (C::*)(Args...) const volatile> {
   using type = C;
-  using args = std::tuple<Args...>;
+  using args = Tuple<Args...>;
   using ret = R;
 };
 
 template <typename R, typename... Args> struct function_info<R (*)(Args...)> {
-  using args = std::tuple<Args...>;
+  using args = Tuple<Args...>;
   using ret = R;
 };
 
@@ -72,8 +73,7 @@ template <typename M> using function_args_t = typename function_info<M>::args;
 template <typename M> using function_ret_t = typename function_info<M>::ret;
 
 template <auto fn, typename Tuple> struct BindMethodImpl;
-template <auto fn, typename... Args>
-struct BindMethodImpl<fn, std::tuple<Args...>> {
+template <auto fn, typename... Args> struct BindMethodImpl<fn, Tuple<Args...>> {
   static auto f(member_obj_t<decltype(fn)> &obj, Args... args) {
     return (obj.*fn)(std::forward<decltype(args)>(args)...);
   }
@@ -95,3 +95,22 @@ template <auto Fn> struct BoundMethodCallable {
                               std::forward<decltype(args)>(args)...);
   }
 };
+
+template <typename T> struct is_pair : std::false_type {};
+template <typename T, typename U>
+struct is_pair<std::pair<T, U>> : std::true_type {};
+template <typename T> inline constexpr bool is_pair_v = is_pair<T>::value;
+
+template <typename T> struct is_tuple : std::false_type {};
+template <typename... Ts>
+struct is_tuple<std::tuple<Ts...>> : std::true_type {};
+template <typename T> inline constexpr bool is_tuple_v = is_tuple<T>::value;
+
+template <typename T, typename Seq> struct tuple_n_helper;
+template <typename T, std::size_t... Is>
+struct tuple_n_helper<T, std::index_sequence<Is...>> {
+  template <std::size_t> using wrap = T;
+  using type = std::tuple<wrap<Is>...>;
+};
+template <typename T, std::size_t N>
+using tuple_n_t = typename tuple_n_helper<T, std::make_index_sequence<N>>::type;

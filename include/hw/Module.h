@@ -32,7 +32,8 @@ public:
   SmallVec<Port, 8> ports;
 
   Module(DynObjRef, std::string name) : name(name) {}
-  Module(DynObjRef, FatObjRef<Module> other) : name(other->name) {}
+  Module(DynObjRef, FatObjRef<Module> other)
+      : name(other->name), ignore(other->ignore) {}
 };
 
 class ModuleIRef;
@@ -101,6 +102,9 @@ public:
   auto ports() {
     return Range{block().begin(), ports_end()}.as<RegisterIRef>();
   }
+  auto internal_regs() {
+    return Range{ports_end(), regs_end()}.as<RegisterIRef>();
+  }
 
   auto procs() {
     return Range{regs_end(), block().end()}
@@ -146,7 +150,7 @@ public:
   }
 
   // todo: signature caching should be more explicit
-  void rebuildSignature() {
+  void rebuildCache() {
     mod()->ports.clear();
     for (auto port : ports()) {
       mod()->ports.emplace_back(port.as<RegisterIRef>().oref(),

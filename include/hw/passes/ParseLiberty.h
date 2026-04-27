@@ -8,17 +8,13 @@
 #include "support/Lexer.h"
 #include "support/MMap.h"
 #include "support/SlabAllocator.h"
+#include "support/StringRef.h"
 #include <variant>
 
 namespace dyno {
 
 class LibertyLexer : public Lexer<false, true> {
 public:
-  // #define FOR_KEYWORDS(x) x(library) x(define)
-  // #define FUNC(x) #x,
-  //   constexpr static auto Keywords = std::to_array({FOR_KEYWORDS(FUNC)});
-  // #undef FUNC
-  // #define FUNC(x) kw_##x,
   constexpr static std::array<const char *, 0> Keywords;
 
   constexpr static auto Operators =
@@ -298,10 +294,6 @@ class LibertyToDyno {
     if (!ff.val_clocked_on)
       err();
 
-    auto clkReg = regBuild.buildRegister(1);
-    build.buildStore(clkReg, ff.val_clocked_on);
-    auto dReg = regBuild.buildRegister(1);
-
     if (ff.val_clocked_on_also)
       report_fatal_error("liberty format: clocked_on_also unsupported");
 
@@ -323,33 +315,24 @@ class LibertyToDyno {
               "liberty parse: unsupported val_clear_preset_var2");
     }
 
-    build.buildStore(dReg, val);
-
-    auto ib = regBuild.buildInstrRaw(HW_FLIP_FLOP, 4 + 3 * !!ff.val_clear +
-                                                       3 * !!ff.val_preset);
-    regBuild.setInsertPoint(ib.instr());
-    ib.other()
-        .addRef(clkReg)
-        .addRef(ConstantRef::fromBool(1))
-        .addRef(dReg)
-        .addRef(outs[0]);
+    auto ib = build.buildInstrRaw(HW_FLIP_FLOP,
+                                  4 + 2 * !!ff.val_clear + 2 * !!ff.val_preset);
+    auto qWire = ctx.getStore<Wire>().create(val.getNumBits());
+    ib.addRef(qWire)
+        .other()
+        .addRef(ff.val_clocked_on)
+        .addRef(ff.val_next_state)
+        // clk en is always 1, possible en mux fused by instcombine later
+        .addRef(ConstantRef::fromBool(1));
 
     auto addClear = [&]() {
       if (ff.val_clear) {
-        auto clrReg = regBuild.buildRegister(1);
-        build.buildStore(clrReg, ff.val_clear);
-        ib.addRef(clrReg)
-            .addRef(ConstantRef::fromBool(1))
-            .addRef(ConstantRef::fromBool(0));
+        ib.addRef(ff.val_clear).addRef(ConstantRef::fromBool(0));
       }
     };
     auto addPreset = [&]() {
       if (ff.val_preset) {
-        auto presetReg = regBuild.buildRegister(1);
-        build.buildStore(presetReg, ff.val_preset);
-        ib.addRef(presetReg)
-            .addRef(ConstantRef::fromBool(1))
-            .addRef(ConstantRef::fromBool(1));
+        ib.addRef(ff.val_preset).addRef(ConstantRef::fromBool(1));
       }
     };
 
@@ -361,6 +344,8 @@ class LibertyToDyno {
       addClear();
     }
 
+    build.buildStore(outs[0], qWire);
+
     build.popInsertPoint();
     if (outs.size() == 2) {
       build.pushInsertPoint(build.buildProcess().block().end());
@@ -369,7 +354,7 @@ class LibertyToDyno {
     }
   }
 
-  std::unordered_map<std::string_view, RegisterRef> portNameMap;
+  TwoLevelMap<SSOStringRef, RegisterRef> portNameMap;
   HWValue parseExpr(std::string_view expr, HWInstrBuilder &build) {
     auto exprParse = LibertyExprParser{build, [&](std::string_view ident) {
                                          auto it = portNameMap.find(ident);
@@ -400,7 +385,8 @@ public:
     HWInstrBuilderStack build{ctx};
 
     SmallVec<std::pair<RegisterRef, Token>, 16> funcList;
-    SmallVec<std::tuple<RegisterRef, RegisterRef, LibertyParser::Block *>, 16>
+
+    SmallVec<Tuple<RegisterRef, RegisterRef, LibertyParser::Block *>, 16>
         ffList;
 
     for (auto *object : block->blocks) {
@@ -436,7 +422,7 @@ public:
             auto reg = build.buildRegister(1);
             ctx.getCtx<HWDialectContext>().regNameInfo.addName(
                 reg, param.strLit.value);
-            portNameMap.emplace(param.strLit.value, reg);
+            portNameMap.insert(param.strLit.value, reg);
             outs.emplace_back(reg);
           }
 

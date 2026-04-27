@@ -1,9 +1,11 @@
 #pragma once
 
 #include "dyno/Obj.h"
+#include "support/DynBitSet.h"
+#include "support/SmallVec.h"
 #include <cassert>
 #include <support/Ranges.h>
-#include <vector>
+
 
 namespace dyno {
 
@@ -123,6 +125,13 @@ public:
   auto end() { return iterator{elements.end(), (uint32_t)elements.size()}; }
 };
 
-template <typename K, typename V> using ObjMapVec = ObjMap<K, std::vector<V>>;
+template <typename K, typename V> struct ObjMapVecT {
+  using type = ObjMap<K, Vec<V>>;
+};
+template <typename K> struct ObjMapVecT<K, bool> {
+  using type = ObjMap<K, DynBitSet<Vec<uint64_t>>>;
+};
+
+template <typename K, typename V> using ObjMapVec = ObjMapVecT<K, V>::type;
 
 } // namespace dyno

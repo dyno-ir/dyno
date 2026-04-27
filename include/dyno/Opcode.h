@@ -1,5 +1,5 @@
 #pragma once
-#include "dyno/IDs.h"
+#include "dyno/Interface.h"
 #include "support/Bits.h"
 #include "support/DenseMapInfo.h"
 
@@ -84,12 +84,12 @@ public:
 };
 
 template <size_t NUM_DIALECTS, typename T> class DialectOpcodeInterface {
-  Interfaces<NUM_DIALECTS, std::vector<T>> interfaces;
+  Interfaces<NUM_DIALECTS, Vec<T>> interfaces;
 
 public:
   constexpr T &operator[](DialectOpcode d) {
     auto &vec =
-        interfaces.template getVal<std::vector<T>>(d.getDialectID().num);
+        interfaces.template getVal<Vec<T>>(d.getDialectID().num);
     if (vec.size() <= d.getOpcodeID().num)
       vec.resize(d.getOpcodeID().num + 1);
     return vec[d.getOpcodeID().num];
@@ -97,7 +97,7 @@ public:
 
   constexpr void set(DialectOpcode d, const T &t) {
     auto &vec =
-        interfaces.template getVal<std::vector<T>>(d.getDialectID().num);
+        interfaces.template getVal<Vec<T>>(d.getDialectID().num);
     if (vec.size() <= d.getOpcodeID().num)
       vec.resize(d.getOpcodeID().num + 1);
     vec[d.getOpcodeID().num] = t;

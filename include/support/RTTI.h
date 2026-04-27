@@ -2,7 +2,7 @@
 
 #include <cassert>
 #include <concepts>
-#include <tuple>
+#include "support/Tuple.h"
 #include <type_traits>
 
 // empty base opt fails if the tag ends up in the hierarchy twice (every
@@ -77,13 +77,13 @@ template <typename T, typename U> bool is(const U &ref) {
 
 template <typename Derived> class ByValueRTTIUtilMixin {
 public:
-  template <typename T> auto is() const {
+  template <typename T> bool is() const {
     return ::is<T, Derived>(*static_cast<const Derived *>(this));
   }
-  template <typename T> auto as() const {
+  template <typename T> T as() const {
     return ::as<T, Derived>(*static_cast<const Derived *>(this));
   }
-  template <typename T> auto dyn_as() const {
+  template <typename T> T dyn_as() const {
     return ::dyn_as<T, Derived>(*static_cast<const Derived *>(this));
   }
 };

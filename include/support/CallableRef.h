@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cassert>
+#include <type_traits>
 #include <utility>
 
 template <typename Fn> class CallableRef;
@@ -15,6 +17,10 @@ template <typename Ret, typename... Params> class CallableRef<Ret(Params...)> {
 
 public:
   CallableRef() = default;
+  CallableRef(const CallableRef &) = default;
+  CallableRef(CallableRef &&) = default;
+  CallableRef &operator=(const CallableRef &) = default;
+  CallableRef &operator=(CallableRef &&) = default;
 
   Ret operator()(Params... params) const {
     assert(*this && "called uninitialized CallableRef");
@@ -22,40 +28,49 @@ public:
   }
 
   template <typename Callable>
+    requires(!std::is_same_v<std::remove_cvref_t<Callable>, CallableRef>)
   CallableRef(Callable &&callable)
       : callback(callOnObject<std::remove_reference_t<Callable>>),
         callable(reinterpret_cast<void *>(&callable)) {}
 
+  // for use with BindMethod<>
+  template <typename Obj>
+  CallableRef(Obj *callable, Ret (*callback)(void *, Params...))
+      : callback(callback), callable(reinterpret_cast<void *>(callable)) {}
+
   explicit operator bool() const { return callback; }
-  bool operator==(const CallableRef<Ret(Params...)> &Other) const {
-    return callable == Other.callable;
+  bool operator==(const CallableRef<Ret(Params...)> &other) const {
+    return callable == other.callable && callback == other.callback;
   }
 };
 
-// directly refer to a member method bound with BindMethod<Obj::Member>.
-// The difference from CallableRef is essentially that the this-pointer
-// is part of (First, Params...) here while it is not for CallableRef.
-template <typename Fn> class MemberRef;
-template <typename Ret, typename First, typename... Params>
-class MemberRef<Ret(First, Params...)> {
-  Ret (*callback)(First, Params... params) = nullptr;
-  void *callable;
+template <typename Obj, typename R, typename... Args>
+CallableRef(Obj *obj, R (*fn)(void *, Args...)) -> CallableRef<R(Args...)>;
+
+// For referencing methods when object is known/stored elsewhere.
+// Single function pointer.
+template <typename Fn> class MethodRef;
+template <typename Ret, typename... Params> class MethodRef<Ret(Params...)> {
+  Ret (*callback)(void *callable, Params... params) = nullptr;
 
 public:
-  MemberRef() = default;
-  MemberRef(void *callable, Ret (*callback)(First, Params...))
-      : callback(callback), callable(callable) {}
+  MethodRef() = default;
+  MethodRef(const MethodRef &) = default;
+  MethodRef(MethodRef &&) = default;
+  MethodRef &operator=(const MethodRef &) = default;
+  MethodRef &operator=(MethodRef &&) = default;
 
-  Ret operator()(Params... params) const {
-    assert(*this && "called uninitialized MemberRef");
-    return callback(callable, std::forward<decltype(params)>(params)...);
-  }
+  // for use with BindMethod<>
+  template <typename Obj>
+  MethodRef(Ret (*callback)(void *, Params...)) : callback(callback) {}
 
   explicit operator bool() const { return callback; }
-  bool operator==(const MemberRef<Ret(First, Params...)> &Other) const {
-    return callable == Other.callable;
+  bool operator==(const MethodRef<Ret(Params...)> &other) const {
+    return callback == other.callback;
   }
+
+  CallableRef<Ret(Params...)> bind(void *self) { return {self, callback}; }
 };
 
-template <typename Obj, typename Fn>
-MemberRef(Obj *obj, Fn *fn) -> MemberRef<Fn>;
+template <typename R, typename... Args>
+MethodRef(R (*fn)(void *, Args...)) -> MethodRef<R(Args...)>;

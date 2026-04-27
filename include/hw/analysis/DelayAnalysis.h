@@ -56,6 +56,11 @@ class DelayAnalysis {
     return reductionDelay + carryDelay;
   }
 
+  uint32_t getMulDelay(uint32_t bits, uint32_t operands) {
+    // todo
+    return getAddDelay(bits, operands) * 5;
+  }
+
   uint32_t getFanoutDelay(uint32_t fanout) {
     if (fanout <= 4)
       return 0;
@@ -76,6 +81,10 @@ public:
     case *OP_SUB:
     case *OP_ADD: {
       return getAddDelay(bits, instr.getNumOthers());
+    }
+
+    case *OP_MUL: {
+      return getMulDelay(bits, instr.getNumOthers());
     }
 
     case *OP_ICMP_EQ:

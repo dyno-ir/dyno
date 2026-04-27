@@ -2,7 +2,6 @@
 
 #include "support/Optional.h"
 #include <cassert>
-#include <vector>
 
 template <typename T> class VectorLUT {
 public:
@@ -11,7 +10,7 @@ public:
   using pointer = T *;
   using const_reference = const T &;
   using const_pointer = const T *;
-  using Container = std::vector<dyno::Optional<T>>;
+  using Container = Vec<dyno::Optional<T>>;
 
 private:
   size_t base = 0;
@@ -24,14 +23,13 @@ public:
     }
     if (idx < base) {
       Container newVec;
-      newVec.reserve(data.size() + (base - idx));
-      newVec.resize(data.size() + base - idx);
+      newVec.resize_safe(data.size() + base - idx);
       std::move(data.begin(), data.end(), newVec.begin() + base - idx);
 
       data = std::move(newVec);
       base = idx;
     } else if (idx - base >= data.size()) {
-      data.resize(idx - base + 1);
+      data.resize_safe(idx - base + 1);
     }
   }
 
@@ -50,5 +48,9 @@ public:
   dyno::Optional<T> &find(size_t k) {
     ensure(k);
     return data[k - base];
+  }
+  void clear() {
+    base = 0;
+    data.clear();
   }
 };

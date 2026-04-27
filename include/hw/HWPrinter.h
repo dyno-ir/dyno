@@ -27,21 +27,49 @@ namespace dyno {
 void dumpCtx(Context &ctx);
 void dumpInstr(InstrRef instr);
 void dumpInstr(InstrRef instr, Context &ctx);
+void dumpInstr(InstrRef instr, Context &ctx, bool trailingNewline);
+void dumpInstr(InstrRef instr, Context &ctx, bool trailingNewline,
+               bool expandBlocks);
 void dumpDeps(InstrRef instr);
 void dumpDeps(InstrRef instr, Context &ctx);
 void dumpDeps(InstrRef instr, Context &ctx, unsigned depth);
 void dumpObj(FatDynObjRef<> obj);
 
-class HWPrinter : public PrinterWrapper<CoreDialectPrinter, MetaDialectPrinter,
+template <typename Derived> class HWPrinterImpl {
+  auto &self() { return *reinterpret_cast<Derived *>(this); }
+
+public:
+  auto &regNames() {
+    return self().printers.template get<HWDialectPrinter>().regNames;
+  }
+
+  void printDeps(InstrRef instr, unsigned maxDepth = -1) {
+    if (maxDepth)
+      for (auto use : instr.others()) {
+        if (!Operand::isDefUseOperand(*use))
+          continue;
+        printDeps(use->as<FatDynObjRef<InstrDefUse>>()->getSingleDef()->instr(),
+                  maxDepth - 1);
+      }
+    self().printInstr(instr);
+  }
+};
+
+class HWPrinter : public HWPrinterImpl<HWPrinter>,
+                  public PrinterWrapper<CoreDialectPrinter, MetaDialectPrinter,
                                         OpDialectPrinter, HWDialectPrinter,
                                         AIGDialectPrinter> {
+  friend class HWPrinterImpl<HWPrinter>;
+
 public:
   HWPrinter(std::ostream &str) : PrinterWrapper(str) {
     setDefaultDialects({DialectID{DIALECT_CORE}, DialectID{DIALECT_OP},
                         DialectID{DIALECT_HW}});
   }
-
-  auto &regNames() { return std::get<HWDialectPrinter>(printers).regNames; }
+  HWPrinter() : PrinterWrapper(OStreamWrapper{}) {
+    setDefaultDialects({DialectID{DIALECT_CORE}, DialectID{DIALECT_OP},
+                        DialectID{DIALECT_HW}});
+  }
 
   [[nodiscard]] auto bindCtx(Context &ctx) {
     return std::pair(
@@ -55,26 +83,16 @@ public:
     for (auto mod : ctx.getStore<Module>()) {
       if (mod.iref().isOpc(HW_STDCELL_DEF) && !printStdCells)
         continue;
-      printInstr(mod.iref());
+      PrinterBase::printInstr(mod.iref());
     }
   }
-
   using PrinterWrapper::printInstr;
-  void printInstr(InstrRef instr, Context &ctx) {
+  void printInstr(InstrRef instr, Context &ctx, bool trailingNewline = true,
+                  bool expandBlocks = true) {
     auto tok = bindCtx(ctx);
-    printInstr(instr);
+    PrinterBase::printInstr(instr, trailingNewline, expandBlocks);
   }
-
-  void printDeps(InstrRef instr, unsigned maxDepth = -1) {
-    if (maxDepth)
-      for (auto use : instr.others()) {
-        if (!Operand::isDefUseOperand(*use))
-          continue;
-        printDeps(use->as<FatDynObjRef<InstrDefUse>>()->getSingleDef()->instr(),
-                  maxDepth - 1);
-      }
-    printInstr(instr);
-  }
+  using HWPrinterImpl::printDeps;
   void printDeps(InstrRef instr, Context &ctx, unsigned maxDepth = -1) {
     if (maxDepth)
       for (auto use : instr.others()) {
@@ -87,4 +105,22 @@ public:
   }
 };
 
+// Smaller/preferred version of HWPrinter when context is known and always the
+// same. Uses context's dialect infos.
+class HWCtxPrinter
+    : public HWPrinterImpl<HWCtxPrinter>,
+      public ContextPrinterWrapper<CoreDialectPrinter, MetaDialectPrinter,
+                                   OpDialectPrinter, HWDialectPrinter,
+                                   AIGDialectPrinter> {
+  friend class HWPrinterImpl<HWCtxPrinter>;
+
+public:
+  HWCtxPrinter(Context &ctx, std::ostream &str)
+      : ContextPrinterWrapper(ctx, str) {
+    setDefaultDialects({DIALECT_CORE, DIALECT_OP, DIALECT_HW});
+  }
+  HWCtxPrinter(Context &ctx) : ContextPrinterWrapper(ctx, OStreamWrapper{}) {
+    setDefaultDialects({DIALECT_CORE, DIALECT_OP, DIALECT_HW});
+  }
+};
 }; // namespace dyno

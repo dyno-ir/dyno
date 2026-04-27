@@ -365,7 +365,7 @@ public:
   void runBlock(BlockRef block) { runOnBlock(block); }
 
   static constexpr auto runFuncs =
-      std::make_tuple(&EarlySharePass::runModule, &EarlySharePass::runProcess,
+      mk_tuple(&EarlySharePass::runModule, &EarlySharePass::runProcess,
                       &EarlySharePass::runBlock, &EarlySharePass::run);
 
   auto make(Context &ctx) { return EarlySharePass(ctx); }

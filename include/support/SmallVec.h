@@ -10,9 +10,13 @@
 #include <support/Bits.h>
 #include <support/InlineStorage.h>
 #include <utility>
+#include <array>
 
 template <typename T, unsigned N> class SmallVec;
 template <typename T> class SmallVecImpl;
+
+struct reserve_tag_t {};
+constexpr reserve_tag_t reserve_tag;
 
 template <typename T, unsigned N> class SmallVec : public SmallVecImpl<T> {
   friend class SmallVecImpl<T>;
@@ -72,6 +76,12 @@ public:
     this->resize(size);
   }
 
+  SmallVec(reserve_tag_t, size_t size)
+      : SmallVecImpl<T>(std::launder(reinterpret_cast<T *>(storage.storage)),
+                        N) {
+    this->reserve(size);
+  }
+
   SmallVec(size_t size, const T &templ)
       : SmallVecImpl<T>(std::launder(reinterpret_cast<T *>(storage.storage)),
                         N) {
@@ -84,13 +94,77 @@ public:
   }
 };
 
+// SmallVec<T, 0> is a vector with 0 expected elements - no initial alloc is
+// made.
+// Vec<T> is a large vector with many expected elements and large initial
+// alloc.
+template <typename T, uint32_t InitialAlloc = (4096 / sizeof(T))>
+class Vec : public SmallVecImpl<T> {
+public:
+  Vec()
+      : SmallVecImpl<T>(
+            reinterpret_cast<T *>(::operator new[](InitialAlloc * sizeof(T))),
+            InitialAlloc) {}
+  Vec(size_t size)
+      : SmallVecImpl<T>(
+            reinterpret_cast<T *>(::operator new[](size * sizeof(T))), size) {
+    this->resize(size);
+  }
+  Vec(reserve_tag_t, size_t size)
+      : SmallVecImpl<T>(
+            reinterpret_cast<T *>(::operator new[](size * sizeof(T))), size) {}
+  Vec(size_t size, const T &templ)
+      : SmallVecImpl<T>(
+            reinterpret_cast<T *>(::operator new[](size * sizeof(T))), size) {
+    this->resize(size, templ);
+  }
+
+  Vec(Vec &&o) : SmallVecImpl<T>(nullptr, 0, std::move(o)) {}
+  Vec(SmallVecImpl<T> &&o) : SmallVecImpl<T>(nullptr, 0, std::move(o)) {}
+
+  template <typename It> Vec(Range<It> range);
+  Vec(std::initializer_list<T> list);
+
+  Vec &operator=(Vec &&o) {
+    // recover from moved-from state.
+    if (this->arr == nullptr) [[unlikely]] {
+      this->cap = 0;
+      this->sz = 0;
+    }
+    this->SmallVecImpl<T>::operator=(std::move(o));
+    return *this;
+  }
+
+  Vec(const SmallVecImpl<T> &o)
+      : SmallVecImpl<T>(reinterpret_cast<T *>(::operator new[](
+                            (o.size() ?: InitialAlloc) * sizeof(T))),
+                        o.size() ?: InitialAlloc, o) {}
+  Vec(const Vec<T> &o)
+      : SmallVecImpl<T>(reinterpret_cast<T *>(::operator new[](
+                            (o.size() ?: InitialAlloc) * sizeof(T))),
+                        o.size() ?: InitialAlloc, o) {}
+
+  Vec &operator=(const Vec &o) {
+    // recover from moved-from state.
+    if (this->arr == nullptr) [[unlikely]] {
+      this->cap = 0;
+      this->sz = 0;
+    }
+    this->SmallVecImpl<T>::operator=(o);
+    return *this;
+  }
+};
+
 template <typename T> class SmallVecImpl {
 public:
   using value_type = T;
   using size_type = unsigned;
   using iterator = T *;
+  using pointer = T *;
   using const_iterator = const T *;
   using param_type = T &;
+  using reference = T &;
+  using const_reference = const T &;
 
 protected:
   size_type sz;
@@ -104,7 +178,7 @@ private:
     assert(cap > 0);
     assert(minSz <= cap * 2);
 
-    size_type newCap = 2 * cap;
+    size_type newCap = std::max(1u, 2 * cap);
     T *newArr = reinterpret_cast<T *>(::operator new[](newCap * sizeof(T)));
     std::uninitialized_move(begin(), end(), newArr);
     destroy();
@@ -252,6 +326,11 @@ public:
     }
   }
 
+  void resize_safe(size_type n) {
+    reserve_safe(n);
+    resize(n);
+  }
+
   void downsize(size_type n) {
     assert(n <= sz);
     if (n < sz)
@@ -262,7 +341,6 @@ public:
   void reserve(size_type n) {
     if (n <= cap)
       return;
-    assert(cap > 0);
 
     T *newArr = reinterpret_cast<T *>(::operator new[](n * sizeof(T)));
     std::uninitialized_move(begin(), end(), newArr);
@@ -321,8 +399,10 @@ public:
     }
     size_t pos = it - begin();
     grow(sz + 1);
-    std::construct_at(begin() + sz);
-    std::move_backward(begin() + pos, end(), begin() + sz + 1);
+
+    std::construct_at(end(), *(end() - 1));
+    std::move_backward(begin() + pos, end() - 1, end());
+
     arr[pos] = std::move(val);
     ++sz;
     return begin() + pos;
@@ -336,7 +416,9 @@ public:
   }
 
   template <typename It> void push_back_range(Range<It> range) {
-    for (auto item : range) {
+    if constexpr (requires { range.size(); })
+      reserve(size() + range.size());
+    for (auto &&item : range) {
       emplace_back(item);
     }
   }
@@ -366,6 +448,7 @@ public:
   }
 
   T *data() { return begin(); }
+  const T *data() const { return begin(); }
 
   iterator begin() { return arr; }
   iterator end() { return arr + sz; }
@@ -384,6 +467,19 @@ inline SmallVec<T, N>::SmallVec(std::initializer_list<T> list) : SmallVec() {
 template <typename T, unsigned N>
 template <typename It>
 inline SmallVec<T, N>::SmallVec(Range<It> range) : SmallVec() {
+  this->template push_back_range<It>(range);
+}
+
+template <typename T, unsigned N>
+inline Vec<T, N>::Vec(std::initializer_list<T> list) : Vec() {
+  this->reserve(list.size());
+  for (auto &elem : list)
+    this->emplace_back(elem);
+}
+
+template <typename T, unsigned N>
+template <typename It>
+inline Vec<T, N>::Vec(Range<It> range) : Vec() {
   this->template push_back_range<It>(range);
 }
 
@@ -496,6 +592,31 @@ public:
     assert(sz < NumInline);
     arr[sz] = val;
     ++sz;
+  }
+
+  constexpr iterator insert(iterator it, const T &val) {
+    return insert(it, T{val});
+  }
+  constexpr iterator insert(iterator it, T &&val) {
+    assert(it <= end());
+    if (it == end()) {
+      push_back(std::move(val));
+      return end() - 1;
+    }
+    size_t pos = it - begin();
+    assert(sz + 1 <= NumInline);
+
+    std::construct_at(end(), *(end() - 1));
+    std::move_backward(begin() + pos, end() - 1, end());
+
+    arr[pos] = std::move(val);
+    ++sz;
+    return begin() + pos;
+  }
+
+  template <typename U> constexpr void push_back_range(Range<U> range) {
+    for (auto &&elem : range)
+      push_back(elem);
   }
 
   bool erase_unordered(iterator it) {

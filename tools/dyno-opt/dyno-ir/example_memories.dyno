@@ -1,0 +1,311 @@
+STDCELL_DEF :module("FakeRAM_288_syncread"), :block {
+  INPUT_REGISTER_DEF %clk:register(1)
+  INPUT_REGISTER_DEF %IN_waddr:register(4)
+  INPUT_REGISTER_DEF %IN_wdata:register(18)
+  INPUT_REGISTER_DEF %IN_wmask:register(2)
+  INPUT_REGISTER_DEF %IN_wen:register(1)
+  INPUT_REGISTER_DEF %IN_raddr:register(4)
+  INPUT_REGISTER_DEF %IN_re:register(1)
+  OUTPUT_REGISTER_DEF %OUT_rdata:register(18)
+  REGISTER_DEF %r12:register(288)
+  TRIGGER_DEF %0:trigger(pos), %clk
+  COMB_PROCESS_DEF :process, :block {
+    LOAD %w23:wire(4), %IN_waddr
+    ZEXT %w10:wire(32), %w23
+    LOAD %w21:wire(1), %IN_wen
+    LOAD %w20:wire(18), %IN_wdata
+    LOAD %w19:wire(2), %IN_wmask
+    TRUNC %w5:wire(1), %w19
+    AND %w14:wire(1), %w5, %w21
+    TRUNC %w35:wire(9), %w20
+    GEP %1:ptr, #32'd0, %w10, #32'd18, #32'd16
+    MEM_STORE :mem_port(1), %w35, %r12, %w14, %1, %0
+    SPLICE %w0:wire(1), %w19, #32'd1
+    AND %w1:wire(1), %w0, %w21
+    SPLICE %w4:wire(9), %w20, #32'd9
+    GEP %2:ptr, #32'd9, %w10, #32'd18, #32'd16
+    MEM_STORE :mem_port(1), %w4, %r12, %w1, %2, %0
+    LOAD %w2:wire(1), %IN_re
+    LOAD %w18:wire(4), %IN_raddr
+    ZEXT %w25:wire(32), %w18
+    GEP %3:ptr, #32'd0, %w25, #32'd18, #32'd16
+    MEM_LOAD %w29:wire(18), :mem_port(0), %r12, %3
+    ASSUME %w30:wire(18), %w29, %w2
+    LOAD %w31:wire(1), %clk
+    FLIP_FLOP %w8:wire(18), %w31, %w30, %w2
+    STORE %w8, %OUT_rdata
+  }
+}
+
+
+STDCELL_DEF %Test:module("fakemem_16x2_3r1w_async_read"), %0:block {
+  INPUT_REGISTER_DEF %clk:register(1)
+  INPUT_REGISTER_DEF %IN_waddr:register(4)
+  INPUT_REGISTER_DEF %IN_wdata:register(2)
+  INPUT_REGISTER_DEF %IN_wmask:register(1)
+  INPUT_REGISTER_DEF %IN_raddr:register(4)
+  OUTPUT_REGISTER_DEF %OUT_rdata:register(2)
+  INPUT_REGISTER_DEF %IN_raddr2:register(4)
+  OUTPUT_REGISTER_DEF %OUT_rdata2:register(2)
+  INPUT_REGISTER_DEF %IN_raddr3:register(4)
+  OUTPUT_REGISTER_DEF %OUT_rdata3:register(2)
+  REGISTER_DEF %r11:register(32)
+  TRIGGER_DEF %1:trigger(pos), %clk
+  COMB_PROCESS_DEF %2:process, %3:block {
+    LOAD %w15:wire(4), %IN_raddr
+    ZEXT %w12:wire(32), %w15
+    GEP %4:ptr, #32'd0, %w12, #32'd2, #32'd16
+    MEM_LOAD %w21:wire(2), %5:mem_port(0), %r11, %4
+    LOAD %w11:wire(4), %IN_raddr2
+    ZEXT %w5:wire(32), %w11
+    GEP %6:ptr, #32'd0, %w5, #32'd2, #32'd16
+    MEM_LOAD %w2:wire(2), %7:mem_port(0), %r11, %6
+    LOAD %w9:wire(4), %IN_raddr3
+    ZEXT %w8:wire(32), %w9
+    GEP %8:ptr, #32'd0, %w8, #32'd2, #32'd16
+    MEM_LOAD %w22:wire(2), %9:mem_port(0), %r11, %8
+    LOAD %w6:wire(1), %IN_wmask
+    LOAD %w1:wire(4), %IN_waddr
+    ZEXT %w13:wire(32), %w1
+    LOAD %w4:wire(2), %IN_wdata
+    GEP %10:ptr, #32'd0, %w13, #32'd2, #32'd16
+    MEM_STORE %11:mem_port(1), %w4, %r11, %w6, %10, %1
+    STORE %w21, %OUT_rdata
+    STORE %w2, %OUT_rdata2
+    STORE %w22, %OUT_rdata3
+  }
+}
+
+// STDCELL_DEF %FakeRAM:module("FakeRAM_18k"), %0:block {
+//   INPUT_REGISTER_DEF %clk:register(1)
+//   INPUT_REGISTER_DEF %IN_waddr:register(10)
+//   INPUT_REGISTER_DEF %IN_wdata:register(18)
+//   INPUT_REGISTER_DEF %IN_wmask0:register(1)
+//   INPUT_REGISTER_DEF %IN_wmask1:register(1)
+//   INPUT_REGISTER_DEF %IN_raddr:register(10)
+//   OUTPUT_REGISTER_DEF %OUT_rdata:register(18)
+//   REGISTER_DEF %r12:register(18432)
+//   TRIGGER_DEF %1:trigger(pos), %clk
+//   COMB_PROCESS_DEF %2:process, %3:block {
+//     LOAD %w31:wire(10), %IN_raddr
+//     ZEXT %w1:wire(32), %w31
+//     GEP %4:ptr, #32'd0, %w1, #32'd18, #32'h00000400
+//     MEM_LOAD %w17:wire(18), %5:mem_port(0), %r12, %4
+//     LOAD %w25:wire(10), %IN_waddr
+//     ZEXT %w26:wire(32), %w25
+//     LOAD %w22:wire(18), %IN_wdata
+//     LOAD %w14:wire(1), %IN_wmask1
+//     LOAD %w13:wire(1), %IN_wmask0
+//     TRUNC %w15:wire(9), %w22
+//     GEP %6:ptr, #32'd0, %w26, #32'd18, #32'h00000400
+//     MEM_STORE %7:mem_port(1), %w15, %r12, %w13, %6, %1
+//     SPLICE %w35:wire(9), %w22, #32'd9
+//     GEP %8:ptr, #32'd9, %w26, #32'd18, #32'h00000400
+//     MEM_STORE %9:mem_port(1), %w35, %r12, %w14, %8, %1
+//     STORE %w17, %OUT_rdata
+//   }
+// }
+
+// STDCELL_DEF %FakeRAM:module("FakeRAM_288"), %0:block {
+//   INPUT_REGISTER_DEF %clk:register(1)
+//   INPUT_REGISTER_DEF %IN_waddr:register(4)
+//   INPUT_REGISTER_DEF %IN_wdata:register(18)
+//   INPUT_REGISTER_DEF %IN_wmask0:register(1)
+//   INPUT_REGISTER_DEF %IN_wmask1:register(1)
+//   INPUT_REGISTER_DEF %IN_raddr:register(4)
+//   OUTPUT_REGISTER_DEF %OUT_rdata:register(18)
+//   REGISTER_DEF %r12:register(288)
+//   TRIGGER_DEF %1:trigger(pos), %clk
+//   COMB_PROCESS_DEF %2:process, %3:block {
+//     LOAD %w31:wire(4), %IN_raddr
+//     ZEXT %w1:wire(32), %w31
+//     GEP %4:ptr, #32'd0, %w1, #32'd18, #32'd16
+//     MEM_LOAD %w17:wire(18), %5:mem_port(0), %r12, %4
+//     LOAD %w25:wire(4), %IN_waddr
+//     ZEXT %w26:wire(32), %w25
+//     LOAD %w22:wire(18), %IN_wdata
+//     LOAD %w14:wire(1), %IN_wmask1
+//     LOAD %w13:wire(1), %IN_wmask0
+//     TRUNC %w15:wire(9), %w22
+//     GEP %6:ptr, #32'd0, %w26, #32'd18, #32'd16
+//     MEM_STORE %7:mem_port(1), %w15, %r12, %w13, %6, %1
+//     SPLICE %w35:wire(9), %w22, #32'd9
+//     GEP %8:ptr, #32'd9, %w26, #32'd18, #32'd16
+//     MEM_STORE %9:mem_port(1), %w35, %r12, %w14, %8, %1
+//     STORE %w17, %OUT_rdata
+//   }
+// }
+
+STDCELL_DEF :module("FakeRAM_288"), :block {
+  INPUT_REGISTER_DEF %clk:register(1)
+  INPUT_REGISTER_DEF %IN_waddr:register(4)
+  INPUT_REGISTER_DEF %IN_wdata:register(18)
+  INPUT_REGISTER_DEF %IN_wmask:register(2)
+  INPUT_REGISTER_DEF %IN_wen:register(1)
+  INPUT_REGISTER_DEF %IN_raddr:register(4)
+  OUTPUT_REGISTER_DEF %OUT_rdata:register(18)
+  REGISTER_DEF %r11:register(288)
+  TRIGGER_DEF %0:trigger(pos), %clk
+  COMB_PROCESS_DEF :process, :block {
+    LOAD %w34:wire(4), %IN_raddr
+    ZEXT %w17:wire(32), %w34
+    GEP %1:ptr, #32'd0, %w17, #32'd18, #32'd16
+    MEM_LOAD %w31:wire(18), :mem_port(0), %r11, %1
+    LOAD %w33:wire(4), %IN_waddr
+    ZEXT %w14:wire(32), %w33
+    LOAD %w28:wire(1), %IN_wen
+    LOAD %w22:wire(18), %IN_wdata
+    LOAD %w11:wire(2), %IN_wmask
+    TRUNC %w5:wire(1), %w11
+    AND %w18:wire(1), %w5, %w28
+    TRUNC %w32:wire(9), %w22
+    GEP %2:ptr, #32'd0, %w14, #32'd18, #32'd16
+    MEM_STORE :mem_port(1), %w32, %r11, %w18, %2, %0
+    SPLICE %w4:wire(1), %w11, #32'd1
+    AND %w1:wire(1), %w4, %w28
+    SPLICE %w19:wire(9), %w22, #32'd9
+    GEP %3:ptr, #32'd9, %w14, #32'd18, #32'd16
+    MEM_STORE :mem_port(1), %w19, %r11, %w1, %3, %0
+    STORE %w31, %OUT_rdata
+  }
+}
+
+STDCELL_DEF %FakeMem_3r1w_1x16:module("FakeMem_3r1w_1x16"), %0:block {
+  INPUT_REGISTER_DEF %clk:register(1)
+  INPUT_REGISTER_DEF %IN_waddr:register(4)
+  INPUT_REGISTER_DEF %IN_wdata:register(1)
+  INPUT_REGISTER_DEF %IN_wmask:register(1)
+  INPUT_REGISTER_DEF %IN_raddr:register(4)
+  OUTPUT_REGISTER_DEF %OUT_rdata:register(1)
+  INPUT_REGISTER_DEF %IN_raddr2:register(4)
+  OUTPUT_REGISTER_DEF %OUT_rdata2:register(1)
+  INPUT_REGISTER_DEF %IN_raddr3:register(4)
+  OUTPUT_REGISTER_DEF %OUT_rdata3:register(1)
+  REGISTER_DEF %r11:register(16)
+  TRIGGER_DEF %1:trigger(pos), %clk
+  COMB_PROCESS_DEF %2:process, %3:block {
+    LOAD %w20:wire(4), %IN_raddr
+    ZEXT %w12:wire(32), %w20
+    GEP %4:ptr, #32'd0, %w12, #32'd1, #32'd16
+    MEM_LOAD %w21:wire(1), %5:mem_port(0), %r11, %4
+    LOAD %w19:wire(4), %IN_raddr2
+    ZEXT %w5:wire(32), %w19
+    GEP %6:ptr, #32'd0, %w5, #32'd1, #32'd16
+    MEM_LOAD %w2:wire(1), %7:mem_port(0), %r11, %6
+    LOAD %w18:wire(4), %IN_raddr3
+    ZEXT %w8:wire(32), %w18
+    GEP %8:ptr, #32'd0, %w8, #32'd1, #32'd16
+    MEM_LOAD %w22:wire(1), %9:mem_port(0), %r11, %8
+    LOAD %w16:wire(1), %IN_wmask
+    LOAD %w3:wire(4), %IN_waddr
+    ZEXT %w13:wire(32), %w3
+    LOAD %w0:wire(1), %IN_wdata
+    GEP %10:ptr, #32'd0, %w13, #32'd1, #32'd16
+    MEM_STORE %11:mem_port(1), %w0, %r11, %w16, %10, %1
+    STORE %w21, %OUT_rdata
+    STORE %w2, %OUT_rdata2
+    STORE %w22, %OUT_rdata3
+  }
+}
+
+
+/*
+STDCELL_DEF %Test:module("fakemem_16x2_1r1w_sync_read"), %0:block {
+  INPUT_REGISTER_DEF %clk:register(1)
+  INPUT_REGISTER_DEF %IN_waddr:register(4)
+  INPUT_REGISTER_DEF %IN_wdata:register(2)
+  INPUT_REGISTER_DEF %IN_wmask:register(1)
+  INPUT_REGISTER_DEF %IN_raddr:register(4)
+  OUTPUT_REGISTER_DEF %OUT_rdata:register(2)
+  REGISTER_DEF %r11:register(32)
+  TRIGGER_DEF %1:trigger(pos), %clk
+  COMB_PROCESS_DEF %2:process, %3:block {
+    LOAD %w15:wire(4), %IN_raddr
+    ZEXT %w12:wire(32), %w15
+    GEP %4:ptr, #32'd0, %w12, #32'd2, #32'd16
+    MEM_LOAD %w21:wire(2), %5:mem_port(1), %r11, %1, %4
+    LOAD %w6:wire(1), %IN_wmask
+    LOAD %w1:wire(4), %IN_waddr
+    ZEXT %w13:wire(32), %w1
+    LOAD %w4:wire(2), %IN_wdata
+    GEP %10:ptr, #32'd0, %w13, #32'd2, #32'd16
+    MEM_STORE %11:mem_port(1), %w4, %r11, %w6, %1, %10
+    STORE %w21, %OUT_rdata
+  }
+}
+*/
+/*
+STDCELL_DEF %Test:module("fakemem_16x32_1r1w_async_read"), %0:block {
+  INPUT_REGISTER_DEF %clk:register(1)
+  INPUT_REGISTER_DEF %IN_waddr:register(4)
+  INPUT_REGISTER_DEF %IN_wdata:register(32)
+  INPUT_REGISTER_DEF %IN_wmask:register(1)
+  INPUT_REGISTER_DEF %IN_raddr:register(4)
+  OUTPUT_REGISTER_DEF %OUT_rdata:register(32)
+  REGISTER_DEF %r11:register(512)
+  TRIGGER_DEF %1:trigger(pos), %clk
+  COMB_PROCESS_DEF %2:process, %3:block {
+    LOAD %w15:wire(4), %IN_raddr
+    ZEXT %w12:wire(32), %w15
+    GEP %4:ptr, #32'd0, %w12, #32'd32, #32'd16
+    MEM_LOAD %w21:wire(32), %5:mem_port(0), %r11, %4
+    LOAD %w6:wire(1), %IN_wmask
+    LOAD %w1:wire(4), %IN_waddr
+    ZEXT %w13:wire(32), %w1
+    LOAD %w4:wire(32), %IN_wdata
+    GEP %10:ptr, #32'd0, %w13, #32'd32, #32'd16
+    MEM_STORE %11:mem_port(1), %w4, %r11, %w6, %1, %10
+    STORE %w21, %OUT_rdata
+  }
+}*/
+
+/*
+STDCELL_DEF %Test:module("fakemem_16x16_1r1w_async_read"), %0:block {
+  INPUT_REGISTER_DEF %clk:register(1)
+  INPUT_REGISTER_DEF %IN_waddr:register(4)
+  INPUT_REGISTER_DEF %IN_wdata:register(16)
+  INPUT_REGISTER_DEF %IN_wmask:register(1)
+  INPUT_REGISTER_DEF %IN_raddr:register(4)
+  OUTPUT_REGISTER_DEF %OUT_rdata:register(16)
+  REGISTER_DEF %r11:register(256)
+  TRIGGER_DEF %1:trigger(pos), %clk
+  COMB_PROCESS_DEF %2:process, %3:block {
+    LOAD %w15:wire(4), %IN_raddr
+    ZEXT %w12:wire(32), %w15
+    GEP %4:ptr, #32'd0, %w12, #32'd16, #32'd16
+    MEM_LOAD %w21:wire(16), %5:mem_port(0), %r11, %4
+    LOAD %w6:wire(1), %IN_wmask
+    LOAD %w1:wire(4), %IN_waddr
+    ZEXT %w13:wire(32), %w1
+    LOAD %w4:wire(16), %IN_wdata
+    GEP %10:ptr, #32'd0, %w13, #32'd16, #32'd16
+    MEM_STORE %11:mem_port(1), %w4, %r11, %w6, %1, %10
+    STORE %w21, %OUT_rdata
+  }
+}
+*/
+/*
+STDCELL_DEF %Test:module("fakemem_16x18_1r1w_async_read"), %0:block {
+  INPUT_REGISTER_DEF %clk:register(1)
+  INPUT_REGISTER_DEF %IN_waddr:register(4)
+  INPUT_REGISTER_DEF %IN_wdata:register(18)
+  INPUT_REGISTER_DEF %IN_wmask:register(1)
+  INPUT_REGISTER_DEF %IN_raddr:register(4)
+  OUTPUT_REGISTER_DEF %OUT_rdata:register(18)
+  REGISTER_DEF %r11:register(288)
+  TRIGGER_DEF %1:trigger(pos), %clk
+  COMB_PROCESS_DEF %2:process, %3:block {
+    LOAD %w15:wire(4), %IN_raddr
+    ZEXT %w12:wire(32), %w15
+    GEP %4:ptr, #32'd0, %w12, #32'd18, #32'd16
+    MEM_LOAD %w21:wire(18), %5:mem_port(0), %r11, %4
+    LOAD %w6:wire(1), %IN_wmask
+    LOAD %w1:wire(4), %IN_waddr
+    ZEXT %w13:wire(32), %w1
+    LOAD %w4:wire(18), %IN_wdata
+    GEP %10:ptr, #32'd0, %w13, #32'd18, #32'd16
+    MEM_STORE %11:mem_port(1), %w4, %r11, %w6, %1, %10
+    STORE %w21, %OUT_rdata
+  }
+}
+*/

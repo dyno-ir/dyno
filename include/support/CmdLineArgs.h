@@ -1,19 +1,22 @@
 #pragma once
 #include "support/ArrayRef.h"
 #include "support/Bits.h"
+#include "support/DenseMapInfo.h"
 #include "support/ErrorRecovery.h"
 #include "support/SmallVec.h"
+#include "support/StringRef.h"
+#include "support/TwoLevelSet.h"
 #include <array>
 #include <cctype>
 #include <charconv>
 #include <cstdint>
 #include <cstring>
 #include <iostream>
+#include <print>
 #include <sstream>
 #include <string>
 #include <string_view>
 #include <system_error>
-#include <unordered_map>
 
 // todo:
 // - multiple arguments for regular options like -a=1,2,3
@@ -38,8 +41,8 @@ class CmdLineArgBase {
   friend class CmdLineArgHandler;
 
   std::optional<char> shortName;
-  ArrayRef<char> longName;
-  ArrayRef<char> description;
+  StringRef longName;
+  StringRef description;
   uint32_t flags;
   uint32_t parseCount = 0;
   auto mandatory() { return BitField<uint32_t, 1, 0>{flags}; }
@@ -54,8 +57,8 @@ class CmdLineArgBase {
   ParseFunc *parse;
 
 public:
-  CmdLineArgBase(std::optional<char> shortName, ArrayRef<char> longName,
-                 ArrayRef<char> description, uint32_t flags, ParseFunc *parse)
+  CmdLineArgBase(std::optional<char> shortName, StringRef longName,
+                 StringRef description, uint32_t flags, ParseFunc *parse)
       : shortName(shortName), longName(longName), description(description),
         flags(flags), parse(parse) {}
 };
@@ -64,11 +67,11 @@ template <typename T> class CmdLineArg : public CmdLineArgBase {
   T value;
 
 public:
-  CmdLineArg(std::optional<char> shortName, ArrayRef<char> longName,
-             ArrayRef<char> description, uint32_t flags)
+  CmdLineArg(std::optional<char> shortName, StringRef longName,
+             StringRef description, uint32_t flags)
       : CmdLineArgBase{shortName, longName, description, flags, parse} {}
-  CmdLineArg(std::optional<char> shortName, ArrayRef<char> longName,
-             ArrayRef<char> description, uint32_t flags, const T &initialValue)
+  CmdLineArg(std::optional<char> shortName, StringRef longName,
+             StringRef description, uint32_t flags, const T &initialValue)
       : CmdLineArgBase{shortName, longName, description, flags, parse},
         value(initialValue) {}
   const T &operator*() const { return value; }
@@ -85,9 +88,11 @@ inline void CmdLineArg<CmdLineHelpObj>::parse(CmdLineArgBase *self,
                                               const char *ptr);
 
 class CmdLineArgHandler {
+  friend class SubCommandHandler;
+
 private:
   std::array<CmdLineArgBase *, 256> shortArgMap = {};
-  std::unordered_map<std::string_view, CmdLineArgBase *> longArgMap;
+  TwoLevelMap<SSOStringRef, CmdLineArgBase *> longArgMap;
   SmallVec<CmdLineArgBase *, 4> positionalArgs;
   SmallVec<CmdLineArgBase *, 4> mandatoryArgs;
   SmallVec<CmdLineArgBase *, 128> allArgs;
@@ -101,7 +106,7 @@ public:
   const char *executableName = "<executable>";
 
   void registerArg(CmdLineArgBase &c) {
-    if (c.shortName) {
+    if (c.shortName && !c.positional()) {
       auto &slot = shortArgMap[*c.shortName];
       if (slot != nullptr)
         report_fatal_error(
@@ -110,9 +115,8 @@ public:
       slot = &c;
     }
 
-    if (!c.longName.empty()) {
-      auto &slot = longArgMap[std::string_view{c.longName.begin(),
-                                               c.longName.end() - 1}];
+    if (!c.longName.empty() && !c.positional()) {
+      auto &slot = longArgMap[c.longName];
       if (slot != nullptr)
         report_fatal_error(
             "multiple arguments registered with long name \"{}\"",
@@ -127,7 +131,7 @@ public:
       mandatoryArgs.emplace_back(&c);
   }
 
-  void printHelpExit(bool isError = true) {
+  void printHelp(bool isError = true, int optionsSpace = 2) {
     std::ostream &os = isError ? std::cerr : std::cout;
     std::print(os, "usage: {}", executableName);
 
@@ -142,7 +146,10 @@ public:
         std::print(os, "...");
     }
 
-    std::print(os, "\n\noptions:\n");
+    for (int i = 0; i < optionsSpace; i++)
+      std::print("\n");
+
+    std::print(os, "options:\n");
     for (auto &arg : Range{allArgs}.deref()) {
       if (arg.flags & CmdLineArgFlags::POSITIONAL)
         continue;
@@ -172,7 +179,9 @@ public:
         std::print(os, " ");
       std::print(os, "{}\n", arg.description.data());
     }
-
+  }
+  void printHelpExit(bool isError = true) {
+    printHelp(isError);
     exit(isError ? -1 : 0);
   }
 
@@ -316,11 +325,6 @@ inline void CmdLineArg<CmdLineHelpObj>::parse(CmdLineArgBase *self,
   static_cast<CmdLineArg<CmdLineHelpObj> *>(self)->value.parent->printHelpExit(
       false);
 }
-template <>
-inline void CmdLineArg<ArrayRef<char>>::parse(CmdLineArgBase *self,
-                                              const char *ptr) {
-  static_cast<CmdLineArg *>(self)->value = std::string_view{ptr};
-}
 
 #define PARSE_STRING(TYPE)                                                     \
   template <>                                                                  \
@@ -328,13 +332,14 @@ inline void CmdLineArg<ArrayRef<char>>::parse(CmdLineArgBase *self,
     static_cast<CmdLineArg *>(self)->value = ptr;                              \
   }                                                                            \
   template <>                                                                  \
-  inline void CmdLineArg<std::vector<TYPE>>::parse(CmdLineArgBase *self,       \
-                                                   const char *ptr) {          \
+  inline void CmdLineArg<Vec<TYPE>>::parse(CmdLineArgBase *self,               \
+                                           const char *ptr) {                  \
     static_cast<CmdLineArg *>(self)->value.emplace_back(ptr);                  \
   }
 
 PARSE_STRING(std::string_view)
 PARSE_STRING(std::string)
+PARSE_STRING(StringRef)
 PARSE_STRING(const char *)
 
 template <>
@@ -365,8 +370,8 @@ inline void CmdLineArg<bool>::parse(CmdLineArgBase *self, const char *ptr) {
       report_fatal_error("expected number (" #TYPE "): {}", str);              \
   }                                                                            \
   template <>                                                                  \
-  inline void CmdLineArg<std::vector<TYPE>>::parse(CmdLineArgBase *self,       \
-                                                   const char *ptr) {          \
+  inline void CmdLineArg<Vec<TYPE>>::parse(CmdLineArgBase *self,               \
+                                           const char *ptr) {                  \
     std::string_view str{ptr};                                                 \
     TYPE val;                                                                  \
     auto [end, ec] = std::from_chars(str.begin(), str.end(), val);             \

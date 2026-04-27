@@ -10,13 +10,13 @@ namespace dyno {
 class DumpPass : public Pass<DumpPass> {
   Context &ctx;
 
+public:
 #define CONFIG_STRUCT_LAMBDA(FIELD, ENUM)                                      \
   FIELD(std::string, path, "/dev/stdout")
   CONFIG_STRUCT(CONFIG_STRUCT_LAMBDA)
 #undef CONFIG_STRUCT_LAMBDA
   Config config;
 
-public:
   void run() {
     std::ofstream str{config.path};
     // todo: generic printer
@@ -37,7 +37,7 @@ public:
     str << "\n";
   }
 
-  static constexpr auto runFuncs = std::make_tuple(
+  static constexpr auto runFuncs = mk_tuple(
       &DumpPass::runInstr, &DumpPass::runObject, &DumpPass::run);
 
   explicit DumpPass(Context &ctx) : ctx(ctx) {}

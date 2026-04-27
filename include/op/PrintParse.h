@@ -16,7 +16,8 @@ public:
   PrinterBase *base;
   OpDialectPrinter(PrinterBase *base) : base(base) {
     base->interfaces.registerVal<PrinterBase::type::print_fn>(
-        dialect, MemberRef{this, BindMethod<&OpDialectPrinter::printType>::fv});
+        dialect,
+        CallableRef{this, BindMethod<&OpDialectPrinter::printType>::fv});
   }
 
   bool printType(FatDynObjRef<> ref, bool def) {
@@ -57,10 +58,10 @@ public:
   static constexpr DialectID dialect{DIALECT_OP};
   OpDialectParser(ParserBase *base) : base(base) {
     base->interfaces.template registerVal<typename ParserBase::obj_parse_fn>(
-        dialect, MemberRef{this, BindMethod<&OpDialectParser::parseObj>::fv});
+        dialect, CallableRef{this, BindMethod<&OpDialectParser::parseObj>::fv});
   }
 
-  FatDynObjRef<> parseObj(DialectType type, ArrayRef<char> name) {
+  FatDynObjRef<> parseObj(DialectType type, ArrayRef<char> name, bool isDef) {
     DynoLexer &lexer = *base->lexer;
 
     switch (type.type) {
@@ -70,7 +71,9 @@ public:
       while (lexer.peekIs(Token::STRING_LITERAL)) {
         auto key = lexer.Pop().strLit.value;
         lexer.popEnsure(DynoLexer::op_colon);
-        auto val = lexer.popEnsure(Token::STRING_LITERAL).strLit.value;
+        auto val =
+            lexer.popEnsure(Token::STRING_LITERAL, Token::INLINE_CODE_LITERAL)
+                .strLit.value;
         map.insert(std::make_pair(key, val));
         if (!lexer.popIf(DynoLexer::op_comma))
           break;
@@ -81,10 +84,13 @@ public:
 
     case OP_STRING.type: {
       lexer.popEnsure(DynoLexer::op_rbropen);
-      std::map<std::string, std::string> map;
       std::string val{lexer.popEnsure(Token::STRING_LITERAL).strLit.value};
       lexer.popEnsure(DynoLexer::op_rbrclose);
       return base->ctx.getStore<StringObj>().create(std::move(val));
+    }
+
+    case OP_FUNC.type: {
+      return base->ctx.getStore<Function>().create(name, &base->ctx);
     }
 
     default:

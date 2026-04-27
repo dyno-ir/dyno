@@ -1,4 +1,4 @@
-
+#pragma once
 #include "dyno/Constant.h"
 #include "dyno/Context.h"
 #include "hw/AutoDebugInfo.h"
@@ -739,7 +739,7 @@ public:
       case slang::ast::SymbolKind::Subroutine: {
         auto &asSubr = member.as<slang::ast::SubroutineSymbol>();
         auto [found, it] = functionMap.findOrInsert(
-            &asSubr, [&] { return build.buildFunc().func(); });
+            &asSubr, [&] { return build.buildFunc(asSubr.name).func(); });
         auto func =
             FunctionRef{it.val(), ctx.getStore<Function>()[it.val()]}.iref();
 
@@ -1178,6 +1178,7 @@ public:
       //   abort();
       // handle_expr(asPAssign.assignment);
       // break;
+      abort();
     }
 
     case slang::ast::StatementKind::ProceduralDeassign:
@@ -1900,7 +1901,7 @@ public:
 
       auto [found, it] = functionMap.findOrInsert(subr, [&] {
         build.pushInsertPoint(regsBackIt.succ());
-        auto rv = build.buildFunc().func();
+        auto rv = build.buildFunc(asCall.getSubroutineName()).func();
         build.popInsertPoint();
         return rv;
       });

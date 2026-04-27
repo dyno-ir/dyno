@@ -14,9 +14,9 @@
 #include "hw/Process.h"
 #include "support/ErrorRecovery.h"
 #include "support/TemplateUtil.h"
+#include "support/Tuple.h"
 #include "support/Utility.h"
 #include <fstream>
-#include <tuple>
 #include <type_traits>
 
 namespace dyno {
@@ -139,11 +139,11 @@ public:
   */
   void parse(AIGObjRef aigObj) {
     std::string line;
-    std::unordered_map<std::string, HWValue> names;
-    std::unordered_map<std::string, ModuleRef> modules;
+    TwoLevelMap<SSOStringRef, HWValue> names;
+    TwoLevelMap<SSOStringRef, ModuleRef> modules;
 
     for (auto mod : ctx.getStore<Module>()) {
-      modules[mod->name] = mod;
+      modules[SSOStringRef(mod->name.data(), mod->name.length())] = mod;
     }
 
     HWInstrBuilder build{ctx};
@@ -219,20 +219,19 @@ public:
             else if (tok == "_const1_")
               constVal = 1;
             else
-              mod = modules.find(std::string(tok))->second;
+              mod = modules.find(tok)->second;
             continue;
           }
           auto eqIdx = tok.find('=');
-          if (eqIdx == std::string::npos)
+          if (eqIdx == std::string_view::npos)
             report_fatal_error("BLIF format");
-          auto tokStr = std::string(tok.begin() + eqIdx + 1, tok.end());
+          auto tokStr = StringRef(tok.begin() + eqIdx + 1, tok.end());
           auto wire = names.find(tokStr);
 
           if (constVal) {
             assert(i == 1);
             if (wire == names.end()) {
-              names.insert(
-                  std::make_pair(tokStr, ConstantRef::fromBool(*constVal)));
+              names.insert(tokStr, ConstantRef::fromBool(*constVal));
             } else {
               if (auto asConst = wire->second.dyn_as<ConstantRef>()) {
                 if (asConst != ConstantRef::fromBool(*constVal))
@@ -246,10 +245,7 @@ public:
               }
             }
           } else if (wire == names.end()) {
-            wire = names
-                       .insert(std::make_pair(tokStr,
-                                              ctx.getStore<Wire>().create(1)))
-                       .first;
+            wire = names.insert(tokStr, ctx.getStore<Wire>().create(1));
           }
 
           if (mod) {
@@ -401,9 +397,11 @@ public:
   }
 
   void run() {
-    for (auto mod : ctx.getCtx<HWDialectContext>().activeModules()) {
-      runOnModule(mod.iref());
-    }
+    runWrapper([&] {
+      for (auto mod : ctx.getCtx<HWDialectContext>().activeModules()) {
+        runOnModule(mod.iref());
+      }
+    });
   }
 
   void runModule(ModuleRef mod) {
@@ -417,8 +415,8 @@ public:
   }
 
   static constexpr auto runFuncs =
-      std::make_tuple(&ABCPass::runModule, &ABCPass::runProcess,
-                      &ABCPass::runAIG, &ABCPass::run);
+      mk_tuple(&ABCPass::runModule, &ABCPass::runProcess, &ABCPass::runAIG,
+                 &ABCPass::run);
 
   auto make(Context &ctx) { return ABCPass(ctx); }
   explicit ABCPass(Context &ctx) : ctx(ctx) {}

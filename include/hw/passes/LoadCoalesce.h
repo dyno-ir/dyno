@@ -101,7 +101,7 @@ public:
   }
 
   static constexpr auto runFuncs =
-      std::make_tuple(&LoadCoalescePass::runProcess,
+      mk_tuple(&LoadCoalescePass::runProcess,
                       &LoadCoalescePass::runModule, &LoadCoalescePass::run);
 
   auto make(Context &ctx) { return LoadCoalescePass(ctx); }

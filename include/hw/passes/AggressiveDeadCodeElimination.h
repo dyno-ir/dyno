@@ -15,13 +15,15 @@
 #include "hw/HWValue.h"
 #include "hw/IDs.h"
 #include "hw/LoadStore.h"
+#include "hw/Memory.h"
+#include "hw/Pointer.h"
 #include "hw/Register.h"
 #include "hw/SensList.h"
 #include "op/IDs.h"
 #include "op/StructuredControlFlow.h"
 #include "support/Debug.h"
+#include "support/Tuple.h"
 #include "support/Utility.h"
-#include <tuple>
 namespace dyno {
 
 // todo: function support
@@ -45,6 +47,8 @@ class AggressiveDeadCodeEliminationPass
         continue;
 
       switch (*instr.getDialectOpcode()) {
+
+      case *HW_MEM_STORE:
       case *HW_STORE_DEFER:
       case *HW_STORE:
         worklist.emplace_back(instr);
@@ -59,6 +63,7 @@ class AggressiveDeadCodeEliminationPass
         break;
       }
 
+      case *HW_MEM_LOAD:
       case *HW_LOAD:
         break;
 
@@ -87,9 +92,21 @@ class AggressiveDeadCodeEliminationPass
     } else {
       auto asWire = value.as<WireRef>();
       for (auto def : asWire.defs()) {
-        worklist.emplace_back(def.instr());
+        if (!instrMap[def.instr()])
+          worklist.emplace_back(def.instr());
       }
       wireMap[asWire] = 1;
+    }
+  }
+  void visitHWAddr(HWAddress addr) {
+    assert(addr);
+    if (auto asConst = addr.dyn_as<ConstantRef>()) {
+      assert(asConst.isInline());
+    } else {
+      auto asPtr = addr.as<PointerRef>();
+      for (auto def : asPtr.defs()) {
+        worklist.emplace_back(def.instr());
+      }
     }
   }
 
@@ -120,7 +137,8 @@ class AggressiveDeadCodeEliminationPass
   }
 
   void visitInstr(InstrRef instr) {
-    markParentBlockDef(instr);
+    if (!instrMap[instr])
+      markParentBlockDef(instr);
     switch (*instr.getDialectOpcode()) {
     case *HW_REGISTER_DEF:
     case *HW_INPUT_REGISTER_DEF:
@@ -256,11 +274,39 @@ class AggressiveDeadCodeEliminationPass
       auto asStore = instr.as<StoreIRef>();
       visitHWValue(asStore.value());
       auto reg = asStore.reg().iref();
-      if (!instrMap[reg])
-        pushInstr(reg);
+      assert(instrMap[reg]);
       for (auto term : asStore.terms()) {
         visitHWValue(term.getIdx());
       }
+      break;
+    }
+
+    case *HW_MEM_LOAD: {
+      if (instrMap[instr])
+        break;
+      auto asLoad = instr.as<MemLoadIRef>();
+      auto reg = asLoad.reg().iref();
+      if (!instrMap[reg])
+        pushInstr(reg);
+      if (asLoad.hasEn())
+        visitHWValue(asLoad.en());
+      if (auto addr = asLoad.addr())
+        visitHWAddr(addr);
+
+      break;
+    }
+
+    case *HW_MEM_STORE: {
+      if (instrMap[instr])
+        break;
+      auto asStore = instr.as<MemStoreIRef>();
+      auto reg = asStore.reg().iref();
+      assert(instrMap[reg]);
+      visitHWValue(asStore.value());
+      if (asStore.hasEn())
+        visitHWValue(asStore.en());
+      if (auto addr = asStore.addr())
+        visitHWAddr(addr);
       break;
     }
 
@@ -307,12 +353,18 @@ class AggressiveDeadCodeEliminationPass
     }
 
     case *AIG_OUTPUT: {
-      pushInstr(
-          instr.other(0)->as<AIGObjRef>()->defUse.getSingleDef()->instr());
+      if (instrMap[instr])
+        break;
+      auto aigInstr =
+          instr.other(0)->as<AIGObjRef>()->defUse.getSingleDef()->instr();
+      if (!instrMap[aigInstr])
+        pushInstr(aigInstr);
       break;
     }
 
     case *AIG_INPUT: {
+      if (instrMap[instr])
+        break;
       visitHWValue(instr.other(0)->as<HWValue>());
       break;
     }
@@ -339,18 +391,19 @@ class AggressiveDeadCodeEliminationPass
       break;
     }
 
-    case *HW_FLIP_FLOP: {
+    case *HW_MEMORY_DEF: {
       if (instrMap[instr])
         break;
-      auto asFF = instr.as<FlipFlopIRef>();
-      pushInstr(asFF.clk().iref());
-      pushInstr(asFF.d().iref());
-      if (asFF.hasClkEn()) {
-        pushInstr(asFF.clkEn().iref());
-      }
-      for (unsigned i = 0; i < asFF.numRsts(); i++) {
-        pushInstr(asFF.rst(i).iref());
-        visitHWValue(asFF.rstVal(i));
+      auto asMem = instr.as<MemoryInstrRef>();
+      for (auto port : asMem.ports()) {
+        instrMap[port] = 1;
+        pushInstr(port.data()->as<RegisterRef>().iref());
+        if (port.hasClock())
+          pushInstr(port.clock()->as<RegisterRef>().iref());
+        if (port.hasEn())
+          pushInstr(port.en()->as<RegisterRef>().iref());
+        for (auto term : port.terms())
+          pushInstr(term.getIdx().iref());
       }
       break;
     }
@@ -434,6 +487,10 @@ class AggressiveDeadCodeEliminationPass
         blockDestroyMap[instr.as<SwitchInstrRef>().block()] = 1;
         break;
       }
+      case *OP_FUNC: {
+        blockDestroyMap[instr.as<FunctionIRef>().getBlock()] = 1;
+        break;
+      }
       }
 
       if (ctx.getCtx<CoreDialectContext>().cfg.contains(instr))
@@ -469,8 +526,6 @@ class AggressiveDeadCodeEliminationPass
   }
 
   void runOnModule(ModuleIRef module) {
-    if (module.mod()->ignore)
-      return;
     instrMap[module] = 1;
     initialWorklist(module);
     while (!worklist.empty()) {
@@ -494,8 +549,8 @@ class AggressiveDeadCodeEliminationPass
 
       if (instr.isOpc(HW_MODULE_DEF, HW_STDCELL_DEF)) {
         // contents of non-ignored modules are DCEd, don't mark alive
-        if (instr.as<ModuleIRef>() == activeMod ||
-            !instr.as<ModuleIRef>().mod()->ignore)
+        if (activeMod ? instr.as<ModuleIRef>() == activeMod
+                      : !instr.as<ModuleIRef>().mod()->ignore)
           continue;
       }
 
@@ -544,6 +599,8 @@ public:
     runWrapper([&] {
       markLiveInstructions();
       for (auto mod : ctx.getCtx<HWDialectContext>().activeModules()) {
+        if (mod->ignore)
+          continue;
         runOnModule(mod.iref());
       }
     });
@@ -557,8 +614,8 @@ public:
   }
 
   static constexpr auto runFuncs =
-      std::make_tuple(&AggressiveDeadCodeEliminationPass::runModule,
-                      &AggressiveDeadCodeEliminationPass::run);
+      mk_tuple(&AggressiveDeadCodeEliminationPass::runModule,
+               &AggressiveDeadCodeEliminationPass::run);
 
   auto make(Context &ctx) { return AggressiveDeadCodeEliminationPass(ctx); }
   explicit AggressiveDeadCodeEliminationPass(Context &ctx)

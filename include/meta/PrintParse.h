@@ -20,7 +20,7 @@ public:
   static constexpr DialectID dialect{DIALECT_META};
   explicit MetaDialectParser(ParserBase *base) : base(base) {}
 
-  FatDynObjRef<> parseMeta(DialectType type, ArrayRef<char> name) {
+  FatDynObjRef<> parseMeta(DialectType type, ArrayRef<char> name, bool isDef) {
     (void)base;
     return nullref;
   }

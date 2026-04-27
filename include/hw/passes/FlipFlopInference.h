@@ -93,7 +93,8 @@ class FlipFlopInferencePass : public Pass<FlipFlopInferencePass> {
     return std::make_pair(nullref, 0);
   }
 
-  bool isQLoad(RegisterIRef q, HWValue value) {
+public:
+  static bool isQLoad(RegisterIRef q, HWValue value) {
     if (!value.is<WireRef>())
       return false;
     auto wire = value.as<WireRef>();
@@ -106,6 +107,7 @@ class FlipFlopInferencePass : public Pass<FlipFlopInferencePass> {
     return true;
   }
 
+private:
   Optional<unsigned> findClockEnable(RegisterIRef q, StoreIRef store,
                                      MuxTree *muxTree) {
     if (!muxTree)
@@ -120,6 +122,23 @@ class FlipFlopInferencePass : public Pass<FlipFlopInferencePass> {
         return i;
     }
     return nullopt;
+  }
+  HWValue findClockEnable2(RegisterIRef q, StoreIRef store) {
+    if (isQLoad(q, store.value().as<HWValue>()))
+      return ConstantRef::fromU32(1);
+    if (store.value().is<ConstantRef>())
+      return nullref;
+    auto wire = store.value().as<WireRef>();
+    if (wire.getNumUses() != 1)
+      return nullref;
+
+    if (auto asMux = wire.getDefI().dyn_as_opc(HW_ONEHOT_MUX)) {
+      for (auto [sel, val] : asMux.others().deref().as<HWValue>().pairwise()) {
+        if (isQLoad(q, val))
+          return sel;
+      }
+    }
+    return nullref;
   }
 
   std::optional<MuxTree> getMuxTree(StoreIRef store) {
@@ -181,34 +200,14 @@ class FlipFlopInferencePass : public Pass<FlipFlopInferencePass> {
               trigger->getMode(i) == SensMode::POSEDGE};
     };
 
-    auto muxTree = getMuxTree(storeI);
-    if (!muxTree) {
-      DYNO_DBG("FlipFlopInference", {
-        dbgs() << "could not get mux tree, skipping enable inference for: ";
-        dumpInstr(reg, ctx);
-        dbgs() << "store value:\n";
-        dumpInstr(storeI, ctx);
-      })
-    }
-    auto *muxTreePtr = muxTree ? &*muxTree : nullptr;
+    HWValue clkEnVal = findClockEnable2(storeI.reg().iref(), storeI);
 
-    HWValue undef = cbuild.undef(*dValue.getNumBits()).get();
-
-    RegisterRef clkEn = nullref;
-    if (auto clkEnIdx =
-            findClockEnable(storeI.reg().iref(), storeI, muxTreePtr)) {
-      clkEn = build.buildRegister(1);
-      build.pushInsertPoint(storeI);
-      auto val = MuxTreeOptimizationPass::getExprVal(
-          build, muxTreePtr, muxTreePtr->entries[*clkEnIdx].expr);
-      build.buildStore(clkEn, val);
-      dValue = build.buildMux(val, undef, dValue);
-      build.popInsertPoint();
-    }
+    build.pushInsertPoint(storeI);
+    HWValue rstVal;
+    HWValue rstValInv;
 
     if (hasReset) {
       SmallVec<std::pair<RegisterRef, bool>, 2> resetCandidates;
-
       if (hasIFF) {
         resetCandidates = {get(2)};
       } else {
@@ -221,34 +220,39 @@ class FlipFlopInferencePass : public Pass<FlipFlopInferencePass> {
       rstReg = resetCandidates[resetIndex];
       clkReg = hasIFF ? resetCandidates[0] : (resetCandidates[1 - resetIndex]);
 
-      build.pushInsertPoint(storeI);
-      dValue = build.buildMux(build.buildLoad(rstReg.first),
-                              rstReg.second ? undef : dValue,
-                              !rstReg.second ? undef : dValue);
-      build.popInsertPoint();
+      rstVal = build.buildLoad(rstReg.first);
+      rstValInv = build.buildNot(rstVal);
+      if (!rstReg.second)
+        std::swap(rstVal, rstValInv);
+
+      dValue = build.buildAssume(dValue, rstValInv);
     } else
       clkReg = get(0);
 
-    auto dReg = build.buildRegister(reg.getNumBits());
+    if (clkEnVal) {
+      if (hasReset)
+        clkEnVal = build.buildAssume(clkEnVal, rstValInv);
+      dValue = build.buildAssume(dValue, build.buildNot(clkEnVal));
+    }
 
-    // ignore clk en for now.
-    auto ib = build.buildInstrRaw(HW_FLIP_FLOP, 4 + !!clkEn * 2 + hasReset * 3);
-    ib.other()
-        .addRef(clkReg.first)
-        .addRef(ConstantRef::fromBool(clkReg.second))
-        .addRef(dReg)
-        .addRef(reg.oref());
-    if (clkEn)
-      ib.addRef(clkEn).addRef(ConstantRef::fromBool(0));
+    HWValue clkVal = build.buildLoad(clkReg.first);
+    if (!clkReg.second)
+      clkVal = build.buildNot(clkVal);
+
+    WireRef qWire = ctx.getStore<Wire>().create(dValue.getNumBits());
+
+    auto ib = build.buildInstrRaw(HW_FLIP_FLOP, 4 + hasReset * 2);
+    ib.addRef(qWire).other().addRef(clkVal).addRef(dValue);
+
+    ib.addRef(clkEnVal ? build.buildNot(clkEnVal) : ConstantRef::fromBool(1));
+
     if (hasReset)
-      ib.addRef(rstReg.first)
-          .addRef(ConstantRef::fromBool(rstReg.second))
-          .addRef(resetValue);
+      ib.addRef(rstVal).addRef(resetValue);
 
-    build.setInsertPoint(storeI);
-    build.buildStore(dReg, dValue);
+    build.buildStore(storeI.reg(), qWire);
     build.destroyInstr(storeI);
 
+    build.popInsertPoint();
     return true;
   }
 
@@ -269,11 +273,11 @@ public:
   }
   void runModule(ModuleIRef mod) { runOnModule(mod); }
 
-  static constexpr auto runFuncs = std::make_tuple(
-      &FlipFlopInferencePass::runModule, &FlipFlopInferencePass::run);
+  static constexpr auto runFuncs =
+      mk_tuple(&FlipFlopInferencePass::runModule, &FlipFlopInferencePass::run);
 
   explicit FlipFlopInferencePass(Context &ctx)
       : ctx(ctx), build(ctx), cbuild(ctx.getStore<Constant>()) {}
   static auto make(Context &ctx) { return FlipFlopInferencePass{ctx}; }
-}; // namespace dyno
+};
 }; // namespace dyno

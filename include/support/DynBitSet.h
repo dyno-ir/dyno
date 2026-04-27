@@ -1,16 +1,18 @@
 #pragma once
 
-#include "Bits.h"
 #include "support/ArrayRef.h"
+#include "support/Bits.h"
+#include "support/Ranges.h"
+#include "support/SmallVec.h"
 #include <bit>
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
 #include <iterator>
-#include <vector>
 
 template <typename containter, size_t SymbolBits,
           containter::value_type DefaultWord = 0>
+// Unsized i.e. doesn't know its size in symbols. Use if size known externally.
 class UnsizedSymbSet {
 public:
   using Container = containter;
@@ -88,8 +90,15 @@ protected:
 
 public:
   using reference = DynBitField<typename Base::container_t::value_type>;
+  using pointer = void;
   using value_type = reference;
   using Base::at_unchecked;
+  void resizeSymbs(size_t) = delete;
+  void resizeBits(size_t) = delete;
+  void ensureSymbs(size_t) = delete;
+  void ensureSymbsExp(size_t) = delete;
+  void ensureBits(size_t) = delete;
+  void ensureBitsExp(size_t) = delete;
 
   DynSymbSet() = default;
   DynSymbSet(size_t resizeTo) : DynSymbSet() { this->resize(resizeTo); }
@@ -106,7 +115,7 @@ public:
 
   void resize(size_t i) {
     numSymbs = i;
-    this->resizeSymbs(numSymbs);
+    this->Base::resizeSymbs(numSymbs);
   }
 
   void reserve(size_t i) {
@@ -195,10 +204,10 @@ public:
       return old;
     }
 
-    reference operator*() {
+    reference operator*() const {
       return reference{*word, symb * SymbolBits, SymbolBits};
     }
-    reference operator[](ssize_t i) { return *((*this) + i); }
+    reference operator[](ssize_t i) const { return *((*this) + i); }
 
     friend difference_type operator-=(iterator lhs, iterator rhs) {
       return (lhs.word - rhs.word) * Base::WordSymbs + (lhs.symb - rhs.symb);
@@ -212,6 +221,33 @@ public:
   iterator end() {
     return iterator{storage.begin() + (numSymbs / Base::WordSymbs),
                     (numSymbs % Base::WordSymbs)};
+  }
+};
+
+template <typename Container, Container::value_type DefaultWord = 0>
+class DynBitSet : public DynSymbSet<Container, 1, DefaultWord> {
+  using Base = DynSymbSet<Container, 1, DefaultWord>;
+
+public:
+  using Base::Base;
+
+  void set(size_t i) { (*this)[i] = 1; }
+  void clr(size_t i) { (*this)[i] = 0; }
+  auto get(size_t i) const { return (*this)[i]; }
+
+  auto setBitIdxs() {
+    return Range{
+        set_bits_iterator{this->raw().begin(), this->raw().end(), 0},
+        set_bits_iterator{this->raw().end(), this->raw().end(), this->size()}};
+  }
+  auto unsetBitIdxs() {
+    return Range{unset_bits_iterator{this->raw().begin(), this->raw().end(), 0},
+                 unset_bits_iterator{this->raw().end(), this->raw().end(),
+                                     this->size()}};
+  }
+  auto clearAllBits() { std::fill(this->raw().begin(), this->raw().end(), 0); }
+  auto setAllBits() {
+    std::fill(this->raw().begin(), this->raw().end(), ~0ULL);
   }
 };
 
@@ -294,13 +330,14 @@ public:
 
   void resizeBits(size_t i) { this->resizeSymbs(i); }
   void ensureBits(size_t i) { this->ensureSymbs(i); }
+  void ensureBitsExp(size_t i) { this->ensureSymbsExp(i); }
 
   void setDyn(size_t i) {
-    ensureBits(i + 1);
+    ensureBitsExp(i + 1);
     set(i);
   }
   void clearDyn(size_t i) {
-    ensureBits(i + 1);
+    ensureBitsExp(i + 1);
     clear(i);
   }
   bool getDyn(size_t i) const {
@@ -310,7 +347,7 @@ public:
     return storage[word] & symbMask(i);
   }
   void modifyRangeDyn(size_t i, size_t len, word_t value) {
-    ensureBits(i + len);
+    ensureBitsExp(i + len);
     modifyRange(i, len, value);
   }
   void setRangeDyn(size_t i, size_t len) { modifyRangeDyn(i, len, ~word_t(0)); }
@@ -366,110 +403,25 @@ public:
     }
     return cnt;
   }
-};
 
-class DynBitSet {
-public:
-  using word_t = uint64_t;
-  static constexpr size_t wordBits = 8 * sizeof(word_t);
-
-  static constexpr size_t numWordsForBits(size_t numBits) {
-    return (numBits + wordBits - 1) / wordBits;
+  size_t ctz() const {
+    size_t rv = 0;
+    size_t i = 0;
+    while (storage[i] == 0 && i < storage.size())
+      rv += WordBits;
+    rv += !!storage[i] ? std::countr_zero(storage[i]) : 0;
+    return rv;
   }
 
-  static constexpr size_t wordIdx(size_t i) { return i / wordBits; }
-  static constexpr size_t bitIdx(size_t i) { return i % wordBits; }
-  static constexpr word_t bitMsk(size_t i) { return word_t(1) << bitIdx(i); }
-
-  DynBitSet() : numBits(0) {}
-
-  DynBitSet(size_t numBits)
-      : numBits(numBits), words(numWordsForBits(numBits)) {}
-
-  size_t size() const { return numBits; }
-
-  size_t count() const {
-    size_t cnt = 0;
-    for (size_t i = 0; i < words.size(); ++i) {
-      cnt += std::popcount(words[i]);
-    }
-    return cnt;
+  auto setBitIdxs() {
+    return Range{set_bits_iterator{this->raw().begin(), this->raw().end(), 0},
+                 set_bits_iterator{this->raw().end(), this->raw().end(),
+                                   this->raw().size() * Base::WordBits}};
   }
-
-  void set(size_t i) {
-    assert(i < numBits);
-    words[wordIdx(i)] |= bitMsk(i);
-  }
-  void clr(size_t i) {
-    assert(i < numBits);
-    words[wordIdx(i)] &= ~bitMsk(i);
-  }
-  void set(size_t i, bool v) {
-    assert(i < numBits);
-    if (v) {
-      set(i);
-    } else {
-      clr(i);
-    }
-  }
-
-  void clrAll() {
-    for (size_t i = 0; i < words.size(); ++i) {
-      words[i] = 0;
-    }
-  }
-  void setAll() {
-    for (size_t i = 0; i < words.size(); ++i) {
-      words[i] = ~word_t(0);
-    }
-    clrUndefined();
-  }
-
-  bool tst(size_t i) const { return words[wordIdx(i)] & bitMsk(i); }
-
-  DynBitSet &operator&=(const DynBitSet &o) {
-    assert(isBinopCompatible(o));
-    for (size_t i = 0; i < words.size(); ++i) {
-      words[i] &= o.words[i];
-    }
-    return *this;
-  }
-
-  DynBitSet &operator|=(const DynBitSet &o) {
-    assert(isBinopCompatible(o));
-    for (size_t i = 0; i < words.size(); ++i) {
-      words[i] |= o.words[i];
-    }
-    return *this;
-  }
-
-  void flip() {
-    for (size_t i = 0; i < words.size(); ++i) {
-      words[i] = ~words[i];
-    }
-    clrUndefined();
-  }
-
-  template <typename CB> void for_each(CB cb) const {
-    for (size_t i = 0; i < numBits; ++i) {
-      if (tst(i)) {
-        cb(i);
-      }
-    }
-  }
-
-private:
-  size_t numBits;
-  std::vector<word_t> words;
-
-  bool isBinopCompatible(const DynBitSet &o) const {
-    return numBits == o.numBits;
-  }
-
-  void clrUndefined() {
-    if (numBits % wordBits == 0)
-      return;
-    words[words.size() - 1] &= bitMsk(numBits) - 1;
+  auto unsetBitIdxs() {
+    return Range{set_bits_iterator{this->raw().begin(), this->raw().end(), 0},
+                 set_bits_iterator{this->raw().end(), this->raw().end(),
+                                   this->raw().size() * Base::WordBits}};
   }
 };
 
@@ -500,7 +452,7 @@ public:
     }
   }
 
-  bool tst(size_t i, size_t j) { return bits.tst(idx(i, j)); }
+  bool tst(size_t i, size_t j) { return bits.get(idx(i, j)); }
 
-  DynBitSet bits;
+  DynBitSet<Vec<uint64_t>> bits;
 };

@@ -6,12 +6,14 @@
 #include "dyno/DialectInfo.h"
 #include "dyno/IDs.h"
 #include "dyno/Obj.h"
+#include "dyno/Symbol.h"
 #include "hw/DebugInfo.h"
 #include "hw/HWContext.h"
 #include "support/CallableRef.h"
 #include "support/DenseMap.h"
 #include "support/RTTI.h"
 #include "support/TempBind.h"
+#include "support/Tuple.h"
 #include "support/Utility.h"
 #include <array>
 #include <dyno/Instr.h>
@@ -19,7 +21,6 @@
 #include <initializer_list>
 #include <iostream>
 #include <ostream>
-#include <tuple>
 
 namespace dyno {
 
@@ -55,6 +56,7 @@ public:
   }
 
   IndentPrinter(OStreamWrapper str) : str(str) {}
+  IndentPrinter() : str() {}
 };
 
 class PrinterBase {
@@ -98,7 +100,7 @@ private:
   DenseMap<DynObjRef, IntroducedName> introduced;
   uint32_t numericNameCnt = 0;
 
-  std::vector<bool> isDefault = std::vector<bool>(MAX_NUM_DIALECTS);
+  UnsizedBitSet<SmallVec<uint64_t, 2>> isDefault = (MAX_NUM_DIALECTS);
 
 protected:
   TempBindPtr<SourceLocInfo<Instr>> sourceLocInfo;
@@ -108,16 +110,18 @@ public:
   Interface<DialectInfo> dialectI;
   Interface<TyInfo> tyI;
   Interface<OpcodeInfo> opcodeI;
+  // may be unset, printers must be able to handle both.
+  // can print with more fidelity when set though.
+  Context *ctx = nullptr;
 
 public:
   struct type {
-    using print_fn = MemberRef<bool(void *, FatDynObjRef<>, bool)>;
+    using print_fn = CallableRef<bool(FatDynObjRef<>, bool)>;
   };
   struct opc {
-    using print_fn = MemberRef<bool(void *, FatDynObjRef<>, bool)>;
+    using print_fn = CallableRef<bool(FatDynObjRef<>, bool)>;
   };
-  using name_fn =
-      MemberRef<std::optional<IntroducedName>(void *, FatDynObjRef<>)>;
+  using name_fn = CallableRef<std::optional<IntroducedName>(FatDynObjRef<>)>;
   Interfaces<NUM_DIALECTS, type::print_fn, opc::print_fn, name_fn> interfaces;
 
   OStreamWrapper str;
@@ -126,12 +130,21 @@ public:
               Interface<TyInfo> tyI, Interface<OpcodeInfo> opcodeI)
       : indentPrint(str), dialectI(dialectI), tyI(tyI), opcodeI(opcodeI),
         str(str) {}
+  PrinterBase(Interface<DialectInfo> dialectI, Interface<TyInfo> tyI,
+              Interface<OpcodeInfo> opcodeI)
+      : indentPrint(), dialectI(dialectI), tyI(tyI), opcodeI(opcodeI), str() {}
 
   void printTypeDefault(DynObjRef ref) {
     if (!isDefault[ref.getDialectID()]) {
       str << dialectI[ref].name << ".";
     }
     str << tyI[ref].name;
+  }
+  void printTypeDefault(DialectType type) {
+    if (!isDefault[type.getDialectID()]) {
+      str << dialectI[type.getDialectID()]->name << ".";
+    }
+    str << tyI[type.getDialectID()][type.getTypeID()].name;
   }
 
   void printOpcodeDefault(InstrRef ref) {
@@ -215,14 +228,22 @@ public:
     }
   }
 
-  void introduce(FatDynObjRef<> ref) {
+  bool introduce(FatDynObjRef<> ref) {
     auto [found, name] = introduceNameFor(ref);
     str << '%' << name.str() << ":";
+    return found;
   }
 
   void introduceAndPrintDef(FatDynObjRef<> ref) {
-    introduce(ref);
-    printDef(ref);
+    bool found = false;
+    if (1 || !Operand::isDefUseOperand(ref) ||
+        ref.as<FatDynObjRef<InstrDefUse>>()->getNumUses() != 0) {
+      found = introduce(ref);
+    } else {
+      str << ":";
+    }
+    if (!found)
+      printDef(ref);
   }
 
   void reset() { introduced.clear(); }
@@ -267,7 +288,8 @@ public:
       str << "]";
   }
 
-  void printInstr(InstrRef instr, bool trailingNewline = true) {
+  void printInstr(InstrRef instr, bool trailingNewline = true,
+                  bool expandBlocks = true) {
     printOpcodeDefault(instr);
     str << ' ';
 
@@ -290,7 +312,8 @@ public:
           first = 0;
           str << ' ';
         }
-        printBlock(asBlock);
+        if (expandBlocks)
+          printBlock(asBlock);
       }
     }
 
@@ -338,12 +361,19 @@ template <typename... Printers>
 class ContextPrinterWrapper : public PrinterBase {
 
 protected:
-  std::tuple<Printers...> printers;
+  Tuple<Printers...> printers;
 
 public:
   ContextPrinterWrapper(Context &ctx, OStreamWrapper str)
       : PrinterBase(
             str,
+            Interface<DialectInfo>{ctx.getDialectInfos().dialectInfoArr.data()},
+            Interface<TyInfo>{ctx.getDialectInfos().typeInfoArr.data()},
+            Interface<OpcodeInfo>{ctx.getDialectInfos().opcodeInfoArr.data()}),
+        printers{(static_cast<void>(sizeof(Printers)), this)...} {}
+
+  ContextPrinterWrapper(Context &ctx)
+      : PrinterBase(
             Interface<DialectInfo>{ctx.getDialectInfos().dialectInfoArr.data()},
             Interface<TyInfo>{ctx.getDialectInfos().typeInfoArr.data()},
             Interface<OpcodeInfo>{ctx.getDialectInfos().opcodeInfoArr.data()}),
@@ -356,7 +386,7 @@ class PrinterWrapper : private AutoDialectInfos<Printers::dialect...>,
                        public PrinterBase {
 
 protected:
-  std::tuple<Printers...> printers;
+  Tuple<Printers...> printers;
 
 public:
   PrinterWrapper(OStreamWrapper str)
@@ -376,13 +406,39 @@ public:
   CoreDialectPrinter(PrinterBase *base) : base(*base) {
     base->interfaces.registerVal<PrinterBase::type::print_fn>(
         DIALECT_CORE,
-        MemberRef{this, &BindMethod<&CoreDialectPrinter::printTypeCore>::fv});
+        CallableRef{this, &BindMethod<&CoreDialectPrinter::printTypeCore>::fv});
+    base->interfaces.registerVal<PrinterBase::name_fn>(
+        DIALECT_CORE,
+        CallableRef{this, &BindMethod<&CoreDialectPrinter::getNameCore>::fv});
+  }
+
+  std::optional<PrinterBase::IntroducedName> getNameCore(FatDynObjRef<> ref) {
+    switch (ref.getTyID()) {
+    case CORE_SYMBOL.type: {
+      return PrinterBase::IntroducedName{ref.as<SymbolRef>()->name.c_str()};
+    }
+    default:
+      return std::nullopt;
+    }
   }
 
   bool printTypeCore(FatDynObjRef<> ref, bool def) {
     switch (ref.getTyID()) {
     case CORE_CONSTANT.type: {
       base.str << '#' << ref.as<ConstantRef>();
+      return true;
+    }
+    case CORE_SYMBOL.type: {
+      auto asSymb = ref.as<SymbolRef>();
+      base.str << "symbol";
+      if (!def || asSymb->type) {
+        std::print(base.str, "(\"{}\"", asSymb->name);
+        if (asSymb->type) {
+          std::print(base.str, ", ");
+          base.printTypeDefault(*asSymb->type);
+        }
+        std::print(base.str, ")");
+      }
       return true;
     }
     default:

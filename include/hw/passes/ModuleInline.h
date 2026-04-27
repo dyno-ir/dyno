@@ -2,10 +2,10 @@
 
 #include "dyno/CFG.h"
 #include "dyno/Context.h"
+#include "dyno/DeepCopy.h"
 #include "dyno/DestroyMap.h"
 #include "dyno/ObjMap.h"
 #include "dyno/Pass.h"
-#include "hw/DeepCopy.h"
 #include "hw/HWAbstraction.h"
 #include "hw/HWContext.h"
 #include "hw/HWInstr.h"
@@ -107,7 +107,32 @@ public:
                      [&](ModuleRef mod) { build.destroyInstr(mod.iref()); });
   }
 
-  static constexpr auto runFuncs = std::make_tuple(&ModuleInlinePass::run);
+  void runModule(ModuleIRef topModule) {
+    destroyMap.clear();
+    destroyMap.resize(ctx.getStore<Module>().numIDs());
+    worklist.clear();
+    isTopModule.clear();
+    isTopModule.resize(ctx.getStore<Module>().numIDs());
+    isTopModule[topModule.mod()] = 1;
+
+    for (auto mod : ctx.getCtx<HWDialectContext>().activeModules()) {
+      for (auto use : mod->defUse.uses()) {
+        auto modUsed = HWInstrRef{use.instr()}.parentMod(ctx);
+        if (modUsed == topModule) {
+          worklist.emplace_back(use.instr());
+        }
+      }
+    }
+    while (!worklist.empty()) {
+      auto inst = worklist.pop_back_val();
+      inlineInstance(inst);
+    }
+
+    // don't delete other modules for explicit top module call
+  }
+
+  static constexpr auto runFuncs =
+      mk_tuple(&ModuleInlinePass::runModule, &ModuleInlinePass::run);
 
 public:
   auto make(Context &ctx) { return ModuleInlinePass(ctx); }

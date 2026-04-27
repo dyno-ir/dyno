@@ -2,66 +2,85 @@
 
 #include "dyno/Constant.h"
 #include "hw/HWInstr.h"
+#include "hw/HWValue.h"
+#include "op/IDs.h"
 #include "support/Utility.h"
 namespace dyno {
 
-class FlipFlopIRef : public OpcodeInstrRef<HWInstrRef, HW_FLIP_FLOP> {
+class FlipFlopIRef
+    : public OpcodeInstrRef<HWInstrRef, HW_FLIP_FLOP, HW_FLIP_FLOP_SRST> {
 public:
   using OpcodeInstrRef::OpcodeInstrRef;
 
 private:
-  constexpr static unsigned numBaseOperands = 4;
-  constexpr static unsigned numClkEnOperands = 2;
-  constexpr static unsigned numRstOperands = 3;
-
 public:
-  RegisterRef clk() { return operand(0)->as<RegisterRef>(); }
-  uint32_t clkPolarity() { return operand(1)->as<ConstantRef>().getExactVal(); }
-  RegisterRef d() { return operand(2)->as<RegisterRef>(); }
-  RegisterRef q() { return operand(3)->as<RegisterRef>(); }
+  constexpr static unsigned numBaseOperands = 3;
+  constexpr static unsigned numRstOperands = 2;
+  HWValue clkRaw() const { return other(0)->as<HWValue>(); }
 
-  bool hasClkEn() const {
-    return ((getNumOperands() - numBaseOperands) % numRstOperands != 0);
+  std::pair<HWValue, bool> clkAndPol() const {
+    auto raw = clkRaw();
+    if (auto w = raw.dyn_as<WireRef>(); w && w.getDefI().isOpc(OP_NOT))
+      return {w.getDefI().other(0)->as<HWValue>(), false};
+    return {raw, true};
   }
+  HWValue clk() const { return clkAndPol().first; }
+  bool clkPol() const { return clkAndPol().second; }
+
+  HWValue d() const { return other(1)->as<HWValue>(); }
+
+  WireRef q() const { return def(0)->as<WireRef>(); }
+
+  HWValue clkEnRaw() const { return other(2)->as<HWValue>(); }
+  bool hasClkEn() const {
+    return !(clkEnRaw().is<ConstantRef>() &&
+             clkEnRaw().as<ConstantRef>().valueEquals(1));
+  }
+
+  std::pair<HWValue, bool> clkEnAndPol() const {
+    auto raw = clkEnRaw();
+    if (auto w = raw.dyn_as<WireRef>(); w && w.getDefI().isOpc(OP_NOT))
+      return {w.getDefI().other(0)->as<HWValue>(), false};
+    return {raw, true};
+  }
+  HWValue clkEn() const { return clkEnAndPol().first; }
+  bool clkEnPolarity() const { return clkEnAndPol().second; }
+
   unsigned numRsts() const {
-    return ((getNumOperands() - numBaseOperands -
-             (hasClkEn() ? numClkEnOperands : 0)) /
-            numRstOperands);
+    return ((getNumOperands() - numBaseOperands) / numRstOperands);
   }
 
 private:
   unsigned rstBase(unsigned i = 0) const {
-    return (hasClkEn() ? (numBaseOperands + numClkEnOperands)
-                       : numBaseOperands) +
-           i * numRstOperands;
+    return numBaseOperands + i * numRstOperands;
   }
-  unsigned clkEnBase() const { return numBaseOperands; }
 
 public:
-  RegisterRef rst(unsigned i = 0) {
-    return operand(rstBase(i) + 0)->as<RegisterRef>();
+  HWValue rstRaw(unsigned i = 0) const {
+    return other(rstBase(i) + 0)->as<HWValue>();
   }
-  uint32_t rstPolarity(unsigned i = 0) {
-    return operand(rstBase(i) + 1)->as<ConstantRef>().getExactVal();
+  std::pair<HWValue, bool> rstAndPol(unsigned i = 0) const {
+    auto raw = rstRaw(i);
+    if (auto w = raw.dyn_as<WireRef>(); w && w.getDefI().isOpc(OP_NOT))
+      return {w.getDefI().other(0)->as<HWValue>(), false};
+    return {raw, true};
   }
-  ConstantRef rstVal(unsigned i = 0) {
-    return operand(rstBase(i) + 2)->as<ConstantRef>();
+  HWValue rst(unsigned i = 0) const { return rstAndPol(i).first; }
+  bool rstPol(unsigned i = 0) const { return rstAndPol(i).second; }
+  HWValue rstVal(unsigned i = 0) const {
+    return other(rstBase(i) + 1)->as<HWValue>();
   }
 
-  RegisterRef clkEn() { return operand(clkEnBase() + 0)->as<RegisterRef>(); }
-  uint32_t clkEnPolarity() {
-    return operand(clkEnBase() + 1)->as<ConstantRef>().getExactVal();
+  auto rsts() {
+    return Range{other_begin() + rstBase(), other_end()}
+        .as<HWValue>()
+        .tuple<2>();
   }
 
-  void flipPolarity(OperandRef ref) {
-    auto pol = (ref + 1);
-    assert(pol->is<ConstantRef>() && pol->as<ConstantRef>().getNumBits() == 1);
-    pol.replace(ConstantRef::fromBool(!pol->as<ConstantRef>().getExactVal()));
-  }
-  uint32_t getPolarity(OperandRef ref) {
-    auto pol = (ref + 1);
-    assert(pol->is<ConstantRef>() && pol->as<ConstantRef>().getNumBits() == 1);
-    return pol->as<ConstantRef>().getExactVal();
+  bool getPolarity(OperandRef ref) const {
+    if (auto w = ref.dyn_as<WireRef>(); w && w.getDefI().isOpc(OP_NOT))
+      return false;
+    return true;
   }
 
   enum UseType {
@@ -74,19 +93,19 @@ public:
     RESET_1 = RESET_BEGIN + numRstOperands,
     RESET_2 = RESET_BEGIN + 2 * numRstOperands,
     RESET_END = RESET_BEGIN +
-                ((InstrRef::max_others - numBaseOperands - numClkEnOperands) /
-                 numRstOperands)
+                ((InstrRef::max_others - numBaseOperands) / numRstOperands)
   };
   UseType classifyUse(OperandRef use) {
     assert(use.instr() == *this);
+    if (use.isDef())
+      return Q;
+
     unsigned idx = use - *other_begin();
     if (idx == 0)
       return CLOCK;
-    if (idx == 2)
+    if (idx == 1)
       return D;
-    if (idx == 3)
-      return Q;
-    if (hasClkEn() && idx == clkEnBase())
+    if (idx == 2)
       return ENABLE;
     if (numRsts() > 0 && (idx - rstBase()) % numRstOperands == 0)
       return UseType(RESET_BEGIN + ((idx - rstBase()) / numRstOperands));

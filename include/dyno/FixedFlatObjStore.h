@@ -18,11 +18,11 @@ private:
   using CreateHookT = void (*)(FatRefT);
   using DestroyHookT = void (*)(FatRefT);
 
-  std::vector<ObjID> freeIds;
+  Vec<ObjID> freeIds;
   FlatAddressSpace<T, 1ULL << bit_mask_sz<ObjID::num_t>> space;
   uint32_t sz = 0;
 
-  using BitFieldT = UnsizedSymbSet<std::vector<uint64_t>, 1>;
+  using BitFieldT = UnsizedSymbSet<Vec<uint64_t>, 1>;
   struct Empty {};
   std::conditional_t<UninitObj<T>, Empty, BitFieldT> valid;
 

@@ -1,10 +1,10 @@
 #pragma once
 
 #include <algorithm>
-#include <bit>
 #include <cassert>
 #include <cstddef>
 #include <memory>
+#include <new>
 
 template <typename T> class InlineStorageRef;
 

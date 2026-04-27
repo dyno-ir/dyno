@@ -3,6 +3,7 @@
 #include "dyno/Context.h"
 #include "dyno/DialectInfo.h"
 #include "dyno/IDImpl.h"
+#include "dyno/IDs.h"
 #include "dyno/Instr.h"
 #include "dyno/Interface.h"
 #include "dyno/Lexer.h"
@@ -13,6 +14,7 @@
 #include "support/RTTI.h"
 #include "support/ResultUnwrap.h"
 #include "support/SmallVec.h"
+#include "support/StringRef.h"
 #include "support/TempBind.h"
 #include "support/TemplateUtil.h"
 #include "support/Tokenizer.h"
@@ -26,12 +28,12 @@ namespace dyno {
 class ParserBase {
 protected:
   VectorLUT<FatDynObjRef<>> identMap;
-  VectorLUT<uint8_t> forwardDef;
+  UnsizedBitSet<Vec<uint64_t>> forwardDef;
 
 public:
   TempBindVal<DynoLexer> lexer;
-  using obj_parse_fn =
-      MemberRef<FatDynObjRef<>(void *, DialectType type, ArrayRef<char> name)>;
+  using obj_parse_fn = CallableRef<FatDynObjRef<>(
+      DialectType type, ArrayRef<char> name, bool isDef)>;
   Interfaces<NUM_DIALECTS, obj_parse_fn> interfaces;
   Context &ctx;
 
@@ -46,12 +48,13 @@ private:
   };
 
 protected:
-  std::expected<FatDynObjRef<>, ParseError> parseObject(ArrayRef<char> name) {
+  std::expected<FatDynObjRef<>, ParseError> parseObject(ArrayRef<char> name,
+                                                        bool isDef) {
     auto state = lexer->getState();
     UNWRAP(type, lexer->popType());
     auto fn = interfaces.template getVal<obj_parse_fn>(type.getDialectID());
     assert(fn);
-    auto ref = fn(type, std::string_view{name});
+    auto ref = fn(type, std::string_view{name}, isDef);
     if (!ref) {
       lexer->restoreState(state);
       return std::unexpected{
@@ -79,17 +82,28 @@ protected:
     identStr = identStr.substr(1);
 
     if (lexer->popIf(DynoLexer::op_colon)) {
-      isDef = !lexer->popIf(DynoLexer::op_qmark);
-      UNWRAP(newObj, parseObject(ArrayRef{identStr}))
-      obj = newObj;
-      auto isFwdDef = forwardDef.find(ident.ident.idx);
-      if (!(isFwdDef.has() && *isFwdDef))
+      auto isFwdDef = forwardDef.getDyn(ident.ident.idx);
+      if (!isFwdDef) {
+        isDef = !lexer->popIf(DynoLexer::op_qmark);
+
+        UNWRAP(newObj, parseObject(ArrayRef{identStr}, isDef))
+        obj = newObj;
+
         identMap.insertOrAssign(ident.ident.idx, FatDynObjRef{obj});
-      else {
-        // todo: delete object or don't parse at all
+
+        if (!isDef)
+          forwardDef.setDyn(ident.ident.idx);
+      } else {
+
+        // todo: remove (legacy format support)
+        if (lexer->peekType()) {
+          UNWRAP(unusedObj, parseObject(ArrayRef{identStr}, true))
+          ctx.destroy(unusedObj);
+        }
+
+        isDef = true;
         obj = *ref;
       }
-      forwardDef.insertOrAssign(ident.ident.idx, !isDef);
     } else {
       if (!ref)
         return std::unexpected{lexer->makeErrorOnPeekToken("undefined value")};
@@ -99,6 +113,7 @@ protected:
     return ParseOperand{obj, isDef};
   }
 
+public:
   std::expected<ParseOperand, ParseError> parseOperand() {
     auto tok = lexer->Peek();
     if (tok.type == DynoLexer::op_hash)
@@ -109,12 +124,12 @@ protected:
 
     if (tok.type == DynoLexer::op_colon) {
       lexer->Pop();
-      UNWRAP(ref, parseObject(ArrayRef<char>::emptyRef()))
+      UNWRAP(ref, parseObject(ArrayRef<char>::emptyRef(), true))
       return ParseOperand{ref, true};
     }
 
     if (lexer->peekType()) {
-      UNWRAP(ref, parseObject(ArrayRef<char>::emptyRef()))
+      UNWRAP(ref, parseObject(ArrayRef<char>::emptyRef(), false))
       return ParseOperand{ref, false};
     }
 
@@ -133,6 +148,7 @@ protected:
     return {};
   }
 
+protected:
   std::expected<void, ParseError> parseSourceLoc(InstrRef instr) {
     UNWRAP(tok, lexer->tryPeekEnsure(Token::STRING_LITERAL))
     auto pos = tok.strLit.value.find_first_of(':');
@@ -190,6 +206,8 @@ protected:
   }
 
   std::expected<InstrRef, ParseError> parseInstr() {
+    auto startLineCol = lexer->getStartOfPeekTokenLineCol();
+
     UNWRAP(opc, lexer->popOpcode());
 
     SmallVec<FatDynObjRef<>, 16> operands;
@@ -242,6 +260,13 @@ protected:
     while (lexer->popIf(DynoLexer::op_semicolon))
       ;
 
+    auto endLineCol = lexer->getEndOfTokenLineCol();
+    if (ctx.getCtx<CoreDialectContext>()
+            .instrSourceLocInfo.getSourceLocs(instr)
+            .empty())
+      ctx.getCtx<CoreDialectContext>().instrSourceLocInfo.addSrcLoc(
+          instr, lexer->path, startLineCol.first, startLineCol.second,
+          endLineCol.first, endLineCol.second);
     return instr;
   }
 
@@ -269,26 +294,23 @@ public:
       } else
         insert.insertPrev(*instr);
     }
+    identMap.clear();
+    forwardDef.clear();
   }
 
-  // essentially coroutine mode to parse one instruction after one another.
-  // state just default initialized for first call.
-  InstrRef parseSingle(ArrayRef<char> src, std::string fileName,
-                       DynoLexer::State &state) {
-    auto val = lexer.emplace(ctx.getDialectInfos(), src, std::move(fileName));
-    lexer->restoreState(state);
-
+  // Parse a single instruction. Lexer must be initialized by caller.
+  InstrRef parseSingle() {
     if (lexer->peekIs(Token::NONE))
       return nullref;
     if (auto res = parseInstr(); !res) {
       lexer->printError(res.error());
       report_fatal_error("parse error");
     } else {
-      ArrayRef{src.begin() + lexer->getState().i, src.end()};
-      state = lexer->getState();
       return *res;
     }
   }
+
+  void reset() { identMap.clear(); }
 
   ParserBase(Context &ctx) : ctx(ctx) {}
 };
@@ -316,18 +338,46 @@ public:
   CoreDialectParser(ParserBase *base) : base(*base) {
     base->interfaces.template registerVal<typename ParserBase::obj_parse_fn>(
         DIALECT_CORE,
-        MemberRef{this, BindMethod<&CoreDialectParser::parseCore>::fv});
+        CallableRef{this, BindMethod<&CoreDialectParser::parseCore>::fv});
   }
 
-  FatDynObjRef<> parseCore(DialectType type, ArrayRef<char> name) {
+  FatDynObjRef<> parseCore(DialectType type, ArrayRef<char> name, bool isDef) {
     assert(type.dialect == DIALECT_CORE);
-    if (type == CORE_BLOCK) {
+    switch (type.type) {
+    case CORE_BLOCK.type: {
       auto block = base.getCFG().blocks.create(base.getCFG());
       return block;
     }
+    case CORE_SYMBOL.type: {
+      SSOStringRef nm = name;
+      Optional<DialectType> type = nullopt;
+      if (base.lexer->popIf(DynoLexer::op_rbropen)) {
+        nm = base.lexer->popEnsure(Token::STRING_LITERAL).strLit.value;
+        if (base.lexer->popIf(DynoLexer::op_comma)) {
+          if (auto t = base.lexer->popType())
+            type = *t;
+          else
+            report_fatal_error("invalid type");
+        }
+        base.lexer->popEnsure(DynoLexer::op_rbrclose);
+      }
+      auto symb = base.ctx.getStore<Symbol>().findOrInsert(nm);
+      if (type != nullopt) {
+        if (symb->type && symb->type != type)
+          report_fatal_error("symbol type mismatch");
+        else
+          symb->type = type;
+      }
+      if (isDef) {
+        if (symb->defCtx && symb->defCtx != &base.ctx)
+          report_fatal_error("symbol defined in multiple contexts");
+        symb->defCtx = &base.ctx;
+      }
 
+      return symb;
+    }
+    }
     return nullref;
   }
 };
-
 }; // namespace dyno

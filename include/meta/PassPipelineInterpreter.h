@@ -3,6 +3,8 @@
 #include "dyno/Context.h"
 #include "dyno/InstrPrinter.h"
 #include "meta/PrintParse.h"
+#include "op/Function.h"
+#include "op/IDs.h"
 #include "op/MapObj.h"
 #include "op/PrintParse.h"
 #include "support/ErrorRecovery.h"
@@ -40,31 +42,66 @@ class MetaPassPipelineInterpreter {
   ArrayRef<void *> passCtorArgs;
   PassStorage passes;
 
-public:
-  void interpretPassPipeline(BlockRef block, ArrayRef<void *> passRunArgs) {
+  bool interpretPassPipelineImpl(Context &ctx, BlockRef block,
+                                 ArrayRef<void *> passRunArgs) {
     for (auto instr : block) {
+      if (instr.isOpc(OP_FUNCTION_DEF, CORE_EXPORT))
+        continue;
+      if (instr.isOpc(OP_CALL)) {
+        auto asCall = instr.as<CallInstrRef>();
+        if (!interpretPassPipelineImpl(*asCall.func()->defContext,
+                                       asCall.func().iref().getBlock(),
+                                       passRunArgs))
+          return false;
+        continue;
+      }
       if (instr.getDialect() != DIALECT_META)
         report_fatal_error("expected meta dialect instruction");
+
+      auto errorCB = [&]() {
+        auto locs =
+            ctx.getCtx<CoreDialectContext>().instrSourceLocInfo.getSourceLocs(
+                instr);
+        if (!locs.empty())
+          std::print(std::cerr, "{}: ", locs.front());
+        std::print(
+            std::cerr, "note: in pass {}\n",
+            ContextPrinterWrapper<CoreDialectPrinter, OpDialectPrinter,
+                                  MetaDialectPrinter>{ctx, OStreamWrapper{}}
+                .toString(instr));
+      };
+      push_fatal_error_callback(errorCB);
+
       auto opc = instr.getDialectOpcode();
       auto &pass = passes.findOrCreate(opc, passCtorArgs);
 
+      FatObjRef<MapObj> cfg = nullref;
       if (instr.getNumOperands() != 0) {
         if (instr.getNumOperands() != 1)
           report_fatal_error("expected at most one operand (config)");
-        auto cfg = instr.operand(0)->dyn_as<MapRef>();
+        cfg = instr.operand(0)->dyn_as<MapRef>();
         if (!cfg)
           report_fatal_error("expected map object");
-        DynoLexer lexer{ctx.getDialectInfos(), ArrayRef<char>::emptyRef(),
-                        "<internal>"};
-        pass.config(cfg->data, lexer);
       }
+      DynoLexer lexer{ctx.getDialectInfos(), ArrayRef<char>::emptyRef(),
+                      "<internal>"};
+      std::map<std::string, std::string> empty{};
+      pass.config(cfg ? cfg->data : empty, lexer);
 
-      if (!pass.run(passRunArgs))
-        report_fatal_error("failed to run pass: ",
-                           PrinterWrapper<CoreDialectPrinter, OpDialectPrinter,
-                                          MetaDialectPrinter>{OStreamWrapper{}}
-                               .toString(instr));
+      bool res = pass.run(passRunArgs);
+      pop_fatal_error_callback();
+      if (!res) {
+        errorCB();
+        std::print(std::cerr, "error: failed to run pass (returned false)\n");
+        return false;
+      }
     }
+    return true;
+  }
+
+public:
+  bool interpretPassPipeline(BlockRef block, ArrayRef<void *> passRunArgs) {
+    return interpretPassPipelineImpl(ctx, block, passRunArgs);
   }
 
   MetaPassPipelineInterpreter(Context &ctx, ArrayRef<void *> passCtorArgs)

@@ -1,17 +1,17 @@
 #pragma once
+#include "dyno/Lexer.h"
 #include "dyno/Obj.h"
 #include "dyno/Opcode.h"
-#include "dyno/Parser.h"
 #include "dyno/Type.h"
 #include "support/ArrayRef.h"
 #include "support/ErrorRecovery.h"
 #include "support/TemplateUtil.h"
 #include "support/Tokenizer.h"
+#include "support/Tuple.h"
 #include <charconv>
 #include <map>
 #include <string_view>
 #include <strings.h>
-#include <tuple>
 #include <type_traits>
 #include <utility>
 
@@ -28,7 +28,7 @@ namespace dyno {
     lambda(uint64_t, U64) \
     lambda(int64_t, I64) \
     lambda(const char*, STRING_CHAR_PTR) \
-    lambda(ArrayRef<char>, STRING_REF) \
+    lambda(StringRef, STRING_REF) \
     lambda(std::string_view, STRING_VIEW) \
     lambda(std::string, STD_STRING) \
     lambda(dyno::DialectOpcode, DIALECT_OPCODE) \
@@ -67,33 +67,14 @@ CONFIG_STRUCT_TYPES(LAMBDA)
   Func(reinterpret_cast<void *>(&this->name), ConfigStructTypeToEnum<type>::v, \
        #name);
 
-#define STR_IMPL(x) #x
-#define STR(x) STR_IMPL(x)
-#define QUOTE_1(x) STR(x)
-#define QUOTE_2(x, ...) STR(x), QUOTE_1(__VA_ARGS__)
-#define QUOTE_3(x, ...) STR(x), QUOTE_2(__VA_ARGS__)
-#define QUOTE_4(x, ...) STR(x), QUOTE_3(__VA_ARGS__)
-#define QUOTE_5(x, ...) STR(x), QUOTE_4(__VA_ARGS__)
-#define QUOTE_6(x, ...) STR(x), QUOTE_5(__VA_ARGS__)
-#define QUOTE_7(x, ...) STR(x), QUOTE_6(__VA_ARGS__)
-#define QUOTE_8(x, ...) STR(x), QUOTE_7(__VA_ARGS__)
-#define GET_NTH_ARG(_1, _2, _3, _4, _5, _6, _7, _8, N, ...) N
-#define COUNT_ARGS(...) GET_NTH_ARG(__VA_ARGS__, 8, 7, 6, 5, 4, 3, 2, 1)
-#define GLUE_IMPL(x, y) x##y
-#define GLUE(x, y) GLUE_IMPL(x, y)
-
-// quote each element in list
-#define QUOTE_LIST(...) GLUE(QUOTE_, COUNT_ARGS(__VA_ARGS__))(__VA_ARGS__)
-
 #define CONFIG_EXPAND_ENUM_CALL(name, defaultV, ...)                           \
   EnumFunc(reinterpret_cast<void *>(&this->name), #name,                       \
-           std::vector<const char *>{QUOTE_LIST(__VA_ARGS__)});
+           Vec<const char *>{DYNO_QUOTE_LIST(__VA_ARGS__)});
 
 #define CONFIG_STRUCT(lambda)                                                  \
   struct Config {                                                              \
-    lambda(CONFIG_EXPAND_MEMBER,                                               \
-           CONFIG_EXPAND_ENUM_MEMBER) void for_fields(auto &&Func,             \
-                                                      auto &&EnumFunc) {       \
+    lambda(CONFIG_EXPAND_MEMBER, CONFIG_EXPAND_ENUM_MEMBER) void for_fields(   \
+        auto &&Func [[maybe_unused]], auto &&EnumFunc [[maybe_unused]]) {      \
       lambda(CONFIG_EXPAND_CALL, CONFIG_EXPAND_ENUM_CALL)                      \
     }                                                                          \
   };
@@ -140,7 +121,7 @@ struct ConfigParser {
       break;
     }
     case ConfigStructType::STRING_REF: {
-      *reinterpret_cast<ArrayRef<char> *>(ptr) = ArrayRef<char>{data};
+      *reinterpret_cast<StringRef *>(ptr) = StringRef{data};
       break;
     }
     case ConfigStructType::STRING_VIEW: {
@@ -182,7 +163,8 @@ struct ConfigParser {
   }
 };
 
-template <typename Derived> class Pass {
+struct PassTag {};
+template <typename Derived> class Pass : public PassTag {
   static constexpr std::string_view getName() {
     for (auto t : Tokenizer{__PRETTY_FUNCTION__, ": <>"}) {
       // there's probably better logic, but format is different between
@@ -205,8 +187,8 @@ template <typename Derived> class Pass {
   template <typename T, std::size_t... Is>
   static auto createArgTuple(ArrayRef<void *> values,
                              std::index_sequence<Is...>) {
-    return std::tuple<typename std::tuple_element<Is, T>::type...>{
-        castArg<typename std::tuple_element<Is, T>::type>(values[Is])...};
+    return Tuple<typename tuple_element<Is, T>::type...>{
+        castArg<typename tuple_element<Is, T>::type>(values[Is])...};
   }
 
 public:
@@ -218,7 +200,9 @@ public:
     constexpr auto sz = std::tuple_size_v<arg_tuple>;
     auto argTuple =
         createArgTuple<arg_tuple>(args, std::make_index_sequence<sz>{});
-    return new Derived(std::make_from_tuple<Derived>(std::move(argTuple)));
+    return new Derived(argTuple.apply([](auto &&...args) {
+      return Derived(std::forward<decltype(args)...>(args)...);
+    }));
   }
 
   static bool typeErasedRun(void *self, ArrayRef<void *> args) {
@@ -226,8 +210,8 @@ public:
     constexpr auto sz = std::tuple_size_v<arg_tuple>;
     auto argTuple =
         createArgTuple<arg_tuple>(args, std::make_index_sequence<sz>{});
-    return std::apply(&BindMethod<&Pass::runGenericPtr>::fv,
-                      std::tuple_cat(std::make_tuple(self), argTuple));
+    return tuple_concat(mk_tuple(self), argTuple)
+        .apply(&BindMethod<&Pass::runGenericPtr>::fv);
   }
 
   static void typeErasedDestroy(void *obj) {
@@ -240,25 +224,28 @@ public:
     if constexpr (requires(Derived &d) {
                     d.config.for_fields(
                         [](void *, ConfigStructType, const char *) {},
-                        [](void *, const char *, std::vector<const char *>) {});
+                        [](void *, const char *, Vec<const char *>) {});
                   }) {
       auto &self = *reinterpret_cast<Derived *>(selfPtr);
       // reset to default config
       self.config = typename Derived::Config{};
 
       ConfigParser parser{lexer};
+      uint32_t cnt = 0;
       self.config.for_fields(
           [&](void *ptr, ConfigStructType ty, const char *nm) {
             auto it = config.find(std::string(nm));
             if (it == config.end())
               return;
+            cnt++;
             if (!parser.parseConfigType(ptr, ty, it->second))
               report_fatal_error("invalid setting {}: {}", nm, it->second);
           },
-          [&](void *ptr, const char *nm, std::vector<const char *> labels) {
+          [&](void *ptr, const char *nm, Vec<const char *> labels) {
             auto it = config.find(std::string(nm));
             if (it == config.end())
               return;
+            cnt++;
             auto it2 = Range{labels}.find_if(
                 [&](const char *elem) { return it->second == elem; });
             if (it2 == labels.end())
@@ -266,6 +253,11 @@ public:
             auto idx = it2 - labels.begin();
             *reinterpret_cast<int *>(ptr) = idx;
           });
+      if (cnt != config.size())
+        report_fatal_error("invalid keys in pass {} config", passName);
+    } else {
+      if (!config.empty())
+        report_fatal_error("pass {} is not configurable", passName);
     }
   }
 
@@ -276,13 +268,17 @@ private:
     if constexpr (std::tuple_size_v<function_args_t<T>> == 0) {
       if (ref)
         return false;
+      if constexpr (requires { bool((self.*func)()); })
+        return (self.*func)();
       (self.*func)();
       return true;
     } else {
       static_assert(std::tuple_size_v<function_args_t<T>> == 1,
                     "expected 0 or 1 arg function");
-      using arg_t = std::tuple_element_t<0, function_args_t<T>>;
+      using arg_t = tuple_element_t<0, function_args_t<T>>;
       if (auto conv = ref.dyn_as<arg_t>()) {
+        if constexpr (requires { bool((self.*func)(conv)); })
+          return (self.*func)(conv);
         (self.*func)(conv);
         return true;
       }
@@ -294,10 +290,11 @@ public:
   bool runGeneric(FatDynObjRef<> ref) {
     auto &self = *reinterpret_cast<Derived *>(this);
     if constexpr (requires { self.runFuncs; }) {
-      return std::apply(
-          [&](auto &&...funcs) { return (tryRun(ref, funcs) || ...); },
-          self.runFuncs);
+      return self.runFuncs.apply(
+          [&](auto &&...funcs) { return (tryRun(ref, funcs) || ...); });
     } else if (!ref) {
+      if constexpr (requires { bool(self.run()); })
+        return self.run();
       self.run();
       return true;
     }
@@ -307,5 +304,9 @@ public:
   bool runGenericPtr(FatDynObjRef<> *ref) { return runGeneric(*ref); }
 
   static constexpr std::string_view passName = getName();
+  static inline uint32_t passID = 0;
+
+  static inline const uint32_t &debugID{passID};
+  static inline const std::string_view &debugName{passName};
 };
 }; // namespace dyno

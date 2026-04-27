@@ -2,13 +2,25 @@
 #include "dyno/Context.h"
 #include "dyno/DialectInfo.h"
 #include "dyno/InstrPrinter.h"
+#include "dyno/Lexer.h"
 #include "dyno/Obj.h"
 #include "dyno/Parser.h"
 #include "hw/HWContext.h"
+#include "hw/IDs.h"
+#include "hw/MemoryPort.h"
 #include "hw/Module.h"
+#include "hw/StdCellInfo.h"
 #include "support/CallableRef.h"
+#include "support/Lexer.h"
+#include "support/Ranges.h"
 #include "support/TemplateUtil.h"
+#include <array>
 #include <cctype>
+#include <charconv>
+
+#define FOR_STDCELL_INFO_ELEMENTS(FUNC) FUNC(area), FUNC(isFlipFlop)
+#define EXPAND_MEMBERS(nm) asInfo->nm
+#define EXPAND_NAMES(nm) #nm
 
 namespace dyno {
 class HWDialectPrinter {
@@ -27,11 +39,11 @@ public:
 
     base->interfaces.registerVal<PrinterBase::type::print_fn>(
         DIALECT_HW,
-        MemberRef{this, BindMethod<&HWDialectPrinter::printHWType>::fv});
+        CallableRef{this, BindMethod<&HWDialectPrinter::printHWType>::fv});
 
     base->interfaces.registerVal<PrinterBase::name_fn>(
         DIALECT_HW,
-        MemberRef{this, BindMethod<&HWDialectPrinter::getObjectName>::fv});
+        CallableRef{this, BindMethod<&HWDialectPrinter::getObjectName>::fv});
   }
 
   bool printHWType(FatDynObjRef<> ref, bool def) {
@@ -79,6 +91,43 @@ public:
       }
       break;
     }
+    case HW_MEM_PORT.type: {
+      auto asPort = ref.as<MemoryPortRef>();
+      str << "mem_port(";
+      str << asPort->delay;
+
+      for (auto &meta : asPort->writeForwardMeta) {
+        std::print(str, ", ({}, {})", meta.oldTime, meta.unkTime);
+      }
+
+      str << ")";
+      break;
+    }
+    case HW_STDCELL_INFO.type: {
+      auto asInfo = ref.as<StdCellInfoRef>();
+      str << "stdcell_info(";
+
+      auto list = mk_tuple(FOR_STDCELL_INFO_ELEMENTS(EXPAND_MEMBERS));
+      auto names = std::to_array({FOR_STDCELL_INFO_ELEMENTS(EXPAND_NAMES)});
+      list.apply([&](auto &...args) {
+        size_t i = 0;
+        bool any = false;
+        (
+            [&] {
+              if (args) {
+                if (any)
+                  str << ", ";
+                // fixme: floating point in parser.
+                std::print(str, "\"{}\": {}", names[i], unsigned(*args));
+                i++;
+                any = true;
+              }
+            }(),
+            ...);
+      });
+      str << ")";
+      break;
+    }
     default:
       return false;
     }
@@ -118,10 +167,11 @@ public:
 
   explicit HWDialectParser(ParserBase *base) : base(*base) {
     base->interfaces.template registerVal<typename ParserBase::obj_parse_fn>(
-        DIALECT_HW, MemberRef{this, BindMethod<&HWDialectParser::parseHW>::fv});
+        DIALECT_HW,
+        CallableRef{this, BindMethod<&HWDialectParser::parseHW>::fv});
   }
 
-  FatDynObjRef<> parseHW(DialectType type, ArrayRef<char> name) {
+  FatDynObjRef<> parseHW(DialectType type, ArrayRef<char> name, bool isDef) {
     auto *lexer = &*base.lexer;
     auto *ctx = &base.ctx;
     switch (*type) {
@@ -176,6 +226,58 @@ public:
       lexer->popEnsure(DynoLexer::op_rbrclose);
       return trigger;
     }
+    case *HW_MEM_PORT: {
+      auto ref = ctx->getStore<MemoryPort>().create();
+      lexer->popEnsure(DynoLexer::op_rbropen);
+      ref->delay = lexer->popEnsure(Token::INT_LITERAL).intLit.value;
+      if (lexer->popIf(DynoLexer::op_comma)) {
+        while (!lexer->peekIs(DynoLexer::op_rbrclose)) {
+          lexer->popEnsure(DynoLexer::op_rbropen);
+          auto a = lexer->popEnsure(Token::INT_LITERAL).intLit.value;
+          lexer->popEnsure(DynoLexer::op_comma);
+          auto b = lexer->popEnsure(Token::INT_LITERAL).intLit.value;
+          lexer->popEnsure(DynoLexer::op_rbrclose);
+          ref->writeForwardMeta.emplace_back(a, b);
+
+          if (!lexer->popIf(DynoLexer::op_comma))
+            break;
+        }
+      }
+      lexer->popEnsure(DynoLexer::op_rbrclose);
+      return ref;
+    }
+    case *HW_POINTER: {
+      return ctx->getStore<Pointer>().create();
+    }
+    case *HW_STDCELL_INFO: {
+      auto asInfo = ctx->getStore<StdCellInfo>().create();
+      lexer->popEnsure(DynoLexer::op_rbropen);
+
+      auto list = mk_tuple(FOR_STDCELL_INFO_ELEMENTS(EXPAND_MEMBERS));
+      auto names = std::to_array({FOR_STDCELL_INFO_ELEMENTS(EXPAND_NAMES)});
+
+      while (lexer->peekIs(Token::STRING_LITERAL)) {
+        auto tok = lexer->popEnsure(Token::STRING_LITERAL).strLit.value;
+        auto res = list.apply([&](auto &...args) {
+          unsigned i = 0;
+          return ([&] {
+            if (names[i++] == tok) {
+              lexer->popEnsure(DynoLexer::op_colon);
+              // todo: non int
+              args = lexer->popEnsure(Token::INT_LITERAL).intLit.value;
+              return true;
+            }
+            return false;
+          }() || ...);
+        });
+        if (!res)
+          return nullref;
+        if (!lexer->popIf(DynoLexer::op_comma))
+          break;
+      }
+      lexer->popEnsure(DynoLexer::op_rbrclose);
+      return asInfo;
+    }
     }
 
     return nullref;
@@ -183,3 +285,7 @@ public:
 };
 
 }; // namespace dyno
+
+#undef FOR_STDCELL_INFO_ELEMENTS
+#undef EXPAND_MEMBERS
+#undef EXPAND_NAMES

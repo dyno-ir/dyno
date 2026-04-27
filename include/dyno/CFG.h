@@ -11,6 +11,7 @@ namespace dyno {
 
 class BlockRef;
 class BlockRef_iterator_base;
+template <bool> class BlockRef_iterator;
 class CFG;
 
 class Block {
@@ -53,6 +54,21 @@ template <> struct ObjTraits<Block> {
 
 using BlockStore = NewDeleteObjStore<Block>;
 
+class InstrNumbering {
+private:
+  Vec<uint64_t> numbers;
+  constexpr static uint64_t defaultInterval = 1ULL << 32;
+
+public:
+  void renumber(BlockRef block);
+  void insert(InstrRef instr, BlockRef_iterator_base it);
+  void replace(InstrRef oldI, InstrRef newI);
+  uint64_t operator[](InstrRef instr) const {
+    return numbers[instr.getObjID() + 1];
+  }
+  uint64_t get(InstrRef instr) { return numbers[instr.getObjID() + 1]; }
+};
+
 class CFG {
   friend class BlockRef;
   friend class BlockRef_iterator_base;
@@ -65,12 +81,18 @@ class CFG {
   ObjMapVec<Instr, Node> map;
 
 public:
+  std::optional<InstrNumbering> numbering = std::nullopt;
   BlockStore blocks;
 
   bool contains(ObjRef<Instr> ref) {
     if (!map.inRange(ref))
       return false;
     return bool(map[ref].block);
+  }
+
+  void reset() {
+    blocks.reset();
+    map.clear();
   }
 
   BlockRef_iterator_base operator[](ObjRef<Instr> ref);
@@ -113,6 +135,9 @@ public:
     lval = cfg().map[entry().ref];
     cfg().map[entry().ref] = CFG::Node{nullref, 0};
     entry().ref = ref;
+
+    if (cfg().numbering)
+      cfg().numbering->replace(instr(), ref);
   }
 
   void insertPrev(InstrRef ref) {
@@ -125,9 +150,13 @@ public:
     auto &cfgMapEntry = cfg().map.get_ensure(ref);
     cfgMapEntry.block = block->ref;
     cfgMapEntry.blockPos = newID;
+
+    if (cfg().numbering)
+      cfg().numbering->insert(ref, *this);
   }
 
   auto blockRef() const;
+  uint32_t getPos() const { return pos; }
 
 protected:
   CFG &cfg() const { return *block->cfg; }
@@ -194,6 +223,8 @@ public:
   }
 
   bool isEnd() const;
+
+  static BlockRef_iterator invalid() { return BlockRef_iterator(nullref, 0); }
 };
 static_assert(std::bidirectional_iterator<BlockRef_iterator<true>>);
 
@@ -237,6 +268,8 @@ public:
   CFG &getCFG() { return *ptr->cfg; }
 
   void sort() {
+    if ((*this)->sorted)
+      return;
     // think copy is faster than in place, just guess though.
     auto &instrsOld = (*this)->instrs;
     SmallVec<Block::Node, 16> instrsNew{instrsOld.size()};
@@ -259,6 +292,8 @@ public:
   }
 
   void sort_inplace() {
+    if ((*this)->sorted)
+      return;
     // might still be broken
     size_t idx = 1;
     auto &instrs = (*this)->instrs;
@@ -314,5 +349,43 @@ template <bool Ordered> bool BlockRef_iterator<Ordered>::isEnd() const {
   else
     return *this == this->blockRef().end_unordered();
 };
+
+inline void InstrNumbering::renumber(BlockRef block) {
+  for (auto [i, instr] : Range{block}.enumerate()) {
+    numbers[instr.getObjID()] = i * defaultInterval;
+  }
+}
+
+inline void InstrNumbering::insert(InstrRef instr, BlockRef_iterator_base it) {
+  numbers.resize_safe(std::max(instr.getObjID() + 2, numbers.size()));
+
+  auto itO = BlockRef_iterator<true>(it);
+  auto prev = std::prev(itO).instr();
+  auto next = std::next(itO).instr();
+
+  if (it == it.blockRef().end()) [[likely]] {
+    numbers[instr.getObjID() + 1] =
+        numbers[prev.getObjID() + 1] + defaultInterval;
+    return;
+  }
+
+  uint64_t carry = 0;
+  uint64_t mean = __builtin_addcl(numbers[next.getObjID() + 1],
+                                  numbers[prev.getObjID() + 1], 0, &carry);
+  mean = (mean >> 1) + (carry ? bit_mask_msb<uint64_t>() : 0);
+
+  if (mean == numbers[prev.getObjID() + 1]) [[unlikely]] {
+    renumber(it.blockRef());
+  } else {
+    numbers[instr.getObjID() + 1] = mean;
+  }
+}
+
+inline void InstrNumbering::replace(InstrRef oldI, InstrRef newI) {
+  numbers.resize_safe(std::max(newI.getObjID() + 2, numbers.size()));
+
+  assert(newI != nullref);
+  numbers[newI.getObjID() + 1] = numbers[oldI.getObjID() + 1];
+}
 
 } // namespace dyno

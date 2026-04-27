@@ -3,7 +3,7 @@
 #include "dyno/Obj.h"
 #include "dyno/ObjMap.h"
 #include "dyno/Pass.h"
-#include "hw/DeepCopy.h"
+#include "dyno/DeepCopy.h"
 #include "hw/HWAbstraction.h"
 #include "hw/HWPrinter.h"
 #include "hw/IDs.h"
@@ -13,6 +13,7 @@
 #include "support/Debug.h"
 #include "support/DenseMap.h"
 #include "support/DynBitSet.h"
+#include "support/ErrorRecovery.h"
 #include "support/Utility.h"
 #include <algorithm>
 #include <ctime>
@@ -105,6 +106,16 @@ public:
           break;
         }
 
+        case HW_MEM_STORE.raw(): {
+          auto asStore = instr.as<MemStoreIRef>();
+          auto parentProc = instr.parentProc(ctx);
+          if (ignoredKind(parentProc))
+            continue;
+          auto [addr, len] = asStore.getConstAccessRange();
+          writeRegions.addRegion(parentProc.proc().getObjID(), addr, len);
+          break;
+        }
+
         case HW_INSTANCE.raw(): {
           auto other = instr.other(0)->as<ModuleRef>();
           bool isInputFromInst = other->ports[access.getNum() - 1].portType.is(
@@ -122,6 +133,9 @@ public:
         case HW_LOAD.raw():
           break;
 
+        case HW_MEM_LOAD.raw():
+          break;
+
         case HW_STORE_DEFER.raw():
           break;
 
@@ -129,7 +143,7 @@ public:
           break;
 
         default:
-          dyno_unreachable("register ref'd by unexpected instr");
+          report_fatal_error("register ref'd by unexpected instr");
         }
       }
 
@@ -271,8 +285,7 @@ public:
             size_t i = 0;
             for (auto it2 = stack.end() - 1; it2 >= it.base(); --it2, ++i) {
               dbgs() << "Process " << (i + 1) << " of " << length << "\n";
-              dumpInstr(it2->proc.iref());
-              dbgs() << "\n";
+              dumpInstr(it2->proc.iref(), ctx, true, false);
             }
           });
 
@@ -432,14 +445,12 @@ public:
   }
 
   void runOnModule(ModuleIRef module) {
+    map.resize(ctx.getStore<Process>().numIDs());
     findDeps(module);
     linearize(module);
-  }
-  void runWrapper(auto &&runFunc) {
-    map.resize(ctx.getStore<Process>().numIDs());
-    runFunc();
     map.clear();
   }
+  void runWrapper(auto &&runFunc) { runFunc(); }
 
   void run() {
     runWrapper([&] {
@@ -451,7 +462,7 @@ public:
   void runModule(ModuleIRef mod) {
     runWrapper([&] { runOnModule(mod); });
   }
-  static constexpr auto runFuncs = std::make_tuple(
+  static constexpr auto runFuncs = mk_tuple(
       &ProcessLinearizePass::runModule, &ProcessLinearizePass::run);
 };
 }; // namespace dyno

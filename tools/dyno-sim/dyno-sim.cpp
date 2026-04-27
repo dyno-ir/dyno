@@ -11,7 +11,9 @@
 #include "hw/Register.h"
 #include "hw/Wire.h"
 #include "hw/passes/ParseDyno.h"
+#define ENABLE_FST
 #include "hw/run/HWInterpreter.h"
+#undef ENABLE_FST
 #include "ieee1800/sv_vpi_user.h"
 #include "ieee1800/vpi_user.h"
 #include "support/SmallVec.h"
@@ -172,7 +174,7 @@ int main(int argc, char **argv) {
   print.printCtx(ctx);
 
   auto mod = *ctx.getStore<Module>().begin();
-  mod.iref().rebuildSignature();
+  mod.iref().rebuildCache();
   auto topInstance = createTopInstance(ctx, mod.iref());
 
   HWInterpreter interpreter{ctx, mod.iref(), std::cout, std::cerr};

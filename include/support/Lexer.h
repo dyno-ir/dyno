@@ -1,8 +1,10 @@
 #pragma once
+#include "StringRef.h"
 #include "dyno/Constant.h"
 #include "support/ArrayRef.h"
 #include "support/ErrorRecovery.h"
 #include "support/SlabAllocator.h"
+#include "support/TwoLevelSet.h"
 #include <cassert>
 #include <cctype>
 #include <cstdio>
@@ -13,6 +15,7 @@
 #include <string_view>
 #include <type_traits>
 #include <unordered_map>
+#include <utility>
 
 struct Token {
   enum BaseType {
@@ -149,10 +152,11 @@ struct Lexer {
 
   struct State {
     size_t i = 0;
-    size_t lastI = 0;
+    size_t columnStartI = 0;
     unsigned lineNumber = 1;
   };
-  State state;
+  State state, lastState, preWhitespaceState;
+
   SlabAllocator<dyno::BigInt> bigIntLiterals;
 
   ArrayRef<const char *> operators;
@@ -163,14 +167,14 @@ struct Lexer {
 
 private:
   std::optional<Token> peekToken;
-  std::unordered_map<std::string_view, uint32_t> strings = initStrings();
-  std::vector<std::string_view> rvStrings;
+  TwoLevelMap<SSOStringRef, uint32_t> strings = initStrings();
+  Vec<SSOStringRef> rvStrings;
 
-  std::unordered_map<std::string_view, uint32_t> initStrings() {
-    std::unordered_map<std::string_view, uint32_t> map;
+  TwoLevelMap<SSOStringRef, uint32_t> initStrings() {
+    TwoLevelMap<SSOStringRef, uint32_t> map;
     size_t i = 0;
     for (auto kw : keywords)
-      map.emplace(kw, i++);
+      map.insert(kw, i++);
     return map;
   }
 
@@ -188,17 +192,21 @@ public:
 
   Token lexNext() {
     auto &i = state.i;
-    auto &lastI = state.lastI;
+    // auto &lastI = state.lastI;
     auto &lineNumber = state.lineNumber;
+    auto &columnStartI = state.columnStartI;
 
     size_t len = src.size();
     const char *srcC = src.data();
+    preWhitespaceState = state;
 
     while (1) {
       // Skip whitespace
       while (isspace(srcC[i])) {
-        if (srcC[i] == '\n')
+        if (srcC[i] == '\n') {
           lineNumber++;
+          columnStartI = i;
+        }
         i++;
       }
 
@@ -215,8 +223,10 @@ public:
         if (srcC[i] == '/' && srcC[i + 1] == '*') {
           i += 2;
           while (i < len && !(srcC[i - 2] == '*' && src[i - 1] == '/')) {
-            if (srcC[i - 2] == '\n')
+            if (srcC[i - 2] == '\n') {
               lineNumber++;
+              columnStartI = i;
+            }
             i++;
           }
           continue;
@@ -236,7 +246,41 @@ public:
     if (i == len)
       return Token::makeNone();
 
-    lastI = i;
+    lastState = state;
+
+    // String Literal
+    bool multiline = (srcC[i] == '[' && srcC[i + 1] == '{') && ParseInlineCode;
+    if (srcC[i] == '\"' || multiline) {
+      size_t delimLen = multiline ? 2 : 1;
+      size_t litLen = delimLen;
+      if (i + litLen >= len)
+        return Token::makeNone();
+      while (multiline
+                 ? (srcC[i + litLen] != '}' || srcC[i + litLen + 1] != ']')
+                 : (srcC[i + litLen] != '\"')) {
+        if (srcC[i + litLen] == '\n') {
+          if (!multiline)
+            return Token::makeNone();
+          else {
+            lineNumber++;
+            columnStartI = i;
+          }
+        }
+        litLen++;
+        if (i + litLen >= len)
+          return Token::makeNone();
+      }
+
+      Token t = Token::makeNone();
+      if (multiline)
+        t = Token::makeInlineCodeLit(
+            std::string_view(srcC + i + delimLen, litLen - delimLen));
+      else
+        t = Token::makeStrLit(
+            std::string_view(srcC + i + delimLen, litLen - delimLen));
+      i += litLen + delimLen;
+      return t;
+    }
 
     { // Try lexing operator
       for (auto [j, op] : Range{operators}.enumerate()) {
@@ -310,34 +354,6 @@ public:
       return Token::makeNumericLit(std::string_view{&src[i - len], len});
     }
 
-    // String Literal
-    bool multiline = (srcC[i] == '[' && srcC[i + 1] == '{') && ParseInlineCode;
-    if (srcC[i] == '\"' || multiline) {
-      size_t delimLen = multiline ? 2 : 1;
-      size_t litLen = delimLen;
-      if (i + litLen >= len)
-        return Token::makeNone();
-      while (multiline
-                 ? (srcC[i + litLen] != '}' || srcC[i + litLen + 1] != ']')
-                 : (srcC[i + litLen] != '\"')) {
-        if (!multiline && srcC[i + litLen] == '\n')
-          return Token::makeNone();
-        litLen++;
-        if (i + litLen >= len)
-          return Token::makeNone();
-      }
-
-      Token t = Token::makeNone();
-      if (multiline)
-        t = Token::makeInlineCodeLit(
-            std::string_view(srcC + i + delimLen, litLen - delimLen));
-      else
-        t = Token::makeStrLit(
-            std::string_view(srcC + i + delimLen, litLen - delimLen));
-      i += litLen + delimLen;
-      return t;
-    }
-
     return Token::makeNone();
   }
 
@@ -360,8 +376,7 @@ public:
     auto rv = state;
     if (peekToken) {
       // we do not back up the peek token, so reset to before it.
-      rv.i = rv.lastI;
-      rv.lastI = 0; // invalid w/o peek token
+      rv = lastState;
     }
     return rv;
   }
@@ -371,15 +386,14 @@ public:
   }
 
   unsigned GetIdentIdx(std::string_view ident) {
-    auto it = strings.find(ident);
-    if (it == strings.end()) {
-      rvStrings.push_back(ident);
-      return (strings[ident] = strings.size()) - NUM_KEYWORDS;
-    }
+    auto [found, it] = strings.findOrInsert(
+        ident, [&] { return (strings.size() - NUM_KEYWORDS); });
+    if (!found)
+      rvStrings.emplace_back(ident);
     return it->second - NUM_KEYWORDS;
   }
 
-  std::string_view GetIdent(unsigned identIdx) { return rvStrings[identIdx]; }
+  SSOStringRef GetIdent(unsigned identIdx) { return rvStrings[identIdx]; }
 
   static std::string_view extractEnclosingLine(std::string_view input,
                                                size_t i) {
@@ -443,12 +457,13 @@ public:
   }
   ParseError makeErrorOnPeekToken(const char *error) {
     assert(peekToken);
-    return ParseError{error, state.lastI, state.i, state.lineNumber};
+    return ParseError{error, lastState.i, state.i, state.lineNumber};
   }
 
   ParseError makeErrorOnNextToken(const char *error) {
-    assert(peekToken);
-    return ParseError{error, state.i, state.i, state.lineNumber};
+    if (!peekToken)
+      Peek();
+    return ParseError{error, lastState.i, state.i, state.lineNumber};
   }
 
   template <typename... Ts> Token peekEnsure(Ts... types) {
@@ -483,5 +498,19 @@ public:
     this->src = src;
     this->state = State{};
     this->peekToken.reset();
+  }
+
+  std::pair<uint32_t, uint32_t> getStartOfPeekTokenLineCol() {
+    if (!peekToken)
+      Peek();
+    return std::make_pair(lastState.lineNumber,
+                          lastState.i - lastState.columnStartI);
+  }
+  std::pair<uint32_t, uint32_t> getEndOfTokenLineCol() {
+    if (peekToken)
+      return std::make_pair(preWhitespaceState.lineNumber,
+                            preWhitespaceState.i -
+                                preWhitespaceState.columnStartI);
+    return std::make_pair(state.lineNumber, state.i - state.columnStartI);
   }
 };

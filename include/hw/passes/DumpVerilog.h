@@ -11,8 +11,9 @@
 #include "op/IDs.h"
 #include "support/ErrorRecovery.h"
 #include "support/Utility.h"
+#include <fstream>
 #include <print>
-#include <tuple>
+#include "support/Tuple.h"
 namespace dyno {
 
 class void_stream final : public std::ostream {
@@ -31,16 +32,20 @@ private:
 
 class DumpVerilogPass : public Pass<DumpVerilogPass> {
   Context &ctx;
-  std::ostream &os;
+  std::ofstream os;
 
   void_stream voidStr;
   HWPrinter print;
 
-#define CONFIG_STRUCT_LAMBDA(FIELD, ENUM) FIELD(bool, dumpWiresLast, true)
+public:
+#define CONFIG_STRUCT_LAMBDA(FIELD, ENUM)                                      \
+  FIELD(bool, dumpWiresLast, true)                                             \
+  FIELD(std::string, fileName, "dump.v")
   CONFIG_STRUCT(CONFIG_STRUCT_LAMBDA)
 #undef CONFIG_STRUCT_LAMBDA
   Config config;
 
+private:
   // Adapter for printer's regular IntroducedName, only overrides str()
   struct VerilogIntroducedName : public Printer::IntroducedName {
     using Printer::IntroducedName::IntroducedName;
@@ -293,13 +298,15 @@ class DumpVerilogPass : public Pass<DumpVerilogPass> {
   }
 
 public:
-  explicit DumpVerilogPass(Context &ctx, std::ostream &os)
-      : ctx(ctx), os(os), print(voidStr) {}
+  explicit DumpVerilogPass(Context &ctx) : ctx(ctx), print(voidStr) {}
+  auto make(Context &ctx) { return DumpVerilogPass{ctx}; }
   void runWrapper(auto &&runFunc) {
+    os = std::ofstream{config.fileName};
     print.reset();
     auto tok =
         print.regNames().bind(&ctx.getCtx<HWDialectContext>().regNameInfo);
     runFunc();
+    os.close();
   }
   void run() {
     runWrapper([&] {
@@ -312,7 +319,7 @@ public:
   }
 
   static constexpr auto runFuncs =
-      std::make_tuple(&DumpVerilogPass::runModule, &DumpVerilogPass::run);
+      mk_tuple(&DumpVerilogPass::runModule, &DumpVerilogPass::run);
 };
 
 }; // namespace dyno

@@ -24,7 +24,7 @@ class SSAConstructPass : public Pass<SSAConstructPass> {
   Context &ctx;
   unsigned depth = 0;
   ObjMapVec<Instr, bool> isNewInstr;
-  AutoCopyDebugInfoStack autoDebugInfo;
+  TempBindVal<AutoCopyDebugInfoStack> autoDebugInfo;
 
 public:
 #define CONFIG_STRUCT_LAMBDA(FIELD, ENUM)                                      \
@@ -82,10 +82,10 @@ private:
 
 public:
   auto make(Context &ctx) { return SSAConstructPass(ctx); }
-  explicit SSAConstructPass(Context &ctx) : ctx(ctx), autoDebugInfo(ctx) {}
+  explicit SSAConstructPass(Context &ctx) : ctx(ctx) {}
 
   struct MultiwayResult {
-    SmallVec<std::tuple<RegisterRef, std::pair<uint32_t, uint32_t>, TriggerID>,
+    SmallVec<Tuple<RegisterRef, std::pair<uint32_t, uint32_t>, TriggerID>,
              2>
         yieldRegs;
     SmallVec<SmallVec<HWValue, 4>, 2> yieldVals;
@@ -159,7 +159,7 @@ public:
         vals[val.depth - startDepth - 1] = &val;
         allUntouched &= val.untouched;
       }
-      if (i >= 0)
+      if (i >= 0 && regState.stack[i].depth == startDepth)
         vals.back() = &regState.stack[i];
 
       if (allUntouched) {
@@ -212,7 +212,7 @@ public:
                                   MutArrayRef<BlockRef> loopBlocks) {
     assert(loopBlocks.size() == numLoopBlocks);
     auto startDepth = depth - numLoopBlocks;
-    SmallVec<std::tuple<RegisterRef, std::pair<uint32_t, uint32_t>, TriggerID>,
+    SmallVec<Tuple<RegisterRef, std::pair<uint32_t, uint32_t>, TriggerID>,
              4>
         yieldVals;
     std::array<SmallVec<HWValue, 4>, numLoopBlocks> materializedYieldVals;
@@ -307,7 +307,7 @@ public:
       }
     }
 
-    return std::make_tuple(yieldVals, materializedYieldVals, unyieldWires);
+    return mk_tuple(yieldVals, materializedYieldVals, unyieldWires);
   }
 
   // this is not really needed, template also works with size == 1.
@@ -320,7 +320,7 @@ public:
     unsigned startDepth = depth - 1;
     unsigned bodyDepth = depth;
 
-    SmallVec<std::tuple<RegisterRef, std::pair<uint32_t, uint32_t>, TriggerID>,
+    SmallVec<Tuple<RegisterRef, std::pair<uint32_t, uint32_t>, TriggerID>,
              4>
         yieldVals;
     SmallVec<HWValue, 4> materializedYieldVals(yieldVals.size());
@@ -387,13 +387,13 @@ public:
       }
     }
 
-    return std::make_tuple(yieldVals, materializedYieldVals, unyieldWires);
+    return mk_tuple(yieldVals, materializedYieldVals, unyieldWires);
   }
 
   bool addYieldsToLoopInstr(
       HWInstrBuilder &build, InstrRef loopInstr,
       ArrayRef<
-          std::tuple<RegisterRef, std::pair<uint32_t, uint32_t>, TriggerID>>
+          Tuple<RegisterRef, std::pair<uint32_t, uint32_t>, TriggerID>>
           yieldVals) {
     if (yieldVals.size() == 0)
       return false;
@@ -454,7 +454,7 @@ public:
     SmallVec<FatDynObjRef<>, 32> destroyList;
 
     for (auto instr : block) {
-      auto token = autoDebugInfo.addWithToken(instr);
+      auto token = autoDebugInfo->addWithToken(instr);
       switch (*instr.getDialectOpcode()) {
 
       case *HW_STORE_DEFER:
@@ -821,6 +821,7 @@ public:
   }
 
   void runWrapper(auto &&runFunc) {
+    auto tok = autoDebugInfo.emplace(ctx);
     isNewInstr.clear();
     isNewInstr.resize(ctx.getStore<Instr>().numIDs());
     auto &createHooks = ctx.getStore<Instr>().createHooks;
@@ -849,7 +850,7 @@ public:
   }
 
   static constexpr auto runFuncs =
-      std::make_tuple(&SSAConstructPass::runProcess,
+      mk_tuple(&SSAConstructPass::runProcess,
                       &SSAConstructPass::runModule, &SSAConstructPass::run);
 };
 

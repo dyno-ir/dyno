@@ -20,6 +20,16 @@ __attribute__((used)) void dumpInstr(InstrRef instr, Context &ctx) {
   print.reset();
   print.printInstr(instr, ctx);
 }
+__attribute__((used)) void dumpInstr(InstrRef instr, Context &ctx,
+                                     bool trailingNewline) {
+  print.reset();
+  print.printInstr(instr, ctx, trailingNewline);
+}
+__attribute__((used)) void dumpInstr(InstrRef instr, Context &ctx,
+                                     bool trailingNewline, bool expandBlocks) {
+  print.reset();
+  print.printInstr(instr, ctx, trailingNewline, expandBlocks);
+}
 
 __attribute__((used)) void dumpDeps(InstrRef instr) {
   print.reset();
@@ -38,6 +48,16 @@ __attribute__((used)) void dumpDeps(InstrRef instr, Context &ctx,
   print.reset();
   print.printDeps(instr, ctx, maxDepth);
 }
+
+__attribute__((used)) void dumpInstrByID(uint32_t id, Context &ctx) {
+  dumpInstr(ctx.getStore<Instr>().resolve(ObjRef<Instr>{ObjID{id}}), ctx);
+}
+__attribute__((used)) void dumpDepsByID(uint32_t id, Context &ctx,
+                                        uint maxDepth) {
+  dumpDeps(ctx.getStore<Instr>().resolve(ObjRef<Instr>{ObjID{id}}), ctx,
+           maxDepth);
+}
+
 __attribute__((used)) void dumpObj(FatDynObjRef<> obj) {
   print.reset();
   if (auto asInstr = obj.dyn_as<InstrRef>())

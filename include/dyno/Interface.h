@@ -41,6 +41,8 @@ public:
                                    entries.data())));
   }
 
+  std::array<std::remove_const_t<Dispatch1T>, 256> &getRaw() { return entries; }
+
   constexpr void registerDialect(DialectID dialect, const Dispatch1T val) {
     entries[dialect] = val;
   }
@@ -69,7 +71,7 @@ public:
 };
 
 template <size_t NumDialects, typename... Types> class Interfaces {
-  std::array<std::tuple<Types...>, NumDialects> arr = {};
+  std::array<Tuple<Types...>, NumDialects> arr = {};
 
   template <typename T> static constexpr size_t type_index() {
     return type_index_impl<T, Types...>(
@@ -85,10 +87,10 @@ template <size_t NumDialects, typename... Types> class Interfaces {
   }
 
   template <typename T> constexpr T &get(size_t index) {
-    return std::get<type_index<T>()>(arr[index]);
+    return arr[index].template get<T>();
   }
   template <typename T> constexpr const T &get(size_t index) const {
-    return std::get<type_index<T>()>(arr[index]);
+    return arr[index].template get<T>();
   }
 
 public:
@@ -117,7 +119,7 @@ public:
 
 class DynInterfaces {
 private:
-  std::vector<void *> interfaces;
+  Vec<void *> interfaces;
   unsigned numDialects;
 
 public:
@@ -156,8 +158,10 @@ template <typename Value, typename... Types> class StaticGenericObjVecMap {
   }
 
 public:
-  template <typename K> auto &map() { return std::get<type_index<K>()>(maps); }
-  std::tuple<ObjMapVec<Types, Value>...> maps;
+  template <typename K> auto &map() {
+    return maps.template get<ObjMapVec<K, Value>>();
+  }
+  Tuple<ObjMapVec<Types, Value>...> maps;
 
   template <typename K> void ensure(ObjRef<K> ref) {
     return map<K>().ensure(ref);

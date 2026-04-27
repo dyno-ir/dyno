@@ -11,9 +11,11 @@
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <iterator>
 #include <memory>
 #include <new>
+#include <type_traits>
 #include <utility>
 
 template <typename Derived, typename K, typename Bucket, typename Iterator>
@@ -21,6 +23,8 @@ class DenseSetMapBase {
 public:
   using size_type = uint32_t;
   using iterator = Iterator;
+  using key = K;
+
   size_type cap;
   size_type sz;
 
@@ -106,12 +110,14 @@ public:
     }
   }
 
-  template <std::invocable<Bucket *, size_type> T> void grow(T &&reinsertFunc) {
+  template <std::invocable<Bucket *, size_type> T>
+  void grow(T &&reinsertFunc, uint32_t newCap) {
     auto oldBuckets = getBuckets();
     auto oldCap = cap;
 
     getBuckets() = (Bucket *)::operator new[](
-        sizeof(Bucket) * (cap *= 2), std::align_val_t(alignof(Bucket)));
+        sizeof(Bucket) * newCap, std::align_val_t(alignof(Bucket)));
+    cap = newCap;
     std::uninitialized_default_construct_n(getBuckets(), cap);
 
     sz = 0;
@@ -130,7 +136,7 @@ public:
     auto max = cap * Bucket::entriesPerBucket;
     auto pct = (max / 2) + (max / 4) + (max / 8) + (max / 16);
     if (sz >= pct) {
-      grow(reinsertFunc);
+      grow(reinsertFunc, 2 * cap);
       return true;
     }
     return false;
@@ -212,8 +218,8 @@ public:
     return tmp;
   }
 
-  friend bool operator==(const DenseSetMapIteratorBase &lhs,
-                         const DenseSetMapIteratorBase &rhs) {
+  bool operator==(const DenseSetMapIteratorBase &rhs) const {
+    auto &lhs = *this;
     if (lhs.bucket != rhs.bucket)
       return false;
     assert(lhs.rem == rhs.rem);
@@ -253,7 +259,7 @@ public:
   // }
 
   value_type operator*() {
-    return std::pair<const K &, V &>(bucket->keys[idx], bucket->values[idx]);
+    return std::pair<const K &, V &>(bucket->keys[idx], bucket->values()[idx]);
   }
   // can't support this with non-contiguous key/val (maybe w proxy object)
   auto operator->() = delete;
@@ -295,11 +301,14 @@ template <typename Derived, typename K, typename V, typename Bucket,
 class DenseMapBase : public DenseSetMapBase<Derived, K, Bucket, Iterator> {
   using Base = DenseSetMapBase<Derived, K, Bucket, Iterator>;
 
+  void reinsertFunc(Bucket *bucket, Base::size_type j) {
+    insert(std::move(bucket->keys[j]), std::move(bucket->values()[j]));
+    std::destroy_at(&bucket->values()[j]);
+  }
+
   bool growIfOversized() {
-    return Base::growIfOversized([&](Bucket *bucket, size_type j) {
-      insert(std::move(bucket->keys[j]), std::move(bucket->values[j]));
-      std::destroy_at(&bucket->values[j]);
-    });
+    return Base::growIfOversized(
+        [&](Bucket *bucket, Base::size_type j) { reinsertFunc(bucket, j); });
   }
 
 protected:
@@ -315,6 +324,18 @@ public:
   using Base::begin;
   using Base::end;
 
+  void reserve(Base::size_type newCap) {
+    // increase by inverse max fill: 1 / 0.9375 = 1.0667
+    newCap = round_up_div(uint64_t(newCap) * 107, uint64_t(100));
+    newCap = round_up_div(newCap, Bucket::entriesPerBucket);
+    newCap = ceil_to_pow2(newCap);
+    if (newCap <= cap)
+      return;
+    this->Base::grow(
+        [&](Bucket *bucket, Base::size_type j) { reinsertFunc(bucket, j); },
+        newCap);
+  }
+
   iterator insert(const K &k, V &&v) {
     growIfOversized();
     auto iter = Base::findEmptyImpl(k);
@@ -324,6 +345,11 @@ public:
     return iter;
   }
   iterator insert(const K &k, const V &v) { return insert(k, V{v}); }
+  template <typename It> void insert(Range<It> arr) {
+    for (auto [k, v] : arr) {
+      insert(k, v);
+    }
+  }
 
   iterator insertOrAssign(const K &k, V &&v) {
     auto [found, iter] = Base::findImpl(k);
@@ -357,7 +383,7 @@ public:
     return std::make_pair(false, iter);
   }
 
-  auto findOrInsert(const K &k, const V &&newVal) {
+  auto findOrInsert(const K &k, V &&newVal) {
     return findOrInsert(k, [&] { return std::move(newVal); });
   }
 
@@ -430,6 +456,12 @@ protected:
   using Base::self;
   using Base::sz;
 
+  bool growIfOversized() {
+    return Base::growIfOversized([&](Bucket *bucket, size_type j) {
+      insert(std::move(bucket->keys[j]));
+    });
+  }
+
 public:
   using iterator = Base::iterator;
   using size_type = Base::size_type;
@@ -437,10 +469,18 @@ public:
   using Base::begin;
   using Base::end;
 
-  bool growIfOversized() {
-    return Base::growIfOversized([&](Bucket *bucket, size_type j) {
-      insert(std::move(bucket->keys[j]));
-    });
+  void reserve(Base::size_type newCap) {
+    // increase by inverse max fill: 1 / 0.9375 = 1.0667
+    newCap = round_up_div(uint64_t(newCap) * 107, uint64_t(100));
+    newCap = round_up_div(newCap, Bucket::entriesPerBucket);
+    newCap = ceil_to_pow2(newCap);
+    if (newCap <= cap)
+      return;
+    this->Base::grow(
+        [&](Bucket *bucket, Base::size_type j) {
+          insert(std::move(bucket->keys[j]));
+        },
+        newCap);
   }
 
   iterator insert(const K &k) {
@@ -481,6 +521,7 @@ public:
       return;
     for (size_t i = 0; i < cap; i++)
       getBuckets()[i].setKeysEmpty();
+    sz = 0;
   }
   iterator erase(iterator it) {
     assert(it != end());
@@ -513,7 +554,7 @@ template <typename K, typename size_type = uint32_t> struct DenseSetBucket {
   // buckets are searched linearly
   // keys are contiguous for SIMD compare
   // values are still here for better locality though
-  std::array<K, entriesPerBucket> keys; // alignas(vector_len * sizeof(K));
+  std::array<K, entriesPerBucket> keys;
 
   template <bool Inverse, typename... Args>
   size_type findVec(size_type cur = ~0, Args... k) {
@@ -572,7 +613,6 @@ template <typename K, typename size_type = uint32_t> struct DenseSetBucket {
     return findVec<true>(cur, DenseMapInfo<K>::getEmptyKey(),
                          DenseMapInfo<K>::getTombstoneKey());
 #else
-    // todo: vectorize manually
     for (size_type i = cur + 1; i < keys.size(); i++) {
       if (!DenseMapInfo<K>::isEqual(keys[i], DenseMapInfo<K>::getEmptyKey()) &&
           !DenseMapInfo<K>::isEqual(keys[i],
@@ -588,7 +628,6 @@ template <typename K, typename size_type = uint32_t> struct DenseSetBucket {
 #if defined(__clang__) && SIMD_DENSE_MAP
     return findVec<false>(cur, k);
 #else
-    // todo: vectorize manually
     for (size_type i = cur + 1; i < keys.size(); i++) {
       if (DenseMapInfo<K>::isEqual(keys[i], k))
         return i;
@@ -602,7 +641,6 @@ template <typename K, typename size_type = uint32_t> struct DenseSetBucket {
     return findVec<false>(cur, DenseMapInfo<K>::getEmptyKey(),
                           DenseMapInfo<K>::getTombstoneKey());
 #else
-    // todo: vectorize manually
     for (size_type i = cur + 1; i < keys.size(); i++) {
       if (DenseMapInfo<K>::isEqual(keys[i], DenseMapInfo<K>::getEmptyKey()) ||
           DenseMapInfo<K>::isEqual(keys[i], DenseMapInfo<K>::getTombstoneKey()))
@@ -619,10 +657,45 @@ template <typename K, typename size_type = uint32_t> struct DenseSetBucket {
   DenseSetBucket() { setKeysEmpty(); }
 };
 
+namespace detail {
+template <typename Bucket>
+void copyDenseMapBucketValues(Bucket *buckets, Bucket *obuckets, size_t cap,
+                              bool move = false) {
+  using KeyT = std::remove_cvref_t<decltype(buckets->keys[0])>;
+  if constexpr (requires { buckets->values(); }) {
+    if constexpr (!std::is_trivially_copyable_v<
+                      std::remove_cvref_t<decltype(buckets->values()[0])>>) {
+      for (size_t bucketI = 0; bucketI < cap; bucketI++) {
+        Bucket *bucket = &buckets[bucketI];
+        Bucket *oBucket = &obuckets[bucketI];
+
+        memcpy(bucket->keys.data(), oBucket->keys.data(), sizeof(bucket->keys));
+
+        for (size_t i = 0; i < Bucket::entriesPerBucket; i++) {
+          if (bucket->keys[i] != DenseMapInfo<KeyT>::getEmptyKey() &&
+              bucket->keys[i] != DenseMapInfo<KeyT>::getTombstoneKey()) {
+            if (move)
+              std::construct_at(&bucket->values()[i],
+                                std::move(oBucket->values()[i]));
+            else
+              std::construct_at(&bucket->values()[i], oBucket->values()[i]);
+          }
+        }
+      }
+      return;
+    }
+  }
+  memcpy(reinterpret_cast<void *>(buckets), reinterpret_cast<void *>(obuckets),
+         cap * sizeof(Bucket));
+}
+}; // namespace detail
+
 template <typename K, typename V, typename size_type = uint32_t>
 struct DenseMapBucket : public DenseSetBucket<K, size_type> {
   using Base = DenseSetBucket<K, size_type>;
-  std::array<V, Base::entriesPerBucket> values;
+  using StorageT = std::array<V, Base::entriesPerBucket>;
+  InlineStorage<sizeof(StorageT), alignof(StorageT)> storage;
+  auto &values() { return *(storage.template as<StorageT>()); }
 };
 
 template <typename Base> class LargeSetMap : public Base {
@@ -649,7 +722,9 @@ public:
   LargeSetMap(const LargeSetMap &other) : Base(other.cap, 0) {
     buckets = (Bucket *)::operator new[](sizeof(Bucket) * other.cap,
                                          std::align_val_t(alignof(Bucket)));
-    std::uninitialized_copy_n(other.buckets, other.cap, buckets);
+
+    detail::copyDenseMapBucketValues(buckets, other.buckets, other.cap);
+
     this->cap = other.cap;
     this->sz = other.sz;
   }
@@ -673,9 +748,31 @@ public:
     std::construct_at(this, std::move(other));
     return *this;
   }
+  LargeSetMap(size_t cap)
+      : Base(ceil_to_pow2(round_up_div(cap * 107,
+                                       size_t(Bucket::entriesPerBucket) * 100)),
+             0) {
+    buckets = (Bucket *)::operator new[](sizeof(Bucket) * this->cap,
+                                         std::align_val_t(alignof(Bucket)));
+    std::uninitialized_default_construct_n(buckets, this->cap);
+  }
+  template <typename T>
+  LargeSetMap(Range<T> range)
+    requires(std::is_same_v<typename Range<T>::iterator_category,
+                            std::random_access_iterator_tag>)
+      : LargeSetMap(range.size()) {
+    this->insert(range);
+  }
+  template <typename T>
+  LargeSetMap(Range<T> range)
+    requires(!std::is_same_v<typename Range<T>::iterator_category,
+                             std::random_access_iterator_tag>)
+      : LargeSetMap() {
+    this->insert(range);
+  }
 
   ~LargeSetMap() {
-    this->Base::clearDelete();
+    static_assert(std::is_trivially_destructible_v<Bucket>);
     ::operator delete[](buckets, std::align_val_t(alignof(Bucket)));
   }
 };
@@ -700,7 +797,7 @@ public:
 public:
   bool isSmall() { return buckets == *arr; }
 
-  SmallSetMap() : Base(InlineBuckets, 0), arr() {
+  SmallSetMap() noexcept : Base(InlineBuckets, 0), arr() {
     std::uninitialized_default_construct_n(*arr, InlineBuckets);
     buckets = *arr;
   }
@@ -711,14 +808,16 @@ public:
     } else {
       buckets = *arr;
     }
-    std::uninitialized_copy_n(other.buckets, other.cap, buckets);
+
+    detail::copyDenseMapBucketValues(buckets, other.buckets, other.cap);
+
     this->cap = other.cap;
     this->sz = other.sz;
   }
-  SmallSetMap(SmallSetMap &&other) : Base(InlineBuckets, 0), arr() {
+  SmallSetMap(SmallSetMap &&other) noexcept : Base(InlineBuckets, 0), arr() {
     if (other.isSmall()) {
       buckets = *arr;
-      std::uninitialized_copy_n(other.buckets, other.cap, buckets);
+      detail::copyDenseMapBucketValues(buckets, other.buckets, other.cap, true);
     } else {
       this->buckets = other.buckets;
     }
@@ -736,31 +835,44 @@ public:
     return *this;
   }
   SmallSetMap &operator=(SmallSetMap &&other) {
-    if (!this->buckets) {
-      // moved-from state
-      std::construct_at(this);
-    }
-
-    if (other.isSmall()) {
-      std::uninitialized_copy_n(other.buckets, other.cap, buckets);
-    } else {
-      deleteArr(buckets);
-      this->buckets = other.buckets;
-    }
-
-    this->cap = other.cap;
-    this->sz = other.sz;
-
-    other.buckets = nullptr;
-    other.sz = 0;
-    other.cap = 0;
+    std::destroy_at(this);
+    std::construct_at(this, std::move(other));
     return *this;
+  }
+  SmallSetMap(size_t cap)
+      : Base(
+            ceil_to_pow2(std::max(
+                round_up_div(cap * 107, size_t(Bucket::entriesPerBucket) * 100),
+                InlineBuckets)),
+            0) {
+    if (this->cap > InlineBuckets) {
+      buckets = (Bucket *)::operator new[](sizeof(Bucket) * this->cap,
+                                           std::align_val_t(alignof(Bucket)));
+    } else {
+      buckets = *arr;
+    }
+    std::uninitialized_default_construct_n(buckets, this->cap);
+  }
+  template <typename T>
+  SmallSetMap(Range<T> range)
+    requires(std::is_same_v<typename Range<T>::iterator_category,
+                            std::random_access_iterator_tag>)
+      : SmallSetMap(range.size()) {
+    this->insert(range);
+  }
+  template <typename T>
+  SmallSetMap(Range<T> range)
+    requires(!std::is_same_v<typename Range<T>::iterator_category,
+                             std::random_access_iterator_tag>)
+      : SmallSetMap() {
+    this->insert(range);
   }
 
   ~SmallSetMap() {
     if (isSmall())
       return;
     ASAN_UNPOISON_MEMORY_REGION(*arr, sizeof(arr));
+    static_assert(std::is_trivially_destructible_v<Bucket>);
     ::operator delete[](buckets, std::align_val_t(alignof(Bucket)));
   }
 };
@@ -771,6 +883,9 @@ class DenseMap : public LargeSetMap<
   using Base =
       LargeSetMap<DenseMapBase<DenseMap<K, V>, K, V, DenseMapBucket<K, V>>>;
   using Base::Base;
+
+public:
+  ~DenseMap() { this->Base::clearDelete(); }
 };
 
 template <typename K, typename V,
@@ -786,6 +901,9 @@ class SmallDenseMap
                                         DenseMapBucket<K, V>>,
                            InlineElemns>;
   using Base::Base;
+
+public:
+  ~SmallDenseMap() { this->Base::clearDelete(); }
 };
 
 template <typename K>

@@ -70,9 +70,9 @@ public:
 
   explicit operator bool() const { return static_cast<bool>(obj); }
 
-  DialectID getDialectID() { return Traits::dialect; }
-  TyID getTyID() { return Traits::ty; }
-  ObjID getObjID() { return obj; }
+  DialectID getDialectID() const { return Traits::dialect; }
+  TyID getTyID() const { return Traits::ty; }
+  ObjID getObjID() const { return obj; }
 
   static bool is_impl(const DynObjRef &Ref);
 
@@ -226,6 +226,8 @@ public:
     return a.custom == b.custom && a.obj == b.obj;
   }
 
+  ObjRef<T> thin() const { return *this; }
+
   uint64_t rawNoPtr() const {
     return uint64_t(special) << 48 | uint64_t(custom) << 32 | this->obj.num;
   }
@@ -314,7 +316,7 @@ public:
     return U{*this};
   }
 #endif
-
+  DynObjRef thin() const { return *this; }
   static bool is_impl(FatDynObjRef<>) { return true; }
 };
 

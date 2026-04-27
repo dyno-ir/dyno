@@ -5,96 +5,94 @@
 #include "hw/HWContext.h"
 #include "hw/HWInstr.h"
 #include "op/IDs.h"
+#include <utility>
 namespace dyno {
 
 class ControlFlowAnalysis {
 
   Context &ctx;
 
-  template <typename T>
-  static auto findFirstShared(ArrayRef<T> a, ArrayRef<T> b) {
-    for (size_t i = 0; i < a.size(); i++)
-      for (size_t j = 0; j < b.size(); j++)
-        if (a[i] == b[j])
-          return std::pair<size_t, size_t>(i, j);
-    dyno_unreachable("no common element");
-  }
-
-  template <typename T>
-  static auto findFirstSharedInstr(ArrayRef<T> a, ArrayRef<T> b) {
-    for (size_t i = 0; i < a.size(); i++)
-      for (size_t j = 0; j < b.size(); j++)
-        if (a[i].instr() == b[j].instr())
-          return std::pair<size_t, size_t>(i, j);
-    dyno_unreachable("no common element");
+  template <typename T> static auto findFirstShared(Range<T> a, Range<T> b) {
+    // todo binary search
+    auto itA = a.end() - 1;
+    auto itB = b.end() - 1;
+    assert(*itA == *itB && "no shared root?");
+    do {
+      --itA;
+      --itB;
+    } while (itA != a.begin() - 1 && itB != b.begin() - 1 && *itA == *itB);
+    return std::make_pair(itA - a.begin() + 1, itB - b.begin() + 1);
   }
 
 public:
   explicit ControlFlowAnalysis(Context &ctx) : ctx(ctx) {}
 
-  void buildDepStack(SmallVecImpl<OperandRef> &stack, BlockRef instrBl) {
-    auto buildStack = [&](BlockRef block, SmallVecImpl<OperandRef> &stack) {
-      while (true) {
-        auto instr = block.defI();
-        stack.emplace_back(*block.def());
-        auto parent = HWInstrRef{instr}.parentBlock(ctx);
-        if (!parent)
-          break;
-        block = parent;
-      }
-    };
-
-    buildStack(instrBl, stack);
+  void buildDepStack(SmallVecImpl<OperandRef> &stack, BlockRef block) {
+    while (true) {
+      auto instr = block.defI();
+      stack.emplace_back(*block.def());
+      auto parent = HWInstrRef{instr}.parentBlock(ctx);
+      if (!parent)
+        break;
+      block = parent;
+    }
+  }
+  auto buildDepStack(BlockRef block) {
+    SmallVec<ObjRef<Block>, 16> stack;
+    while (true) {
+      auto instr = block.defI();
+      stack.emplace_back(block);
+      auto parent = HWInstrRef{instr}.parentBlock(ctx);
+      if (!parent)
+        break;
+      block = parent;
+    }
+    return stack;
   }
 
   BlockRef findSharedParentBlock(BlockRef instrBl, BlockRef otherBl) {
     if (otherBl == instrBl)
       return otherBl;
 
-    SmallVec<OperandRef, 4> instrStack;
-    buildDepStack(instrStack, instrBl);
-    SmallVec<OperandRef, 4> otherStack;
-    buildDepStack(otherStack, otherBl);
+    auto instrStack = buildDepStack(instrBl);
+    auto otherStack = buildDepStack(otherBl);
 
     auto [otherIdx, instrIdx] =
-        findFirstShared(ArrayRef{otherStack}, ArrayRef{instrStack});
+        findFirstShared(Range{otherStack}, Range{instrStack});
+    assert(otherStack[otherIdx] == instrStack[instrIdx]);
 
-    BlockRef block = otherStack[otherIdx]->as<BlockRef>();
-    assert(block == instrStack[instrIdx]->as<BlockRef>());
+    BlockRef block = ctx.resolve(otherStack[otherIdx]);
 
+    // switch is a special block, can only have case instrs.
+    // return the first regular block above it.
     if (block.defI().isOpc(OP_SWITCH))
       block = HWInstrRef{block.defI()}.parentBlock(ctx);
 
     return block;
   }
 
-  bool isTriviallyMutuallyExclusive(InstrRef instr, InstrRef other) {
-    BlockRef otherBl = HWInstrRef{other}.parentBlock(ctx);
-    BlockRef instrBl = HWInstrRef{instr}.parentBlock(ctx);
-    if (instrBl == otherBl)
-      return false;
+  std::tuple<BlockRef, InstrRef, InstrRef>
+  findSharedParentBlockAndInstrs(BlockRef instrBl, BlockRef otherBl) {
+    assert(otherBl != instrBl);
 
-    SmallVec<OperandRef, 4> instrStack;
-    buildDepStack(instrStack, instrBl);
-    SmallVec<OperandRef, 4> otherStack;
-    buildDepStack(otherStack, otherBl);
+    auto instrStack = buildDepStack(instrBl);
+    auto otherStack = buildDepStack(otherBl);
 
-    auto [instrIdx, otherIdx] =
-        findFirstSharedInstr(ArrayRef{instrStack}, ArrayRef{otherStack});
+    auto [otherIdx, instrIdx] =
+        findFirstShared(Range{otherStack}, Range{instrStack});
+    assert(otherStack[otherIdx] == instrStack[instrIdx]);
 
-    auto instrOp = instrStack[instrIdx];
-    auto otherOp = otherStack[otherIdx];
+    BlockRef block = ctx.resolve(otherStack[otherIdx]);
 
-    auto parentInstr = instrOp.instr();
-    assert(parentInstr == otherOp.instr());
+    auto instrI = ctx.resolve(instrStack[instrIdx - 1]).defI();
+    auto otherI = ctx.resolve(otherStack[otherIdx - 1]).defI();
 
-    if (parentInstr.isOpc(OP_SWITCH))
-      return true;
+    if (block.defI().isOpc(OP_SWITCH)) {
+      return {HWInstrRef{block.defI()}.parentBlock(ctx), block.defI(),
+              block.defI()};
+    }
 
-    if (instrOp != otherOp && instrOp.instr().isOpc(OP_IF))
-      return true;
-
-    return false;
+    return {block, instrI, otherI};
   }
 };
 

@@ -1,5 +1,4 @@
 
-
 TEST_CASE :string("instcombine-constants"), :block, :block, :block {
   MODULE_DEF :module("mod"), :block {
     OUTPUT_REGISTER_DEF %out_a:register(128)
@@ -29,6 +28,32 @@ TEST_CASE :string("instcombine-constants"), :block, :block, :block {
   meta.INST_COMBINE_PASS
 }
 
+TEST_CASE :string("instcombine-repeat-not"), :block, :block, :block {
+  MODULE_DEF :module("mod"), :block {
+    INPUT_REGISTER_DEF %in_a:register(1)
+    OUTPUT_REGISTER_DEF %out_a:register(100)
+    hw.COMB_PROCESS_DEF :process, :block {
+      LOAD %a:wire(1), %in_a
+      REPEAT %aa:wire(100), %a
+      NOT %n:wire(100), %aa
+      STORE %n, %out_a
+    }
+  }
+}{
+  hw.MODULE_DEF %mod:module("mod"), %108:core.block {
+    hw.INPUT_REGISTER_DEF %in_a:register(1)
+    hw.OUTPUT_REGISTER_DEF %out_a:register(100)
+    hw.COMB_PROCESS_DEF %109:process, %110:core.block {
+      hw.LOAD %w0:wire(1), %in_a
+      op.NOT %w3:wire(1), %w0
+      hw.REPEAT %w2:wire(100), %w3
+      hw.STORE %w2, %out_a
+    }
+  }
+}{
+  meta.INST_COMBINE_PASS
+}
+
 TEST_CASE :string("fuzzy-cse-basic"), :block, :block, :block {
   MODULE_DEF :module("mod"), :block {
     INPUT_REGISTER_DEF %in_a:register(32)
@@ -46,7 +71,7 @@ TEST_CASE :string("fuzzy-cse-basic"), :block, :block, :block {
       ADD %ac:wire(32), %a_v, %c_v
 
       STORE %abc, %out_a
-      STORE %ac, %out_a
+      STORE %ac, %out_b
     }
   }
 }{
@@ -66,7 +91,7 @@ TEST_CASE :string("fuzzy-cse-basic"), :block, :block, :block {
       ADD %abc:wire(32), %b_v, %ac
 
       STORE %abc, %out_a
-      STORE %ac, %out_a
+      STORE %ac, %out_b
     }
   }
 }{
@@ -197,3 +222,1060 @@ TEST_CASE :string("instcombine-onehot-mux-merge2"), :block, :block, :block {
 }{
   meta.INST_COMBINE_PASS
 }
+
+TEST_CASE :string("bool-simplify"), :block, :block, :block {
+  MODULE_DEF :module("mod"), :block {
+    INPUT_REGISTER_DEF %in_a:register(1)
+    INPUT_REGISTER_DEF %in_b:register(1)
+    INPUT_REGISTER_DEF %in_c:register(1)
+    OUTPUT_REGISTER_DEF %out_a:register(1)
+    OUTPUT_REGISTER_DEF %out_b:register(1)
+
+    COMB_PROCESS_DEF :process, :block {
+      LOAD %a_v:wire(1), %in_a
+      LOAD %b_v:wire(1), %in_b
+      LOAD %c_v:wire(1), %in_c
+
+      // x implied by a_v
+      OR %x:wire(1), %a_v, %b_v
+      AND %o:wire(1), %a_v, %x, %c_v
+      STORE %o, %out_a
+
+      NOT %y:wire(1), %a_v
+      AND %o1:wire(1), %a_v, %y, %c_v
+      // contradiction
+      STORE %o1, %out_b
+    }
+  }
+}{
+  hw.MODULE_DEF %mod:module("mod"), %0:core.block {
+    hw.INPUT_REGISTER_DEF %r0:register(1)
+    hw.INPUT_REGISTER_DEF %r1:register(1)
+    hw.INPUT_REGISTER_DEF %r2:register(1)
+    hw.OUTPUT_REGISTER_DEF %r3:register(1)
+    hw.OUTPUT_REGISTER_DEF %r4:register(1)
+    hw.COMB_PROCESS_DEF %1:process, %2:core.block {
+      hw.LOAD %w0:wire(1), %r0
+      hw.LOAD %w2:wire(1), %r2
+      op.AND %w7:wire(1), %w0, %w2
+      hw.STORE %w7, %r3
+      hw.STORE #1'd0, %r4
+    }
+  }
+}{
+  meta.INST_COMBINE_PASS
+}
+
+TEST_CASE :string("bool-simplify2"), :block, :block, :block {
+  MODULE_DEF :module("mod"), :block {
+    INPUT_REGISTER_DEF %in_a:register(32)
+    OUTPUT_REGISTER_DEF %out_a:register(1)
+
+    COMB_PROCESS_DEF :process, :block {
+      LOAD %a_v:wire(32), %in_a
+
+      ICMP_EQ %x:wire(1), %a_v, #32'd42
+      ICMP_EQ %y:wire(1), %a_v, #32'd69
+      ICMP_EQ %z:wire(1), %a_v, #32'd1337
+
+      OR %yz:wire(1), %y, %z
+      NOT %nyz:wire(1), %yz
+      AND %o:wire(1), %x, %nyz
+      STORE %o, %out_a
+    }
+  }
+}{
+  hw.MODULE_DEF %mod:module("mod"), %0:core.block {
+    hw.INPUT_REGISTER_DEF %r0:register(32)
+    hw.OUTPUT_REGISTER_DEF %r1:register(1)
+    hw.COMB_PROCESS_DEF %1:process, %2:core.block {
+      hw.LOAD %w0:wire(32), %r0
+      op.ICMP_EQ %w1:wire(1), %w0, #32'd42
+      hw.STORE %w1, %r1
+    }
+  }
+}{
+  meta.INST_COMBINE_PASS
+}
+
+TEST_CASE :string("bool-simplify3"), :block, :block, :block {
+  MODULE_DEF :module("mod"), :block {
+    INPUT_REGISTER_DEF %in_a:register(32)
+    INPUT_REGISTER_DEF %in_b:register(1)
+    OUTPUT_REGISTER_DEF %out_a:register(1)
+
+    COMB_PROCESS_DEF :process, :block {
+      LOAD %a_v:wire(32), %in_a
+      LOAD %b_v:wire(1), %in_b
+
+      ICMP_EQ %x:wire(1), %a_v, #32'd42
+      ICMP_EQ %z:wire(1), %a_v, #32'd1337
+
+      OR %yz:wire(1), %b_v, %z
+      NOT %nyz:wire(1), %yz
+      AND %o:wire(1), %x, %nyz
+      STORE %o, %out_a
+    }
+  }
+}{
+  hw.MODULE_DEF %mod:module("mod"), %0:core.block {
+    hw.INPUT_REGISTER_DEF %r0:register(32)
+    hw.INPUT_REGISTER_DEF %r1:register(1)
+    hw.OUTPUT_REGISTER_DEF %r2:register(1)
+    hw.COMB_PROCESS_DEF %1:process, %2:core.block {
+      hw.LOAD %w0:wire(32), %r0
+      hw.LOAD %w1:wire(1), %r1
+      op.ICMP_EQ %w2:wire(1), %w0, #32'd42
+      op.NOT %w5:wire(1), %w1
+      op.AND %w6:wire(1), %w2, %w5
+      hw.STORE %w6, %r2
+    }
+  }
+}{
+  meta.INST_COMBINE_PASS
+}
+
+TEST_CASE :string("instcombine-onehot-mux-assume"), :block, :block, :block {
+  MODULE_DEF :module("mod"), :block {
+    INPUT_REGISTER_DEF %in_a:register(32)
+    INPUT_REGISTER_DEF %in_b:register(32)
+    INPUT_REGISTER_DEF %in_c:register(32)
+
+    INPUT_REGISTER_DEF %sel_a:register(1)
+    INPUT_REGISTER_DEF %sel_b:register(1)
+    INPUT_REGISTER_DEF %sel_c:register(1)
+    INPUT_REGISTER_DEF %sel_d:register(1)
+
+    OUTPUT_REGISTER_DEF %out_a:register(32)
+
+    COMB_PROCESS_DEF :process, :block {
+      LOAD %a_v:wire(32), %in_a
+      LOAD %b_v:wire(32), %in_b
+      LOAD %c_v:wire(32), %in_c
+      LOAD %sa_v:wire(1), %sel_a
+      LOAD %sb_v:wire(1), %sel_b
+      LOAD %sc_v:wire(1), %sel_c
+      LOAD %sd_v:wire(1), %sel_d
+
+      NOT %n_sc_v:wire(1), %sc_v
+      AND %prio:wire(1), %sa_v, %n_sc_v
+
+      ONEHOT_MUX %val:wire(32), %prio, %a_v, %sb_v, %b_v, %sc_v, #32'hxxxxxxxx, %sd_v, %c_v
+      STORE %val, %out_a
+    }
+  }
+}{
+  hw.MODULE_DEF %mod:module("mod"), %0:core.block {
+    hw.INPUT_REGISTER_DEF %r0:register(32)
+    hw.INPUT_REGISTER_DEF %r1:register(32)
+    hw.INPUT_REGISTER_DEF %r2:register(32)
+    hw.INPUT_REGISTER_DEF %r3:register(1)
+    hw.INPUT_REGISTER_DEF %r4:register(1)
+    hw.INPUT_REGISTER_DEF %r5:register(1)
+    hw.INPUT_REGISTER_DEF %r6:register(1)
+    hw.OUTPUT_REGISTER_DEF %r7:register(32)
+    hw.COMB_PROCESS_DEF %1:process, %2:core.block {
+      hw.LOAD %w0:wire(32), %r0
+      hw.LOAD %w1:wire(32), %r1
+      hw.LOAD %w2:wire(32), %r2
+      hw.LOAD %w3:wire(1), %r3
+      hw.LOAD %w4:wire(1), %r4
+      hw.LOAD %w5:wire(1), %r5
+      hw.LOAD %w6:wire(1), %r6
+      op.NOT %w10:wire(1), %w5
+      hw.ASSUME %w11:wire(1), %w3, %w10
+      hw.ASSUME %w12:wire(1), %w4, %w10
+      hw.ASSUME %w13:wire(1), %w6, %w10
+      hw.ONEHOT_MUX %w14:wire(32), %w11, %w0, %w12, %w1, %w13, %w2
+      hw.STORE %w14, %r7
+    }
+  }
+}{
+  meta.INST_COMBINE_PASS
+}
+
+
+TEST_CASE :string("flip-flop-inference-rst-clk-en"), :block, :block, :block {
+  MODULE_DEF :module("mod"), :block {
+    INPUT_REGISTER_DEF %clk:register(1)
+    INPUT_REGISTER_DEF %rst:register(1)
+    INPUT_REGISTER_DEF %in_a:register(32)
+    INPUT_REGISTER_DEF %in_en:register(1)
+    OUTPUT_REGISTER_DEF %out_a:register(32)
+
+    TRIGGER_DEF %trig:trigger(pos, pos), %clk, %rst
+
+    COMB_PROCESS_DEF :process, :block {
+      LOAD %a_v:wire(32), %in_a
+      LOAD %en_v:wire(1), %in_en
+      LOAD %rst_v:wire(1), %rst
+      LOAD %old_a_v:wire(32), %out_a
+
+      NOT %not_en:wire(1), %en_v
+      NOT %not_rst:wire(1), %rst_v
+
+      AND %en_gated:wire(1), %en_v, %not_rst
+      AND %not_en_gated:wire(1), %not_en, %not_rst
+
+      ONEHOT_MUX %d:wire(32), %en_gated, %a_v, %not_en_gated, %old_a_v, %rst_v, #32'h0
+      STORE_DEFER %d, %out_a, %trig
+    }
+  }
+}{
+hw.MODULE_DEF :module("mod"), :core.block {
+    hw.INPUT_REGISTER_DEF %r5:register(1)
+    hw.INPUT_REGISTER_DEF %r6:register(1)
+    hw.INPUT_REGISTER_DEF %r7:register(32)
+    hw.INPUT_REGISTER_DEF %r8:register(1)
+    hw.OUTPUT_REGISTER_DEF %r9:register(32)
+    hw.TRIGGER_DEF :trigger(pos, pos), %r5, %r6
+    hw.COMB_PROCESS_DEF :process, :core.block {
+      hw.LOAD %w9:wire(32), %r7
+      hw.LOAD %w10:wire(1), %r8
+      hw.LOAD %w11:wire(1), %r6
+      hw.LOAD %w12:wire(32), %r9
+      op.NOT %w13:wire(1), %w11
+      op.OR %w14:wire(1), %w10, %w11
+      op.NOT %w15:wire(1), %w14
+      hw.ONEHOT_MUX %w16:wire(32), %w10, %w9, %w15, %w12
+      hw.ASSUME %w17:wire(1), %w15, %w13
+      op.NOT %w18:wire(1), %w17
+      op.OR %w19:wire(1), %w11, %w17
+      op.NOT %w20:wire(1), %w19
+      hw.ASSUME %w21:wire(32), %w16, %w20
+      hw.LOAD %w22:wire(1), %r5
+      hw.FLIP_FLOP %w23:wire(32), %w22, %w21, %w18, %w11, #32'd0
+      hw.STORE %w23, %r9
+    }
+  }
+}{
+  meta.FLIP_FLOP_INFERENCE_PASS
+  meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS
+  meta.INST_COMBINE_PASS
+}
+
+
+TEST_CASE :string("instcombine-mux-lift"), :block, :block, :block {
+  MODULE_DEF :module("mod"), :block {
+    INPUT_REGISTER_DEF %clk:register(1)
+    INPUT_REGISTER_DEF %rst:register(1)
+    INPUT_REGISTER_DEF %in_a:register(32)
+    INPUT_REGISTER_DEF %in_b:register(32)
+    INPUT_REGISTER_DEF %in_a2:register(32)
+    INPUT_REGISTER_DEF %in_b2:register(32)
+    INPUT_REGISTER_DEF %in_sel:register(1)
+    OUTPUT_REGISTER_DEF %out_a:register(96)
+
+    TRIGGER_DEF %trig:trigger(pos, pos), %clk, %rst
+
+    COMB_PROCESS_DEF :process, :block {
+      LOAD %a_v:wire(32), %in_a
+      LOAD %b_v:wire(32), %in_b
+      LOAD %a2_v:wire(32), %in_a2
+      LOAD %b2_v:wire(32), %in_b2
+      LOAD %sel_v:wire(1), %in_sel
+      NOT %nsel:wire(1), %sel_v
+
+      ONEHOT_MUX %first:wire(32), %sel_v, %a_v, %nsel, %b_v
+      ONEHOT_MUX %second:wire(32), %sel_v, %a2_v, %nsel, %b2_v
+
+      CONCAT %v:wire(96), %first, %second, #32'h0
+      STORE %v, %out_a
+    }
+  }
+}{
+  hw.MODULE_DEF %mod:module("mod"), %4:core.block {
+    hw.INPUT_REGISTER_DEF %clk:register(1)
+    hw.INPUT_REGISTER_DEF %rst:register(1)
+    hw.INPUT_REGISTER_DEF %in_a:register(32)
+    hw.INPUT_REGISTER_DEF %in_b:register(32)
+    hw.INPUT_REGISTER_DEF %in_a2:register(32)
+    hw.INPUT_REGISTER_DEF %in_b2:register(32)
+    hw.INPUT_REGISTER_DEF %in_sel:register(1)
+    hw.OUTPUT_REGISTER_DEF %out_a:register(96)
+    hw.TRIGGER_DEF %5:trigger(pos, pos), %clk, %rst
+    hw.COMB_PROCESS_DEF %6:process, %7:core.block {
+      hw.LOAD %w0:wire(32), %in_a
+      hw.LOAD %w1:wire(32), %in_b
+      hw.LOAD %w2:wire(32), %in_a2
+      hw.LOAD %w3:wire(32), %in_b2
+      hw.LOAD %w4:wire(1), %in_sel
+      op.NOT %w5:wire(1), %w4
+      hw.CONCAT %w9:wire(64), %w0, %w2
+      hw.CONCAT %w10:wire(64), %w1, %w3
+      hw.ONEHOT_MUX %w11:wire(64), %w4, %w9, %w5, %w10
+      hw.CONCAT %w12:wire(96), %w11, #32'd0
+      hw.STORE %w12, %out_a
+    }
+  }
+}{
+  meta.INST_COMBINE_PASS
+}
+
+
+TEST_EQUIVALENCE :string("test-arith-lower"), :block, :block {
+  MODULE_DEF :module("mod"), :block {
+    INPUT_REGISTER_DEF %clk:register(1)
+    INPUT_REGISTER_DEF %in_a:register(32)
+    INPUT_REGISTER_DEF %in_b:register(32)
+    INPUT_REGISTER_DEF %in_c:register(32)
+    OUTPUT_REGISTER_DEF %out_sum:register(32)
+    OUTPUT_REGISTER_DEF %out_and:register(32)
+    OUTPUT_REGISTER_DEF %out_or:register(32)
+    OUTPUT_REGISTER_DEF %out_xor:register(32)
+    OUTPUT_REGISTER_DEF %out_mul:register(32)
+
+    COMB_PROCESS_DEF :process, :block {
+      LOAD %a_v:wire(32), %in_a
+      LOAD %b_v:wire(32), %in_b
+      LOAD %c_v:wire(32), %in_c
+
+      ADD %sum:wire(32), %a_v, %b_v, %c_v
+      AND %and:wire(32), %a_v, %b_v, %c_v
+      OR %or:wire(32), %a_v, %b_v, %c_v
+      XOR %xor:wire(32), %a_v, %b_v, %c_v
+      MUL %mul:wire(32), %a_v, %b_v, %c_v
+
+      STORE %sum, %out_sum
+      STORE %and, %out_and
+      STORE %or, %out_or
+      STORE %xor, %out_xor
+      STORE %mul, %out_mul
+    }
+  }
+}{
+  meta.LOWER_OPS_PASS
+  meta.INST_COMBINE_PASS
+  meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS
+  meta.RANDOM_EQUIVALENCE_CHECK_PASS map("cycles": "1000")
+}
+
+TEST_EQUIVALENCE :string("test-icmp-lower"), :block, :block {
+  MODULE_DEF :module("mod"), :block {
+    INPUT_REGISTER_DEF %clk:register(1)
+    INPUT_REGISTER_DEF %in_a:register(32)
+    INPUT_REGISTER_DEF %in_b:register(32)
+    OUTPUT_REGISTER_DEF %out_eq:register(1)
+    OUTPUT_REGISTER_DEF %out_ne:register(1)
+    OUTPUT_REGISTER_DEF %out_ult:register(1)
+    OUTPUT_REGISTER_DEF %out_ule:register(1)
+    OUTPUT_REGISTER_DEF %out_ugt:register(1)
+    OUTPUT_REGISTER_DEF %out_uge:register(1)
+    OUTPUT_REGISTER_DEF %out_slt:register(1)
+    OUTPUT_REGISTER_DEF %out_sle:register(1)
+    OUTPUT_REGISTER_DEF %out_sgt:register(1)
+    OUTPUT_REGISTER_DEF %out_sge:register(1)
+
+    COMB_PROCESS_DEF :process, :block {
+      LOAD %a_v:wire(32), %in_a
+      LOAD %b_v:wire(32), %in_b
+
+      ICMP_EQ  %eq_v:wire(1), %a_v, %b_v
+      ICMP_NE  %ne_v:wire(1), %a_v, %b_v
+      ICMP_ULT %ult_v:wire(1), %a_v, %b_v
+      ICMP_ULE %ule_v:wire(1), %a_v, %b_v
+      ICMP_UGT %ugt_v:wire(1), %a_v, %b_v
+      ICMP_UGE %uge_v:wire(1), %a_v, %b_v
+      ICMP_SLT %slt_v:wire(1), %a_v, %b_v
+      ICMP_SLE %sle_v:wire(1), %a_v, %b_v
+      ICMP_SGT %sgt_v:wire(1), %a_v, %b_v
+      ICMP_SGE %sge_v:wire(1), %a_v, %b_v
+
+      STORE %eq_v, %out_eq
+      STORE %ne_v, %out_ne
+      STORE %ult_v, %out_ult
+      STORE %ule_v, %out_ule
+      STORE %ugt_v, %out_ugt
+      STORE %uge_v, %out_uge
+      STORE %slt_v, %out_slt
+      STORE %sle_v, %out_sle
+      STORE %sgt_v, %out_sgt
+      STORE %sge_v, %out_sge
+    }
+  }
+}{
+  meta.LOWER_OPS_PASS
+  meta.INST_COMBINE_PASS
+  meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS
+  meta.RANDOM_EQUIVALENCE_CHECK_PASS map("cycles": "10000")
+}
+
+TEST_CASE :string("test-extract"), :block, :block, :block {
+  MODULE_DEF :module("Test"), :block {
+    INPUT_REGISTER_DEF %addr:register(2)
+    INPUT_REGISTER_DEF %data:register(4)
+    OUTPUT_REGISTER_DEF %out:register(1)
+
+    COMB_PROCESS_DEF :process, :block {
+      LOAD %addr_v:wire(2), %addr
+      ZEXT %addr32:wire(32), %addr_v
+
+      LOAD %data_v:wire(4), %data
+
+      SPLICE %out_v:wire(1), %data_v, #32'd0, %addr32, #32'd1, #32'd4
+
+      STORE %out_v, %out
+    }
+  }
+}{
+  hw.MODULE_DEF %Test:module("Test"), %4:core.block {
+    hw.INPUT_REGISTER_DEF %r0:register(2)
+    hw.INPUT_REGISTER_DEF %r1:register(4)
+    hw.OUTPUT_REGISTER_DEF %r2:register(1)
+    hw.COMB_PROCESS_DEF %5:process, %6:core.block {
+      hw.LOAD %w0:wire(2), %r0
+      hw.LOAD %w2:wire(4), %r1
+      op.TRUNC %w8:wire(1), %w2
+      hw.SPLICE %w9:wire(1), %w2, #32'd1
+      hw.SPLICE %w10:wire(1), %w2, #32'd2
+      hw.SPLICE %w11:wire(1), %w2, #32'd3
+      op.TRUNC %w12:wire(1), %w0
+      hw.SPLICE %w25:wire(1), %w0, #32'd1
+      op.AND %w3:wire(1), %w12, %w25
+      op.NOT %w17:wire(1), %w12
+      op.AND %w18:wire(1), %w17, %w25
+      op.NOT %w19:wire(1), %w25
+      op.AND %w20:wire(1), %w12, %w19
+      op.OR %w21:wire(1), %w12, %w25
+      op.NOT %w24:wire(1), %w21
+      hw.ONEHOT_MUX %w23:wire(1), %w24, %w8, %w20, %w9, %w18, %w10, %w3, %w11
+      hw.STORE %w23, %r2
+    }
+  }
+}{
+  meta.LOWER_OPS_PASS
+  meta.MUX_TREE_FLATTEN_PASS
+  meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS
+  meta.INST_COMBINE_PASS
+}
+
+TEST_CASE :string("test-reg-split"), :block, :block, :block {
+  MODULE_DEF :module("Test"), :block {
+    INPUT_REGISTER_DEF %clk:register(1)
+    INPUT_REGISTER_DEF %addr:register(2)
+    INPUT_REGISTER_DEF %in_op:register(1)
+    OUTPUT_REGISTER_DEF %out_a:register(1)
+
+    REGISTER_DEF %state:register(4)
+
+    TRIGGER_DEF %trig:trigger(pos), %clk
+
+    COMB_PROCESS_DEF :process, :block {
+      LOAD %state_v:wire(4), %state
+      LOAD %addr_v:wire(2), %addr
+      ZEXT %addr32:wire(32), %addr_v
+
+      SPLICE %bit_v:wire(1), %state_v, #32'd0, %addr32, #32'd1, #32'd4
+
+      STORE %bit_v, %out_a
+
+      LOAD %in_op_v:wire(1), %in_op
+      NOT %bit_v_inv:wire(1), %bit_v
+      MUX %bit_v_out:wire(1), %in_op_v, #1'b0, %bit_v_inv
+
+      INSERT %res_v:wire(4), %state_v, %bit_v_out, #32'd0, %addr32, #32'd1, #32'd4
+
+      STORE_DEFER %res_v, %state, %trig
+    }
+  }
+}{
+  hw.MODULE_DEF %Test:module("Test"), %4:core.block {
+    hw.INPUT_REGISTER_DEF %r0:register(1)
+    hw.INPUT_REGISTER_DEF %r1:register(2)
+    hw.INPUT_REGISTER_DEF %r2:register(1)
+    hw.OUTPUT_REGISTER_DEF %r3:register(1)
+    hw.REGISTER_DEF %r4:register(4)
+    hw.TRIGGER_DEF %5:trigger(pos), %r0
+    hw.COMB_PROCESS_DEF %6:process, %7:core.block {
+      hw.LOAD %w0:wire(4), %r4
+      hw.LOAD %w1:wire(2), %r1
+      op.ZEXT %w2:wire(32), %w1
+      op.TRUNC %w39:wire(1), %w0
+      hw.SPLICE %w40:wire(1), %w0, #32'd1
+      hw.SPLICE %w41:wire(1), %w0, #32'd2
+      hw.SPLICE %w42:wire(1), %w0, #32'd3
+      op.TRUNC %w43:wire(1), %w1
+      op.NOT %w56:wire(1), %w43
+      hw.SPLICE %w55:wire(1), %w1, #32'd1
+      op.NOT %w54:wire(1), %w55
+      op.AND %w57:wire(1), %w43, %w55
+      op.AND %w58:wire(1), %w55, %w56
+      op.AND %w61:wire(1), %w43, %w54
+      op.OR %w64:wire(1), %w43, %w55
+      op.NOT %w65:wire(1), %w64
+      hw.ONEHOT_MUX %w63:wire(1), %w65, %w39, %w61, %w40, %w58, %w41, %w57, %w42
+      hw.STORE %w63, %r3
+      hw.LOAD %w4:wire(1), %r2
+      op.OR %w52:wire(1), %w4, %w63
+      op.NOT %w53:wire(1), %w52
+      op.NOT %w16:wire(32), %w2
+      op.TRUNC %w18:wire(1), %w16
+      hw.SPLICE %w20:wire(1), %w16, #32'd1
+      op.AND %w22:wire(1), %w18, %w55
+      op.AND %w23:wire(1), %w20, %w43
+      op.AND %w24:wire(1), %w18, %w20
+      hw.LOAD %w50:wire(1), %r0
+      hw.ASSUME %w30:wire(1), %w53, %w24
+      // register split into 4 ffs with different clock enables
+      hw.FLIP_FLOP %w21:wire(1), %w50, %w30, %w24
+      hw.ASSUME %w17:wire(1), %w53, %w23
+      hw.FLIP_FLOP %w67:wire(1), %w50, %w17, %w23
+      hw.ASSUME %w68:wire(1), %w53, %w22
+      hw.FLIP_FLOP %w70:wire(1), %w50, %w68, %w22
+      hw.ASSUME %w71:wire(1), %w53, %w57
+      hw.FLIP_FLOP %w73:wire(1), %w50, %w71, %w57
+      hw.CONCAT %w36:wire(4), %w73, %w70, %w67, %w21
+      hw.STORE %w36, %r4
+    }
+  }
+}{
+  meta.LOWER_OPS_PASS
+  meta.INST_COMBINE_PASS map("muxToOneHotMux": "1")
+  meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS
+
+  meta.FLIP_FLOP_INFERENCE_PASS
+  meta.INST_COMBINE_PASS map("findFlipFlopEnables": "1")
+}
+
+// lower down to memory mapping
+FUNCTION_DEF %memoryTestSynth:func, :block {
+  CALL symbol("flow_earlyCanonFlow")
+  meta.INACTIVE_COPY_PASS
+  CALL symbol("flow_synthCanonicalize")
+  CALL symbol("flow_synthEarlyOpt")
+  CALL symbol("flow_synthLowerControlFlow")
+  CALL symbol("flow_synthMemoryFFMuxHandling")
+  CALL symbol("flow_synthLowerMemoryFF")
+}
+// lift back up for sim
+FUNCTION_DEF %memoryTestLift:func, :block {
+  meta.LIFT_STD_CELLS_PASS
+  meta.SELECT_MODULES_PASS map("regex": "^(?!.*__inactive$).*")
+  meta.MODULE_INLINE_PASS
+  meta.SELECT_MODULES_PASS map("regex": "Test")
+  meta.LOWER_MEM_ACCESS_PASS
+
+  meta.LIFT_FLIP_FLOPS_PASS
+  meta.TRIGGER_DEDUPE_PASS
+
+  meta.PROCESS_LINEARIZE_PASS map("retainIODeps": "0", "retainInnerDeps": "0")
+  meta.SSA_CONSTRUCT_PASS
+  meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS
+  meta.INST_COMBINE_PASS
+  meta.AGGRESSIVE_DEAD_CODE_ELIMINATION_PASS
+
+  meta.ORDER_INSTRS_PASS map("assertNoCircularDeps": "1", "moveStoresBeforeLoads": "1")
+  meta.SSA_CONSTRUCT_PASS
+  meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS
+  meta.INST_COMBINE_PASS
+  meta.AGGRESSIVE_DEAD_CODE_ELIMINATION_PASS
+  meta.TRIGGER_DEDUPE_PASS
+}
+
+// Normal synth pipeline down to memory mapping, then lift for simulation.
+FUNCTION_DEF %memoryTestSynthRoundTrip:func, :block {
+  CALL %memoryTestSynth
+  CALL %memoryTestLift
+}
+
+TEST_SCRIPT :string("test-memory-different-port-widths"), :block {
+  PARSE_VERILOG_PASS map("code":[{
+    module Test#(parameter int DEPTH = 128, parameter int WIDTH = 2) (
+      input logic clk,
+      input logic[$clog2(DEPTH) + $clog2(WIDTH) - 1:0] IN_waddr,
+      input logic[0:0] IN_wdata,
+      input logic[0:0] IN_wmask,
+
+      input logic[$clog2(DEPTH) - 1:0] IN_raddr,
+      output logic[1:0] OUT_rdata
+    );
+
+    union packed {
+      logic[DEPTH-1:0][WIDTH-1:0] mem;
+      logic[(DEPTH*WIDTH)-1:0] flat;
+    } u;
+
+    always_ff@(posedge clk)
+      if (IN_wmask[0])
+        u.flat[IN_waddr] <= IN_wdata;
+
+    always_comb
+      OUT_rdata = u.mem[IN_raddr];
+
+    endmodule
+  }])
+
+  CALL %memoryTestSynth
+  meta.ASSERT_EXISTS_PASS map("regex": "STDCELL_INSTANCE.+%FakeMem_3r1w_1x16.+#4'd0, #4'd0", "num": "16")
+  CALL %memoryTestLift
+
+  meta.RANDOM_EQUIVALENCE_CHECK_PASS map("cycles": "10000", "clockMode": "CLOCK")
+}
+
+TEST_SCRIPT :string("test-memory-basic"), :block {
+  PARSE_VERILOG_PASS map("code":[{
+    module Test#(parameter int DEPTH = 32, parameter int WIDTH = 32) (
+      input logic clk,
+      input logic[$clog2(DEPTH) - 1:0] IN_waddr,
+      input logic[WIDTH-1:0] IN_wdata,
+      input logic[0:0] IN_wmask,
+
+      input logic[$clog2(DEPTH) - 1:0] IN_raddr,
+      output logic[WIDTH-1:0] OUT_rdata
+    );
+
+    logic[WIDTH-1:0] mem[DEPTH-1:0];
+
+    always_ff@(posedge clk)
+      if (IN_wmask[0])
+        mem[IN_waddr] <= IN_wdata;
+
+    always_comb
+      OUT_rdata = mem[IN_raddr];
+
+    endmodule
+  }])
+  CALL %memoryTestSynth
+  meta.ASSERT_EXISTS_PASS map("regex": "STDCELL_INSTANCE.+%FakeRAM_288", "num": "4")
+  CALL %memoryTestLift
+  meta.RANDOM_EQUIVALENCE_CHECK_PASS map("cycles": "10000", "clockMode": "CLOCK")
+}
+
+TEST_SCRIPT :string("test-ff-clken"), :block {
+  PARSE_VERILOG_PASS map("code":[{
+    module Test#(parameter int WIDTH = 32) (
+      input logic clk,
+      input logic en,
+
+      input logic[WIDTH-1:0] d,
+      output logic[WIDTH-1:0] q
+    );
+
+    always_ff@(posedge clk)
+      if (en) q <= d;
+
+    endmodule
+  }])
+  CALL %memoryTestSynth
+  meta.ASSERT_EXISTS_PASS map("regex":
+    "STDCELL_INSTANCE %[_a-zA-Z0-9]+:wire\(1\), %sky130_fd_sc_hd__edfxtp_1",
+    "num": "32")
+  CALL %memoryTestLift
+  meta.RANDOM_EQUIVALENCE_CHECK_PASS map("cycles": "10000", "clockMode": "CLOCK")
+}
+
+TEST_SCRIPT :string("test-ff-srst-clken"), :block {
+  PARSE_VERILOG_PASS map("code":[{
+    module Test#(parameter int WIDTH = 32) (
+      input logic clk,
+      input logic rst,
+      input logic en,
+
+      input logic[WIDTH-1:0] d,
+      output logic[WIDTH-1:0] q
+    );
+
+    always_ff@(posedge clk) begin
+      if (rst)
+        q <= '0;
+      else if (en)
+        q <= d;
+    end
+
+    endmodule
+  }])
+  CALL %memoryTestSynth
+  meta.ASSERT_EXISTS_PASS map("regex":
+    "STDCELL_INSTANCE %[_a-zA-Z0-9]+:wire\(1\), %sky130_fd_sc_hd__edfxtp_1",
+    "num": "32")
+  CALL %memoryTestLift
+  meta.RANDOM_EQUIVALENCE_CHECK_PASS map("cycles": "10000", "clockMode": "CLOCK")
+}
+
+TEST_SCRIPT :string("test-ff-arst-clken"), :block {
+  PARSE_VERILOG_PASS map("code":[{
+    module Test#(parameter int WIDTH = 32) (
+      input logic clk,
+      input logic rst,
+      input logic en,
+
+      input logic[WIDTH-1:0] d,
+      output logic[WIDTH-1:0] q
+    );
+
+    always_ff@(posedge clk or posedge rst) begin
+      if (rst)
+        q <= '0;
+      else if (en)
+        q <= d;
+    end
+
+    endmodule
+  }])
+  CALL %memoryTestSynth
+  meta.ASSERT_EXISTS_PASS map("regex":
+    "STDCELL_INSTANCE %[_a-zA-Z0-9]+:wire\(1\), %sky130_fd_sc_hd__dfrtp_1",
+    "num": "32")
+  CALL %memoryTestLift
+  // run as comb to cover async rst
+  meta.RANDOM_EQUIVALENCE_CHECK_PASS map("cycles": "10000", "clockMode": "COMB")
+}
+
+TEST_SCRIPT :string("test-memory-basic-sync-read"), :block {
+  PARSE_VERILOG_PASS map("code":[{
+    module Test#(parameter int DEPTH = 32, parameter int WIDTH = 32) (
+      input logic clk,
+      input logic[$clog2(DEPTH) - 1:0] IN_waddr,
+      input logic[WIDTH-1:0] IN_wdata,
+      input logic[0:0] IN_wmask,
+
+      input logic IN_re,
+      input logic[$clog2(DEPTH) - 1:0] IN_raddr,
+      output logic[WIDTH-1:0] OUT_rdata
+    );
+
+    logic[WIDTH-1:0] mem[DEPTH-1:0];
+
+    always_ff@(posedge clk)
+      if (IN_wmask[0])
+        mem[IN_waddr] <= IN_wdata;
+
+    always_ff@(posedge clk)
+      if (IN_re)
+        OUT_rdata <= mem[IN_raddr];
+
+    endmodule
+  }])
+  CALL %memoryTestSynth
+  meta.ASSERT_EXISTS_PASS map("regex": "STDCELL_INSTANCE.+%FakeRAM_288_syncread", "num": "4")
+  CALL %memoryTestLift
+  meta.RANDOM_EQUIVALENCE_CHECK_PASS map("cycles": "10000", "clockMode": "CLOCK")
+}
+
+TEST_SCRIPT :string("test-memory-byte-write"), :block {
+  PARSE_VERILOG_PASS map("code":[{
+    module Test#(parameter int DEPTH = 16, parameter int WIDTH = 16, parameter BYTE = 8) (
+      input logic clk,
+      input logic[$clog2(DEPTH) - 1:0] IN_waddr,
+      input logic[WIDTH-1:0] IN_wdata,
+      input logic[WIDTH/BYTE-1:0] IN_wmask,
+
+      input logic[$clog2(DEPTH) - 1:0] IN_raddr,
+      output logic[WIDTH-1:0] OUT_rdata
+    );
+
+    logic[WIDTH-1:0] mem[DEPTH-1:0];
+
+    always_ff@(posedge clk)
+      for (int i = 0; i < WIDTH/BYTE; i++)
+        if (IN_wmask[i])
+          mem[IN_waddr][i*BYTE+:BYTE] <= IN_wdata[i*BYTE+:BYTE];
+
+    always_comb
+      OUT_rdata = mem[IN_raddr];
+
+    endmodule
+  }])
+  CALL %memoryTestSynth
+  meta.ASSERT_EXISTS_PASS map("regex":
+    "STDCELL_INSTANCE.+%FakeRAM_288",
+    "num": "1")
+  CALL %memoryTestLift
+  meta.RANDOM_EQUIVALENCE_CHECK_PASS map("cycles": "10000", "clockMode": "CLOCK")
+}
+
+TEST_SCRIPT :string("test-memory-byte-write2"), :block {
+  PARSE_VERILOG_PASS map("code":[{
+    module Test#(parameter int DEPTH = 16, parameter int WIDTH = 15, parameter BYTE = 5) (
+      input logic clk,
+      input logic[$clog2(DEPTH) - 1:0] IN_waddr,
+      input logic[WIDTH-1:0] IN_wdata,
+      input logic[WIDTH/BYTE-1:0] IN_wmask,
+
+      input logic[$clog2(DEPTH) - 1:0] IN_raddr,
+      output logic[WIDTH-1:0] OUT_rdata
+    );
+
+    logic[WIDTH-1:0] mem[DEPTH-1:0];
+
+    always_ff@(posedge clk)
+      for (int i = 0; i < WIDTH/BYTE; i++)
+        if (IN_wmask[i])
+          mem[IN_waddr][i*BYTE+:BYTE] <= IN_wdata[i*BYTE+:BYTE];
+
+    always_comb
+      OUT_rdata = mem[IN_raddr];
+
+    endmodule
+  }])
+  CALL %memoryTestSynth
+  meta.ASSERT_EXISTS_PASS map("regex":
+    "STDCELL_INSTANCE.+%FakeRAM_288",
+    "num": "2")
+  CALL %memoryTestLift
+  meta.RANDOM_EQUIVALENCE_CHECK_PASS map("cycles": "10000", "clockMode": "CLOCK")
+}
+
+TEST_SCRIPT :string("test-memory-byte-write3"), :block {
+  PARSE_VERILOG_PASS map("code":[{
+    module Test#(parameter int DEPTH = 32, parameter int WIDTH = 15, parameter BYTE = 5) (
+      input logic clk,
+      input logic[$clog2(DEPTH) - 1:0] IN_waddr,
+      input logic[WIDTH-1:0] IN_wdata,
+      input logic[WIDTH/BYTE-1:0] IN_wmask,
+
+      input logic[$clog2(DEPTH) - 1:0] IN_raddr,
+      output logic[WIDTH-1:0] OUT_rdata
+    );
+
+    logic[WIDTH-1:0] mem[DEPTH-1:0];
+
+    always_ff@(posedge clk)
+      for (int i = 0; i < WIDTH/BYTE; i++)
+        if (IN_wmask[i])
+          mem[IN_waddr][i*BYTE+:BYTE] <= IN_wdata[i*BYTE+:BYTE];
+
+    always_comb
+      OUT_rdata = mem[IN_raddr];
+
+    endmodule
+  }])
+  CALL %memoryTestSynth
+  meta.ASSERT_EXISTS_PASS map("regex":
+    "STDCELL_INSTANCE.+%FakeRAM_288",
+    "num": "3")
+  CALL %memoryTestLift
+  meta.RANDOM_EQUIVALENCE_CHECK_PASS map("cycles": "10000", "clockMode": "CLOCK")
+}
+
+TEST_SCRIPT :string("test-memory-byte-write-sync-read-en"), :block {
+  PARSE_VERILOG_PASS map("code":[{
+    module Test#(parameter int DEPTH = 32, parameter int WIDTH = 15, parameter BYTE = 5) (
+      input logic clk,
+      input logic[$clog2(DEPTH) - 1:0] IN_waddr,
+      input logic[WIDTH-1:0] IN_wdata,
+      input logic[WIDTH/BYTE-1:0] IN_wmask,
+
+      input logic[$clog2(DEPTH) - 1:0] IN_raddr,
+      input logic IN_re,
+      output logic[WIDTH-1:0] OUT_rdata
+    );
+
+    logic[WIDTH-1:0] mem[DEPTH-1:0];
+
+    always_ff@(posedge clk)
+      for (int i = 0; i < WIDTH/BYTE; i++)
+        if (IN_wmask[i])
+          mem[IN_waddr][i*BYTE+:BYTE] <= IN_wdata[i*BYTE+:BYTE];
+
+    always_ff@(posedge clk)
+      if (IN_re)
+        OUT_rdata <= mem[IN_raddr];
+
+    endmodule
+  }])
+  CALL %memoryTestSynth
+  meta.ASSERT_EXISTS_PASS map("regex":
+    "STDCELL_INSTANCE.+%FakeRAM_288_syncread",
+    "num": "3")
+  CALL %memoryTestLift
+  meta.RANDOM_EQUIVALENCE_CHECK_PASS map("cycles": "10000", "clockMode": "CLOCK")
+}
+
+
+/*
+TEST_CASE :string("test-mem-map"), :block, :block, :block, {
+  // 2 bit async read sync write memory
+
+  STDCELL_DEF %Test:module("ram_mod"), %8:block {
+    INPUT_REGISTER_DEF %clk:register(1)
+    INPUT_REGISTER_DEF %IN_waddr:register(4)
+    INPUT_REGISTER_DEF %IN_wdata:register(16)
+    INPUT_REGISTER_DEF %IN_wmask:register(1)
+    INPUT_REGISTER_DEF %IN_raddr:register(4)
+    OUTPUT_REGISTER_DEF %OUT_rdata:register(16)
+    REGISTER_DEF %r7:register(256)
+    TRIGGER_DEF %9:trigger(pos), %clk
+    COMB_PROCESS_DEF %10:process, %11:block {
+      LOAD %w9:wire(4), %IN_raddr  ["test/tools/dyno-sv/testMemSmol.sv:19:15-28"]
+      ZEXT %w6:wire(32), %w9  ["test/tools/dyno-sv/testMemSmol.sv:19:15-28"]
+      GEP %12:ptr, #32'd0, %w6, #32'd16, #32'd16
+      MEM_LOAD %w13:wire(16), %13:mem_port(0), %r7, %12
+      LOAD %w5:wire(1), %IN_wmask  ["test/tools/dyno-sv/testMemSmol.sv:15.3-16.31"]
+      LOAD %w12:wire(4), %IN_waddr  ["test/tools/dyno-sv/testMemSmol.sv:16:5-18"]
+      ZEXT %w7:wire(32), %w12  ["test/tools/dyno-sv/testMemSmol.sv:16:5-18"]
+      LOAD %w0:wire(16), %IN_wdata  ["test/tools/dyno-sv/testMemSmol.sv:16:5-30"]
+      GEP %14:ptr, #32'd0, %w7, #32'd16, #32'd16
+      MEM_STORE %15:mem_port(1), %w0, %r7, %w5, %9, %14
+      STORE %w13, %OUT_rdata
+    }
+  }
+
+  MODULE_DEF %Test:module("Test"), %0:block {
+    INPUT_REGISTER_DEF %clk:register(1)
+    INPUT_REGISTER_DEF %IN_waddr:register(32)
+    INPUT_REGISTER_DEF %IN_wdata:register(8)
+    INPUT_REGISTER_DEF %IN_raddr:register(32)
+    OUTPUT_REGISTER_DEF %OUT_rdata:register(8)
+    REGISTER_DEF %r7:register(128)
+    TRIGGER_DEF %1:trigger(pos), %clk
+    COMB_PROCESS_DEF %2:process, %3:block {
+      LOAD %w9:wire(4), %IN_waddr  ["test/tools/dyno-sv/testMem.sv:20:3-23"]
+      ZEXT %w3:wire(32), %w9  ["test/tools/dyno-sv/testMem.sv:20:3-23"]
+      LOAD %w10:wire(8), %IN_wdata  ["test/tools/dyno-sv/testMem.sv:20:3-34"]
+      GEP %4:ptr, #32'd0, %w3, #32'd8, #32'd16
+      MEM_STORE %5:mem_port(1), %w10, %r7, %1, %4
+      LOAD %w5:wire(4), %IN_raddr  ["test/tools/dyno-sv/testMem.sv:24:16-36"]
+      ZEXT %w7:wire(32), %w5  ["test/tools/dyno-sv/testMem.sv:24:16-36"]
+      GEP %6:ptr, #32'd0, %w7, #32'd8, #32'd16
+      MEM_LOAD %w1:wire(8), %7:mem_port(0), %r7, %6
+      STORE_DEFER %w1, %OUT_rdata, %1
+    }
+  }
+}{
+
+}{
+  meta.MEMORY_MAPPING_PASS
+}
+
+TEST_CASE :string("test-mem-map-2bit-wr-8bit-rd"), :block, :block, :block, {
+  // 2 bit async read sync write memory
+
+  STDCELL_DEF %Test:module("ram_mod"), %0:block {
+    INPUT_REGISTER_DEF %clk:register(1)
+    INPUT_REGISTER_DEF %IN_waddr:register(4)
+    INPUT_REGISTER_DEF %IN_wdata:register(2)
+    INPUT_REGISTER_DEF %IN_wmask:register(1)
+    INPUT_REGISTER_DEF %IN_raddr:register(4)
+    OUTPUT_REGISTER_DEF %OUT_rdata:register(2)
+    INPUT_REGISTER_DEF %IN_raddr2:register(4)
+    OUTPUT_REGISTER_DEF %OUT_rdata2:register(2)
+    INPUT_REGISTER_DEF %IN_raddr3:register(4)
+    OUTPUT_REGISTER_DEF %OUT_rdata3:register(2)
+    REGISTER_DEF %r11:register(32)
+    TRIGGER_DEF %1:trigger(pos), %clk
+    COMB_PROCESS_DEF %2:process, %3:block {
+      LOAD %w15:wire(4), %IN_raddr  ["test/tools/dyno-sv/testMemSmol3R.sv:23:25-38"]
+      ZEXT %w12:wire(32), %w15  ["test/tools/dyno-sv/testMemSmol3R.sv:23:25-38"]
+      GEP %4:ptr, #32'd0, %w12, #32'd2, #32'd16
+      MEM_LOAD %w21:wire(2), %5:mem_port(0), %r11, %4
+      LOAD %w11:wire(4), %IN_raddr2  ["test/tools/dyno-sv/testMemSmol3R.sv:24:26-40"]
+      ZEXT %w5:wire(32), %w11  ["test/tools/dyno-sv/testMemSmol3R.sv:24:26-40"]
+      GEP %6:ptr, #32'd0, %w5, #32'd2, #32'd16
+      MEM_LOAD %w2:wire(2), %7:mem_port(0), %r11, %6
+      LOAD %w9:wire(4), %IN_raddr3  ["test/tools/dyno-sv/testMemSmol3R.sv:25:26-40"]
+      ZEXT %w8:wire(32), %w9  ["test/tools/dyno-sv/testMemSmol3R.sv:25:26-40"]
+      GEP %8:ptr, #32'd0, %w8, #32'd2, #32'd16
+      MEM_LOAD %w22:wire(2), %9:mem_port(0), %r11, %8
+      LOAD %w6:wire(1), %IN_wmask  ["test/tools/dyno-sv/testMemSmol3R.sv:20.3-21.31"]
+      LOAD %w1:wire(4), %IN_waddr  ["test/tools/dyno-sv/testMemSmol3R.sv:21:5-18"]
+      ZEXT %w13:wire(32), %w1  ["test/tools/dyno-sv/testMemSmol3R.sv:21:5-18"]
+      LOAD %w4:wire(2), %IN_wdata  ["test/tools/dyno-sv/testMemSmol3R.sv:21:5-30"]
+      GEP %10:ptr, #32'd0, %w13, #32'd2, #32'd16
+      MEM_STORE %11:mem_port(1), %w4, %r11, %w6, %1, %10
+      STORE %w21, %OUT_rdata
+      STORE %w2, %OUT_rdata2
+      STORE %w22, %OUT_rdata3
+    }
+  }
+
+  MODULE_DEF %Test:module("Test"), %0:block {
+    INPUT_REGISTER_DEF %clk:register(1)
+    INPUT_REGISTER_DEF %IN_waddr:register(32)
+    INPUT_REGISTER_DEF %IN_wdata:register(2)
+    INPUT_REGISTER_DEF %IN_raddr:register(32)
+    OUTPUT_REGISTER_DEF %OUT_rdata:register(8)
+    INPUT_REGISTER_DEF %IN_raddr2:register(32)
+    OUTPUT_REGISTER_DEF %OUT_rdata2:register(2)
+    REGISTER_DEF %r7:register(128)
+    TRIGGER_DEF %1:trigger(pos), %clk
+    COMB_PROCESS_DEF %2:process, %3:block {
+      LOAD %w9:wire(4), %IN_waddr  ["test/tools/dyno-sv/testMem.sv:20:3-23"]
+      ZEXT %w3:wire(32), %w9  ["test/tools/dyno-sv/testMem.sv:20:3-23"]
+      LOAD %w10:wire(2), %IN_wdata  ["test/tools/dyno-sv/testMem.sv:20:3-34"]
+      GEP %4:ptr, #32'd0, %w3, #32'd2, #32'd64
+      MEM_STORE %5:mem_port(1), %w10, %r7, %1, %4
+      LOAD %w5:wire(4), %IN_raddr  ["test/tools/dyno-sv/testMem.sv:24:16-36"]
+      LOAD %ww5:wire(6), %IN_raddr2  ["test/tools/dyno-sv/testMem.sv:24:16-36"]
+      ZEXT %w7:wire(32), %w5  ["test/tools/dyno-sv/testMem.sv:24:16-36"]
+      ZEXT %ww7:wire(32), %ww5  ["test/tools/dyno-sv/testMem.sv:24:16-36"]
+      GEP %6:ptr, #32'd0, %w7, #32'd8, #32'd16
+      GEP %pp6:ptr, #32'd0, %ww7, #32'd2, #32'd64
+      MEM_LOAD %w1:wire(8), %7:mem_port(0), %r7, %6
+      STORE_DEFER %w1, %OUT_rdata, %1
+      MEM_LOAD %ww1:wire(2), %mm7:mem_port(0), %r7, %pp6
+      STORE_DEFER %ww1, %OUT_rdata2, %1
+    }
+  }
+}{
+
+}{
+  meta.MEMORY_MAPPING_PASS
+  meta.INST_COMBINE_PASS
+  meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS
+  meta.INST_COMBINE_PASS
+  meta.AGGRESSIVE_DEAD_CODE_ELIMINATION_PASS
+}
+
+TEST_CASE :string("test-mem-map-2w"), :block, :block, :block, {
+  // 2 bit async read, 2x sync write memory
+  STDCELL_DEF %Test:module("Test"), %0:block {
+    INPUT_REGISTER_DEF %clk:register(1)
+    INPUT_REGISTER_DEF %IN_waddr:register(4)
+    INPUT_REGISTER_DEF %IN_wdata:register(2)
+    INPUT_REGISTER_DEF %IN_waddr2:register(4)
+    INPUT_REGISTER_DEF %IN_wdata2:register(2)
+    INPUT_REGISTER_DEF %IN_wmask:register(2)
+    INPUT_REGISTER_DEF %IN_raddr:register(4)
+    OUTPUT_REGISTER_DEF %OUT_rdata:register(2)
+    REGISTER_DEF %r9:register(32)
+    TRIGGER_DEF %1:trigger(pos), %clk
+    COMB_PROCESS_DEF %2:process, %3:block {
+      LOAD %w12:wire(4), %IN_raddr  ["test/tools/dyno-sv/testMemSmol2W.sv:26:15-28"]
+      ZEXT %w1:wire(32), %w12  ["test/tools/dyno-sv/testMemSmol2W.sv:26:15-28"]
+      GEP %4:ptr, #32'd0, %w1, #32'd2, #32'd16
+      MEM_LOAD %w5:wire(2), %5:mem_port(0, (0, 0)), %r9, %4, %6:?mem_port(1)
+      LOAD %w13:wire(2), %IN_wmask
+      TRUNC %w19:wire(1), %w13
+      SPLICE %w20:wire(1), %w13, #32'd1
+      LOAD %w10:wire(4), %IN_waddr  ["test/tools/dyno-sv/testMemSmol2W.sv:19:5-18"]
+      ZEXT %w14:wire(32), %w10  ["test/tools/dyno-sv/testMemSmol2W.sv:19:5-18"]
+      LOAD %w7:wire(2), %IN_wdata  ["test/tools/dyno-sv/testMemSmol2W.sv:19:5-30"]
+      GEP %7:ptr, #32'd0, %w14, #32'd2, #32'd16
+      MEM_STORE %6:mem_port(1), %w7, %r9, %w19, %1, %7
+      LOAD %w21:wire(4), %IN_waddr2  ["test/tools/dyno-sv/testMemSmol2W.sv:23:5-19"]
+      ZEXT %w9:wire(32), %w21  ["test/tools/dyno-sv/testMemSmol2W.sv:23:5-19"]
+      LOAD %w18:wire(2), %IN_wdata2  ["test/tools/dyno-sv/testMemSmol2W.sv:23:5-32"]
+      GEP %8:ptr, #32'd0, %w9, #32'd2, #32'd16
+      MEM_STORE %9:mem_port(1), %w18, %r9, %w20, %1, %8
+      STORE %w5, %OUT_rdata
+    }
+  }
+
+  MODULE_DEF %Test:module("Test"), %0:block {
+    INPUT_REGISTER_DEF %clk:register(1)
+    INPUT_REGISTER_DEF %IN_waddr:register(32)
+    INPUT_REGISTER_DEF %IN_wdata:register(8)
+    INPUT_REGISTER_DEF %IN_raddr:register(32)
+    OUTPUT_REGISTER_DEF %OUT_rdata:register(8)
+    REGISTER_DEF %r7:register(128)
+    TRIGGER_DEF %1:trigger(pos), %clk
+    COMB_PROCESS_DEF %2:process, %3:block {
+      LOAD %w9:wire(4), %IN_waddr  ["test/tools/dyno-sv/testMem.sv:20:3-23"]
+      ZEXT %w3:wire(32), %w9  ["test/tools/dyno-sv/testMem.sv:20:3-23"]
+      LOAD %w10:wire(8), %IN_wdata  ["test/tools/dyno-sv/testMem.sv:20:3-34"]
+      GEP %4:ptr, #32'd0, %w3, #32'd8, #32'd16
+      MEM_STORE %5:mem_port(1), %w10, %r7, %1, %4
+      LOAD %w5:wire(4), %IN_raddr  ["test/tools/dyno-sv/testMem.sv:24:16-36"]
+      ZEXT %w7:wire(32), %w5  ["test/tools/dyno-sv/testMem.sv:24:16-36"]
+      GEP %6:ptr, #32'd0, %w7, #32'd8, #32'd16
+      MEM_LOAD %w1:wire(8), %7:mem_port(0), %r7, %6
+      STORE_DEFER %w1, %OUT_rdata, %1
+    }
+  }
+}{
+
+}{
+  meta.MEMORY_MAPPING_PASS
+}
+*/

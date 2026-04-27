@@ -1,6 +1,5 @@
 #pragma once
 
-#include "support/ErrorRecovery.h"
 #include <bit>
 #include <cassert>
 #include <climits>
@@ -57,14 +56,18 @@ template <typename T> constexpr unsigned clog2(T val) {
   if (val == 1)
     return 1;
   return std::bit_width(val - 1);
-  // if (val == 0 || val == 1)
-  //   return 0;
-  // return bit_mask_sz<T> - std::countl_zero(val - 1);
+}
+template <typename T> constexpr unsigned flog2(T val) {
+  if (val == 0)
+    return 0;
+  return std::bit_width(val) - 1;
 }
 
 template <typename T> constexpr T round_up_div(T dividend, T divisor) {
   return (dividend + divisor - 1) / divisor;
 }
+
+void report_fatal_error(const char *reason) __attribute__((noreturn));
 
 template <typename T>
 constexpr T checked_mul(T multiplicand, T multiplier,
@@ -136,6 +139,22 @@ constexpr uint64_t hash_u64(uint64_t a) {
   a ^= a >> 33;
   a *= 0xff51afd7ed558ccdull;
   return a ^ (a >> 32);
+}
+
+constexpr uint32_t hash_reduce_64_to_32(uint64_t a) {
+  return hash_combine(a, a >> 32);
+}
+
+constexpr uint32_t strhash_u32(const char *data, size_t len) {
+  uint32_t hash = 0x811c9dc5;
+  uint32_t prime = 0x01000193;
+
+  for (size_t i = 0; i < len; i++) {
+    hash ^= static_cast<uint8_t>(data[i]);
+    hash *= prime;
+  }
+
+  return hash;
 }
 
 // split integer into regions of N bits, return 1000... for each region if equal

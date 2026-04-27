@@ -1,12 +1,12 @@
 #pragma once
 
+#include "support/SmallVec.h"
 #include <algorithm>
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
 #include <iterator>
 #include <type_traits>
-#include <vector>
 
 template <typename T>
 concept CArrayRef = requires {
@@ -59,7 +59,7 @@ public:
     return ArrayRef{ptr, sz - 1};
   }
 
-  constexpr const_pointer data() { return ptr; }
+  constexpr const_pointer data() const { return ptr; }
 
   static constexpr ArrayRef emptyRef() { return ArrayRef{nullptr, size_t(0)}; }
   template <typename U>
@@ -67,7 +67,7 @@ public:
 
   template <typename U,
             typename = std::enable_if_t<!std::is_same_v<U, bool>, void>>
-  constexpr ArrayRef(const std::vector<U> &u) : ArrayRef(u.data(), u.size()) {}
+  constexpr ArrayRef(const Vec<U> &u) : ArrayRef(u.data(), u.size()) {}
 
   template <typename U, size_t N>
   constexpr ArrayRef(const U (&c_arr)[N]) : ArrayRef(c_arr, c_arr + N) {}
@@ -168,7 +168,11 @@ public:
   MutArrayRef<T> resolve(MutArrayRef<T> storage) {
     return MutArrayRef<T>{&storage[idx], len};
   }
+  template <typename Storage> ArrayRef<T> resolve(Storage &storage) {
+    return MutArrayRef<T>{&storage[idx], len};
+  }
   size_type size() const { return len; }
+  size_type index() const { return idx; }
 
   constexpr static ThinArrayRef emptyRef() { return ThinArrayRef{0, 0}; }
 

@@ -71,19 +71,19 @@ struct SmallBoolExprCNF {
     uint32_t idx;
     uint32_t len;
 
-    uint32_t size() { return len; }
+    uint32_t size() const { return len; }
 
-    BoolExprLiteral &front() { return parent->literals[idx]; }
-    BoolExprLiteral &back() { return parent->literals[idx + len - 1]; }
-    BoolExprLiteral *begin() { return &front(); }
-    BoolExprLiteral *end() { return &back() + 1; }
+    BoolExprLiteral &front() const { return parent->literals[idx]; }
+    BoolExprLiteral &back() const { return parent->literals[idx + len - 1]; }
+    BoolExprLiteral *begin() const { return &front(); }
+    BoolExprLiteral *end() const { return &back() + 1; }
 
-    BoolExprLiteral &operator[](uint32_t i) {
+    BoolExprLiteral &operator[](uint32_t i) const {
       assert(i < len);
       return begin()[i];
     }
 
-    void dump() {
+    void dump() const {
       dbgs() << "(";
       for (auto [j, lit] : Range{*this}.enumerate()) {
         if (j != 0)
@@ -119,8 +119,8 @@ struct SmallBoolExprCNF {
       return copy;
     }
 
-    ClauseRef &operator*() { return current; }
-    ClauseRef *operator->() { return &current; }
+    const ClauseRef &operator*() const { return current; }
+    const ClauseRef *operator->() const { return &current; }
 
     ClauseIterator(ClauseRef ref) : current(ref) { findLen(); }
 
@@ -799,9 +799,10 @@ struct SmallBoolExprCNF {
     }
 
     SmallBoolExprCNF exprOut;
-    for (auto [_, v] : clauseSet) {
+    for (auto &v : clauseSet) {
+      auto &vc = const_cast<SymbSet &>(v);
       auto pos = exprOut.literals.size();
-      for (auto [litId, assign] : Range{v}.enumerate()) {
+      for (auto [litId, assign] : Range{vc}.enumerate()) {
         if (assign == UNDEFINED)
           continue;
         exprOut.literals.emplace_back(
@@ -1036,9 +1037,9 @@ struct SmallBoolExprCNF {
       }
     }
 
-    for (auto [_, v] : clauseSet) {
+    for (auto &v : clauseSet) {
       auto pos = literals.size();
-      for (auto [litId, assign] : Range{v}.enumerate()) {
+      for (auto [litId, assign] : Range{const_cast<SymbSet &>(v)}.enumerate()) {
         if (assign == UNDEFINED)
           continue;
         literals.emplace_back(
@@ -1191,12 +1192,17 @@ public:
     return analyzeMuxTree(root, [](InstrRef) {}, matchMultiUse, exploreConds);
   }
 
+  struct Frame {
+    HWValue val;
+    uint32_t idx;
+  };
+
   std::optional<MuxTree>
   analyzeMuxTree(InstrRef root, std::invocable<InstrRef> auto visitedCallback,
                  bool matchMultiUse = false, bool exploreConds = true) {
     conditionsDedupeMap.clear();
-    SmallVec<std::tuple<HWValue, uint32_t>, 32> worklist{
-        {root.def(0)->as<WireRef>(), 1}};
+
+    SmallVec<Frame, 32> worklist{{root.def(0)->as<WireRef>(), 1u}};
 
     SmallVec<SmallBoolExprCNF, 4> prefixes;
 
@@ -1252,7 +1258,7 @@ public:
 
       switch (*instr.getDialectOpcode()) {
       case *HW_MUX: {
-        std::get<1>(worklist.back()) += 1;
+        worklist.back().idx += 1;
         worklist.emplace_back(operand->as<HWValue>(), 1);
         if (operand != instr.other(1)) {
           auto negated = prefixes.back().negated2(muxtree->conditions.size());

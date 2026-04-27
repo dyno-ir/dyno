@@ -24,10 +24,10 @@ class CSEDedupeMap {
   Context &ctx;
   DenseMultimap<Unhashed<uint32_t>, ObjRef<Instr>> instrDedupeMap;
 
-  uint32_t hashOperand(OperandRef operand) {
+  uint32_t hashOperand(IsThinOperandRef auto operand) {
     return DenseMapInfo<DynObjRef>::getHashValue(operand->thin());
   }
-  uint32_t hashInstr(InstrRef instr) {
+  uint32_t hashInstr(IsInstrRef auto instr) {
     uint32_t acc = 0;
     acc = hash_combine(acc, hash_u32(instr.getDialectOpcode().raw()));
     for (auto op : instr.others())
@@ -35,19 +35,22 @@ class CSEDedupeMap {
     return acc;
   }
 
-  static bool defIsCompatible(OperandRef lhs, OperandRef rhs) {
-    if (lhs->is<WireRef>() && rhs->is<WireRef>()) {
-      if (*lhs->as<WireRef>()->numBits != *rhs->as<WireRef>()->numBits)
+  static bool defIsCompatible(IsFatOperandRef auto lhs,
+                              IsFatOperandRef auto rhs) {
+    if (lhs->template is<WireRef>() && rhs->template is<WireRef>()) {
+      if (*lhs->template as<WireRef>()->numBits !=
+          *rhs->template as<WireRef>()->numBits)
         return false;
     }
-    if (lhs->is<RegisterRef>() && rhs->is<RegisterRef>()) {
-      if (*lhs->as<RegisterRef>()->numBits != *rhs->as<RegisterRef>()->numBits)
+    if (lhs->template is<RegisterRef>() && rhs->template is<RegisterRef>()) {
+      if (*lhs->template as<RegisterRef>()->numBits !=
+          *rhs->template as<RegisterRef>()->numBits)
         return false;
     }
     return true;
   }
 
-  static bool instrDeepEqual(InstrRef lhs, InstrRef rhs) {
+  static bool instrDeepEqual(IsInstrRef auto &lhs, IsInstrRef auto &rhs) {
     if (lhs.getNumOperands() != rhs.getNumOperands())
       return false;
     if (lhs.getNumDefs() != rhs.getNumDefs())
@@ -68,7 +71,7 @@ class CSEDedupeMap {
   }
 
 public:
-  InstrRef findOrInsert(InstrRef instr) {
+  InstrRef findOrInsert(IsInstrRef auto &instr, auto &&matInstr) {
     uint32_t hash = hashInstr(instr);
     auto it = instrDedupeMap.find(hash);
     for (; it != instrDedupeMap.end(); it = instrDedupeMap.find_next(it)) {
@@ -77,8 +80,11 @@ public:
         continue;
       return otherI;
     }
-    instrDedupeMap.insert(hash, instr);
+    instrDedupeMap.insert(hash, matInstr());
     return nullref;
+  }
+  InstrRef findOrInsert(InstrRef instr) {
+    return findOrInsert(instr, [&]() { return instr; });
   }
 
   void clear() { instrDedupeMap.clear(); }
@@ -100,14 +106,16 @@ public:
   Config config;
 
 private:
-  static bool ignoreForCSE(InstrRef instr) {
-    return instr.isOpc(
-        HW_STORE, HW_STORE_DEFER, HW_ASSERT_DEFER, OP_ASSERT, HW_PRINT_DEFER,
-        HW_PRINT, OP_IF, OP_WHILE, OP_DO_WHILE, OP_FOR, OP_CALL, OP_SWITCH,
-        OP_YIELD, OP_UNYIELD, OP_CASE, OP_CASE_DEFAULT, HW_CASE_Z, HW_CASE_X,
-        HW_COMB_PROCESS_DEF, HW_INIT_PROCESS_DEF, HW_FINAL_PROCESS_DEF,
-        HW_SEQ_PROCESS_DEF, HW_LATCH_PROCESS_DEF, HW_NETLIST_PROCESS_DEF,
-        AIG_OUTPUT, AIG_INPUT);
+  bool ignoreForCSE(InstrRef instr) {
+    return ctx.opcodeInfosIF[instr].flags.noCSE() ||
+           instr.isOpc(HW_STORE, HW_STORE_DEFER, HW_ASSERT_DEFER, OP_ASSERT,
+                       HW_PRINT_DEFER, HW_PRINT, OP_IF, OP_WHILE, OP_DO_WHILE,
+                       OP_FOR, OP_CALL, OP_SWITCH, OP_YIELD, OP_UNYIELD,
+                       OP_CASE, OP_CASE_DEFAULT, HW_CASE_Z, HW_CASE_X,
+                       HW_COMB_PROCESS_DEF, HW_INIT_PROCESS_DEF,
+                       HW_FINAL_PROCESS_DEF, HW_SEQ_PROCESS_DEF,
+                       HW_LATCH_PROCESS_DEF, HW_NETLIST_PROCESS_DEF, AIG_OUTPUT,
+                       AIG_INPUT);
   }
 
   void runOnInstr(InstrRef instr) {
@@ -134,20 +142,22 @@ private:
     BlockRef otherBl = HWInstrRef{other}.parentBlock(ctx);
     BlockRef instrBl = HWInstrRef{instr}.parentBlock(ctx);
     if (otherBl == instrBl) {
-      DYNO_DBG("CSE", {
+      DYNO_DBG({
         dbgs() << "merging in same block:\n";
         dumpInstr(instr, ctx);
         dumpInstr(other, ctx);
+        dbgs() << "\n";
       })
       return;
     }
 
     auto block = controlFlowAnalysis.findSharedParentBlock(instrBl, otherBl);
 
-    DYNO_DBG("CSE", {
+    DYNO_DBG({
       dbgs() << "merging in different blocks:\n";
       dumpInstr(instr, ctx);
       dumpInstr(other, ctx);
+      dbgs() << "\n";
     })
 
     ctx.getCtx<CoreDialectContext>().cfg[other].erase();
@@ -218,9 +228,9 @@ public:
   }
 
   static constexpr auto runFuncs =
-      std::make_tuple(&CommonSubexpressionEliminationPass::runProcess,
-                      &CommonSubexpressionEliminationPass::runModule,
-                      &CommonSubexpressionEliminationPass::run);
+      mk_tuple(&CommonSubexpressionEliminationPass::runProcess,
+               &CommonSubexpressionEliminationPass::runModule,
+               &CommonSubexpressionEliminationPass::run);
 
   explicit CommonSubexpressionEliminationPass(Context &ctx)
       : ctx(ctx), map(ctx), controlFlowAnalysis(ctx) {}

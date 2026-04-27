@@ -2,11 +2,11 @@
 
 #include <cassert>
 #include <utility>
-#include <vector>
+
 
 template <std::unsigned_integral T> class PackedSet {
 public:
-  using iterator = std::vector<T>::const_iterator;
+  using iterator = Vec<T>::const_iterator;
 
   PackedSet() : sz(0) {}
   PackedSet(size_t universeSz) : sz(0), map(universeSz), stack(universeSz) {}
@@ -50,6 +50,6 @@ public:
 
 private:
   size_t sz;
-  std::vector<T> map;
-  std::vector<T> stack;
+  Vec<T> map;
+  Vec<T> stack;
 };

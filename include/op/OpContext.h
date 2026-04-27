@@ -9,15 +9,15 @@ namespace dyno {
 
 class OpDialectContext : public ContextMixin<OpDialectContext> {
 public:
-  std::tuple<NewDeleteObjStore<Function>, NewDeleteObjStore<MapObj>,
-             NewDeleteObjStore<StringObj>>
+  Tuple<NewDeleteObjStore<Function>, NewDeleteObjStore<MapObj>,
+        NewDeleteObjStore<StringObj>>
       stores;
 
   static constexpr DialectID dialect{DIALECT_OP};
   template <typename T> auto &getStore();
-  template <> auto &getStore<Function>() { return std::get<0>(stores); }
-  template <> auto &getStore<MapObj>() { return std::get<1>(stores); }
-  template <> auto &getStore<StringObj>() { return std::get<2>(stores); }
+  template <> auto &getStore<Function>() { return stores.get<0>(); }
+  template <> auto &getStore<MapObj>() { return stores.get<1>(); }
+  template <> auto &getStore<StringObj>() { return stores.get<2>(); }
 };
 template <> struct DialectContext<DialectID{DIALECT_OP}> {
   using t = OpDialectContext;

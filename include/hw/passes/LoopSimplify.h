@@ -122,400 +122,7 @@ class LoopSimplifer {
   }
 
 public:
-  InstrRef runOnLoop(InstrRef loop) {
-
-    SmallVec<YieldVal, 8> yieldVals;
-    SmallVec<BlockRef, 4> blocks;
-    switch (*loop.getDialectOpcode()) {
-    case *OP_WHILE:
-      blocks.emplace_back(loop.as<WhileInstrRef>().getCondBlock());
-      blocks.emplace_back(loop.as<WhileInstrRef>().getBodyBlock());
-      yieldVals.resize(loop.as<WhileInstrRef>().getNumYieldValues());
-      for (auto [i, val] : Range{yieldVals}.enumerate())
-        val.init = loop.as<WhileInstrRef>().getInputValue(i).as<HWValue>();
-      break;
-    case *OP_DO_WHILE:
-      blocks.emplace_back(loop.as<DoWhileInstrRef>().getBlock());
-      yieldVals.resize(loop.as<DoWhileInstrRef>().getNumYieldValues());
-      for (auto [i, val] : Range{yieldVals}.enumerate())
-        val.init = loop.as<DoWhileInstrRef>().getInputValue(i).as<HWValue>();
-      break;
-    case *OP_FOR:
-      blocks.emplace_back(loop.as<ForInstrRef>().getBlock());
-      yieldVals.resize(loop.as<ForInstrRef>().getNumYieldValues());
-      for (auto [i, val] : Range{yieldVals}.enumerate())
-        val.init = (*(loop.as<ForInstrRef>().inputValues().begin() + i))
-                       ->as<WireRef>();
-      break;
-    default:
-      dyno_unreachable("unknown loop instr");
-    }
-
-    if (yieldVals.size() == 0)
-      return nullref;
-
-    // categorize yields
-    for (auto [blockID, block] : Range{blocks}.enumerate()) {
-      auto yield = getYield(block);
-      auto range = Range{yield};
-      if (yield.getNumOperands() == yieldVals.size() + 1)
-        range = range.drop_front();
-      for (auto [opIdx, op] : range.enumerate()) {
-
-        if (auto asConst = op->dyn_as<ConstantRef>()) {
-          yieldVals[opIdx].set(blockID, YieldVal::Invariant{asConst});
-          continue;
-        }
-        if (auto asWire = op->dyn_as<WireRef>()) {
-          auto defI = asWire.getDefI();
-          if (!HWInstrRef{defI}.isDescendantOf(block, ctx)) {
-            yieldVals[opIdx].set(blockID, YieldVal::Invariant{asWire});
-            continue;
-          }
-          if (defI.isOpc(OP_UNYIELD)) {
-            unsigned idx = asWire.getDef() - *defI.begin();
-            if (idx == opIdx)
-              yieldVals[opIdx].set(blockID, YieldVal::Passthru{});
-            else
-              yieldVals[opIdx].set(blockID, YieldVal::Permute{idx});
-
-            continue;
-          }
-
-          if (defI.getNumOthers() == 2 && defI.isOpc(OP_ADD)) {
-            FatDynObjRef<> operand = nullref;
-            FatDynObjRef<> increment = nullref;
-            for (auto cur : defI.others()) {
-              if (cur->is<ConstantRef>()) {
-                increment = cur->fat();
-              } else if (auto wire = cur->dyn_as<WireRef>()) {
-                // operand is wire which is just passed through -> iter
-                if (wire.getDefI().isOpc(OP_UNYIELD)) {
-                  unsigned idx = wire.getDef() - *wire.getDef().instr().begin();
-                  if (idx != opIdx)
-                    goto complex;
-                  operand = wire;
-                } else {
-                  // operand is not iter, so must be increment. only valid if
-                  // invariant while running through loop.
-                  if (HWInstrRef{wire.getDefI()}.isDescendantOf(block, ctx))
-                    goto complex;
-                  increment = wire;
-                }
-              } else
-                dyno_unreachable("invalid hwvalue");
-            }
-
-            if (!operand || !increment)
-              goto complex;
-
-            yieldVals[opIdx].set(blockID, YieldVal::Increment{increment});
-            continue;
-          }
-
-        complex:
-          yieldVals[opIdx].set(blockID, YieldVal::Complex{});
-        }
-      }
-    }
-
-    DYNO_DBG("LoopSimplify", {
-      dumpInstr(loop, ctx);
-      dbgs() << "yield analysis results:\n";
-      for (auto [i, val] : Range{yieldVals}.enumerate()) {
-        dbgs() << "yield val #" << i << ": ";
-        if (std::get_if<YieldVal::Passthru>(&val.variant))
-          dbgs() << "Passthru";
-        else if (auto incr = std::get_if<YieldVal::Increment>(&val.variant)) {
-          dbgs() << "Increment(";
-          dumpObj(incr->step);
-          dbgs() << ")";
-        } else if (auto vari = std::get_if<YieldVal::Invariant>(&val.variant)) {
-          dbgs() << "Invariant(";
-          dumpObj(vari->value);
-          dbgs() << ")";
-        } else if (auto perm = std::get_if<YieldVal::Permute>(&val.variant)) {
-          dbgs() << "Permute(" << perm->idx << ")";
-        } else {
-          dbgs() << "Complex";
-        }
-        dbgs() << "\n";
-      }
-    });
-
-    bool change = false;
-    HWValue forLower = nullref;
-    HWValue forUpper;
-    HWValue forStep;
-    Optional<unsigned> forLoopIter = nullopt;
-    bool isNewForLoop = false;
-    bool isOldForLoop = false;
-
-    if (loop.isOpc(OP_FOR)) {
-      forLower = loop.as<ForInstrRef>().getLower()->as<HWValue>();
-      forUpper = loop.as<ForInstrRef>().getUpper()->as<HWValue>();
-      forStep = loop.as<ForInstrRef>().getStep()->as<HWValue>();
-      isOldForLoop = true;
-    }
-    // find loop condition
-    else if (auto result = analyzeCondition(blocks.front(), yieldVals)) {
-      if (!(blocks.size() == 1 || blocks.front().size() == 3))
-        goto end;
-
-      forLower = yieldVals[result->iterYieldIdx].init;
-      forUpper = result->bound;
-      forStep =
-          std::get<YieldVal::Increment>(yieldVals[result->iterYieldIdx].variant)
-              .step;
-
-      auto forLowerC = forLower.dyn_as<ConstantRef>();
-      auto forUpperC = forUpper.dyn_as<ConstantRef>();
-      auto forStepC = forStep.dyn_as<ConstantRef>();
-
-      if (!forLowerC || !forUpperC || !forStepC)
-        goto end;
-
-      auto cmpPred = BigInt::ICmpPred(
-          BigInt::ICMP_EQ + (result->comparison.opc - OP_ICMP_EQ.opc));
-      auto initial = BigInt::icmpOp4S(forLowerC, forUpperC, cmpPred);
-      if (!initial) {
-        // no iterations
-        forUpper = yieldVals[result->iterYieldIdx].init;
-        change |= 1;
-        forLoopIter = result->iterYieldIdx;
-        isNewForLoop = true;
-        goto end;
-      }
-
-      if (forStepC.getSignBit() == FourState::S0) {
-        // positive step
-        switch (*result->comparison) {
-        case *OP_ICMP_SLT:
-        case *OP_ICMP_ULT: {
-          auto rem = ((forUpperC - forLowerC) % forStepC);
-          if (!rem.valueEquals(0))
-            rem = forStepC - rem;
-          forUpper = ConstantBuilder{ctx.getStore<Constant>()}
-                         .val(forUpperC)
-                         .add(rem)
-                         .get();
-          break;
-        }
-        case *OP_ICMP_NE: {
-          auto rem = (forUpperC - forLowerC) % forStepC;
-          if (!rem.valueEquals(0))
-            goto end;
-          break;
-        }
-        case *OP_ICMP_ULE:
-        case *OP_ICMP_SLE: {
-          auto upperPlusOne = forUpperC + "1'b1"_bv;
-          auto rem = ((upperPlusOne - forLowerC) % forStepC);
-          if (!rem.valueEquals(0))
-            rem = forStepC - rem;
-          forUpper = ConstantBuilder{ctx.getStore<Constant>()}
-                         .val(upperPlusOne)
-                         .add(rem)
-                         .get();
-          break;
-        }
-        default:
-          goto end;
-        }
-      } else if (forStepC.getSignBit() == FourState::S1) {
-        // negative step
-        switch (*result->comparison) {
-        case *OP_ICMP_SGT:
-        case *OP_ICMP_UGT: {
-          auto rem = ((forLowerC - forUpperC) % (-forStepC));
-          if (!rem.valueEquals(0))
-            rem = (-forStepC) - rem;
-          forUpper = ConstantBuilder{ctx.getStore<Constant>()}
-                         .val(forUpperC)
-                         .sub(rem)
-                         .get();
-          break;
-        }
-        case *OP_ICMP_NE: {
-          auto rem = (forLowerC - forUpperC) % (-forStepC);
-          if (!rem.valueEquals(0))
-            goto end;
-          break;
-        }
-        case *OP_ICMP_UGE:
-        case *OP_ICMP_SGE: {
-          auto upperMinusOne = forUpperC - "1'b1"_bv;
-          auto rem = ((forLowerC - upperMinusOne) % (-forStepC));
-          if (!rem.valueEquals(0))
-            rem = (-forStepC) - rem;
-          forUpper = ConstantBuilder{ctx.getStore<Constant>()}
-                         .val(upperMinusOne)
-                         .sub(rem)
-                         .get();
-          break;
-        }
-        default:
-          goto end;
-        }
-      }
-
-      // check for overflows
-      auto final =
-          BigInt::icmpOp4S(forLowerC, forUpper.as<ConstantRef>(), cmpPred);
-      if (!final)
-        goto end;
-
-      change |= 1;
-      forLoopIter = result->iterYieldIdx;
-      isNewForLoop = true;
-    }
-  end:
-    bool isForLoop = isNewForLoop || isOldForLoop;
-
-    // apply new yields
-    auto isSkipYieldVal = [](const YieldVal &val) {
-      return (std::get_if<YieldVal::Passthru>(&val.variant));
-    };
-
-    unsigned newNumYieldVals = 0;
-    for (auto [i, val] : Range{yieldVals}.enumerate()) {
-      if (isSkipYieldVal(val) || i == forLoopIter) {
-        change |= 1;
-        continue;
-      }
-      if (std::get_if<YieldVal::Invariant>(&val.variant))
-        change |= 1;
-      newNumYieldVals++;
-    }
-    if (!change)
-      return nullref;
-
-    auto token = autoDebugInfo.addWithToken(loop);
-
-    // simplify yields by deleting unused.
-    for (auto block : blocks) {
-      auto unyield = getUnyield(block);
-      auto yield = getYield(block);
-      bool hasCond = (yield.getNumOperands() == yieldVals.size() + 1);
-      bool newHasCond = hasCond && !isForLoop;
-
-      build.setInsertPoint(unyield);
-      auto unyieldBuild =
-          build.buildInstrRaw(OP_UNYIELD, newNumYieldVals + isForLoop);
-
-      build.setInsertPoint(yield);
-
-      auto yieldBuildVals = newNumYieldVals + newHasCond;
-
-      std::optional<InstrBuilder> yieldBuild = std::nullopt;
-      if (yieldBuildVals != 0) {
-        yieldBuild = build.buildInstrRaw(OP_YIELD, yieldBuildVals);
-        yieldBuild->other();
-      }
-
-      WireRef forIterWire;
-      if (isForLoop) {
-        forIterWire = isNewForLoop
-                          ? ctx.getStore<Wire>().create(
-                                yieldVals[*forLoopIter].init.getNumBits())
-                          : unyield.def(0)->as<WireRef>();
-        unyieldBuild.addRef(forIterWire);
-      }
-      if (newHasCond)
-        yieldBuild->addRef(yield.operand(0)->fat());
-
-      if (forLoopIter) {
-        unyield.operand(*forLoopIter)
-            ->as<WireRef>()
-            .replaceAllUsesWith(forIterWire);
-      }
-
-      for (unsigned i = 0; i < yieldVals.size(); i++) {
-        auto yieldOp = yield.operand(i + hasCond);
-        auto unyieldOp = unyield.operand(i + isOldForLoop);
-        auto analysis = yieldVals[i];
-
-        if (auto *passthru [[maybe_unused]] =
-                std::get_if<YieldVal::Passthru>(&analysis.variant)) {
-          unyieldOp->as<WireRef>().replaceAllUsesWith(analysis.init);
-          continue;
-        }
-        if (auto *invariant [[maybe_unused]] =
-                std::get_if<YieldVal::Invariant>(&analysis.variant)) {
-          // there's some initial iteration shenanigans here, fixme
-          // unyieldOp->as<WireRef>().replaceAllUsesWith(invariant->value);
-          // continue;
-        }
-
-        if (i == forLoopIter)
-          continue;
-
-        yieldBuild->addRef(yieldOp->fat());
-        unyieldBuild.addRef(unyieldOp->fat());
-        unyieldOp.replace(FatDynObjRef<>{nullref});
-      }
-
-      build.destroyInstr(unyield);
-      build.destroyInstr(yield);
-    }
-
-    build.setInsertPoint(loop);
-
-    auto originalNumBlocks = blocks.size();
-    bool destroyFirstBlock = false;
-    if (isNewForLoop && blocks.size() == 2) {
-      destroyFirstBlock = true;
-      blocks.erase(blocks.begin());
-    }
-
-    auto ibuild = build.buildInstrRaw(
-        isForLoop ? static_cast<DialectOpcode>(OP_FOR)
-                  : loop.getDialectOpcode(),
-        blocks.size() + 2 * newNumYieldVals + (isForLoop ? 3 : 0));
-    for (auto block : blocks)
-      ibuild.addRef(block);
-    for (auto [i, val] : Range{yieldVals}.enumerate()) {
-      auto def = loop.def(originalNumBlocks + i);
-      if (i == forLoopIter) {
-        def->as<WireRef>().replaceAllUsesWith(forUpper);
-        continue;
-      }
-      if (auto *passthru [[maybe_unused]] =
-              std::get_if<YieldVal::Passthru>(&val.variant)) {
-        def->as<WireRef>().replaceAllUsesWith(loop.other(i)->fat());
-      } else {
-        // if (auto *invariant = std::get_if<YieldVal::Invariant>(&val.variant))
-        // {
-        //   def->as<WireRef>().replaceAllUsesWith(invariant->value);
-        // }
-        ibuild.addRef(def->fat());
-        def.replace(FatDynObjRef<>{nullref});
-      }
-    }
-    ibuild.other();
-    if (isForLoop) {
-      ibuild.addRef(forLower);
-      ibuild.addRef(forUpper);
-      ibuild.addRef(forStep);
-    }
-    for (auto [i, val] : Range{yieldVals}.enumerate()) {
-      if (i == forLoopIter)
-        continue;
-      if (isSkipYieldVal(val))
-        continue;
-      ibuild.addRef(loop.other(i)->fat());
-    }
-
-    // not replaced -> gets deleted
-    unsigned replaceStart = destroyFirstBlock ? 1 : 0;
-    for (unsigned i = replaceStart; i < originalNumBlocks; i++) {
-      loop.def(i).replace(FatDynObjRef<>{nullref});
-    }
-
-    build.destroyInstr(loop);
-
-    return ibuild.instr();
-  }
+  InstrRef runOnLoop(InstrRef loop);
 
 public:
   LoopSimplifer(Context &ctx) : ctx(ctx), autoDebugInfo(ctx), build(ctx) {}
@@ -523,7 +130,7 @@ public:
 
 class LoopSimplifyPass : public Pass<LoopSimplifyPass> {
   Context &ctx;
-  LoopSimplifer loopSimplifier;
+  TempBindVal<LoopSimplifer> loopSimplifier;
 
 public:
   struct Config {
@@ -536,7 +143,7 @@ private:
     auto instrs = getSCFInstrsPreorder(proc.block());
     for (auto instr : Range{instrs}.reverse()) {
       if (instr.isOpc(OP_FOR, OP_WHILE, OP_DO_WHILE))
-        loopSimplifier.runOnLoop(instr);
+        loopSimplifier->runOnLoop(instr);
     }
   }
 
@@ -548,18 +155,422 @@ private:
 
 public:
   void run() {
+    auto tok = loopSimplifier.emplace(ctx);
     for (auto mod : ctx.getCtx<HWDialectContext>().activeModules()) {
       runOnModule(mod.iref());
     }
   }
-  void runProcess(ProcessIRef proc) { runOnProcess(proc); }
-  void runModule(ModuleIRef mod) { runOnModule(mod); }
+  void runProcess(ProcessIRef proc) {
+    auto tok = loopSimplifier.emplace(ctx);
+    runOnProcess(proc);
+  }
+  void runModule(ModuleIRef mod) {
+    auto tok = loopSimplifier.emplace(ctx);
+    runOnModule(mod);
+  }
 
   static constexpr auto runFuncs =
-      std::make_tuple(&LoopSimplifyPass::runProcess,
-                      &LoopSimplifyPass::runModule, &LoopSimplifyPass::run);
+      mk_tuple(&LoopSimplifyPass::runProcess, &LoopSimplifyPass::runModule,
+               &LoopSimplifyPass::run);
 
   auto make(Context &ctx) { return LoopSimplifyPass(ctx); }
-  explicit LoopSimplifyPass(Context &ctx) : ctx(ctx), loopSimplifier(ctx) {}
+  explicit LoopSimplifyPass(Context &ctx) : ctx(ctx) {}
 };
+
+inline InstrRef LoopSimplifer::runOnLoop(InstrRef loop) {
+  auto &debugID = LoopSimplifyPass::debugID;
+  auto &debugName = LoopSimplifyPass::debugName;
+
+  SmallVec<YieldVal, 8> yieldVals;
+  SmallVec<BlockRef, 4> blocks;
+  switch (*loop.getDialectOpcode()) {
+  case *OP_WHILE:
+    blocks.emplace_back(loop.as<WhileInstrRef>().getCondBlock());
+    blocks.emplace_back(loop.as<WhileInstrRef>().getBodyBlock());
+    yieldVals.resize(loop.as<WhileInstrRef>().getNumYieldValues());
+    for (auto [i, val] : Range{yieldVals}.enumerate())
+      val.init = loop.as<WhileInstrRef>().getInputValue(i).as<HWValue>();
+    break;
+  case *OP_DO_WHILE:
+    blocks.emplace_back(loop.as<DoWhileInstrRef>().getBlock());
+    yieldVals.resize(loop.as<DoWhileInstrRef>().getNumYieldValues());
+    for (auto [i, val] : Range{yieldVals}.enumerate())
+      val.init = loop.as<DoWhileInstrRef>().getInputValue(i).as<HWValue>();
+    break;
+  case *OP_FOR:
+    blocks.emplace_back(loop.as<ForInstrRef>().getBlock());
+    yieldVals.resize(loop.as<ForInstrRef>().getNumYieldValues());
+    for (auto [i, val] : Range{yieldVals}.enumerate())
+      val.init =
+          (*(loop.as<ForInstrRef>().inputValues().begin() + i))->as<WireRef>();
+    break;
+  default:
+    dyno_unreachable("unknown loop instr");
+  }
+
+  if (yieldVals.size() == 0)
+    return nullref;
+
+  // categorize yields
+  for (auto [blockID, block] : Range{blocks}.enumerate()) {
+    auto yield = getYield(block);
+    auto range = Range{yield};
+    if (yield.getNumOperands() == yieldVals.size() + 1)
+      range = range.drop_front();
+    for (auto [opIdx, op] : range.enumerate()) {
+
+      if (auto asConst = op->dyn_as<ConstantRef>()) {
+        yieldVals[opIdx].set(blockID, YieldVal::Invariant{asConst});
+        continue;
+      }
+      if (auto asWire = op->dyn_as<WireRef>()) {
+        auto defI = asWire.getDefI();
+        if (!HWInstrRef{defI}.isDescendantOf(block, ctx)) {
+          yieldVals[opIdx].set(blockID, YieldVal::Invariant{asWire});
+          continue;
+        }
+        if (defI.isOpc(OP_UNYIELD)) {
+          unsigned idx = asWire.getDef() - *defI.begin();
+          if (idx == opIdx)
+            yieldVals[opIdx].set(blockID, YieldVal::Passthru{});
+          else
+            yieldVals[opIdx].set(blockID, YieldVal::Permute{idx});
+
+          continue;
+        }
+
+        if (defI.getNumOthers() == 2 && defI.isOpc(OP_ADD)) {
+          FatDynObjRef<> operand = nullref;
+          FatDynObjRef<> increment = nullref;
+          for (auto cur : defI.others()) {
+            if (cur->is<ConstantRef>()) {
+              increment = cur->fat();
+            } else if (auto wire = cur->dyn_as<WireRef>()) {
+              // operand is wire which is just passed through -> iter
+              if (wire.getDefI().isOpc(OP_UNYIELD)) {
+                unsigned idx = wire.getDef() - *wire.getDef().instr().begin();
+                if (idx != opIdx)
+                  goto complex;
+                operand = wire;
+              } else {
+                // operand is not iter, so must be increment. only valid if
+                // invariant while running through loop.
+                if (HWInstrRef{wire.getDefI()}.isDescendantOf(block, ctx))
+                  goto complex;
+                increment = wire;
+              }
+            } else
+              dyno_unreachable("invalid hwvalue");
+          }
+
+          if (!operand || !increment)
+            goto complex;
+
+          yieldVals[opIdx].set(blockID, YieldVal::Increment{increment});
+          continue;
+        }
+
+      complex:
+        yieldVals[opIdx].set(blockID, YieldVal::Complex{});
+      }
+    }
+  }
+
+  DYNO_DBG({
+    dumpInstr(loop, ctx);
+    dbgs() << "yield analysis results:\n";
+    for (auto [i, val] : Range{yieldVals}.enumerate()) {
+      dbgs() << "yield val #" << i << ": ";
+      if (std::get_if<YieldVal::Passthru>(&val.variant))
+        dbgs() << "Passthru";
+      else if (auto incr = std::get_if<YieldVal::Increment>(&val.variant)) {
+        dbgs() << "Increment(";
+        dumpObj(incr->step);
+        dbgs() << ")";
+      } else if (auto vari = std::get_if<YieldVal::Invariant>(&val.variant)) {
+        dbgs() << "Invariant(";
+        dumpObj(vari->value);
+        dbgs() << ")";
+      } else if (auto perm = std::get_if<YieldVal::Permute>(&val.variant)) {
+        dbgs() << "Permute(" << perm->idx << ")";
+      } else {
+        dbgs() << "Complex";
+      }
+      dbgs() << "\n";
+    }
+  });
+
+  bool change = false;
+  HWValue forLower = nullref;
+  HWValue forUpper;
+  HWValue forStep;
+  Optional<unsigned> forLoopIter = nullopt;
+  bool isNewForLoop = false;
+  bool isOldForLoop = false;
+
+  if (loop.isOpc(OP_FOR)) {
+    forLower = loop.as<ForInstrRef>().getLower()->as<HWValue>();
+    forUpper = loop.as<ForInstrRef>().getUpper()->as<HWValue>();
+    forStep = loop.as<ForInstrRef>().getStep()->as<HWValue>();
+    isOldForLoop = true;
+  }
+  // find loop condition
+  else if (auto result = analyzeCondition(blocks.front(), yieldVals)) {
+    if (!(blocks.size() == 1 || blocks.front().size() == 3))
+      goto end;
+
+    forLower = yieldVals[result->iterYieldIdx].init;
+    forUpper = result->bound;
+    forStep =
+        std::get<YieldVal::Increment>(yieldVals[result->iterYieldIdx].variant)
+            .step;
+
+    auto forLowerC = forLower.dyn_as<ConstantRef>();
+    auto forUpperC = forUpper.dyn_as<ConstantRef>();
+    auto forStepC = forStep.dyn_as<ConstantRef>();
+
+    if (!forLowerC || !forUpperC || !forStepC)
+      goto end;
+
+    auto cmpPred = BigInt::ICmpPred(BigInt::ICMP_EQ +
+                                    (result->comparison.opc - OP_ICMP_EQ.opc));
+    auto initial = BigInt::icmpOp4S(forLowerC, forUpperC, cmpPred);
+    if (!initial) {
+      // no iterations
+      forUpper = yieldVals[result->iterYieldIdx].init;
+      change |= 1;
+      forLoopIter = result->iterYieldIdx;
+      isNewForLoop = true;
+      goto end;
+    }
+
+    if (forStepC.getSignBit() == FourState::S0) {
+      // positive step
+      switch (*result->comparison) {
+      case *OP_ICMP_SLT:
+      case *OP_ICMP_ULT: {
+        auto rem = ((forUpperC - forLowerC) % forStepC);
+        if (!rem.valueEquals(0))
+          rem = forStepC - rem;
+        forUpper = ConstantBuilder{ctx.getStore<Constant>()}
+                       .val(forUpperC)
+                       .add(rem)
+                       .get();
+        break;
+      }
+      case *OP_ICMP_NE: {
+        auto rem = (forUpperC - forLowerC) % forStepC;
+        if (!rem.valueEquals(0))
+          goto end;
+        break;
+      }
+      case *OP_ICMP_ULE:
+      case *OP_ICMP_SLE: {
+        auto upperPlusOne = forUpperC + "1'b1"_bv;
+        auto rem = ((upperPlusOne - forLowerC) % forStepC);
+        if (!rem.valueEquals(0))
+          rem = forStepC - rem;
+        forUpper = ConstantBuilder{ctx.getStore<Constant>()}
+                       .val(upperPlusOne)
+                       .add(rem)
+                       .get();
+        break;
+      }
+      default:
+        goto end;
+      }
+    } else if (forStepC.getSignBit() == FourState::S1) {
+      // negative step
+      switch (*result->comparison) {
+      case *OP_ICMP_SGT:
+      case *OP_ICMP_UGT: {
+        auto rem = ((forLowerC - forUpperC) % (-forStepC));
+        if (!rem.valueEquals(0))
+          rem = (-forStepC) - rem;
+        forUpper = ConstantBuilder{ctx.getStore<Constant>()}
+                       .val(forUpperC)
+                       .sub(rem)
+                       .get();
+        break;
+      }
+      case *OP_ICMP_NE: {
+        auto rem = (forLowerC - forUpperC) % (-forStepC);
+        if (!rem.valueEquals(0))
+          goto end;
+        break;
+      }
+      case *OP_ICMP_UGE:
+      case *OP_ICMP_SGE: {
+        auto upperMinusOne = forUpperC - "1'b1"_bv;
+        auto rem = ((forLowerC - upperMinusOne) % (-forStepC));
+        if (!rem.valueEquals(0))
+          rem = (-forStepC) - rem;
+        forUpper = ConstantBuilder{ctx.getStore<Constant>()}
+                       .val(upperMinusOne)
+                       .sub(rem)
+                       .get();
+        break;
+      }
+      default:
+        goto end;
+      }
+    }
+
+    // check for overflows
+    auto final =
+        BigInt::icmpOp4S(forLowerC, forUpper.as<ConstantRef>(), cmpPred);
+    if (!final)
+      goto end;
+
+    change |= 1;
+    forLoopIter = result->iterYieldIdx;
+    isNewForLoop = true;
+  }
+end:
+  bool isForLoop = isNewForLoop || isOldForLoop;
+
+  // apply new yields
+  auto isSkipYieldVal = [](const YieldVal &val) {
+    return (std::get_if<YieldVal::Passthru>(&val.variant));
+  };
+
+  unsigned newNumYieldVals = 0;
+  for (auto [i, val] : Range{yieldVals}.enumerate()) {
+    if (isSkipYieldVal(val) || i == forLoopIter) {
+      change |= 1;
+      continue;
+    }
+    if (std::get_if<YieldVal::Invariant>(&val.variant))
+      change |= 1;
+    newNumYieldVals++;
+  }
+  if (!change)
+    return nullref;
+
+  auto token = autoDebugInfo.addWithToken(loop);
+
+  // simplify yields by deleting unused.
+  for (auto block : blocks) {
+    auto unyield = getUnyield(block);
+    auto yield = getYield(block);
+    bool hasCond = (yield.getNumOperands() == yieldVals.size() + 1);
+    bool newHasCond = hasCond && !isForLoop;
+
+    build.setInsertPoint(unyield);
+    auto unyieldBuild =
+        build.buildInstrRaw(OP_UNYIELD, newNumYieldVals + isForLoop);
+
+    build.setInsertPoint(yield);
+
+    auto yieldBuildVals = newNumYieldVals + newHasCond;
+
+    std::optional<InstrBuilder> yieldBuild = std::nullopt;
+    if (yieldBuildVals != 0) {
+      yieldBuild = build.buildInstrRaw(OP_YIELD, yieldBuildVals);
+      yieldBuild->other();
+    }
+
+    WireRef forIterWire;
+    if (isForLoop) {
+      forIterWire = isNewForLoop
+                        ? ctx.getStore<Wire>().create(
+                              yieldVals[*forLoopIter].init.getNumBits())
+                        : unyield.def(0)->as<WireRef>();
+      unyieldBuild.addRef(forIterWire);
+    }
+    if (newHasCond)
+      yieldBuild->addRef(yield.operand(0)->fat());
+
+    if (forLoopIter) {
+      unyield.operand(*forLoopIter)
+          ->as<WireRef>()
+          .replaceAllUsesWith(forIterWire);
+    }
+
+    for (unsigned i = 0; i < yieldVals.size(); i++) {
+      auto yieldOp = yield.operand(i + hasCond);
+      auto unyieldOp = unyield.operand(i + isOldForLoop);
+      auto analysis = yieldVals[i];
+
+      if (auto *passthru [[maybe_unused]] =
+              std::get_if<YieldVal::Passthru>(&analysis.variant)) {
+        unyieldOp->as<WireRef>().replaceAllUsesWith(analysis.init);
+        continue;
+      }
+      if (auto *invariant [[maybe_unused]] =
+              std::get_if<YieldVal::Invariant>(&analysis.variant)) {
+        // there's some initial iteration shenanigans here, fixme
+        // unyieldOp->as<WireRef>().replaceAllUsesWith(invariant->value);
+        // continue;
+      }
+
+      if (i == forLoopIter)
+        continue;
+
+      yieldBuild->addRef(yieldOp->fat());
+      unyieldBuild.addRef(unyieldOp->fat());
+      unyieldOp.replace(FatDynObjRef<>{nullref});
+    }
+
+    build.destroyInstr(unyield);
+    build.destroyInstr(yield);
+  }
+
+  build.setInsertPoint(loop);
+
+  auto originalNumBlocks = blocks.size();
+  bool destroyFirstBlock = false;
+  if (isNewForLoop && blocks.size() == 2) {
+    destroyFirstBlock = true;
+    blocks.erase(blocks.begin());
+  }
+
+  auto ibuild = build.buildInstrRaw(
+      isForLoop ? static_cast<DialectOpcode>(OP_FOR) : loop.getDialectOpcode(),
+      blocks.size() + 2 * newNumYieldVals + (isForLoop ? 3 : 0));
+  for (auto block : blocks)
+    ibuild.addRef(block);
+  for (auto [i, val] : Range{yieldVals}.enumerate()) {
+    auto def = loop.def(originalNumBlocks + i);
+    if (i == forLoopIter) {
+      def->as<WireRef>().replaceAllUsesWith(forUpper);
+      continue;
+    }
+    if (auto *passthru [[maybe_unused]] =
+            std::get_if<YieldVal::Passthru>(&val.variant)) {
+      def->as<WireRef>().replaceAllUsesWith(loop.other(i)->fat());
+    } else {
+      // if (auto *invariant = std::get_if<YieldVal::Invariant>(&val.variant))
+      // {
+      //   def->as<WireRef>().replaceAllUsesWith(invariant->value);
+      // }
+      ibuild.addRef(def->fat());
+      def.replace(FatDynObjRef<>{nullref});
+    }
+  }
+  ibuild.other();
+  if (isForLoop) {
+    ibuild.addRef(forLower);
+    ibuild.addRef(forUpper);
+    ibuild.addRef(forStep);
+  }
+  for (auto [i, val] : Range{yieldVals}.enumerate()) {
+    if (i == forLoopIter)
+      continue;
+    if (isSkipYieldVal(val))
+      continue;
+    ibuild.addRef(loop.other(i)->fat());
+  }
+
+  // not replaced -> gets deleted
+  unsigned replaceStart = destroyFirstBlock ? 1 : 0;
+  for (unsigned i = replaceStart; i < originalNumBlocks; i++) {
+    loop.def(i).replace(FatDynObjRef<>{nullref});
+  }
+
+  build.destroyInstr(loop);
+
+  return ibuild.instr();
+}
+
 }; // namespace dyno

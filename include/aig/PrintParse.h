@@ -17,7 +17,7 @@ public:
   AIGDialectPrinter(PrinterBase *base) : base(base) {
     base->interfaces.registerVal<PrinterBase::type::print_fn>(
         DIALECT_AIG,
-        MemberRef{this, BindMethod<&AIGDialectPrinter::printAIGType>::fv});
+        CallableRef{this, BindMethod<&AIGDialectPrinter::printAIGType>::fv});
   }
 
   bool printAIGType(FatDynObjRef<> ref, bool def) {
@@ -108,7 +108,7 @@ public:
   static constexpr DialectID dialect{DIALECT_AIG};
   explicit AIGDialectParser(ParserBase *base) : base(base) {}
 
-  FatDynObjRef<> parseAIG(DialectType type, ArrayRef<char> name) {
+  FatDynObjRef<> parseAIG(DialectType type, ArrayRef<char> name, bool isDef) {
     (void)base;
     return nullref;
   }

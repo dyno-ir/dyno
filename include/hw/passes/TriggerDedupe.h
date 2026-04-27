@@ -25,6 +25,7 @@ class TriggerDedupePass : public Pass<TriggerDedupePass> {
   SmallVec<TriggerIRef, 4> canonical;
 
   void runOnModule(ModuleIRef mod) {
+    canonical.clear();
     SmallVec<TriggerIRef, 128> destroyList;
     for (auto trigger : mod.triggers()) {
       if (trigger.oref()->defUse.getNumUses() == 0) {
@@ -58,7 +59,7 @@ public:
   void runModule(ModuleIRef mod) { runOnModule(mod); }
 
   static constexpr auto runFuncs =
-      std::make_tuple(&TriggerDedupePass::runModule, &TriggerDedupePass::run);
+      mk_tuple(&TriggerDedupePass::runModule, &TriggerDedupePass::run);
 
 public:
   auto make(Context &ctx) { return TriggerDedupePass(ctx); }

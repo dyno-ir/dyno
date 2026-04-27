@@ -39,6 +39,10 @@ public:
   void unbind() { val = nullptr; }
   T *operator->() { return val; }
   T &operator*() { return *val; }
+  auto operator=(T *val) {
+    this->val = val;
+    return *this;
+  }
   explicit operator bool() const { return !!val; }
 };
 
@@ -60,6 +64,6 @@ public:
   const T *operator->() const { return &val; }
   const T &operator*() const { return val; }
 
-  TempBindVal(){};
-  ~TempBindVal(){};
+  TempBindVal() {};
+  ~TempBindVal() {};
 };

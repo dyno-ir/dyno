@@ -7,8 +7,9 @@
 #include "dyno/Instr.h"
 #include "dyno/NewDeleteObjStore.h"
 #include "hw/DebugInfo.h"
+#include "meta/IDs.h"
 #include "op/MapObj.h"
-#include <tuple>
+#include "support/Tuple.h"
 
 namespace dyno {
 class MetaContext {
@@ -28,9 +29,17 @@ public:
 
 class MetaDialectContext : public ContextMixin<MetaDialectContext> {
 public:
-  std::tuple<> stores;
+  Tuple<> stores;
   static constexpr DialectID dialect{DIALECT_META};
   template <typename T> auto &getStore();
+
+  // re register if meta info changed, e.g. new pass added
+  void reRegister(Context &context) {
+    dyno::registerDialect<DIALECT_META>(
+        &context, context.getDialectInfos().dialectInfoArr.data(),
+        context.getDialectInfos().typeInfoArr.data(),
+        context.getDialectInfos().opcodeInfoArr.data());
+  }
 };
 template <> struct DialectContext<DialectID{DIALECT_META}> {
   using t = MetaDialectContext;

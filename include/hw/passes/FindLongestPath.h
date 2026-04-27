@@ -54,14 +54,17 @@ class FindLongestPathPass : public Pass<FindLongestPathPass> {
 
       if (instr.isOpc(HW_STDCELL_INSTANCE)) {
         auto stdcell = instr.other(0)->as<ModuleRef>().iref();
-        auto info = stdcell.def(2)->as<StdCellInfoRef>();
-        if (info->area)
-          area += *info->area;
 
-        if (info->isFlipFlop)
-          entry.length = 0;
-        else
-          *entry.length += 1;
+        if (stdcell.getNumDefs() >= 3) {
+          auto info = stdcell.def(2)->as<StdCellInfoRef>();
+          if (info->area)
+            area += *info->area;
+
+          if (info->isFlipFlop)
+            entry.length = 0;
+          else
+            *entry.length += 1;
+        }
       }
 
       if (!longestPathInstr || *entry.length > *map[longestPathInstr].length)
@@ -110,7 +113,7 @@ public:
   }
   void runModule(ModuleIRef mod) { runOnModule(mod); }
 
-  static constexpr auto runFuncs = std::make_tuple(
+  static constexpr auto runFuncs = mk_tuple(
       &FindLongestPathPass::runModule, &FindLongestPathPass::run);
 
   auto make(Context &ctx) { return FindLongestPathPass(ctx); }

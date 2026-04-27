@@ -11,7 +11,9 @@
 #include "hw/DebugInfo.h"
 #include "hw/HWValue.h"
 #include "hw/IDs.h"
+#include "hw/MemoryPort.h"
 #include "hw/Module.h"
+#include "hw/Pointer.h"
 #include "hw/Process.h"
 #include "hw/SensList.h"
 #include "hw/StdCellInfo.h"
@@ -31,13 +33,14 @@ public:
 
   static constexpr DialectID dialect{DIALECT_HW};
 
-  std::tuple<StoreType_t<Wire>, StoreType_t<Register>, StoreType_t<Process>,
+  Tuple<StoreType_t<Wire>, StoreType_t<Register>, StoreType_t<Process>,
              StoreType_t<Module>, StoreType_t<Trigger>,
-             StoreType_t<StdCellInfo>>
+             StoreType_t<StdCellInfo>, StoreType_t<MemoryPort>,
+             StoreType_t<Pointer>>
       stores;
 
   ValueNameInfo<Register> regNameInfo;
-  template <typename T> T &get() { return std::get<T>(stores); }
+  template <typename T> T &get() { return stores.get<T>(); }
 
   template <typename T> StoreType_t<T> &getStore() {
     return get<StoreType_t<T>>();

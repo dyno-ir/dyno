@@ -14,8 +14,9 @@
 #include "support/Bits.h"
 #include "support/Debug.h"
 #include "support/DynBitSet.h"
+#include "support/Tuple.h"
+#include "support/Utility.h"
 #include <cassert>
-#include <tuple>
 
 namespace dyno {
 
@@ -24,7 +25,7 @@ class FuzzyCSEPass : public Pass<FuzzyCSEPass> {
   BitAliasAnalysis bitAlias;
   HWInstrBuilder build;
   ControlFlowAnalysis controlFlowAnalysis;
-  AutoCopyDebugInfoStack autoDbgInfo;
+  TempBindVal<AutoCopyDebugInfoStack> autoDbgInfo;
 
   struct AbstractValue {
     uint16_t id;
@@ -139,7 +140,7 @@ private:
     // Rebuild the two instructions, with (1) adding the shared sum as an
     // additional operand and (2) replacing all matched operand fragments with
     // neutral element.
-    auto tok = autoDbgInfo.addWithToken(instr.ref);
+    auto tok = autoDbgInfo->addWithToken(instr.ref);
     SmallVec<HWValue, 8> lhsNewOps;
     for (auto [opIdx, op] : Range{instr.ref.others()}.enumerate()) {
       if (covered[opIdx])
@@ -243,8 +244,8 @@ private:
       auto lhsV = lhsOp->as<HWValue>();
       auto rhsV = rhsOp->as<HWValue>();
 
-      auto [lhsRepr, lhsChange] = bitAlias.getReprAliases(lhsV);
-      auto [rhsRepr, rhsChange] = bitAlias.getReprAliases(rhsV);
+      auto lhsRepr = bitAlias.getReprAliases(lhsV);
+      auto rhsRepr = bitAlias.getReprAliases(rhsV);
 
       auto &prefix = matchingPrefixes.emplace_back();
       prefix.untouched = false;
@@ -269,10 +270,11 @@ private:
       }
       maxPrefixSize = std::max(maxPrefixSize, prefix.getLen());
       if (prefix.frags.empty()) {
-        return false;
         matchingPrefixes.pop_back();
         it = intersectOps.erase(it);
         continue;
+        // or bail?
+        // return false;
       }
       lhsCovered[lhsOpIdx] = 1;
       rhsCovered[rhsOpIdx] = 1;
@@ -309,18 +311,19 @@ private:
     if (config.opToShare == OP_ADD)
       sharedInstSize += 1;
 
-    if (matchingPrefixes.size() == 0)
+    // if we end up with less than one shared op prefix, bail
+    if (matchingPrefixes.size() <= 1)
       return false;
 
-    DYNO_DBG(passName, {
+    DYNO_DBG({
       dbgs() << "matched instrs:\n";
       HWPrinter print{dbgs()};
       print.printInstr(lhsAbstr.ref, ctx);
       print.printInstr(rhsAbstr.ref, ctx);
     })
 
-    autoDbgInfo.pushDebugInfo(lhsAbstr.ref);
-    autoDbgInfo.pushDebugInfo(rhsAbstr.ref);
+    autoDbgInfo->pushDebugInfo(lhsAbstr.ref);
+    autoDbgInfo->pushDebugInfo(rhsAbstr.ref);
 
     auto parentBlock = controlFlowAnalysis.findSharedParentBlock(
         HWInstrRef{lhsAbstr.ref}.parentBlock(ctx),
@@ -334,23 +337,29 @@ private:
       auto val = prefix.get(build, false);
       sharedOperands.emplace_back(build.buildZExt(sharedInstSize, val));
     }
-    auto defW = build.buildCommutative(opc, sharedOperands).as<WireRef>();
-    newInstrAbstr.ref = defW.getDefI();
+    // assert(Range{sharedOperands}.any([](HWValue v) {
+    //   return v.is<WireRef>();
+    // }) && "only constants?");
+    auto defVal = build.buildCommutative(opc, sharedOperands);
+    auto defW = defVal.dyn_as<WireRef>();
 
-    if (!newInstrAbstr.ref.isOpc(opc) ||
+    // bail if the builder folded the instruction, can probably
+    // be done a bit better
+    if (!defW || !defW.getDefI().isOpc(opc) ||
         // todo: more efficient
         Range{candidates}.find_if([&](auto &cand) {
-          return cand.ref == newInstrAbstr.ref;
+          return cand.ref == defW.getDefI();
         }) != candidates.end()) {
-      DYNO_DBG(passName, { dbgs() << "builder folded, bailing\n"; })
+      DYNO_DBG({ dbgs() << "builder folded, bailing\n"; })
       // we may have created a couple of zexts, leave these for DCE to clean up
       return false;
     }
+    newInstrAbstr.ref = defW.getDefI();
 
     for (auto [idx, prefix] : Range{matchingPrefixes}.enumerate()) {
       auto ref = prefix.frags.front().ref;
       if (ref.is<ObjRef<Wire>>()) {
-        auto it = operands.find(ref);
+        auto [_, it] = operands.findOrInsert(ref, operands.size());
         newInstrAbstr.operands.emplace_back(idx, it.val());
         auto &uses = operandUses[it.val()];
         uses.emplace_back(newInstrAbstr.idx);
@@ -362,8 +371,8 @@ private:
         [](auto lhs, auto rhs) { return lhs.second < rhs.second; });
     worklist.emplace_back(newInstrAbstr.idx);
 
-    autoDbgInfo.popDebugInfo();
-    autoDbgInfo.popDebugInfo();
+    autoDbgInfo->popDebugInfo();
+    autoDbgInfo->popDebugInfo();
 
     build.setInsertPoint(lhsAbstr.ref);
     auto lhsIdxs = Range{intersectOps}.transform(
@@ -377,7 +386,7 @@ private:
     auto newRHS =
         rebuildInstr(rhsAbstr, matchingPrefixes, rhsCovered, rhsIdxs, defW);
 
-    DYNO_DBG(passName, {
+    DYNO_DBG({
       dbgs() << "replaced with:\n";
       HWPrinter print{dbgs()};
       dbgs() << "shared: ";
@@ -406,18 +415,21 @@ private:
   struct Use {
     uint16_t instr;
   };
-  std::vector<SmallVec<Use, 4>> operandUses;
+  Vec<SmallVec<Use, 4>> operandUses;
   SmallVec<AbstractInstr, 16> candidates;
   SmallVec<uint32_t, 32> worklist;
 
   void convertToAbstractOperand(WireRef wire, uint16_t opIdx,
                                 AbstractInstr &abstr) {
 
-    auto [aliases, change] = bitAlias.getReprAliases(wire);
+    auto aliases = bitAlias.getReprAliases(wire);
     auto &front = aliases.frags.front();
     // we use the first fragment's ref as the operand for heuristic
     // matching. higher fragments (if any) will be checked during detailed
     // matching.
+
+    // todo: do not include trailing zeros in here, we don't want to match
+    // everything that has a trailing zero fragment.
     auto [found, id] = operands.findOrInsert(front.ref, operands.size());
 
     abstr.operands.emplace_back(uint16_t(opIdx),
@@ -471,10 +483,6 @@ private:
 
       if (!candidate.ref)
         continue;
-      DYNO_DBG(passName, {
-        dbgs() << "inspecting: ";
-        dumpInstr(candidate.ref, ctx);
-      });
 
       for (auto op : candidate.operands) {
         auto &arr = operandUses[op.second.id];
@@ -519,11 +527,11 @@ private:
 
 public:
   FuzzyCSEPass(Context &ctx)
-      : ctx(ctx), bitAlias(ctx), build(ctx), controlFlowAnalysis(ctx),
-        autoDbgInfo(ctx) {}
+      : ctx(ctx), bitAlias(ctx), build(ctx), controlFlowAnalysis(ctx) {}
   static auto make(Context &ctx) { return FuzzyCSEPass{ctx}; }
 
   void runWrapper(auto &&runFunc) {
+    auto tok = autoDbgInfo.emplace(ctx);
     bitAlias.clearCache();
     runFunc();
   }
@@ -539,7 +547,7 @@ public:
   }
 
   static constexpr auto runFuncs =
-      std::make_tuple(&FuzzyCSEPass::runModule, &FuzzyCSEPass::run);
+      mk_tuple(&FuzzyCSEPass::runModule, &FuzzyCSEPass::run);
 };
 
 }; // namespace dyno

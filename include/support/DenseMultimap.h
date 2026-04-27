@@ -38,8 +38,8 @@ protected:
     return this->DenseSetMapBase<Derived, K, Bucket,
                                  DenseMultimapIterator<Bucket, K, V>>::
         growIfOversized([&](Bucket *bucket, size_type j) {
-          insert(std::move(bucket->keys[j]), std::move(bucket->values[j]));
-          std::destroy_at(&bucket->values[j]);
+          insert(std::move(bucket->keys[j]), std::move(bucket->values()[j]));
+          std::destroy_at(&bucket->values()[j]);
         });
   }
 
@@ -120,6 +120,12 @@ public:
     return iter;
   }
   iterator insert(const K &k, const V &v) { return insert(k, V{v}); }
+
+  template <typename It> void insert(Range<It> arr) {
+    for (auto [k, v] : arr) {
+      insert(k, v);
+    }
+  }
 
   iterator find_next(iterator prev) {
     auto [found, it] = findNextImpl(prev);

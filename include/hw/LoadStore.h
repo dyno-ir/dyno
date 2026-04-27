@@ -1,8 +1,13 @@
 #pragma once
+#include "dyno/Constant.h"
+#include "dyno/Obj.h"
 #include "hw/HWInstr.h"
 #include "hw/HWValue.h"
 #include "hw/IDs.h"
+#include "hw/MemoryPort.h"
+#include "hw/Pointer.h"
 #include <algorithm>
+#include <utility>
 
 namespace dyno {
 
@@ -13,15 +18,18 @@ template <typename Derived> struct AddressGenTermMixin {
 public:
 };
 
-class AddressGenTermOperand
-    : public AddressGenTermMixin<AddressGenTermOperand> {
-  OperandRef base;
+template <typename IdxT, typename RefT = OperandRef>
+class AddressGenTermOperandBase
+    : public AddressGenTermMixin<AddressGenTermOperandBase<IdxT>> {
+  RefT base;
 
 public:
-  HWValue getIdx() const { return base[0].as<HWValue>(); }
-  uint32_t getFact() const { return base[1].as<ConstantRef>().getExactVal(); }
+  IdxT getIdx() const { return base[0].template as<IdxT>(); }
+  uint32_t getFact() const {
+    return base[1].template as<ConstantRef>().getExactVal();
+  }
   Optional<uint32_t> getMax() const {
-    auto val = base[2].as<ConstantRef>().getExactVal();
+    auto val = base[2].template as<ConstantRef>().getExactVal();
     if (val == ~0u)
       return nullopt;
     return val;
@@ -29,8 +37,10 @@ public:
 
   OperandRef getUnderlyingOperand() const { return base; }
 
-  AddressGenTermOperand(OperandRef base) : base(base) {}
+  AddressGenTermOperandBase(RefT base) : base(base) {}
 };
+using AddressGenTermOperand = AddressGenTermOperandBase<HWValue>;
+using AddressGenTermRef = AddressGenTermOperandBase<HWValue, FatDynObjRef<> *>;
 
 class AddressGenTerm : public AddressGenTermMixin<AddressGenTerm> {
   HWValue idx;
@@ -66,15 +76,9 @@ public:
     if (getNumTerms() != 0)
       beginIt = self().other_begin() + getTermsBaseIndex();
 
-    return Range{beginIt, self().other_end()}
-        .transform([](size_t idx,
-                      OperandRef ref) -> std::optional<AddressGenTermOperand> {
-          if (idx % TermSize != 0)
-            return std::nullopt;
-          return AddressGenTermOperand{ref};
-        })
-        .discard_optional();
-  };
+    return Range{beginIt, self().other_end()}.step(3).transform(
+        [](size_t, auto ref) { return AddressGenTermOperand{ref}; });
+  }
 
   AddressGenTermOperand term(unsigned i = 0) {
     return AddressGenTermOperand{idx(i)};
@@ -147,6 +151,26 @@ inline bool addressingFragsEqual(AddressGenMixin<T> &lhs,
   }
   return true;
 }
+
+class GEPIRef : public OpcodeInstrRef<HWInstrRef, HW_GEP>,
+                public AddressGenMixin<GEPIRef> {
+public:
+  using OpcodeInstrRef::OpcodeInstrRef;
+  unsigned addressGenBaseIndex() const { return 0; }
+  PointerRef ptr() { return def(0)->as<PointerRef>(); }
+
+  Optional<uint32_t> getMaxOffset() {
+    uint32_t endOffs = 0;
+    for (auto term : terms()) {
+      auto max = term.getMax();
+      if (!max) {
+        return nullopt;
+      }
+      endOffs += (*max - 1) * term.getFact();
+    }
+    return endOffs;
+  }
+};
 
 class LoadIRef : public OpcodeInstrRef<HWInstrRef, HW_LOAD>,
                  public AddressGenMixin<LoadIRef> {
@@ -222,6 +246,145 @@ public:
 
   uint32_t getMemoryLen() { return *out()->as<WireRef>().getNumBits(); }
   uint32_t getLen() { return *val()->as<HWValue>().getNumBits(); }
+};
+
+template <typename Derived> class PointerMixin {
+
+public:
+  Derived &self() { return *static_cast<Derived *>(this); }
+
+  auto getConstAccessRange() {
+    auto addrOp = self().addr();
+    if (!addrOp)
+      return std::make_pair(0U, self().getLen());
+    if (auto c = addrOp.template dyn_as<ConstantRef>()) {
+      return std::make_pair(c.template as<ConstantRef>().getExactVal(),
+                            self().getLen());
+    }
+    auto gep = addrOp.template as<PointerRef>()
+                   .getDef()
+                   .instr()
+                   .template as<GEPIRef>();
+    auto base = gep.getBase();
+    auto maxOffset = gep.getMaxOffset();
+    auto pessimisticMax = self().getMemoryLen() - base;
+
+    if (maxOffset)
+      return std::make_pair(0U, std::min(*maxOffset, pessimisticMax));
+    return std::make_pair(0U, pessimisticMax);
+  }
+
+  GEPIRef gep() {
+    auto a = self().addr();
+    if (!a || !a.template is<PointerRef>())
+      return nullref;
+    return a.template as<PointerRef>().getDef().instr().template as<GEPIRef>();
+  }
+  using TermsT = decltype(std::declval<GEPIRef>().terms());
+  auto terms() {
+    if (auto g = gep())
+      return g.terms();
+    return TermsT::emptyRange();
+  }
+
+  uint32_t base() {
+    auto a = self().addr();
+    if (!a)
+      return 0U;
+    if (auto asConst = a.template dyn_as<ConstantRef>())
+      asConst.getExactVal();
+    return gep().getBase();
+  }
+};
+
+
+
+class MemLoadIRef : public OpcodeInstrRef<HWInstrRef, HW_MEM_LOAD>,
+                    public PointerMixin<MemLoadIRef> {
+public:
+  unsigned forwardsIndex() const { return hasTrigger() + triggerIndex(); }
+  unsigned addrIndex() const { return hasEn() ? 2 : 1; }
+  unsigned triggerIndex() const { return hasAddr() + addrIndex(); }
+
+public:
+  using OpcodeInstrRef::OpcodeInstrRef;
+
+  WireRef value() { return def(0)->as<WireRef>(); }
+  MemoryPortRef port() { return def(1)->as<MemoryPortRef>(); }
+
+  RegisterRef reg() { return other(0)->as<RegisterRef>(); }
+
+  WireRef en() const {
+    if (getNumOthers() < 2)
+      return nullref;
+    return other(1)->dyn_as<WireRef>();
+  }
+  bool hasEn() const { return !!en(); }
+
+  TriggerRef trigger() const {
+    if (getNumOthers() < triggerIndex() + 1)
+      return nullref;
+    return other(triggerIndex())->dyn_as<TriggerRef>();
+  }
+  bool hasTrigger() const { return !!trigger(); }
+
+  uint32_t getMemoryLen() { return *reg().getNumBits(); }
+  uint32_t getLen() { return *value().getNumBits(); }
+
+  HWAddress addr() const {
+    if (getNumOthers() < addrIndex() + 1)
+      return nullref;
+    return other(addrIndex())->as<HWAddress>();
+  }
+  bool hasAddr() const { return !!addr(); }
+
+  auto writeForwards() {
+    return Range{other_begin() + forwardsIndex(), other_end()}.zip(
+        port()->writeForwardMeta);
+  }
+
+  bool isFullReg() { return getLen() == reg().getNumBits() && !addr(); }
+};
+
+class MemStoreIRef : public OpcodeInstrRef<HWInstrRef, HW_MEM_STORE>,
+                     public PointerMixin<MemStoreIRef> {
+public:
+  unsigned addrIndex() const { return hasEn() ? 3 : 2; }
+  unsigned triggerIndex() const { return hasAddr() + addrIndex(); }
+
+public:
+  using OpcodeInstrRef::OpcodeInstrRef;
+
+  MemoryPortRef port() { return def(0)->as<MemoryPortRef>(); }
+  WireRef value() { return other(0)->as<WireRef>(); }
+
+  RegisterRef reg() { return other(1)->as<RegisterRef>(); }
+
+  WireRef en() const {
+    if (getNumOthers() < 3)
+      return nullref;
+    return other(2)->dyn_as<WireRef>();
+  }
+  bool hasEn() const { return !!en(); }
+
+  TriggerRef trigger() const {
+    if (getNumOthers() < triggerIndex() + 1)
+      return nullref;
+    return other(triggerIndex())->dyn_as<TriggerRef>();
+  }
+  bool hasTrigger() const { return !!trigger(); }
+
+  uint32_t getMemoryLen() { return *reg().getNumBits(); }
+  uint32_t getLen() { return *value().getNumBits(); }
+
+  HWAddress addr() const {
+    if (getNumOthers() < addrIndex() + 1)
+      return nullref;
+    return other(addrIndex())->as<HWAddress>();
+  }
+  bool hasAddr() const { return !!addr(); }
+
+  bool isFullReg() { return getLen() == reg().getNumBits() && !addr(); }
 };
 
 }; // namespace dyno

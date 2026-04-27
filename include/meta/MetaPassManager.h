@@ -1,9 +1,12 @@
 #pragma once
 
 #include "dyno/DialectInfo.h"
+#include "dyno/Interface.h"
 #include "dyno/Lexer.h"
 #include "dyno/Opcode.h"
+#include "support/Debug.h"
 #include "support/SlabAllocator.h"
+#include "support/TwoLevelSet.h"
 #include <cctype>
 #include <cstring>
 #include <map>
@@ -68,11 +71,13 @@ private:
 };
 
 struct PassRegistry {
-
-  std::vector<OpcodeInfo> metaOpcodeInfoArr;
-  SlabAllocator<TypeErasedPass> typeErasedPasses;
+  Vec<OpcodeInfo> metaOpcodeInfoArr;
+  Vec<TypeErasedPass> typeErasedPasses;
   MixedSizeSlabAllocator<> stringAlloc;
-
+#ifdef DYNO_ENABLE_DEBUG
+  Vec<uint16_t, MAX_NUM_DIALECTS> dialectPassIDCounter = (MAX_NUM_DIALECTS);
+  Vec<uint32_t> opcodeDebugIDs;
+#endif
   char *processString(std::string_view view) {
     std::stringstream str;
 
@@ -102,11 +107,48 @@ struct PassRegistry {
     return ptr;
   }
 
-  template <typename T> void registerPass() {
+  template <typename T> void registerPass(DialectID dialect) {
+#ifdef DYNO_ENABLE_DEBUG
+    auto id = (++dialectPassIDCounter[dialect]) * MAX_NUM_DIALECTS + dialect;
+    assert((T::passID == 0 || T::passID == id) &&
+           "different orders for passes in same dialect");
+    T::passID = id;
+    opcodeDebugIDs.emplace_back(id);
+#endif
     metaOpcodeInfoArr.emplace_back(processString(T::passName));
     typeErasedPasses.emplace_back(T::typeErasedConstruct, T::typeErasedDestroy,
                                   T::typeErasedRun, T::typeErasedConfig);
   }
+  // requires Pass::dialect.
+  template <typename T> void registerPass() {
+#ifdef DYNO_ENABLE_DEBUG
+    auto id =
+        ++dialectPassIDCounter[T::dialect] * MAX_NUM_DIALECTS + T::dialect;
+    assert((T::passID == 0 || T::passID == id) &&
+           "different orders for passes in same dialect");
+    T::passID = id;
+    opcodeDebugIDs.emplace_back(id);
+#endif
+    metaOpcodeInfoArr.emplace_back(processString(T::passName));
+    typeErasedPasses.emplace_back(T::typeErasedConstruct, T::typeErasedDestroy,
+                                  T::typeErasedRun, T::typeErasedConfig);
+  }
+
+#ifdef DYNO_ENABLE_DEBUG
+  // note: This changes global debug state (_debugEnable). It does not
+  // matter what instance of PassRegistry this is run on.
+  void setDebugEnForPasses(ArrayRef<StringRef> passes, bool en) {
+    TwoLevelSet<StringRef> passesMap(Range{passes});
+    for (auto [info, id] : Range{metaOpcodeInfoArr}.zip(opcodeDebugIDs)) {
+      if (passesMap.contains(info.name)) {
+        if (en)
+          dbg_enable_for_id(id);
+        else
+          dbg_disable_for_id(id);
+      }
+    }
+  }
+#endif
 
   TypeErasedPassObj constructPass(DialectOpcode opc, ArrayRef<void *> args) {
     assert(opc.getDialectID() == DIALECT_META);

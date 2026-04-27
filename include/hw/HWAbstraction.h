@@ -6,6 +6,7 @@
 #include "dyno/Context.h"
 #include "dyno/IDs.h"
 #include "dyno/Instr.h"
+#include "dyno/MutInstr.h"
 #include "dyno/Obj.h"
 #include "dyno/Opcode.h"
 #include "hw/BitRange.h"
@@ -14,7 +15,9 @@
 #include "hw/HWValue.h"
 #include "hw/IDs.h"
 #include "hw/LoadStore.h"
+#include "hw/MemoryPort.h"
 #include "hw/Module.h"
+#include "hw/Pointer.h"
 #include "hw/Process.h"
 #include "hw/Register.h"
 #include "hw/SensList.h"
@@ -27,6 +30,7 @@
 #include "support/ArrayRef.h"
 #include "support/ErrorRecovery.h"
 #include "support/RTTI.h"
+#include "support/Ranges.h"
 #include "support/Utility.h"
 #include <algorithm>
 #include <dyno/NewDeleteObjStore.h>
@@ -38,7 +42,7 @@ namespace dyno {
 class HWInstrBuilder {
 public:
   Context &ctx;
-  BlockRef_iterator<true> insert;
+  BlockRef_iterator<true> insert = BlockRef_iterator<true>::invalid();
 
   HWInstrBuilder(Context &ctx, BlockRef_iterator<true> insert)
       : ctx(ctx), insert(insert) {}
@@ -55,21 +59,23 @@ protected:
   // Compile-time edge cases for adding special types like BitRange
   // todo: rename this and put this in new HWInstrBuilder deriving from instr
   // build
-  template <typename T> void addSpecialRef(InstrBuilder &build, const T &ref) {
-    if constexpr (std::is_same_v<BitRange, T>) {
+  template <typename T> void addSpecialRef(InstrBuilder &build, T &&ref) {
+    if constexpr (std::is_same_v<BitRange, std::remove_cvref_t<T>>) {
       build.addRef(ref.getAddr());
       build.addRef(ref.getLen());
-    } else if constexpr (std::is_same_v<AddressGenTerm, T>) {
+    } else if constexpr (std::is_same_v<AddressGenTerm,
+                                        std::remove_cvref_t<T>>) {
       build.addRef(ref.getIdx());
       build.addRef(ConstantRef::fromU32(ref.getFact()));
       build.addRef(ConstantRef::fromU32(ref.getMax().value_or(~0u)));
-    } else if constexpr (std::is_same_v<AddressGenTermOperand, T>) {
+    } else if constexpr (std::is_same_v<AddressGenTermOperand,
+                                        std::remove_cvref_t<T>>) {
       build.addRef(ref.getIdx());
       build.addRef(ConstantRef::fromU32(ref.getFact()));
       build.addRef(ConstantRef::fromU32(ref.getMax().value_or(~0u)));
     } else if constexpr (IsArrayRef<std::decay_t<T>> ||
                          IsRange<std::decay_t<T>>) {
-      for (auto elem : ref)
+      for (auto &&elem : ref)
         addSpecialRef(build, elem);
     } else {
       build.addRef(ref);
@@ -112,6 +118,12 @@ public:
         }(),
         ...);
     return size;
+  }
+
+  template <IsFatDynObjRef T> HWValue build(MutInstr<T> &&mut) {
+    auto rv = mut.build();
+    insertInstr(rv);
+    return rv.def()->template as<HWValue>();
   }
 
   // does not place in CFG
@@ -208,16 +220,24 @@ public:
       cbuild.val(bits, 0);                                                     \
                                                                                \
       size_t index = operands.size() - 1;                                      \
-      while (operands.size() != 0) {                                           \
+      while (index != 0) {                                                     \
         auto last = operands[index].dyn_as<ConstantRef>();                     \
-        cbuild.constFunc(last);                                                \
         if (!last)                                                             \
           break;                                                               \
+        cbuild.constFunc(last);                                                \
         index--;                                                               \
       }                                                                        \
-      index++;                                                                 \
-      operands = MutArrayRef{operands.data(), index};                          \
+      operands = MutArrayRef{operands.data(), index + 2};                      \
       operands.back() = cbuild.get();                                          \
+    }                                                                          \
+    if (auto asConst = operands.back().dyn_as<ConstantRef>()) {                \
+      if constexpr (opcode == OP_AND) {                                        \
+        if (asConst.valueEqualsS(-1))                                          \
+          operands = operands.drop_back();                                     \
+      } else {                                                                 \
+        if (asConst.valueEquals(0))                                            \
+          operands = operands.drop_back();                                     \
+      }                                                                        \
     }                                                                          \
                                                                                \
     if (operands.size() == 1)                                                  \
@@ -233,6 +253,10 @@ public:
   template <typename T> HWValue ident(Range<T> range) {                        \
     SmallVec<HWValue, 8> vec{range};                                           \
     return ident(MutArrayRef{vec});                                            \
+  }                                                                            \
+  HWValue ident(OperandVec<HWValue> &&vec) {                                   \
+    vec.setOpcode(opcode);                                                     \
+    return buildCommutative(std::move(vec));                                   \
   }
 
   static bool commutativeOpWireOrder(WireRef lhs, WireRef rhs) {
@@ -244,8 +268,71 @@ public:
       return commutativeOpWireOrder(lhs.as<WireRef>(), rhs.as<WireRef>());
     return lhs.is<WireRef>();
   }
+  template <typename Ref>
+  static bool addressGenTermOperandOrder(Ref lhs, Ref rhs) {
+    if (!lhs.getMax() && rhs.getMax())
+      return true;
+    if (lhs.getMax() && !rhs.getMax())
+      return false;
+    if (lhs.getMax() == rhs.getMax())
+      return *lhs.getMax() > *rhs.getMax();
+    return lhs.getFact() > rhs.getFact();
+  }
 
   FOR_HW_COMM_OPS(COMM_OP)
+
+  HWValue buildCommutative(MutInstr<HWValue> &&templ) {
+    assert(templ.getNumDefs() == 1);
+    templ.others().sort(commutativeOpOperandOrder);
+    bool multipleConstants = templ.size() >= 3 &&
+                             templ.end()[-1].is<ConstantRef>() &&
+                             templ.end()[-2].is<ConstantRef>();
+
+    auto bits = *templ.other(0).getNumBits();
+    assert(templ.others().drop_front().all(
+        [&](HWValue val) { return val.getNumBits() == bits; }));
+
+    if (multipleConstants) {
+      auto cbuild = ConstantBuilder{ctx.getStore<Constant>()};
+      cbuild.val(bits, 0);
+
+      unsigned cnt = 0;
+      for (auto val : templ.others().reverse()) {
+        auto constant = val.as<ConstantRef>();
+        if (!constant)
+          break;
+        switch (*templ.getDialectOpcode()) {
+        case *OP_ADD:
+          cbuild.add(constant);
+          break;
+        case *OP_MUL:
+          cbuild.mul(constant);
+          break;
+        case *OP_AND:
+          cbuild.bitAND(constant);
+          break;
+        case *OP_OR:
+          cbuild.bitOR(constant);
+          break;
+        case *OP_XOR:
+          cbuild.bitXOR(constant);
+          break;
+        }
+        cnt++;
+      }
+      templ.resize(templ.size() - cnt);
+    }
+
+    if (templ.getNumOthers() == 1)
+      return templ.other(0);
+
+    if (!templ.def())
+      templ.def() = ctx.getStore<Wire>().create(bits);
+
+    auto ref = templ.build();
+    insertInstr(ref);
+    return ref.def()->as<HWValue>();
+  }
 
   HWValue buildCommutative(DialectOpcode opc, MutArrayRef<HWValue> operands) {
     switch (*opc) {
@@ -257,6 +344,11 @@ public:
     default:
       dyno_unreachable("invalid opcode");
     }
+  }
+  template <typename T>
+  HWValue buildCommutative(DialectOpcode opc, Range<T> operands) {
+    SmallVec<HWValue, 8> vec{operands};
+    return buildCommutative(opc, MutArrayRef{vec});
   }
 
   // template <IsAnyHWValue... Ts> HWInstrRef buildAdd2(Ts... operands) {
@@ -305,7 +397,7 @@ public:
   //            operand.as<WireRef>().getSingleDef()->instr().others())
   //         build.addRef(subOp->template as<HWValue>());
 
-  //       ctx.getCtx<CoreDialectContext>().cfg[otherInstr].erase();
+  //       ctx.getCFG()[otherInstr].erase();
   //       ctx.getStore<Instr>().destroy(otherInstr);
   //     } else
   //       build.addRef(operand);
@@ -402,6 +494,7 @@ public:
     return buildExt(newSize, value, true);
   }
   HWValue buildTrunc(uint32_t newSize, HWValue value) {
+    assert(newSize <= *value.getNumBits());
     if (newSize == 0)
       return ConstantRef::zeroBitZero();
     if (auto asConst = value.dyn_as<ConstantRef>()) {
@@ -414,9 +507,9 @@ public:
     auto wire = value.as<WireRef>();
     if (wire.getNumBits() == newSize)
       return wire;
-    else if (wire.getDefI().isOpc(OP_TRUNC)) {
+    else if (wire.hasSingleDef() && wire.getDefI().isOpc(OP_TRUNC)) {
       return buildTrunc(newSize, wire.getDefI().other(0)->as<HWValue>());
-    } else if (wire.getDefI().isOpc(OP_ZEXT, OP_SEXT)) {
+    } else if (wire.hasSingleDef() && wire.getDefI().isOpc(OP_ZEXT, OP_SEXT)) {
       auto src = wire.getDefI().other(0)->as<HWValue>();
       if (*src.getNumBits() >= newSize)
         return buildTrunc(newSize, src);
@@ -459,35 +552,35 @@ private:
     return nullopt;
   }
   template <typename... Rest>
-  std::tuple<Optional<uint32_t>, uint32_t, bool>
+  Tuple<Optional<uint32_t>, uint32_t, bool>
   spliceNumBitsOps(HWValue value, BitRange range, Rest... rest) {
     auto lhs = spliceSingleNumBits(value, range);
     auto [rhsB, rhsN, rhsConst] = spliceNumBitsOps(rest...);
 
-    return std::make_tuple((!lhs || !rhsB) ? nullopt : Optional(*lhs + *rhsB),
-                           rhsN + (lhs.value_or(1) != 0),
-                           rhsConst && lhs && range.addr.is<ConstantRef>() &&
-                               value.is<ConstantRef>());
+    return mk_tuple((!lhs || !rhsB) ? nullopt : Optional(*lhs + *rhsB),
+                    rhsN + (lhs.value_or(1) != 0),
+                    rhsConst && lhs && range.addr.is<ConstantRef>() &&
+                        value.is<ConstantRef>());
   }
-  std::tuple<Optional<uint32_t>, uint32_t, bool> spliceNumBitsOps() {
-    return std::make_tuple(0, 0, true);
+  Tuple<Optional<uint32_t>, uint32_t, bool> spliceNumBitsOps() {
+    return mk_tuple(Optional<uint32_t>{0}, 0u, true);
   }
 
   Optional<uint32_t> concatSingleNumBits(HWValue value) {
     return value.getNumBits();
   }
   template <typename... Rest>
-  std::tuple<Optional<uint32_t>, uint32_t, bool>
-  concatNumBitsOps(HWValue value, Rest... rest) {
+  Tuple<Optional<uint32_t>, uint32_t, bool> concatNumBitsOps(HWValue value,
+                                                             Rest... rest) {
     auto lhs = concatSingleNumBits(value);
     auto [rhsB, rhsN, rhsConst] = concatNumBitsOps(rest...);
 
-    return std::make_tuple((!lhs || !rhsB) ? nullopt : Optional(*lhs + *rhsB),
-                           rhsN + (lhs.value_or(1) != 0),
-                           rhsConst && lhs && value.is<ConstantRef>());
+    return mk_tuple((!lhs || !rhsB) ? nullopt : Optional(*lhs + *rhsB),
+                    rhsN + (lhs.value_or(1) != 0),
+                    rhsConst && lhs && value.is<ConstantRef>());
   }
-  std::tuple<Optional<uint32_t>, uint32_t, bool> concatNumBitsOps() {
-    return std::make_tuple(0, 0, true);
+  Tuple<Optional<uint32_t>, uint32_t, bool> concatNumBitsOps() {
+    return mk_tuple(Optional<uint32_t>{0}, 0u, true);
   }
 
   HWValue buildConstSpliceOfConcat(WireRef wire, uint32_t numBits,
@@ -805,6 +898,43 @@ public:
     return rv;
   }
 
+  HWValue buildConcat(OperandVec<HWValue> &&templ) {
+    assert(templ.getNumDefs() == 1);
+
+    if (templ.getNumOthers() == 1) {
+      if (templ[0])
+        templ[0].as<WireRef>().replaceAllUsesWith(templ.other(0));
+      return templ.other(0).as<HWValue>();
+    }
+
+    if (templ[0] == nullref)
+      templ[0] = ctx.getStore<Wire>().create();
+
+    bool allConstant = true;
+    uint32_t bits = 0;
+    for (auto op : templ.others().as<HWValue>()) {
+      bits += *op.getNumBits();
+      allConstant &= op.is<ConstantRef>();
+    }
+
+    if (allConstant) {
+      auto cbuild = ConstantBuilder{ctx.getStore<Constant>()};
+      if (templ.getNumOperands() == 0)
+        return cbuild.val(0, 0).get();
+      for (auto val : templ.others().as<ConstantRef>())
+        cbuild.concatLHS(val);
+
+      return cbuild.get();
+    }
+
+    auto wire = templ.def().as<WireRef>();
+    wire->numBits = bits;
+
+    insertInstr(templ.build(HW_CONCAT));
+
+    return wire;
+  }
+
   HWValue buildRepeat(HWValue value, unsigned count) {
     if (value.is<ConstantRef>()) {
       return ConstantBuilder{ctx.getStore<Constant>()}
@@ -869,7 +999,7 @@ public:
   WireRef buildLoad(RegisterRef reg, uint32_t numBits, uint32_t baseAddr = 0,
                     Ts... addressGenTerms) {
     HWInstrRef ref;
-    if (baseAddr == 0 && sizeof...(addressGenTerms) == 0)
+    if (baseAddr == 0 && getNumOperands<Ts...>(addressGenTerms...) == 0)
       ref = buildInstr(HW_LOAD, true, reg);
     else
       ref = buildInstr(HW_LOAD, true, reg, ConstantRef::fromU32(baseAddr),
@@ -878,13 +1008,98 @@ public:
     return ref.defW();
   }
 
+  WireRef buildMemLoad(RegisterRef reg, uint32_t numBits, HWValue en,
+                       uint32_t delay, TriggerIRef trigger, HWAddress addr,
+                       IsRange auto forwards) {
+    assert(!trigger == (delay == 0));
+    auto wire = ctx.getStore<Wire>().create(numBits);
+    auto port = ctx.getStore<MemoryPort>().create(delay);
+
+    auto instr = ctx.getStore<Instr>().create(
+        3 + !!en + !!trigger + !!addr + forwards.size(), HW_MEM_LOAD);
+    auto ib = InstrBuilder{instr};
+
+    ib.addRef(wire).addRef(port);
+    ib.other();
+    ib.addRef(reg);
+    if (!!en)
+      ib.addRef(en);
+    if (!!addr)
+      ib.addRef(addr);
+    if (!!trigger)
+      ib.addRef(trigger.oref());
+    for (auto &&forward : forwards) {
+      ib.addRef(forward.port);
+      port->writeForwardMeta.emplace_back(forward.oldTime, forward.unkTime);
+    }
+    insertInstr(instr);
+    return wire;
+  }
+
+  MemStoreIRef buildMemStore(RegisterRef reg, HWValue val, HWValue en,
+                             uint32_t delay, TriggerIRef trigger,
+                             HWAddress addr) {
+    assert(!trigger == (delay == 0));
+    auto port = ctx.getStore<MemoryPort>().create(delay);
+
+    auto instr = ctx.getStore<Instr>().create(3 + !!en + !!trigger + !!addr,
+                                              HW_MEM_STORE);
+    auto ib = InstrBuilder{instr};
+
+    ib.addRef(port);
+    ib.other();
+    ib.addRef(val);
+    ib.addRef(reg);
+    if (!!en)
+      ib.addRef(en);
+    if (!!addr)
+      ib.addRef(addr);
+    if (!!trigger)
+      ib.addRef(trigger.oref());
+    insertInstr(instr);
+    return instr;
+  }
+
+  template <typename T> HWAddress buildGEP(uint32_t base, Range<T> terms) {
+    if (terms.empty()) {
+      // for use with buildLoad/buildStore, these drop the addr operand if it's
+      // nullref
+      if (base == 0)
+        return nullref;
+      return ConstantRef::fromU32(base);
+    }
+
+    MutInstr<FatDynObjRef<>> instr{ctx, HW_GEP, 2U + terms.size()};
+    instr.emplace_back(ctx.getStore<Pointer>().create());
+    instr.defsDone();
+
+    instr.emplace_back(ConstantRef::fromU32(base));
+
+    for (auto &&term : terms) {
+      instr.emplace_back(term.getIdx());
+      instr.emplace_back(ConstantRef::fromU32(term.getFact()));
+      instr.emplace_back(
+          ConstantRef::fromU32(term.getMax() ? *term.getMax() : 0));
+    }
+
+    instr.others().drop_front().tuple<3>().sort([](auto &&a, auto &&b) {
+      return addressGenTermOperandOrder(AddressGenTermRef{&std::get<0>(a)},
+                                        AddressGenTermRef{&std::get<0>(b)});
+    });
+
+    auto ref = instr.build();
+    insertInstr(ref);
+
+    return ref.def().as<PointerRef>();
+  }
+
   template <typename... Ts>
-  HWInstrRef buildStore(RegisterRef reg, HWValue value, bool defer = false,
-                        TriggerIRef trigger = nullref, uint32_t baseAddr = 0,
-                        Ts... addressGenTerms) {
+  StoreIRef buildStore(RegisterRef reg, HWValue value, bool defer = false,
+                       TriggerIRef trigger = nullref, uint32_t baseAddr = 0,
+                       Ts... addressGenTerms) {
     assert(!(!defer && trigger) && "trigger on non-deferred store");
     auto opc = defer ? HW_STORE_DEFER : HW_STORE;
-    if (sizeof...(addressGenTerms) > 0 || baseAddr != 0) {
+    if (getNumOperands<Ts...>(addressGenTerms...) > 0 || baseAddr != 0) {
       if (trigger) {
         return buildInstr(opc, false, value, reg, trigger.oref(),
                           ConstantRef::fromU32(baseAddr), addressGenTerms...);
@@ -897,6 +1112,30 @@ public:
       }
       return buildInstr(opc, false, value, reg);
     }
+  }
+
+  WireRef buildFlipFlop(HWValue clk, HWValue d,
+                        HWValue en = ConstantRef::fromBool(1), auto... resets) {
+    auto defW = ctx.getStore<Wire>().create(d.getNumBits());
+    auto ib = buildInstrRaw(HW_FLIP_FLOP, 4 + sizeof...(resets) * 2);
+    ib.addRef(defW).other().addRef(clk).addRef(d).addRef(en);
+    if constexpr (sizeof...(resets) != 0)
+      for (auto [rst, rstval] : InitListRange{resets...}.pairwise()) {
+        ib.addRef(rst).addRef(rstval);
+      }
+    return defW;
+  }
+  template <typename T>
+  WireRef buildFlipFlop(HWValue clk, HWValue d,
+                        HWValue en = ConstantRef::fromBool(1),
+                        Range<T> resets = Range<T>::emptyRange()) {
+    auto defW = ctx.getStore<Wire>().create(d.getNumBits());
+    auto ib = buildInstrRaw(HW_FLIP_FLOP, 4 + resets.size());
+    ib.addRef(defW).other().addRef(clk).addRef(d).addRef(en);
+    for (auto [rst, rstval] : resets) {
+      ib.addRef(rst).addRef(rstval);
+    }
+    return defW;
   }
 
   RegisterRef buildRegister(Optional<uint32_t> bitSize = nullopt) {
@@ -949,6 +1188,25 @@ public:
 
     insertInstr(procInstRef);
     return procInstRef;
+  }
+
+  ProcessIRef changeProcessType(HWOpcode type, ProcessIRef proc) {
+    if (proc.isOpc(type))
+      return proc;
+    auto ib =
+        InstrBuilder{ctx.getStore<Instr>().create(proc.getNumOperands(), type)};
+    for (auto def : proc.defs()) {
+      ib.addRef(def->fat());
+      def.replace(FatDynObjRef<>{nullref});
+    }
+    ib.other();
+    for (auto use : proc.others()) {
+      ib.addRef(use->fat());
+    }
+    ctx.getCtx<CoreDialectContext>().instrSourceLocInfo.copyDebugInfo(
+        proc, ib.instr());
+    ctx.getCFG()[proc].replace(ib.instr());
+    return ib.instr();
   }
 
   // HWInstrRef buildEventDelay(RegisterRef dReg, RegisterRef qReg,
@@ -1234,7 +1492,7 @@ public:
 
   InstrRef addOperands(InstrRef old, ArrayRef<WireRef> newDefs,
                        ArrayRef<HWValue> newUses) {
-    setInsertPoint(ctx.getCtx<CoreDialectContext>().cfg[old]);
+    setInsertPoint(ctx.getCFG()[old]);
     auto newInstr = InstrRef{ctx.getStore<Instr>().create(
         old.getNumOperands() + newDefs.size() + newUses.size(),
         old.getDialectOpcode())};
@@ -1296,6 +1554,11 @@ public:
       return buildInstr(HW_ASSERT_DEFER, false, value, deferTrigger.oref());
     return buildInstr(OP_ASSERT, false, value);
   }
+  auto buildAssume(HWValue x, HWValue under) {
+    auto w = buildInstr(HW_ASSUME, true, x, under).def()->as<WireRef>();
+    w->numBits = x.getNumBits();
+    return w;
+  }
 
   auto buildFuncParam(Optional<uint32_t> numBits = nullopt) {
     auto reg = ctx.getStore<Register>().create(numBits);
@@ -1314,8 +1577,8 @@ public:
     return instr;
   }
 
-  auto buildFunc() {
-    auto funcRef = FunctionRef{ctx.getStore<Function>().create()};
+  auto buildFunc(StringRef name) {
+    auto funcRef = FunctionRef{ctx.getStore<Function>().create(name, &ctx)};
     auto funcInstr =
         FunctionIRef{ctx.getStore<Instr>().create(2, OP_FUNCTION_DEF)};
     insertInstr(funcInstr);
@@ -1365,6 +1628,13 @@ public:
   HWValue buildOneHotMux(MutArrayRef<std::pair<HWValue, HWValue>> cases) {
     assert(!cases.empty());
 
+    if (Range{cases}.drop_front().all(
+            [&](auto &&p) { return p.second == cases.front().second; })) {
+      return buildAssume(cases.front().second,
+                         buildOr(Range{cases}.transform(
+                             [](size_t, auto &&p) { return p.first; })));
+    }
+
     Range{cases}.sort([](auto &lhs, auto &rhs) {
       return commutativeOpOperandOrder(lhs.second, rhs.second);
     });
@@ -1375,6 +1645,27 @@ public:
     for (auto [sel, val] : cases)
       ib.addRef(sel).addRef(val);
     return defW;
+  }
+  HWValue buildOneHotMux(OperandVec<HWValue> &&templ) {
+    assert(templ.getNumDefs() == 1);
+
+    if (!templ[0])
+      templ[0] = ctx.getStore<Wire>().create();
+
+    auto val = templ.def(0).as<WireRef>();
+    val->numBits = templ.other(1).getNumBits();
+
+    if (templ.others().pairwise().drop_front().all(
+            [&](auto &&p) { return p.second == templ.other(1); })) {
+      return buildAssume(templ.other(1), buildOr(templ.others().step(2)));
+    }
+
+    templ.others().pairwise().sort([](auto lhs, auto rhs) {
+      return commutativeOpOperandOrder(lhs.second, rhs.second);
+    });
+
+    insertInstr(templ.build(HW_ONEHOT_MUX));
+    return val;
   }
 
   void destroyObj(FatDynObjRef<> obj) {
@@ -1419,6 +1710,18 @@ public:
       ctx.getStore<Module>().destroy(obj.as<ModuleRef>());
       break;
     }
+    case *HW_STDCELL_INFO: {
+      ctx.getStore<StdCellInfo>().destroy(obj.as<StdCellInfoRef>());
+      break;
+    }
+    case *HW_MEM_PORT: {
+      ctx.getStore<MemoryPort>().destroy(obj.as<MemoryPortRef>());
+      break;
+    }
+    case *HW_POINTER: {
+      ctx.getStore<Pointer>().destroy(obj.as<PointerRef>());
+      break;
+    }
     default:
       dyno_unreachable("deleting unknown object");
     }
@@ -1429,8 +1732,23 @@ public:
       destroyObj(obj);
     }
 
-    if (ctx.getCtx<CoreDialectContext>().cfg.contains(instr))
-      ctx.getCtx<CoreDialectContext>().cfg[instr].erase();
+    if (ctx.getCFG().contains(instr)) {
+      auto eraseIt = ctx.getCFG()[instr];
+      // some checks to keep iterator stable. maybe just make insert
+      // StableBlockIterator
+      if (insert == eraseIt)
+        insert = insert.succ();
+      if (insert != BlockRef_iterator<true>::invalid() &&
+          insert.blockRef() == eraseIt.blockRef() &&
+          BlockRef_iterator<false>{insert} ==
+              insert.blockRef().end_unordered().pred()) {
+        auto instr = *insert;
+        eraseIt.erase();
+        insert = ctx.getCFG()[instr];
+      } else {
+        eraseIt.erase();
+      }
+    }
     instr.destroyOthers();
     ctx.getStore<Instr>().destroy(instr);
   }
@@ -1442,13 +1760,11 @@ public:
     for (auto instr : toDestroy)
       destroyInstr(instr);
 
-    ctx.getCtx<CoreDialectContext>().cfg.blocks.destroy(block);
+    ctx.getCFG().blocks.destroy(block);
   }
 
   void setInsertPoint(BlockRef_iterator<true> it) { insert = it; }
-  void setInsertPoint(InstrRef ref) {
-    insert = ctx.getCtx<CoreDialectContext>().cfg[ref];
-  }
+  void setInsertPoint(InstrRef ref) { insert = ctx.getCFG()[ref]; }
 }; // namespace dyno
 
 class HWInstrBuilderStack : public HWInstrBuilder {

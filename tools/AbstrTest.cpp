@@ -59,7 +59,7 @@ int main() {
   build.buildStore(reg, whileInstr.getYieldValue(0));
   // build.buildYield(whileInstr.getYieldValue(0));
 
-  auto func = build.buildFunc();
+  auto func = build.buildFunc("abc");
   build.setInsertPoint(func.getBlock().begin());
   auto param = build.buildFuncParam();
   auto ret = build.buildFuncReturn(param, build.buildConst(64, 1UL << 40));

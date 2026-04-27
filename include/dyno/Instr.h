@@ -1,7 +1,8 @@
 #pragma once
 
-#include "Obj.h"
+#include "dyno/IDImpl.h"
 #include "dyno/IDs.h"
+#include "dyno/Obj.h"
 #include "dyno/Opcode.h"
 #include "dyno/Type.h"
 #include "support/Bits.h"
@@ -9,16 +10,19 @@
 #include "support/DenseMapInfo.h"
 #include "support/RTTI.h"
 #include "support/SmallVec.h"
+#include "support/TwoLevelSet.h"
 #include "support/Utility.h"
 #include <cassert>
 #include <compare>
 #include <cstdint>
 #include <dyno/Interface.h>
 #include <dyno/Obj.h>
+#include <functional>
 #include <iterator>
 #include <limits>
 #include <support/InlineStorage.h>
 #include <support/Ranges.h>
+#include <type_traits>
 #include <utility>
 
 namespace dyno {
@@ -29,6 +33,7 @@ class InstrRef;
 class OperandRef;
 class InstrDefUse;
 class InsrBuilder;
+template <IsFatDynObjRef T> class MutInstr;
 
 class Operand : public ByValueRTTIUtilMixin<Operand>, ByValueRTTITag2 {
   friend class Instr;
@@ -44,6 +49,7 @@ class Operand : public ByValueRTTIUtilMixin<Operand>, ByValueRTTITag2 {
     auto ptr = custom.as<T *>();
     return {ref, *ptr};
   }
+  Operand() = default;
 
 public:
   static inline bool isDefUseOperand(DynObjRef ref) {
@@ -103,6 +109,7 @@ class Instr : public TrailingObjArr<Instr, Operand> {
   friend class InstrRef;
   friend class OperandRef;
   friend class InstrBuilder;
+  template <IsFatDynObjRef T> friend class MutInstr;
 
   OpcodeID opc;
   DialectID dialect;
@@ -127,6 +134,13 @@ public:
   Instr &operator=(Instr &&) = delete;
 
   ~Instr() = default;
+
+  Instr(Instr &&old, size_t numOperands)
+      : opc(old.opc), dialect(old.dialect), _unused(old._unused),
+        numOperands(numOperands), numDefs(old.numDefs),
+        customStorage(old.customStorage) {
+    assert(numOperands <= 0x1000);
+  }
 
 private:
   iterator begin() { return trailing(); }
@@ -201,7 +215,8 @@ public:
 
   OperandRef &operator+=(int i) {
     uint16_t newVal = instrRef.getCustom() + i;
-    assert(newVal <= instrRef->numOperands && "out of bounds");
+    // allow two extra so that other_begin() + 1 is valid even without others.
+    assert(newVal < instrRef->numOperands + 2 && "out of bounds");
     instrRef.setCustom(newVal);
     return *this;
   }
@@ -237,17 +252,20 @@ public:
   Operand &operator[](int index) const { return *((*this) + index); }
   explicit operator Operand &() const { return instrRef->operand(getNum()); }
 
-  template <typename T> void replace(FatObjRef<T> newRef) {
+  template <typename T> T as() const { return (*this)->as<T>(); }
+  template <typename T> T dyn_as() const { return (*this)->dyn_as<T>(); }
+  template <typename T> bool is() const { return (*this)->is<T>(); }
+
+  template <typename T> void replace(FatObjRef<T> newRef) const {
     return replace(newRef.template as<FatDynObjRef<>>());
   }
-  template <typename T> void replace(FatDynObjRef<T> newRef);
+  template <typename T> void replace(FatDynObjRef<T> newRef) const;
 
   void destroy();
 
 private:
   void addToDefUse() const;
 };
-
 class InstrRef : public FatObjRef<Instr> {
   friend class InstrDefUse;
 
@@ -399,6 +417,27 @@ public:
   }
 };
 
+template <typename T>
+concept IsInstrRef = requires(T ref) {
+  // todo: more specific
+  ref.begin();
+  ref.end();
+  ref.def_begin();
+  ref.def_end();
+  ref.other_begin();
+  ref.other_end();
+  ref.defs();
+  ref.others();
+  ref.getDialectOpcode();
+};
+
+template <typename T>
+concept IsThinOperandRef = requires(T ref) { ref->thin(); };
+template <typename T>
+concept IsFatOperandRef = IsThinOperandRef<T> && requires(T ref) {
+  ref->template as<FatDynObjRef<>>();
+};
+
 // #define INSERT_ERASE_HOOK
 
 class InstrDefUse {
@@ -433,7 +472,8 @@ public:
   unsigned getNumUses() const { return refs.size() - numDefs; }
 
   const OperandRef &getDef() {
-    assert(numDefs == 1);
+    assert(numDefs != 0);
+    assert(numDefs <= 1);
     return *def_begin();
   }
 
@@ -492,6 +532,22 @@ public:
     refs.downsize(numDefs);
   }
 
+  template <std::invocable<OperandRef> Callback>
+  void replaceAllUsesWithRaw(FatDynObjRef<> newRef, Callback &&func) {
+    if (Operand::isDefUseOperand(newRef)) {
+      auto &other = *reinterpret_cast<InstrDefUse *>(newRef.getPtr());
+      assert(&other != this);
+      for (OperandRef use : uses()) {
+        func(use);
+      }
+    } else {
+      for (OperandRef use : uses()) {
+        func(use);
+      }
+    }
+    refs.downsize(numDefs);
+  }
+
   void replaceAllUsesWith(FatDynObjRef<> newRef) {
     return replaceAllUsesWith(newRef, [](OperandRef) {});
   }
@@ -545,7 +601,7 @@ private:
     }
 #endif
     unsigned pos;
-    if (opRef.isDef()) {
+    if (opRef.isDef()) [[unlikely]] {
       pos = numDefs++;
       auto it = refs.begin() + pos;
       if (it != refs.end()) {
@@ -668,6 +724,7 @@ public:
     return *this;
   }*/
   InstrBuilder &addRef(FatDynObjRef<> ref) {
+    new (&*op) Operand{};
     op->emplace(ref);
     if (op.hasDefUse()) {
       op.addToDefUse();
@@ -799,7 +856,7 @@ inline void GenericOperand::setLinkedPos(uint16_t pos) {
 }
 #endif
 
-template <typename T> void OperandRef::replace(FatDynObjRef<T> newRef) {
+template <typename T> void OperandRef::replace(FatDynObjRef<T> newRef) const {
   auto &op = (**this);
   if (Operand::isDefUseOperand(op.ref)) {
     assert(this->isDef() ==
@@ -826,29 +883,23 @@ inline void OperandRef::destroy() {
 struct UniqueOperand {
   Instr *instr;
   uint32_t idx;
+  bool operator==(const UniqueOperand &o) const {
+    return instr == o.instr && idx == o.idx;
+  }
 };
 
 } // namespace dyno
 
-template <> struct DenseMapInfo<dyno::UniqueOperand> {
-  static constexpr dyno::UniqueOperand getEmptyKey() { return {nullptr, 0}; }
-  static constexpr dyno::UniqueOperand getTombstoneKey() {
-    return {nullptr, 1};
-  }
-  static unsigned getHashValue(const dyno::UniqueOperand &k) {
-    auto ptrHash = hash_u64(uintptr_t(k.instr));
-    return hash_combine(hash_combine(uint32_t(ptrHash), hash_u32(k.idx)),
-                        ptrHash >> 32);
-  }
-  static bool isEqual(const dyno::UniqueOperand &lhs,
-                      const dyno::UniqueOperand &rhs) {
-    return lhs.instr == rhs.instr && lhs.idx == rhs.idx;
+template <> struct std::hash<dyno::UniqueOperand> {
+  size_t operator()(const dyno::UniqueOperand &op) {
+    return hash_combine64(hash_u64(reinterpret_cast<uintptr_t>(op.instr)),
+                          op.idx);
   }
 };
 
 namespace dyno {
 
-inline DenseMap<UniqueOperand, uint32_t> linkIdxSpillMap;
+inline TwoLevelMap<UniqueOperand, uint32_t> linkIdxSpillMap;
 
 // to be called on instr def use side OperandRefs.
 inline void OperandRef::setLinkIdx(uint32_t idx) {
@@ -880,3 +931,17 @@ inline uint32_t OperandRef::getLinkIdx() {
 }
 
 } // namespace dyno
+
+template <> struct DenseMapInfo<dyno::OperandRef> {
+  static dyno::OperandRef getEmptyKey() {
+    return dyno::OperandRef{
+        dyno::FatObjRef<dyno::Instr>{dyno::ObjID::invalid(), nullptr, 0}};
+  }
+  // optional only
+  static dyno::OperandRef getTombstoneKey() = delete;
+  static unsigned getHashValue(const dyno::OperandRef &k) = delete;
+  static bool isEqual(const dyno::OperandRef &lhs,
+                      const dyno::OperandRef &rhs) {
+    return lhs.instr() == rhs.instr();
+  }
+};
