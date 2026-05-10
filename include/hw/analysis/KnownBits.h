@@ -5,12 +5,14 @@
 #include "dyno/Context.h"
 #include "dyno/Instr.h"
 #include "dyno/Opcode.h"
+#include "hw/HWPrinter.h"
 #include "hw/HWValue.h"
 #include "hw/IDs.h"
 #include "hw/LoadStore.h"
 #include "hw/Wire.h"
 #include "hw/analysis/CacheInvalidation.h"
 #include "op/IDs.h"
+#include "support/Debug.h"
 #include "support/Utility.h"
 #include <concepts>
 namespace dyno {
@@ -49,6 +51,7 @@ class KnownBitsAnalysis : public CacheInvalidation<KnownBitsAnalysis> {
     KnownBitsVal(const BigInt &val) : val(val) {}
     KnownBitsVal() = default;
   };
+  Context &ctx;
 
   struct Frame {
     HWValue value;
@@ -57,6 +60,9 @@ class KnownBitsAnalysis : public CacheInvalidation<KnownBitsAnalysis> {
   };
   SmallVec<Frame, 16> stack;
   KnownBitsVal retVal;
+
+  static constexpr const char *debugName = "KnownBitsAnalysis";
+  static constexpr uint32_t debugID = 128; // todo: analysis debug ID assignment
 
   void pushNextOrReturn(Frame &frame, InstrRef instr, bool inv = false) {
     auto n = instr.getNumOthers();
@@ -97,6 +103,7 @@ class KnownBitsAnalysis : public CacheInvalidation<KnownBitsAnalysis> {
   }
 
 public:
+  KnownBitsAnalysis(Context &ctx) : ctx(ctx) {}
   AnalysisCache<ObjRef<Wire>, BigInt> cache;
 
   BigInt getKnownBits(HWValue rootVal) {
@@ -112,6 +119,16 @@ public:
       }
       auto wire = frame.value.as<WireRef>();
       auto instr = wire.getDefI();
+
+      DYNO_DBG({
+        // print last return value first.
+        if (retVal.val.getNumBits() != 0 && !retVal.val.getWords().empty()) {
+          std::print(dbgs(), "  got {}\n", retVal.val);
+        }
+
+        dumpInstr(instr, ctx, false, false);
+        std::print(dbgs(), ": #{} acc {}\n", frame.idx, frame.acc.val);
+      });
 
       if (auto val = cache.find(wire.as<WireRef>())) {
         retVal = KnownBitsVal{*val};
@@ -237,12 +254,12 @@ public:
           frame.idx++;
           stack.emplace_back(asInsert.val()->as<HWValue>(), 0);
         } else {
-
           if (asInsert.getBase() < asInsert.getMemoryLen()) {
             int64_t oobLen = int64_t(asInsert.getBase() + asInsert.getLen()) -
                              asInsert.getMemoryLen();
-            BigInt::resizeOp4S(retVal.val, retVal.val,
-                               asInsert.getLen() - oobLen);
+            if (oobLen > 0)
+              BigInt::resizeOp4S(retVal.val, retVal.val,
+                                 asInsert.getLen() - oobLen);
             BigInt::insertOp4S(frame.acc.val, frame.acc.val, retVal.val,
                                asInsert.getBase());
           }
@@ -495,7 +512,7 @@ public:
   void clearCache() { knownBits.clearCache(); }
 
 public:
-  explicit DeriveBitsAnalysis(Context &ctx) : ctx(ctx) {}
+  explicit DeriveBitsAnalysis(Context &ctx) : ctx(ctx), knownBits(ctx) {}
 };
 
 }; // namespace dyno

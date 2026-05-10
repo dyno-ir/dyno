@@ -9,20 +9,21 @@ EXPORT :symbol("flow_completeFlow"),             %completeFlow             :?fun
 
 FUNCTION_DEF %earlyCanonFlow:func, :block {
   // preprocessing, inlining
-  meta.REMOVE_INIT_PROCS_PASS
   meta.FUNCTION_INLINE_PASS
   meta.INST_COMBINE_PASS
   meta.MODULE_INLINE_PASS
+  meta.EVAL_INIT_PROCS_PASS
+  meta.REMOVE_INIT_PROCS_PASS
   meta.TRIGGER_DEDUPE_PASS
 
   // early dedupe/simplification
-  meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS map("differentBlocks": "0")
+  meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS map("differentBlocks": "0", "keepLoadStoreOrder": "1")
   meta.INST_COMBINE_PASS
 
   // process fusion & ssa construction
   meta.SEQ_TO_COMB_PASS
   meta.SSA_CONSTRUCT_PASS
-  meta.PROCESS_LINEARIZE_PASS map("retainIODeps": "0", "retainInnerDeps": "0")
+  meta.PROCESS_LINEARIZE_PASS map("retainIODeps": "1", "retainInnerDeps": "1")
   meta.SSA_CONSTRUCT_PASS
   meta.SSA_CONSTRUCT_PASS map("mode": "DEFERRED")
   meta.INST_COMBINE_PASS

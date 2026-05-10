@@ -135,40 +135,40 @@ public:
   using Base::clear;
 };
 
-// slab allocator for mixed size objects. no longer supports fast indexing
-// anyways, so are slabs linked-list based.
-// template <typename size_type = uint32_t, size_type slab_size = 8 * 4096>
-// class MixedSizeSlabAllocator {
-//   constexpr static size_type payload_size = slab_size - sizeof(uintptr_t);
-//   struct Slab {
-//     uint8_t payload[payload_size];
-//     Slab *prev;
-//   };
-//   Slab *cur;
-//   size_type pos;
+template <typename size_type = uint32_t, size_type slab_size = 8 * 4096,
+          size_type base_align = alignof(std::max_align_t)>
+class LinkedListSlabAllocator {
+  constexpr static size_type payload_size = slab_size - sizeof(uintptr_t);
+  struct Slab {
+    uint8_t payload[payload_size];
+    Slab *prev;
+  };
+  Slab *cur;
+  size_type pos;
 
-//   void makeSlab() {
-//     auto *ptr = malloc(slab_size);
-//     if (!ptr) [[unlikely]]
-//       std::terminate();
-//     pos = 0;
-//     cur = ptr;
-//   }
+  void makeSlab() {
+    auto *ptr = reinterpret_cast<Slab *>(malloc(slab_size));
+    if (!ptr) [[unlikely]]
+      std::terminate();
+    pos = 0;
+    ptr->prev = cur;
+    cur = ptr;
+  }
 
-//   void allocate(size_type size, size_type align) {
-//     assert(align <= slab_size && "can't align larger than slab size");
-//     assert(size <= payload_size && "can't alloc larger than payload size");
-//     assert(std::popcount(align) == 1 && "non pow2 align");
+  void *allocate(size_type size, size_type align = base_align) {
+    assert(align <= slab_size && "can't align larger than slab size");
+    assert(size <= payload_size && "can't alloc larger than payload size");
+    assert(std::popcount(align) == 1 && "non pow2 align");
 
-//     // align
-//     if (pos & (align - 1)) {
-//       pos &= ~(align - 1);
-//       pos += align;
-//     }
+    // align
+    if (pos & (align - 1)) {
+      pos &= ~(align - 1);
+      pos += align;
+    }
 
-//     if (pos + size > payload_size)
-//       makeSlab();
-//   }
+    if (pos + size > payload_size)
+      makeSlab();
+  }
 
-//   MixedSizeSlabAllocator() { makeSlab(); }
-// };
+  LinkedListSlabAllocator() { makeSlab(); }
+};

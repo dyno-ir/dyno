@@ -1,6 +1,7 @@
 #pragma once
 #include "DenseMapInfo.h"
 #include <cassert>
+#include <concepts>
 
 namespace dyno {
 
@@ -48,7 +49,7 @@ public:
     return lhs.val == rhs.val;
   }
 
-  explicit operator bool() const { return val != InvalidF(); }
+  constexpr explicit operator bool() const { return val != InvalidF(); }
 
   template <typename U = T>
     requires(!std::is_same_v<U, bool>)
@@ -61,7 +62,7 @@ public:
     assert(*this);
     return val;
   }
-  constexpr T value_or(T &&alt) { return (*this) ? val : alt; }
+  constexpr T value_or(auto &&alt) { return (*this) ? val : alt; }
 
   constexpr T &operator*() {
     assert(*this);
@@ -80,7 +81,7 @@ public:
     return &val;
   }
 
-  bool has() const { return bool(*this); }
+  constexpr bool has() const { return bool(*this); }
 };
 
 template <> class Optional<bool> : public Optional<uint8_t> {

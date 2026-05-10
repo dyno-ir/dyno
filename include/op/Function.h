@@ -81,9 +81,9 @@ inline FunctionIRef FunctionRef::iref() const {
   return ptr->defUse.getDef(0)->instr();
 }
 
-class CallInstrRef : public InstrRef {
+class CallInstrRef : public OpcodeInstrRef<InstrRef, OP_CALL> {
 public:
-  using InstrRef::InstrRef;
+  using OpcodeInstrRef::OpcodeInstrRef;
 
   FunctionRef func() { return this->other(0)->as<FunctionRef>(); }
 

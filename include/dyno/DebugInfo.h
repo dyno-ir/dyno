@@ -3,8 +3,6 @@
 #include "dyno/Instr.h"
 #include "dyno/ObjMap.h"
 #include "dyno/Type.h"
-#include "hw/Register.h"
-#include "hw/Wire.h"
 #include "support/Bits.h"
 #include "support/Debug.h"
 #include "support/DedupeMap.h"
@@ -152,21 +150,22 @@ public:
     if (!instrMap.inRange(src) || instrMap[src].empty())
       return;
     auto &vec = instrMap.get_ensure(dst);
-    // todo: better data structure
-    for (auto info : instrMap[src]) {
-      if (std::find(vec.begin(), vec.end(), info) != vec.end())
+    auto vecLen = vec.size();
+    // todo: better data structure, bloom filter?
+    for (auto elem : instrMap[src]) {
+      if (Range{vec.begin(), vec.begin() + vecLen}.find_idx(elem))
         continue;
-      vec.emplace_back(info);
+      vec.emplace_back(elem);
     }
   }
 
-  void copyDebugInfoOOC(SourceLocInfo &other, ObjRef<InstrT> src,
+  void copyDebugInfoOOC(SourceLocInfo &srcCtxInfo, ObjRef<InstrT> src,
                         ObjRef<InstrT> dst) {
-    if (&other == this)
+    if (&srcCtxInfo == this)
       return copyDebugInfo(src, dst);
-    if (!other.instrMap.inRange(src) || other.instrMap[src].empty())
+    if (!srcCtxInfo.instrMap.inRange(src) || srcCtxInfo.instrMap[src].empty())
       return;
-    for (auto loc : other.getSourceLocs(src)) {
+    for (auto loc : srcCtxInfo.getSourceLocs(src)) {
       addSrcLoc(dst, loc.fileName, loc.beginLine, loc.beginCol, loc.endLine,
                 loc.endCol);
     }
@@ -188,7 +187,10 @@ public:
   static constexpr DialectType ty{ObjTraits<ValueObj>::ty};
   void addName(RefT ref, std::string_view name) {
     auto nameIdx = strDedupe.getCanonicalIdx(name);
-    valueMap.get_ensure(ref).emplace_back(nameIdx);
+    auto &vec = valueMap.get_ensure(ref);
+    if (Range{vec}.find_idx(nameIdx))
+      return;
+    vec.emplace_back(nameIdx);
   }
 
   auto getNames(RefT ref) {
@@ -197,6 +199,28 @@ public:
   }
 
   auto clearNames(RefT ref) { return valueMap.get_ensure(ref).clear(); }
+
+  void copyNames(RefT src, RefT dst) {
+    if (!valueMap.inRange(src))
+      return;
+    if (!valueMap[src].empty()) {
+      auto &vec = valueMap.get_ensure(dst);
+      auto vecLen = vec.size();
+
+      for (auto elem : valueMap[src]) {
+        if (Range{vec.begin(), vec.begin() + vecLen}.find_idx(elem))
+          continue;
+        vec.emplace_back(elem);
+      }
+    }
+  }
+
+  void copyNamesOOC(ValueNameInfo &srcCtxInfo, RefT src, RefT dst) {
+    if (&srcCtxInfo == this)
+      return copyNames(src, dst);
+    for (auto nm : srcCtxInfo.getNames(src))
+      addName(dst, nm);
+  }
 
   void reset() {
     strDedupe.clear();

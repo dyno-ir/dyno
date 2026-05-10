@@ -3,6 +3,7 @@
 #include "dyno/RefUnion.h"
 #include "hw/Module.h"
 #include "hw/Process.h"
+#include "hw/Wire.h"
 #include "op/Function.h"
 
 namespace dyno {

@@ -50,6 +50,10 @@ template <typename T> constexpr T sign_extend(T num, unsigned bits) {
   return S(num << shamt) >> shamt;
 }
 
+template <typename T> constexpr T modulo_mask(unsigned bits) {
+  return (bits % 32) ? bit_mask_ones<T>(bits % 32) : ~T(0);
+}
+
 template <typename T> constexpr unsigned clog2(T val) {
   if (val == 0)
     return 0;
@@ -141,8 +145,14 @@ constexpr uint64_t hash_u64(uint64_t a) {
   return a ^ (a >> 32);
 }
 
+// input already hashed
 constexpr uint32_t hash_reduce_64_to_32(uint64_t a) {
   return hash_combine(a, a >> 32);
+}
+
+// input not yet hashed
+constexpr uint32_t hash_64_to_32(uint64_t a) {
+  return hash_reduce_64_to_32(hash_u64(a));
 }
 
 constexpr uint32_t strhash_u32(const char *data, size_t len) {

@@ -7,6 +7,7 @@
 #include "hw/MemoryPort.h"
 #include "hw/Pointer.h"
 #include <algorithm>
+#include <numeric>
 #include <utility>
 
 namespace dyno {
@@ -134,6 +135,39 @@ public:
     if (endOffs)
       max = std::min(*endOffs, pessimisticMax);
     else
+      max = pessimisticMax;
+
+    return std::make_pair(getBase(), max);
+  }
+  // same as getConstAccessRange but keep length a multiple of minimum factor to
+  // avoid ugly splices.
+  std::pair<uint32_t, uint32_t> getConstAccessRangeAligned() {
+    if (isConstantOffs())
+      return std::make_pair(getBase(), self().getLen());
+
+    Optional<uint32_t> endOffs = 0;
+    Optional<uint32_t> minFactor = nullopt;
+
+    for (auto term : terms()) {
+      auto max = term.getMax();
+      if (!max) {
+        endOffs = nullopt;
+        break;
+      }
+      *endOffs += (*max - 1) * term.getFact();
+      minFactor =
+          minFactor ? std::min(*minFactor, term.getFact()) : term.getFact();
+    }
+
+    auto pessimisticMax = self().getMemoryLen() - getBase();
+
+    uint32_t max;
+    if (endOffs) {
+      *endOffs +=
+          minFactor ? std::max(*minFactor, self().getLen()) : self().getLen();
+      max = std::min(*endOffs, pessimisticMax);
+
+    } else
       max = pessimisticMax;
 
     return std::make_pair(getBase(), max);
@@ -296,8 +330,6 @@ public:
     return gep().getBase();
   }
 };
-
-
 
 class MemLoadIRef : public OpcodeInstrRef<HWInstrRef, HW_MEM_LOAD>,
                     public PointerMixin<MemLoadIRef> {

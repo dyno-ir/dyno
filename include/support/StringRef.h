@@ -22,6 +22,7 @@ public:
   operator ArrayRef<char>() { return {self().data(), self().size()}; }
   operator Range<const char *>() { return {self().begin(), self().end()}; }
   operator std::string_view() { return {self().data(), self().size()}; }
+  operator std::string() { return {self().data(), self().size()}; }
 
   constexpr Derived substr(size_t pos, size_t n) const {
     return Derived{cself().begin() + pos, cself().begin() + pos + n};

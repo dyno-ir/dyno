@@ -1,6 +1,5 @@
 #pragma once
-#include <cassert>
-#include <optional>
+#include "op/StringObj.h"
 #ifdef ENABLE_FST
 #include "../../../tools/dyno-sim/include/FST.h"
 #endif
@@ -17,6 +16,8 @@
 #include "op/IDs.h"
 #include "op/StructuredControlFlow.h"
 #include "support/Debug.h"
+#include <cassert>
+#include <optional>
 
 #include "dyno/Constant.h"
 #include "dyno/Context.h"
@@ -49,10 +50,25 @@ public:
   // register to operand in TriggerIRef
   ObjMapVec<Register, SmallVec<OperandRef, 1>> triggers;
   ObjMapVec<Trigger, SmallVec<DeferredStore, 16>> deferredStores;
+  // failing deferred asserts
+  ObjMapVec<Trigger, SmallDenseSet<ObjRef<Instr>>> deferredAsserts;
   SmallDenseSet<ObjRef<Trigger>, 4> firedTriggers;
   std::optional<Range<InstrRef::iterator>> loopYieldVals;
 
   bool trace = false;
+
+  struct Config {
+    bool undefAddressInsertIsNOP = false;
+  };
+  Config config;
+
+  enum class RunState { INITIAL, MAIN, FINAL };
+  RunState runState = RunState::INITIAL;
+
+  Context &getCtx() { return ctx; }
+
+  static constexpr const char *debugName = "HWInterpreter";
+  static constexpr uint32_t debugID = 129;
 
 private:
   void queueTriggers(RegisterIRef reg) {
@@ -87,14 +103,29 @@ private:
     queueTriggers(reg);
   }
   void scheduleDependentForEval(RegisterIRef reg) {
-    for (auto use : reg.oref().uses()) {
-      if (!use.instr().isOpc(HW_LOAD))
-        continue;
-      auto load = use.instr().as<LoadIRef>();
-      auto proc = load.parentProc(ctx);
+    // initial/final do not schedule dependent.
+    if (runState != RunState::MAIN)
+      return;
+    auto uses =
+        reg.oref()
+            .uses()
+            .filter([](OperandRef ref) { return ref.instr().isOpc(HW_LOAD); })
+            .transform([&](size_t, OperandRef ref) {
+              return HWInstrRef{ref.instr()}.parentProc(ctx);
+            });
+
+    SmallVec<ProcessIRef, 64> usesVec(uses);
+    if (module.block().isSorted()) {
+      Range{usesVec}.sort([&](InstrRef lhs, InstrRef rhs) {
+        return ctx.getCFG()[lhs].getPos() > ctx.getCFG()[rhs].getPos();
+      });
+    }
+
+    for (auto proc : usesVec) {
       auto [found, it] = evalSet.findOrInsert(proc);
-      if (!found)
+      if (!found) {
         evalStack.emplace_back(proc);
+      }
     }
   }
 
@@ -104,10 +135,6 @@ private:
     auto wire = value.as<WireRef>();
     BigInt &val = wireVals[wire];
     if (val.getNumBits() == 0) {
-      DYNO_DBG("HWInterpreter", {
-        std::print(dbgs(), "undefined value, def instr:\n");
-        dumpInstr(wire.getDefI(), ctx);
-      });
       dyno_unreachable("undefined value");
     }
     return GenericBigIntRef{val};
@@ -161,11 +188,21 @@ private:
 
   void runStore(RegisterIRef reg, GenericBigIntRef val, uint32_t addr) {
     auto &regVal = regVals[reg.oref()];
-    auto oldCopy = regVal;
+    BigInt old;
+    BigInt::rangeSelectOp4S(old, regVal, addr, val.getNumBits());
     BigInt::insertOp4S(regVal, regVal, val, addr);
     assert(regVal.getNumWords() != 0);
-    if (oldCopy != regVal)
+    if (old != val)
       onValueChange(reg);
+  }
+
+  void failedAssert(InstrRef instr) {
+    std::print(errs, "failed assertion: ");
+    HWCtxPrinter{ctx, errs}.printInstr(instr, true, false);
+#ifdef ENABLE_FST
+    // finalize FST
+    fstWriter.reset();
+#endif
   }
 
 public:
@@ -244,9 +281,10 @@ public:
 
       auto addr = evalAddress(insert.base());
 
-      if (!addr)
-        out = PatBigInt::undef(insert.getMemoryLen());
-      else
+      if (!addr) {
+        if (!config.undefAddressInsertIsNOP)
+          out = PatBigInt::undef(insert.getMemoryLen());
+      } else
         BigInt::insertOp4S(out, base, val, *addr);
       break;
     }
@@ -293,7 +331,9 @@ public:
           abort();
         trig = proc.other(0)->as<TriggerRef>().iref();
       }
-
+      if (!addr) {
+        break;
+      }
       deferredStores[trig.oref()].emplace_back(store, *addr,
                                                getValue(store.value()));
       break;
@@ -315,10 +355,15 @@ public:
         val = reg;
         assert(val.getNumBits() != 0);
         assert(val.getNumBits() == load.getLen());
+
         break;
       }
-      BigInt::rangeSelectOp4S(val, reg, *evalAddress(load.base()),
-                              load.getLen());
+      auto addr = evalAddress(load.base());
+      if (!addr) {
+        val = PatBigInt::undef(load.getLen());
+        break;
+      }
+      BigInt::rangeSelectOp4S(val, reg, *addr, load.getLen());
       assert(val.getNumBits() != 0);
       assert(val.getNumBits() == load.getLen());
       break;
@@ -345,13 +390,82 @@ public:
     case *OP_ASSERT: {
       auto val = getValue(instr.other(0)->as<HWValue>());
       if (!val.valueEquals(1)) {
-        std::print(errs, "Assertion Failed at: ");
-        for (auto loc :
-             ctx.getCtx<CoreDialectContext>().instrSourceLocInfo.getSourceLocs(
-                 instr))
-          std::print(errs, "{}:{}.{}-{}.{}\n", loc.fileName, loc.beginLine,
-                     loc.beginCol, loc.endLine, loc.endCol);
-        errs << "\n";
+        failedAssert(instr);
+        report_fatal_error("HWInterpreter: failed assert");
+      }
+      break;
+    }
+
+    case *HW_ASSERT_DEFER: {
+      auto trigger = instr.operand(1)->as<TriggerRef>();
+      auto val = getValue(instr.operand(0)->as<HWValue>());
+      if (val.valueEquals(1)) {
+        if (auto it = deferredAsserts[trigger].find(instr))
+          deferredAsserts[trigger].erase(it);
+      } else {
+        deferredAsserts[trigger].findOrInsert(instr);
+      }
+      break;
+    }
+
+    case *HW_PRINT: {
+      auto strObjRef = instr.operand(0)->as<StringObjRef>();
+      auto &str = strObjRef->data;
+
+      auto argIt = instr.operand(1);
+
+      // todo: full verilog formatting
+      uint64_t pos = 0;
+      while (1) {
+        auto idx = str.find('%', pos);
+
+        if (argIt == instr.end() && idx == std::string::npos) {
+          std::print(os, "{}", std::string_view(str).substr(pos));
+          break;
+        }
+
+        if (idx == std::string::npos) {
+          std::print(os, "{}", std::string_view(str).substr(pos));
+          if (argIt != instr.end()) {
+            dumpInstr(instr, ctx);
+            report_fatal_error("too many print args");
+          }
+          break;
+        }
+
+        std::print(os, "{}", std::string_view(str).substr(pos, idx - pos));
+
+        if (argIt == instr.end()) {
+          dumpInstr(instr, ctx);
+          report_fatal_error("too few print args");
+        }
+
+        auto arg = getValue(argIt->as<HWValue>());
+        switch (str[idx + 1]) {
+        case 'c':
+          std::print(os, "{}", (char)arg.getExactVal());
+          break;
+        case 'x':
+          BigInt::stream_hex_4s_vlog(os, arg);
+          break;
+        case 'b':
+          BigInt::stream_bin_4s_vlog(os, arg);
+          break;
+        case 'd':
+        case 'u':
+          if (arg.getIs4S())
+            os << 'X';
+          else
+            BigInt::stream_dec(os, arg, str[idx + 1] == 'd');
+          break;
+        default: {
+          dumpInstr(instr, ctx);
+          report_fatal_error("invalid fmt string");
+        }
+        }
+
+        ++argIt;
+        pos = idx + 2;
       }
       break;
     }
@@ -388,11 +502,30 @@ public:
           defaultInstr = caseI;
           continue;
         }
-        for (auto val : caseI.labels().deref().as<HWValue>())
+        for (auto val : caseI.labels().deref().as<HWValue>()) {
+          switch (*caseI.getDialectOpcode()) {
           // todo: casex, casez
-          if (getValue(val) == cond) {
-            caseInstr = caseI;
+          case *OP_CASE:
+            if (getValue(val) == cond) {
+              caseInstr = caseI;
+              break;
+            }
+            continue;
+          case *HW_CASE_X:
+            if (BigInt::icmpCaseXEqualOp4S(getValue(val), cond)) {
+              caseInstr = caseI;
+              break;
+            }
+            continue;
+          case *HW_CASE_Z:
+            if (BigInt::icmpCaseZEqualOp4S(getValue(val), cond)) {
+              caseInstr = caseI;
+              break;
+            }
+            continue;
           }
+          break;
+        }
       }
       if (!caseInstr)
         caseInstr = defaultInstr;
@@ -515,13 +648,13 @@ public:
     }
 
 #ifdef ENABLE_FST
-    if (fstWriter)
-      for (auto def : instr.defs()) {
-        if (def->is<WireRef>()) {
-          fstWriter->updateValue(def->as<WireRef>(),
-                                 wireVals[def->as<WireRef>()]);
-        }
-      }
+    // if (fstWriter)
+    //   for (auto def : instr.defs()) {
+    //     if (def->is<WireRef>()) {
+    //       fstWriter->updateValue(def->as<WireRef>(),
+    //                              wireVals[def->as<WireRef>()]);
+    //     }
+    //   }
 #endif
   }
 
@@ -537,12 +670,66 @@ public:
           dbgs() << wireVals[def->as<WireRef>()];
           dbgs() << (back ? " <- " : ", ");
         }
-        print.printInstr(instr);
+        print.printInstr(instr, true, false);
+      }
+
+      bool debug = false;
+      if (debug) {
+        for (auto other : instr.others()) {
+          if (!other->is<WireRef>())
+            continue;
+          dumpObj(other->fat());
+          std::print(dbgs(), " = {}\n", wireVals[other->as<WireRef>()]);
+        }
+        for (auto def : instr.defs()) {
+          if (!def->is<WireRef>())
+            continue;
+          dumpObj(def->fat());
+          std::print(dbgs(), " <- {}\n", wireVals[def->as<WireRef>()]);
+        }
+        dumpInstr(instr);
       }
     }
   }
 
-  void evalProc(ProcessIRef proc) { evalBlock(proc.block()); }
+  // required w/o deferred SSA construct, if there are nested store defers
+  // that may have been queued during a previous eval.
+  void removeProcStoreDefers(ProcessIRef proc) {
+    for (auto [trig, stores] : deferredStores) {
+      if (!ctx.getStore<Trigger>().exists(trig))
+        continue;
+      for (auto it = stores.begin(); it != stores.end(); ++it) {
+        auto &store = *it;
+        if (HWInstrRef{store.store}.parentProc(ctx) == proc) {
+          if (stores.erase_unordered(it))
+            --it;
+          else
+            break;
+        }
+      }
+    }
+  }
+
+  void removeProcAssertDefers(ProcessIRef proc) {
+    for (auto [trig, asserts] : deferredAsserts) {
+      if (!ctx.getStore<Trigger>().exists(trig))
+        continue;
+      for (auto it = asserts.begin(); it != asserts.end();) {
+        auto assertI = ctx.resolve(*it);
+        if (HWInstrRef{assertI}.parentProc(ctx) == proc) {
+          it = asserts.erase(it);
+        } else
+          ++it;
+      }
+    }
+  }
+
+  void evalProc(ProcessIRef proc) {
+    // removeProcStoreDefers(proc);
+    removeProcAssertDefers(proc);
+    DYNO_DBG(std::print(dbgs(), "eval: "); dumpInstr(proc, ctx, true, false);)
+    evalBlock(proc.block());
+  }
 
   void evalActive() {
     // active
@@ -556,11 +743,16 @@ public:
   void evalNBA() {
     // deferred stores
     for (auto trigger : Range{firedTriggers}.resolve(ctx)) {
+      for (auto assert : deferredAsserts[trigger])
+        failedAssert(ctx.resolve(assert));
+      if (!deferredAsserts[trigger].empty())
+        report_fatal_error("HWInterpreter: failed assert");
       for (auto deferred : deferredStores[trigger]) {
         runStore(deferred.store.reg().iref(), GenericBigIntRef{deferred.value},
                  deferred.addr);
       }
       deferredStores[trigger].clear();
+      deferredAsserts[trigger].clear();
     }
     firedTriggers.clear();
   }
@@ -574,22 +766,44 @@ public:
     }
   }
 
-  void initialEval() {
+  // initial run for always_comb processes, runs after initialEval for actual
+  // initial procs
+  void initialCombEval() {
     for (auto proc : module.procs()) {
+      if (!proc.isOpc(HW_COMB_PROCESS_DEF, HW_NETLIST_PROCESS_DEF))
+        continue;
       evalSet.insert(proc);
       evalStack.emplace_back(proc);
     }
     eval();
   }
 
+  void initialEval() {
+    assert(runState == RunState::INITIAL);
+
+    for (auto proc : module.procs()) {
+      if (!proc.isOpc(HW_INIT_PROCESS_DEF))
+        continue;
+      evalSet.insert(proc);
+      evalStack.emplace_back(proc);
+    }
+    eval();
+    runState = RunState::MAIN;
+  }
+
   void setup() {
     wireVals.resize(ctx.getStore<Wire>().numIDs());
     regVals.resize(ctx.getStore<Register>().numIDs());
     triggers.resize(ctx.getStore<Register>().numIDs());
-    deferredStores.resize(ctx.getStore<Register>().numIDs());
+    deferredStores.resize(ctx.getStore<Trigger>().numIDs());
+    deferredAsserts.resize(ctx.getStore<Trigger>().numIDs());
+
+    auto &regResetValues = ctx.getCtx<HWDialectContext>().regResetValue;
 
     for (auto reg : ctx.getStore<Register>()) {
-      if (reg.getNumBits())
+      if (regResetValues.inRange(reg) && regResetValues[reg])
+        regVals[reg] = ctx.getStore<Constant>().resolve(regResetValues[reg]);
+      else if (reg.getNumBits())
         regVals[reg] =
             PatBigInt::fromFourState(FourState::SX, *reg.getNumBits());
     }
@@ -663,25 +877,27 @@ public:
           HWInstrRef{reg.iref()}.parentMod(ctx) != module)
         continue;
       auto names = ctx.getCtx<HWDialectContext>().regNameInfo.getNames(reg);
-      auto name = names.empty() ? "reg" + std::to_string(reg.getObjID())
-                                : (*names.begin());
-      fstWriter->createVar(reg, RegWireFSTWriter::VarType::LOGIC,
-                           RegWireFSTWriter::VarDir::INPUT, *reg.getNumBits(),
-                           name.c_str());
+      SmallVec<const char *, 16> namesVec(names);
+      std::string numericName = "r" + std::to_string(reg.getObjID());
+      namesVec.emplace_back(numericName.c_str());
+
+      auto regType =
+          ctx.getCtx<HWDialectContext>().regTypeInfo.getType(ctx, ref);
+      fstWriter->createVar(reg, regType, RegWireFSTWriter::VarDir::INPUT,
+                           *reg.getNumBits(), namesVec.front());
     }
 
-    for (auto [ref, val] : wireVals) {
-      if (!ctx.getStore<Wire>().exists(ref))
-        continue;
-      auto wire = ctx.getStore<Wire>().resolve(ref);
-      if (!wire.hasSingleDef() ||
-          HWInstrRef{wire.getDefI()}.parentMod(ctx) != module)
-        continue;
-      auto name = std::string("w") + std::to_string(wire.getObjID().num);
-      fstWriter->createVar(wire, RegWireFSTWriter::VarType::LOGIC,
-                           RegWireFSTWriter::VarDir::INPUT, *wire.getNumBits(),
-                           name.c_str());
-    }
+    // for (auto [ref, val] : wireVals) {
+    //   if (!ctx.getStore<Wire>().exists(ref))
+    //     continue;
+    //   auto wire = ctx.getStore<Wire>().resolve(ref);
+    //   if (!wire.hasSingleDef() ||
+    //       HWInstrRef{wire.getDefI()}.parentMod(ctx) != module)
+    //     continue;
+    //   auto name = std::string("w") + std::to_string(wire.getObjID().num);
+    //   fstWriter->createVar(wire, nullref, RegWireFSTWriter::VarDir::INPUT,
+    //                        *wire.getNumBits(), name.c_str());
+    // }
 
     fstWriter->endDefinitions();
 
@@ -694,17 +910,17 @@ public:
         continue;
       fstWriter->updateValue(reg, regVals[reg]);
     }
-    for (auto [ref, val] : wireVals) {
-      if (!ctx.getStore<Wire>().exists(ref))
-        continue;
-      auto wire = ctx.getStore<Wire>().resolve(ref);
-      if (!wire.hasSingleDef() ||
-          HWInstrRef{wire.getDefI()}.parentMod(ctx) != module)
-        continue;
-      fstWriter->updateValue(wire, wireVals[wire].getNumBits() == 0
-                                       ? PatBigInt::undef(*wire.getNumBits())
-                                       : wireVals[wire]);
-    }
+    // for (auto [ref, val] : wireVals) {
+    //   if (!ctx.getStore<Wire>().exists(ref))
+    //     continue;
+    //   auto wire = ctx.getStore<Wire>().resolve(ref);
+    //   if (!wire.hasSingleDef() ||
+    //       HWInstrRef{wire.getDefI()}.parentMod(ctx) != module)
+    //     continue;
+    //   fstWriter->updateValue(wire, wireVals[wire].getNumBits() == 0
+    //                                    ? PatBigInt::undef(*wire.getNumBits())
+    //                                    : wireVals[wire]);
+    // }
   }
 #endif
 

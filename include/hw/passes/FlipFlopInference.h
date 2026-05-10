@@ -73,7 +73,7 @@ class FlipFlopInferencePass : public Pass<FlipFlopInferencePass> {
   std::pair<ConstantRef, unsigned>
   findReset2(StoreIRef store,
              ArrayRef<std::pair<RegisterRef, bool>> resetCandidates) {
-    KnownBitsAnalysis knownBits;
+    KnownBitsAnalysis knownBits{ctx};
     for (auto [i, cand] : Range{resetCandidates}.enumerate()) {
       auto [reg, pol] = cand;
       SmallVec<std::pair<ObjRef<Wire>, BigInt>, 4> assignments;

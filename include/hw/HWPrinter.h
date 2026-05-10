@@ -4,12 +4,12 @@
 #include "aig/IDs.h"
 #include "aig/PrintParse.h"
 #include "dyno/Context.h"
+#include "dyno/DebugInfo.h"
 #include "dyno/IDs.h"
 #include "dyno/InstrPrinter.h"
 #include "dyno/Obj.h"
 #include "dyno/Opcode.h"
 #include "dynomite/IDs.h"
-#include "hw/DebugInfo.h"
 #include "hw/HWAbstraction.h"
 #include "hw/HWContext.h"
 #include "hw/IDs.h"
@@ -20,6 +20,7 @@
 #include "op/PrintParse.h"
 #include "support/ArrayRef.h"
 #include "support/TempBind.h"
+#include "type/PrintParse.h"
 #include <fstream>
 #include <ostream>
 namespace dyno {
@@ -58,7 +59,7 @@ public:
 class HWPrinter : public HWPrinterImpl<HWPrinter>,
                   public PrinterWrapper<CoreDialectPrinter, MetaDialectPrinter,
                                         OpDialectPrinter, HWDialectPrinter,
-                                        AIGDialectPrinter> {
+                                        AIGDialectPrinter, TypeDialectPrinter> {
   friend class HWPrinterImpl<HWPrinter>;
 
 public:
@@ -80,17 +81,27 @@ public:
 
   void printCtx(Context &ctx, bool printStdCells = false) {
     auto tok = bindCtx(ctx);
+    this->ctx = &ctx;
+    for (auto func : ctx.getStore<Function>()) {
+      // only dump top level funcs manually
+      if (ctx.getCFG().contains(func.iref()))
+        continue;
+      PrinterBase::printInstr(func.iref());
+    }
     for (auto mod : ctx.getStore<Module>()) {
       if (mod.iref().isOpc(HW_STDCELL_DEF) && !printStdCells)
         continue;
       PrinterBase::printInstr(mod.iref());
     }
+    this->ctx = nullptr;
   }
   using PrinterWrapper::printInstr;
   void printInstr(InstrRef instr, Context &ctx, bool trailingNewline = true,
                   bool expandBlocks = true) {
     auto tok = bindCtx(ctx);
+    this->ctx = &ctx;
     PrinterBase::printInstr(instr, trailingNewline, expandBlocks);
+    this->ctx = nullptr;
   }
   using HWPrinterImpl::printDeps;
   void printDeps(InstrRef instr, Context &ctx, unsigned maxDepth = -1) {
@@ -118,9 +129,13 @@ public:
   HWCtxPrinter(Context &ctx, std::ostream &str)
       : ContextPrinterWrapper(ctx, str) {
     setDefaultDialects({DIALECT_CORE, DIALECT_OP, DIALECT_HW});
+    sourceLocInfo.set(&ctx.getCtx<CoreDialectContext>().instrSourceLocInfo);
+    regNames().set(&ctx.getCtx<HWDialectContext>().regNameInfo);
   }
   HWCtxPrinter(Context &ctx) : ContextPrinterWrapper(ctx, OStreamWrapper{}) {
     setDefaultDialects({DIALECT_CORE, DIALECT_OP, DIALECT_HW});
+    sourceLocInfo.set(&ctx.getCtx<CoreDialectContext>().instrSourceLocInfo);
+    regNames().set(&ctx.getCtx<HWDialectContext>().regNameInfo);
   }
 };
 }; // namespace dyno

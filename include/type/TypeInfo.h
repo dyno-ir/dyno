@@ -1,8 +1,10 @@
 #pragma once
+#include "dyno/Context.h"
 #include "dyno/NewDeleteObjStore.h"
 #include "dyno/Obj.h"
 #include "support/Any.h"
 #include "support/Bits.h"
+#include "support/Optional.h"
 #include "support/Utility.h"
 #include "type/IDs.h"
 #include <bit>
@@ -53,6 +55,8 @@ public:
 
   operator TypeRef() { return TypeRef(getObjID()); }
   uint32_t typeID() { return getObjID() & 3; }
+
+  uint32_t getBitLen(dyno::Context &ctx);
 };
 
 template <> struct ObjTraits<TypeObj> {
@@ -67,12 +71,20 @@ public:
 private:
   constexpr auto dialect() { return BitField<uint32_t, 8, 3>{obj.num}; }
   constexpr auto id() { return BitField<uint32_t, 21, 11>{obj.num}; }
+  constexpr auto dialect() const {
+    return BitField<const uint32_t, 8, 3>{obj.num};
+  }
+  constexpr auto id() const {
+    return BitField<const uint32_t, 21, 11>{obj.num};
+  }
 
 public:
-  constexpr DialectID getDialectID() { return DialectID{uint8_t(dialect())}; }
-  constexpr uint32_t getID() { return id(); }
+  constexpr DialectID getDialectID() const {
+    return DialectID{uint8_t(dialect())};
+  }
+  constexpr uint32_t getID() const { return id(); }
 
-  constexpr BaseTypeRef(DialectID dialect, uint32_t id) {
+  constexpr BaseTypeRef(DialectID dialect, uint32_t id) : TypeRef(ObjID(0)) {
     this->dialect() = dialect;
     this->id() = id;
   }
@@ -89,7 +101,7 @@ public:
             ref.as<TypeRef>().typeID() == TypeDialectTypeID::BASE);
   }
 
-  operator FatTypeRef() { return FatTypeRef{*this, nullptr}; }
+  operator FatTypeRef() const { return FatTypeRef{*this, nullptr}; }
 };
 
 struct StructTypeObj {
@@ -139,8 +151,10 @@ public:
             ref.as<TypeRef>().typeID() == TypeDialectTypeID::STRUCT);
   }
 
-  operator TypeRef() { return TypeRef{getObjID()}; }
-  operator FatTypeRef() { return FatTypeRef{TypeRef(*this), (TypeObj *)ptr}; }
+  operator TypeRef() const { return TypeRef{getObjID()}; }
+  operator FatTypeRef() const {
+    return FatTypeRef{TypeRef(*this), (TypeObj *)ptr};
+  }
 };
 
 template <> struct ObjTraits<StructTypeObj> {
@@ -205,8 +219,10 @@ public:
             ref.as<TypeRef>().typeID() == TypeDialectTypeID::ENUM);
   }
 
-  operator TypeRef() { return TypeRef{getObjID()}; }
-  operator FatTypeRef() { return FatTypeRef{TypeRef(*this), (TypeObj *)ptr}; }
+  operator TypeRef() const { return TypeRef{getObjID()}; }
+  operator FatTypeRef() const {
+    return FatTypeRef{TypeRef(*this), (TypeObj *)ptr};
+  }
 };
 
 template <> struct ObjTraits<EnumTypeObj> {
@@ -258,8 +274,10 @@ public:
             ref.as<TypeRef>().typeID() == TypeDialectTypeID::ARRAY);
   }
 
-  operator TypeRef() { return TypeRef{getObjID()}; }
-  operator FatTypeRef() { return FatTypeRef{TypeRef(*this), (TypeObj *)ptr}; }
+  operator TypeRef() const { return TypeRef{getObjID()}; }
+  operator FatTypeRef() const {
+    return FatTypeRef{TypeRef(*this), (TypeObj *)ptr};
+  }
 };
 
 template <> struct ObjTraits<ArrayTypeObj> {
@@ -323,9 +341,9 @@ public:
     store.destroy(ref);
   }
 
-  void clear() {
+  void reset() {
     map.clear();
-    store.clear();
+    store.reset();
   }
 };
 
@@ -385,24 +403,66 @@ public:
 public:
   using value_type = TypeObj;
 
-  RemapStore<DedupeStore<StructTypeObj>, 2, 0> structStore;
-  RemapStore<DedupeStore<EnumTypeObj>, 2, 1> enumStore;
-  RemapStore<DedupeStore<ArrayTypeObj>, 2, 2> arrayStore;
+  RemapStore<DedupeStore<StructTypeObj>, 2, 1> structStore;
+  RemapStore<DedupeStore<EnumTypeObj>, 2, 2> enumStore;
+  RemapStore<DedupeStore<ArrayTypeObj>, 2, 3> arrayStore;
 
   FatTypeRef resolve(ObjRef<TypeObj> ref) {
     switch (ref.getObjID() & typeMask) {
     case 0:
+      return BaseTypeRef{ref};
+    case 1:
       return FatTypeRef{
           structStore.resolve(ObjRef<StructTypeObj>(ref.getObjID()))};
-    case 1:
-      return FatTypeRef{enumStore.resolve(ObjRef<EnumTypeObj>(ref.getObjID()))};
     case 2:
+      return FatTypeRef{enumStore.resolve(ObjRef<EnumTypeObj>(ref.getObjID()))};
+    case 3:
       return FatTypeRef{
           arrayStore.resolve(ObjRef<ArrayTypeObj>(ref.getObjID()))};
     default:
       dyno_unreachable("invalid type obj id");
     }
   }
+
+  void reset() {
+    structStore.reset();
+    enumStore.reset();
+    arrayStore.reset();
+  }
+};
+
+template <typename ValueObj> class TypeDebugInfo {
+  ObjMapVec<ValueObj, Optional<TypeRef>> map;
+
+public:
+  static constexpr DialectType ty{ObjTraits<ValueObj>::ty};
+
+  void setType(ObjRef<ValueObj> ref, TypeRef type) {
+    if (!type)
+      return;
+    map.get_ensure(ref) = type;
+  }
+
+  void clearType(ObjRef<ValueObj> ref) {
+    if (map.inRange(ref))
+      map[ref] = nullopt;
+  }
+
+  FatTypeRef getType(Context &ctx, ObjRef<ValueObj> ref) {
+    auto type = map.get_ensure(ref);
+    if (!type)
+      return nullref;
+    return ctx.resolve(*type);
+  }
+
+  void copyType(ObjRef<ValueObj> src, ObjRef<ValueObj> dst) {
+    if (map.inRange(src) && map[src]) {
+      auto srcInfo = map[src];
+      map.get_ensure(dst) = srcInfo;
+    }
+  }
+
+  void reset() { map.clear(); }
 };
 
 }; // namespace dyno

@@ -1,10 +1,13 @@
 #pragma once
+#include "dyno/CFG.h"
 #include "dyno/Constant.h"
 #include "dyno/Context.h"
 #include "hw/AutoDebugInfo.h"
 #include "hw/HWAbstraction.h"
 #include "hw/HWContext.h"
+#include "hw/HWTypeIDs.h"
 #include "hw/LoadStore.h"
+#include "op/IDs.h"
 #include "slang/ast/ASTVisitor.h"
 #include "slang/ast/Symbol.h"
 #include "slang/ast/SystemSubroutine.h"
@@ -30,9 +33,15 @@
 #include "slang/ast/types/Type.h"
 #include "slang/diagnostics/TextDiagnosticClient.h"
 #include "slang/numeric/ConstantValue.h"
+#include "slang/parsing/KnownSystemName.h"
 #include "slang/text/SourceLocation.h"
 #include "slang/text/SourceManager.h"
+#include "support/Bits.h"
 #include "support/Debug.h"
+#include "support/ErrorRecovery.h"
+#include "support/Utility.h"
+#include "type/TypeContext.h"
+#include "type/TypeInfo.h"
 #include <memory>
 namespace dyno {
 
@@ -78,7 +87,9 @@ public:
   explicit SlangErrorPrinter(slang::SourceManager &sm) : sm(sm) {}
 };
 
-class VisitorAST : public slang::ast::ASTVisitor<VisitorAST, true, true> {
+class VisitorAST
+    : public slang::ast::ASTVisitor<VisitorAST,
+                                    slang::ast::VisitFlags::AllGood> {
 public:
   struct Value;
 
@@ -178,6 +189,7 @@ public:
                                         const slang::ast::Type *type) {
       switch (value.kind) {
       case Value::VK_CCL:
+        // verilog does not actually allow this
         // if (auto cIdx = idx.dyn_as<ConstantRef>()) {
         //   auto &asCCL = value.as<ConcatLValue>();
         //   for (auto &regLV : asCCL.lvValues) {
@@ -376,13 +388,154 @@ public:
     return extractIFModuleVars(body, true);
   }
 
+  static void preprocessName(std::string &name) {
+    // maybe escaping in dyno
+    std::replace(name.begin(), name.end(), '[', '_');
+    std::replace(name.begin(), name.end(), ']', '_');
+  }
+
+  void handle_instance(const slang::ast::InstanceSymbol &asInst,
+                       ObjRef<Module> modRef) {
+    SmallVec<RegisterRef, 16> portRegs;
+
+    for (auto [connIdx, conn] :
+         Range{asInst.getPortConnections()}.enumerate()) {
+
+      std::unique_ptr<Value> val;
+
+      auto expr = conn->getExpression();
+      if (!expr) {
+        auto mod = ctx.getStore<Module>().resolve(modRef);
+        portRegs.emplace_back(makeReg(*mod->ports[connIdx].reg.getNumBits()));
+        continue;
+      }
+      assert(expr);
+
+      // interface args
+      if (auto *asArbSym =
+              expr->as_if<slang::ast::ArbitrarySymbolExpression>()) {
+        auto &inst = asArbSym->symbol->as<slang::ast::InstanceSymbol>();
+        auto ifVars = extractIFModuleVarsPorts(inst.body);
+
+        for (auto *ifVar : ifVars) {
+          auto it = vars.find(ifVar);
+          assert(it && "interface var not found");
+          auto reg = it.val().as<RegisterRef>();
+          portRegs.emplace_back(reg);
+        }
+        continue;
+      }
+
+      auto proc = build.buildProcess();
+      build.pushInsertPoint(proc.block().end());
+
+      bool isOutput = false;
+
+      // output args are wrapped in an empty RHS assignment
+      if (auto *asAssign = expr->as_if<slang::ast::AssignmentExpression>()) {
+        assert(asAssign->right().kind ==
+               slang::ast::ExpressionKind::EmptyArgument);
+        val = handle_expr(asAssign->left());
+        isOutput = true;
+      } else
+        val = handle_expr(*conn->getExpression());
+
+      build.popInsertPoint();
+
+      if (auto *asLV = val->dyn_as<RegLValue>(); asLV && asLV->fullReg()) {
+        portRegs.emplace_back(asLV->lvReg);
+      } else {
+        build.pushInsertPoint(regsBackIt.succ());
+        portRegs.emplace_back(build.buildRegister());
+        regsBackIt = build.insert.pred();
+        build.popInsertPoint();
+
+        if (auto *psym = conn->port.as_if<slang::ast::PortSymbol>())
+          portRegs.back()->numBits = psym->getType().getBitstreamWidth();
+
+        if (portRegs.back().getNumBits() != val->getNumBits())
+          print.error(expr->sourceRange);
+
+        build.pushInsertPoint(proc.block().end());
+        if (isOutput)
+          val->as<LValue>().storeVal(build, build.buildLoad(portRegs.back()));
+        else
+          build.buildStore(portRegs.back(), val->proGetValue(build));
+
+        build.popInsertPoint();
+      }
+      if (proc.block().empty()) {
+        // use builder's checks to keep regsBackIt stable.
+        build.pushInsertPoint(regsBackIt);
+        build.destroyInstr(proc);
+        regsBackIt = build.insert;
+        build.popInsertPoint();
+      }
+    }
+
+    if (asInst.isInterface()) {
+      // for interfaces, expose internal vars as ports
+      for (auto *ifVar : extractIFModuleVars(asInst.body)) {
+        auto [found, it] = vars.findOrInsert(ifVar, [&] {
+          build.pushInsertPoint(regsBackIt.succ());
+          auto rv = build.buildRegister(ifVar->getType().getBitstreamWidth());
+          regsBackIt = build.insert.pred();
+          build.popInsertPoint();
+          return rv;
+        });
+        portRegs.emplace_back(it.val().as<RegisterRef>());
+        if (!curModIsInterface)
+          assert(!found);
+      }
+
+      for (auto [i, ifPort] : Range{asInst.getPortConnections()}.enumerate()) {
+        vars.insertOrAssign(
+            ifPort->port.as<slang::ast::PortSymbol>().internalSymbol,
+            portRegs[i]);
+      }
+    }
+
+    ModuleRef instMod = ModuleRef{modRef, ctx.getStore<Module>()[modRef]};
+    std::string hierPath;
+    asInst.appendHierarchicalPath(hierPath, true);
+    preprocessName(hierPath);
+    build.buildInstance(instMod, portRegs,
+                        std::string_view(hierPath).substr(1));
+  }
+
+  void handle_instance_array(const slang::ast::InstanceArraySymbol &asIArr) {
+    for (auto elem : asIArr.elements) {
+      if (auto *inst = elem->as_if<slang::ast::InstanceSymbol>()) {
+        auto &body = *(inst->getCanonicalBody() ?: &inst->body);
+        auto it = moduleMap.find(&body);
+        if (!it)
+          abort();
+        handle_instance(*inst, it.val());
+      } else if (auto *nested =
+                     elem->as_if<slang::ast::InstanceArraySymbol>()) {
+        handle_instance_array(*nested);
+      }
+    }
+  }
+
+  void handle(const slang::ast::SubroutineSymbol &subr) {
+    // only handle global funcs here
+    if (subr.getParentScope()->asSymbol().kind !=
+        slang::ast::SymbolKind::CompilationUnit)
+      return;
+    build.setInsertPoint(BlockRef_iterator<true>::invalid());
+    handle_subr(subr);
+  }
+
   void handle(const slang::ast::InstanceSymbol &node) {
-    assert((node.isModule() || node.isInterface()) &&
-           "only module and interface supported rn");
+    if (!(node.isModule() || node.isInterface()))
+      report_fatal_error("only module and interface supported");
     auto &body = *(node.getCanonicalBody() ?: &node.body);
     auto [found, it] = moduleMap.findOrInsert(&body, [&] {
+      std::string name = node.getHierarchicalPath();
+      preprocessName(name);
       return HWInstrBuilder{ctx}
-          .buildModule(node.name)
+          .buildModule(std::move(name))
           .def()
           ->as<ObjRef<Module>>();
     });
@@ -416,6 +569,8 @@ public:
         auto reg = build.buildPort(module, ptype);
         reg->numBits = ps->getType().getBitstreamWidth();
         ctx.getCtx<HWDialectContext>().regNameInfo.addName(reg, ps->name);
+        ctx.getCtx<HWDialectContext>().regTypeInfo.setType(
+            reg, toDynoType(&ps->getType()));
 
       } else if (auto asIFS = port->as_if<slang::ast::InterfacePortSymbol>()) {
         // this runs if you have a port in your param list.
@@ -430,7 +585,7 @@ public:
           auto reg = build.buildPort(module, HW_REF_REGISTER_DEF);
           reg->numBits = ifVar->getType().getBitstreamWidth();
           ctx.getCtx<HWDialectContext>().regNameInfo.addName(
-              reg, (ifName + std::string{ifVar->name}).c_str());
+              reg, (ifName + '.' + std::string(ifVar->name)).c_str());
         }
       }
     }
@@ -444,7 +599,7 @@ public:
         auto reg = build.buildPort(module, HW_REF_REGISTER_DEF);
         reg->numBits = ifPort->getType().getBitstreamWidth();
         ctx.getCtx<HWDialectContext>().regNameInfo.addName(
-            reg, (ifName + std::string{ifPort->name}).c_str());
+            reg, (ifName + '.' + std::string(ifPort->name)).c_str());
       }
     }
     visitDefault(node);
@@ -468,9 +623,8 @@ public:
       vars.clear();
       curModIsInterface = slangMod->parentInstance->isInterface();
 
-      regsBackIt = mod.regs_end();
-      build.setInsertPoint(regsBackIt);
-      --regsBackIt;
+      build.setInsertPoint(mod.regs_end());
+      regsBackIt = build.insert.pred();
 
       size_t i = 0;
       for (auto port : slangMod->getPortList()) {
@@ -519,6 +673,20 @@ public:
     }
   }
 
+  FunctionIRef findEnclosingFunc(const slang::ast::Symbol &sym) {
+    auto parent = sym.getParentScope();
+    while (parent) {
+      if (parent->asSymbol().kind == slang::ast::SymbolKind::Subroutine) {
+        auto &subr = parent->asSymbol().as<slang::ast::SubroutineSymbol>();
+        auto it = functionMap.find(&subr);
+        assert(it && "function not found in functionMap");
+        return ctx.resolve(it.val()).iref();
+      }
+      parent = parent->asSymbol().getParentScope();
+    }
+    return nullref;
+  }
+
   RegisterRef makeReg(uint32_t size, std::string_view name = {}) {
     build.pushInsertPoint(regsBackIt.succ());
     auto reg = build.buildRegister();
@@ -530,14 +698,89 @@ public:
     return reg;
   }
 
-  RegisterRef makeOrFindReg(const slang::ast::Symbol &symb) {
+  auto funcRegsEnd(FunctionIRef func) {
+    auto it = func.getBlock().begin();
+    // todo: decent impl via block defrag
+    while (it != func.getBlock().end()) {
+      switch (*it.instr().getDialectOpcode()) {
+      case *OP_PARAM:
+      case *HW_REGISTER_DEF:
+        it++;
+        continue;
+      default:
+        break;
+      }
+      break;
+    }
+    return it;
+  }
+
+  RegisterRef makeReg(const slang::ast::Symbol &symb) {
+    BlockRef_iterator<true> insertPt;
+
+    bool inFuncVar = false;
+    bool isAutomatic = false;
+    if (auto var = symb.as_if<slang::ast::VariableSymbol>()) {
+      isAutomatic = var->lifetime == slang::ast::VariableLifetime::Automatic;
+    }
+    if (isAutomatic) {
+      if (auto func = findEnclosingFunc(symb); func) {
+        insertPt = funcRegsEnd(func);
+        inFuncVar = true;
+      } else
+        insertPt = regsBackIt.succ();
+    } else
+      insertPt = regsBackIt.succ();
+
     assert(symb.getDeclaredType());
+    std::string buf;
+    symb.appendHierarchicalPath(buf, true);
+    preprocessName(buf);
+    auto name =
+        buf[0] == '.' ? std::string_view(buf).substr(1) : std::string_view(buf);
+    build.pushInsertPoint(insertPt);
+    auto reg = build.buildRegister();
+    if (!inFuncVar)
+      regsBackIt = build.insert.pred();
     uint32_t numBits = symb.getDeclaredType()->getType().getBitstreamWidth();
-    auto reg =
-        vars.findOrInsert(&symb, [&] { return makeReg(numBits, symb.name); })
-            .second.val()
-            .as<RegisterRef>();
+    reg->numBits = numBits;
+    build.popInsertPoint();
+    if (!name.empty())
+      ctx.getCtx<HWDialectContext>().regNameInfo.addName(reg, name);
+    ctx.getCtx<HWDialectContext>().regTypeInfo.setType(
+        reg, toDynoType(&symb.getDeclaredType()->getType()));
     return reg;
+  }
+
+  RegisterRef makeOrFindReg(const slang::ast::Symbol &symb) {
+    auto reg = vars.findOrInsert(&symb, [&] { return makeReg(symb); })
+                   .second.val()
+                   .as<RegisterRef>();
+    return reg;
+  }
+
+  void handle_subr(const slang::ast::SubroutineSymbol &subr) {
+    auto [found, it] = functionMap.findOrInsert(
+        &subr, [&] { return build.buildFunc(subr.name).func(); });
+    auto func =
+        FunctionRef{it.val(), ctx.getStore<Function>()[it.val()]}.iref();
+
+    build.pushInsertPoint(func.getBlock().begin());
+    for (auto arg : subr.getArguments()) {
+      vars.insert(arg,
+                  build.buildFuncParam(arg->getType().getBitstreamWidth()));
+    }
+    handle_stmt(subr.getBody());
+    if (subr.returnValVar) {
+      if (auto it = vars.find(subr.returnValVar); it != vars.end()) {
+        auto retValReg = it.val().as<RegisterRef>();
+        build.pushInsertPoint(func.getBlock().end());
+        auto loadedVal = build.buildLoad(retValReg);
+        build.buildFuncReturn(loadedVal);
+        build.popInsertPoint();
+      }
+    }
+    build.popInsertPoint();
   }
 
   void handle_member_list(
@@ -547,8 +790,6 @@ public:
       case slang::ast::SymbolKind::InterfacePort:
       case slang::ast::SymbolKind::Modport:
       case slang::ast::SymbolKind::Port:
-        // std::cout << "port " << &member << ", "
-        //           << member.as<slang::ast::PortSymbol>().name << "\n";
         break;
       case slang::ast::SymbolKind::Parameter: {
         auto &asParam = member.as<slang::ast::ParameterSymbol>();
@@ -609,106 +850,7 @@ public:
         if (!it)
           abort();
 
-        SmallVec<RegisterRef, 16> portRegs;
-
-        for (auto [connIdx, conn] :
-             Range{asInst.getPortConnections()}.enumerate()) {
-
-          std::unique_ptr<Value> val;
-
-          auto expr = conn->getExpression();
-          if (!expr) {
-            auto mod = ctx.getStore<Module>().resolve(it.val());
-            portRegs.emplace_back(makeReg(*mod->ports[connIdx].reg.getNumBits(),
-                                          "__unused_port"));
-            continue;
-          }
-          assert(expr);
-
-          // interface args
-          if (auto *asArbSym =
-                  expr->as_if<slang::ast::ArbitrarySymbolExpression>()) {
-            auto &asInst = asArbSym->symbol->as<slang::ast::InstanceSymbol>();
-            auto ifVars = extractIFModuleVarsPorts(asInst.body);
-
-            for (auto *ifVar : ifVars) {
-              auto it = vars.find(ifVar);
-              assert(it && "interface var not found");
-              auto reg = it.val().as<RegisterRef>();
-              portRegs.emplace_back(reg);
-            }
-            continue;
-          }
-
-          auto proc = build.buildProcess();
-          build.pushInsertPoint(proc.block().end());
-
-          bool isOutput = false;
-
-          // output args are wrapped in an empty RHS assignment
-          if (auto *asAssign =
-                  expr->as_if<slang::ast::AssignmentExpression>()) {
-            assert(asAssign->right().kind ==
-                   slang::ast::ExpressionKind::EmptyArgument);
-            val = handle_expr(asAssign->left());
-            isOutput = true;
-          } else
-            val = handle_expr(*conn->getExpression());
-
-          build.popInsertPoint();
-
-          if (auto *asLV = val->dyn_as<RegLValue>(); asLV && asLV->fullReg()) {
-            portRegs.emplace_back(asLV->lvReg);
-          } else {
-            build.pushInsertPoint(regsBackIt.succ());
-            portRegs.emplace_back(build.buildRegister());
-            regsBackIt = build.insert.pred();
-            build.popInsertPoint();
-
-            if (auto *psym = conn->port.as_if<slang::ast::PortSymbol>())
-              portRegs.back()->numBits = psym->getType().getBitstreamWidth();
-
-            if (portRegs.back().getNumBits() != val->getNumBits())
-              print.error(expr->sourceRange);
-
-            build.pushInsertPoint(proc.block().end());
-            if (isOutput)
-              val->as<LValue>().storeVal(build,
-                                         build.buildLoad(portRegs.back()));
-            else
-              build.buildStore(portRegs.back(), val->proGetValue(build));
-
-            build.popInsertPoint();
-          }
-        }
-
-        if (asInst.isInterface()) {
-          // for interfaces, expose internal vars as ports
-          for (auto *ifVar : extractIFModuleVars(asInst.body)) {
-            auto [found, it] = vars.findOrInsert(ifVar, [&] {
-              build.pushInsertPoint(regsBackIt.succ());
-              auto rv =
-                  build.buildRegister(ifVar->getType().getBitstreamWidth());
-              regsBackIt = build.insert.pred();
-              build.popInsertPoint();
-              return rv;
-            });
-            portRegs.emplace_back(it.val().as<RegisterRef>());
-            if (!curModIsInterface)
-              assert(!found);
-          }
-
-          for (auto [i, ifPort] :
-               Range{asInst.getPortConnections()}.enumerate()) {
-            vars.insertOrAssign(
-                ifPort->port.as<slang::ast::PortSymbol>().internalSymbol,
-                portRegs[i]);
-          }
-        }
-
-        ModuleRef instMod =
-            ModuleRef{it.val(), ctx.getStore<Module>()[it.val()]};
-        build.buildInstance(instMod, portRegs);
+        handle_instance(asInst, it.val());
         break;
       }
 
@@ -738,18 +880,7 @@ public:
 
       case slang::ast::SymbolKind::Subroutine: {
         auto &asSubr = member.as<slang::ast::SubroutineSymbol>();
-        auto [found, it] = functionMap.findOrInsert(
-            &asSubr, [&] { return build.buildFunc(asSubr.name).func(); });
-        auto func =
-            FunctionRef{it.val(), ctx.getStore<Function>()[it.val()]}.iref();
-
-        build.pushInsertPoint(func.getBlock().begin());
-        for (auto arg : asSubr.getArguments()) {
-          vars.insert(arg,
-                      build.buildFuncParam(arg->getType().getBitstreamWidth()));
-        }
-        handle_stmt(asSubr.getBody());
-        build.popInsertPoint();
+        handle_subr(asSubr);
         break;
       }
 
@@ -766,6 +897,8 @@ public:
       }
 
       case slang::ast::SymbolKind::InstanceArray: {
+        auto &asIArr = member.as<slang::ast::InstanceArraySymbol>();
+        handle_instance_array(asIArr);
         break;
       }
 
@@ -877,7 +1010,11 @@ public:
     build.pushInsertPoint(regsBackIt.succ());
     auto trigger = build.buildTrigger(sens);
     build.popInsertPoint();
+
+    pushSourceRange(stmt->sourceRange);
     proc = build.buildProcess(opc, trigger);
+    popSourceRange();
+
     build.pushInsertPoint(proc.block().end());
     handle_stmt(*stmt);
     build.popInsertPoint();
@@ -983,13 +1120,7 @@ public:
 
     case slang::ast::StatementKind::VariableDeclaration: {
       auto &asVarDecl = stmt.as<slang::ast::VariableDeclStatement>();
-      build.pushInsertPoint(regsBackIt.succ());
-      auto reg = build.buildRegister();
-      regsBackIt = build.insert.pred();
-      build.popInsertPoint();
-
-      vars.findOrInsert(&asVarDecl.symbol, reg);
-      reg->numBits = asVarDecl.symbol.getType().getBitstreamWidth();
+      auto reg = makeOrFindReg(asVarDecl.symbol);
 
       if (auto *init = asVarDecl.symbol.getInitializer())
         build.buildStore(reg, handle_expr(*init)->proGetValue(build));
@@ -1234,13 +1365,12 @@ public:
         inverse ? BigInt::ICMP_EQ : BigInt::ICMP_NE);
   }
 
-  ConstantRef toDynoConstant(const slang::SVInt &svint) {
+  BigInt toDynoBigInt(const slang::SVInt &svint) {
     ConstantRef ref;
     ArrayRef data{reinterpret_cast<const uint32_t *>(svint.getRawPtr()),
                   2 * svint.getNumWords()};
     if (!svint.hasUnknown()) {
-      ref = ConstantBuilder{ctx.getStore<Constant>()}.raw(
-          (unsigned)svint.getBitWidth(), data);
+      return BigInt::fromRaw(data, svint.getBitWidth(), 0, 0);
     } else {
       SmallVec<uint32_t, 16> buf(round_up_div(2 * svint.getBitWidth(), 32U));
 
@@ -1254,24 +1384,170 @@ public:
         buf[i] ^= mask;
       }
 
-      ref = ConstantBuilder{ctx.getStore<Constant>()}.raw(
-          2 * svint.getBitWidth(), std::move(buf), 0, 1);
+      return BigInt::fromRaw(std::move(buf), 2 * svint.getBitWidth(), 0, 1);
     }
     return ref;
   }
 
-  ConstantRef toDynoConstant(const slang::ConstantValue &value) {
+  ConstantRef toDynoConstant(const slang::SVInt &svint) {
+    return ctx.getStore<Constant>().findOrInsert(toDynoBigInt(svint));
+  }
+
+  BigInt toDynoBigInt(const slang::ConstantValue &value) {
     if (value.isInteger())
-      return toDynoConstant(value.integer());
+      return toDynoBigInt(value.integer());
     if (value.isContainer()) {
-      auto cbuild = ConstantBuilder{ctx.getStore<Constant>()};
-      cbuild.val(0, 0);
+      BigInt bi;
       for (auto elem : Range{value.elements()}.reverse()) {
-        cbuild.concat(toDynoConstant(elem));
+        BigInt::concatOp4S(bi, toDynoBigInt(elem), bi);
       }
-      return cbuild.get();
+      return bi;
     }
     abort();
+  }
+
+  ConstantRef toDynoConstant(const slang::ConstantValue &value) {
+    return ctx.getStore<Constant>().findOrInsert(toDynoBigInt(value));
+  }
+
+  std::unique_ptr<Value>
+  handleNamedValueRef(const slang::ast::ValueSymbol &symbol) {
+    if (auto modport = symbol.as_if<slang::ast::ModportPortSymbol>();
+        modport && modport->internalSymbol) {
+      return handleNamedValueRef(
+          modport->internalSymbol->as<slang::ast::ValueSymbol>());
+    }
+
+    auto [found, sig] = vars.findOrInsert(&symbol, [&] {
+      // when the enum is used in a structs, enum values aren't propagated to
+      // nval.getConstant()
+      if (auto enumMember = symbol.as_if<slang::ast::EnumValueSymbol>())
+        return RegisterOrConstantRef{toDynoConstant(enumMember->getValue())};
+      if (auto param = symbol.as_if<slang::ast::ParameterSymbol>()) {
+        auto &value = param->getValue();
+        return RegisterOrConstantRef{toDynoConstant(value)};
+      }
+
+      // if (nval.getConstant())
+      //   return RegisterOrConstantRef{toDynoConstant(*nval.getConstant())};
+
+      return RegisterOrConstantRef{makeReg(symbol)};
+    });
+
+    if (auto reg = sig.val().dyn_as<RegisterRef>())
+      return std::make_unique<RegLValue>(reg, &symbol.getType());
+    else
+      return std::make_unique<RValue>(sig.val().as<ConstantRef>(),
+                                      &symbol.getType());
+  }
+
+  FatTypeRef toDynoType(const slang::ast::Type *type) {
+    switch (type->kind) {
+    case slang::ast::SymbolKind::EnumType: {
+      auto &asEnum = type->as<slang::ast::EnumType>();
+      EnumTypeObj obj;
+      obj.underlying = toDynoType(&asEnum.baseType);
+      for (auto &elem : asEnum.values()) {
+        obj.elemns.emplace_back(
+            toDynoConstant(elem.getValue()),
+            ctx.getCtx<TypeDialectContext>().strings.getCanonicalIdx(
+                elem.name));
+      }
+      return ctx.getStore<EnumTypeObj>().create(std::move(obj));
+    }
+    case slang::ast::SymbolKind::PackedStructType: {
+      auto &asPStr = type->as<slang::ast::PackedStructType>();
+      StructTypeObj obj;
+      for (auto &member : asPStr.members()) {
+        obj.elemns.emplace_back(
+            toDynoType(&member.getDeclaredType()->getType()),
+            ctx.getCtx<TypeDialectContext>().strings.getCanonicalIdx(
+                member.name));
+      }
+      return ctx.getStore<StructTypeObj>().create(std::move(obj));
+    }
+    case slang::ast::SymbolKind::UnpackedStructType: {
+      auto &asUStr = type->as<slang::ast::UnpackedStructType>();
+      StructTypeObj obj;
+      for (auto &member : asUStr.members()) {
+        obj.elemns.emplace_back(
+            toDynoType(&member.getDeclaredType()->getType()),
+            ctx.getCtx<TypeDialectContext>().strings.getCanonicalIdx(
+                member.name));
+      }
+      return ctx.getStore<StructTypeObj>().create(std::move(obj));
+    }
+    case slang::ast::SymbolKind::PackedArrayType: {
+      auto &asPArr = type->as<slang::ast::PackedArrayType>();
+      ArrayTypeObj obj;
+      obj.element = toDynoType(&asPArr.elementType);
+      obj.start = asPArr.range.lower()
+                      ? ConstantRef::fromU32(asPArr.range.lower())
+                      : nullref;
+      if (asPArr.range.fullWidth() != asPArr.range.width())
+        report_fatal_error("overflow");
+      obj.len = ConstantRef::fromU32(asPArr.range.width());
+      return ctx.getStore<ArrayTypeObj>().create(std::move(obj));
+    }
+    case slang::ast::SymbolKind::FixedSizeUnpackedArrayType: {
+      auto &asUArr = type->as<slang::ast::FixedSizeUnpackedArrayType>();
+      ArrayTypeObj obj;
+      obj.element = toDynoType(&asUArr.elementType);
+      obj.start = asUArr.range.lower()
+                      ? ConstantRef::fromU32(asUArr.range.lower())
+                      : nullref;
+      if (asUArr.range.fullWidth() != asUArr.range.width())
+        report_fatal_error("overflow");
+      obj.len = ConstantRef::fromU32(asUArr.range.width());
+      return ctx.getStore<ArrayTypeObj>().create(std::move(obj));
+    }
+
+    case slang::ast::SymbolKind::PredefinedIntegerType: {
+      auto &asInt = type->as<slang::ast::PredefinedIntegerType>();
+      switch (asInt.integerKind) {
+      case slang::ast::PredefinedIntegerType::ShortInt:
+        return ctx.getStore<ArrayTypeObj>().create(ArrayTypeObj{
+            nullref, ConstantRef::fromU32(16), hw::HW_TYPE_VLOG_BIT});
+      case slang::ast::PredefinedIntegerType::Int:
+        return ctx.getStore<ArrayTypeObj>().create(ArrayTypeObj{
+            nullref, ConstantRef::fromU32(32), hw::HW_TYPE_VLOG_BIT});
+      case slang::ast::PredefinedIntegerType::LongInt:
+        return ctx.getStore<ArrayTypeObj>().create(ArrayTypeObj{
+            nullref, ConstantRef::fromU32(64), hw::HW_TYPE_VLOG_BIT});
+      case slang::ast::PredefinedIntegerType::Byte:
+        return ctx.getStore<ArrayTypeObj>().create(ArrayTypeObj{
+            nullref, ConstantRef::fromU32(8), hw::HW_TYPE_VLOG_BIT});
+      case slang::ast::PredefinedIntegerType::Integer:
+        return ctx.getStore<ArrayTypeObj>().create(ArrayTypeObj{
+            nullref, ConstantRef::fromU32(32), hw::HW_TYPE_VLOG_LOGIC});
+      case slang::ast::PredefinedIntegerType::Time:
+        return ctx.getStore<ArrayTypeObj>().create(ArrayTypeObj{
+            nullref, ConstantRef::fromU32(64), hw::HW_TYPE_VLOG_LOGIC});
+      }
+    }
+    case slang::ast::SymbolKind::ScalarType: {
+      auto &asScalar = type->as<slang::ast::ScalarType>();
+      switch (asScalar.scalarKind) {
+      case slang::ast::ScalarType::Bit:
+        return hw::HW_TYPE_VLOG_BIT;
+      case slang::ast::ScalarType::Logic:
+        return hw::HW_TYPE_VLOG_LOGIC;
+      case slang::ast::ScalarType::Reg:
+        return hw::HW_TYPE_VLOG_REG;
+      }
+      unreachable();
+    }
+    case slang::ast::SymbolKind::TypeAlias: {
+      auto &asAlias = type->as<slang::ast::TypeAliasType>();
+      // todo: typedef support in type dialect
+      return toDynoType(&asAlias.targetType.getType());
+    }
+    case slang::ast::SymbolKind::PackedUnionType:
+    case slang::ast::SymbolKind::UnpackedUnionType:
+    // /case slang::ast::SymbolKind::
+    default:
+      return nullref;
+    }
   }
 
   std::unique_ptr<Value> handle_expr(const slang::ast::Expression &expr) {
@@ -1301,8 +1577,6 @@ public:
 
     case slang::ast::ExpressionKind::BinaryOp: {
       const auto &binop = expr.as<slang::ast::BinaryExpression>();
-      // std::cout << binop.kind << "\n";
-
       switch (binop.op) {
       case slang::ast::BinaryOperator::LogicalOr:
       case slang::ast::BinaryOperator::LogicalImplication:
@@ -1557,28 +1831,38 @@ public:
 
       return std::make_unique<RValue>(val, expr.type);
     }
-    case slang::ast::ExpressionKind::HierarchicalValue:
+
+    case slang::ast::ExpressionKind::HierarchicalValue: {
+      auto const &hval = expr.as<slang::ast::HierarchicalValueExpression>();
+      return handleNamedValueRef(
+          hval.ref.target->as<slang::ast::ValueSymbol>());
+    }
     case slang::ast::ExpressionKind::NamedValue: {
       auto const &nval = expr.as<slang::ast::ValueExpressionBase>();
-      auto [found, sig] = vars.findOrInsert(&nval.symbol, [&] {
-        // when the enum is used in a structs, enum values aren't propagated to
-        // nval.getConstant()
-        if (auto enumMember = nval.symbol.as_if<slang::ast::EnumValueSymbol>())
-          return RegisterOrConstantRef{toDynoConstant(enumMember->getValue())};
-        if (auto param = nval.symbol.as_if<slang::ast::ParameterSymbol>()) {
-          auto &value = param->getValue();
-          return RegisterOrConstantRef{toDynoConstant(value)};
-        }
-        return nval.getConstant()
-                   ? RegisterOrConstantRef{toDynoConstant(*nval.getConstant())}
-                   : RegisterOrConstantRef{makeReg(
-                         nval.type->getBitstreamWidth(), nval.symbol.name)};
-      });
+      return handleNamedValueRef(nval.symbol);
+      // auto [found, sig] = vars.findOrInsert(&nval.symbol, [&] {
+      //   // when the enum is used in a structs, enum values aren't propagated
+      //   to
+      //   // nval.getConstant()
+      //   if (auto enumMember =
+      //   nval.symbol.as_if<slang::ast::EnumValueSymbol>())
+      //     return
+      //     RegisterOrConstantRef{toDynoConstant(enumMember->getValue())};
+      //   if (auto param = nval.symbol.as_if<slang::ast::ParameterSymbol>()) {
+      //     auto &value = param->getValue();
+      //     return RegisterOrConstantRef{toDynoConstant(value)};
+      //   }
+      //   if (nval.getConstant())
+      //     return RegisterOrConstantRef{toDynoConstant(*nval.getConstant())};
 
-      if (auto reg = sig.val().dyn_as<RegisterRef>())
-        return std::make_unique<RegLValue>(reg, expr.type);
-      else
-        return std::make_unique<RValue>(sig.val().as<ConstantRef>(), expr.type);
+      //   return RegisterOrConstantRef{makeReg(nval.symbol)};
+      // });
+
+      // if (auto reg = sig.val().dyn_as<RegisterRef>())
+      //   return std::make_unique<RegLValue>(reg, expr.type);
+      // else
+      //   return std::make_unique<RValue>(sig.val().as<ConstantRef>(),
+      //   expr.type);
     }
     case slang::ast::ExpressionKind::IntegerLiteral: {
       const auto &asLit = expr.as<slang::ast::IntegerLiteral>();
@@ -1870,6 +2154,34 @@ public:
           return std::make_unique<RValue>(
               handle_expr(*asCall.arguments().front())->proGetValue(build),
               expr.type);
+        }
+        case slang::parsing::KnownSystemName::Write: {
+          auto fmt = handle_expr(*asCall.arguments().front());
+          auto fmtVal = fmt->proGetValue(build);
+          if (!fmtVal.is<ConstantRef>() || fmtVal.as<ConstantRef>().getIs4S() ||
+              (fmtVal.as<ConstantRef>().getNumBits() % 8) != 0)
+            print.error(asCall.arguments().front()->sourceRange);
+          std::string buf;
+
+          auto fmtValC = fmtVal.as<ConstantRef>();
+
+          uint32_t directSize =
+              std::min(fmtValC.getWords().size() * sizeof(uint32_t),
+                       *fmtVal.getNumBits() / 8zu);
+          auto ptr = reinterpret_cast<const char *>(fmtValC.getWords().data());
+          buf.append_range(Range{ptr, ptr + directSize}.reverse());
+          int32_t expand =
+              fmtValC.getNumBits() - fmtValC.getWords().size() * WordBits;
+          // edge case for extend
+          for (int32_t i = 0; i < expand / 8; i++)
+            buf += (char)repeatBits(fmtValC.getExtend(), 2);
+
+          auto others = Range{asCall.arguments()}.drop_front().transform(
+              [&](size_t, auto &&arg) {
+                return handle_expr(*arg)->proGetValue(build);
+              });
+          build.buildPrint(buf, Range{SmallVec<HWValue, 4>(others)});
+          return nullptr;
         }
         default:
           abort();

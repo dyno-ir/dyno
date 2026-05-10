@@ -1,8 +1,10 @@
 #pragma once
 
+#include "dyno/CFG.h"
 #include "dyno/Constant.h"
 #include "dyno/Context.h"
 #include "dyno/CustomInstr.h"
+#include "dyno/DeepCopy.h"
 #include "dyno/HierBlockIterator.h"
 #include "dyno/IDs.h"
 #include "dyno/Instr.h"
@@ -132,6 +134,8 @@ private:
     }
   }
   void replaceUses(RegisterRef oldR, RegisterRef newR) {
+    auto &regNameInfo = ctx.getCtx<HWDialectContext>().regNameInfo;
+    regNameInfo.copyNames(oldR, newR);
     oldR.replaceAllUsesWith(newR);
   }
 #define replaceAllUsesWith static_assert(0, "use this->replaceUses")
@@ -1638,6 +1642,7 @@ private:
         return false;
       replaceUses(ref.as<RegisterRef>(), reg);
       deleteMatchedInstr(instr);
+      deleteMatchedInstr(ref.as<RegisterRef>().iref());
       return PAT_TRUE;
     }
 
@@ -1666,35 +1671,38 @@ private:
       }
     };
 
-    if (ref.is<RegisterRef>()) {
+    if (auto asRegRef = ref.dyn_as<RegisterRef>()) {
+      auto &regNameInfo = ctx.getCtx<HWDialectContext>().regNameInfo;
+      regNameInfo.copyNames(reg, asRegRef);
       for (auto use : uses) {
-        use.replace(ref);
+        use.replace(asRegRef);
         if (inverse)
           inverseUse(use);
         currentReplaced.emplace_back(use);
       }
-    } else {
-      assert(ref.is<ConstantRef>());
+    } else if (auto asConstRef = ref.dyn_as<ConstantRef>()) {
       assert(!inverse);
       HWInstrBuilder build{ctx};
       for (auto use : uses) {
         auto asLoad = use.instr().as<LoadIRef>();
         build.setInsertPoint(asLoad);
-        auto splice = build.buildSplice(ref.as<ConstantRef>(), asLoad.getLen(),
+        auto splice = build.buildSplice(asConstRef, asLoad.getLen(),
                                         asLoad.getBase(), asLoad.terms());
         replaceUses(asLoad.value(), splice);
         deleteMatchedInstr(use.instr());
       }
-    }
+    } else
+      unreachable();
 
+    deleteMatchedInstr(reg.iref());
     deleteMatchedInstr(instr);
     return PAT_TRUE;
   }
 
   template <typename Ref> PatBool simplifyYieldValues(Ref instr) {
-    SmallVec<HWValue, 32> yieldValues;
     if (instr.getNumYieldValues() == 0)
       return false;
+    SmallVec<HWValue, 32> yieldValues;
     yieldValues.reserve(instr.getNumYieldValues() * instr.getNumCases());
 
     DynSymbSet<SmallVec<uint64_t, 1>, 1, ~0UL> equal(instr.getNumYieldValues());
@@ -1813,6 +1821,12 @@ private:
         continue;
       }
 
+      if (term.getMax() == 1) {
+        // drop single-element dimension
+        change = true;
+        continue;
+      }
+
       auto asWire = term.getIdx().template as<WireRef>();
       if (asWire.getDefI().isOpc(OP_MUL) &&
           asWire.getDefI().getNumOthers() == 2 &&
@@ -1883,6 +1897,83 @@ private:
     return PAT_TRUE;
   }
 
+  void replaceMultiwayWithBlock(auto instr, BlockRef block) {
+    DeepCopier copier{ctx};
+    copier.moveInstrs(
+        block.begin(), ctx.getCFG()[instr],
+        [&](DeepCopier *, InstrRef cInstr, BlockRef_iterator<true>) {
+          if (cInstr == *block.end().pred() && cInstr.isOpc(OP_YIELD) &&
+              // fixme: only need this for dead old yields, no longer required
+              // with eager delete
+              !instr.yieldValues().empty()) {
+            for (auto [out, act] :
+                 instr.yieldValues().template as<WireRef>().zip(
+                     cInstr.others().as<HWValue>()))
+              replaceUses(out, act);
+            return true;
+          }
+          return false;
+        });
+  }
+
+  PatBool simplifyIfStmt(IfInstrRef instr) {
+    if (auto cCond = instr.getCondValue()->dyn_as<ConstantRef>();
+        cCond && !cCond.getIs4S()) {
+      auto activeBlock =
+          cCond.valueEquals(1) ? instr.getTrueBlock() : instr.getFalseBlock();
+      replaceMultiwayWithBlock(instr, activeBlock);
+      deleteMatchedInstr(instr);
+      return PAT_TRUE;
+    }
+
+    if (!instr.yieldValues().empty() && instr.getTrueBlock().size() == 1 &&
+        instr.getFalseBlock().size() == 1) {
+
+      HWInstrBuilder build{ctx, instr};
+      for (auto [outW, trueV, falseV] :
+           instr.yieldValues()
+               .as<WireRef>()
+               .zip(instr.getInnerYieldTrue().others().as<HWValue>())
+               .zip(instr.getInnerYieldFalse().others().as<HWValue>())
+               .flat()) {
+        auto val =
+            build.buildMux(instr.getCondValue()->as<HWValue>(), trueV, falseV);
+        replaceUses(outW, val);
+        deleteMatchedInstr(instr);
+      }
+      return PAT_TRUE;
+    }
+
+    return PAT_FALSE;
+  }
+
+  PatBool simplifySwitchStmt(SwitchInstrRef instr) {
+    bool allConst = instr.cond()->is<ConstantRef>();
+    CaseInstrRef defaultCase = nullref;
+    for (auto caseI : instr.caseInstrs()) {
+      if (caseI.isDefault()) {
+        defaultCase = caseI;
+        continue;
+      }
+      allConst = allConst && caseI.labels().all([](auto op) {
+        return op.template is<ConstantRef>();
+      });
+      if (caseI.labels().as<HWValue>().find_idx(instr.cond()->as<HWValue>())) {
+        replaceMultiwayWithBlock(instr, caseI.block());
+        deleteMatchedInstr(instr);
+        return PAT_TRUE;
+      }
+    }
+
+    if (allConst && defaultCase) {
+      replaceMultiwayWithBlock(instr, defaultCase.block());
+      deleteMatchedInstr(instr);
+      return PAT_TRUE;
+    }
+
+    return PAT_FALSE;
+  }
+
   PatBool manual(InstrRef instr) {
     if (instr.getNumDefs() == 1 && instr.def(0)->is<WireRef>())
       if (auto trueV = knownBitsConstProp(instr))
@@ -1950,12 +2041,16 @@ private:
     }
 
     case *OP_IF: {
+      if (auto trueV = simplifyIfStmt(instr.as<IfInstrRef>()))
+        return trueV;
       if (auto trueV = simplifyYieldValues(instr.as<IfInstrRef>()))
         return trueV;
       break;
     }
 
     case *OP_SWITCH: {
+      if (auto trueV = simplifySwitchStmt(instr.as<SwitchInstrRef>()))
+        return trueV;
       if (auto trueV = simplifyYieldValues(instr.as<SwitchInstrRef>()))
         return trueV;
       break;
@@ -2100,6 +2195,14 @@ private:
     if (TaggedIRef{old}.get()) {
       for (auto op : old) {
 
+        // delete nested instructions
+        if (auto asBlock = op->dyn_as<BlockRef>()) {
+          for (auto instr : asBlock) {
+            TaggedIRef{instr}.get() = 1;
+            oldInstrHook(instr, {});
+          }
+        }
+
         // propagate unused values up the chain
         if (!op.isDef()) {
           if (auto asWire = op->dyn_as<WireRef>();
@@ -2110,6 +2213,7 @@ private:
           }
         }
 
+        // todo: delete
         op.replace(FatDynObjRef<>{nullref});
       }
     } else {
@@ -2142,16 +2246,16 @@ private:
     anyMatchHook();
 
     DYNO_DBG({
-      HWPrinter print{dbgs()};
+      HWCtxPrinter print(ctx, dbgs());
       dbgs() << "initial instructions (" << result.function << "):\n";
 
       for (auto instr : currentMatched)
-        print.printInstr(instr, ctx);
+        print.printInstr(instr);
 
       dbgs() << "replaced with:\n";
 
       for (size_t i = lastWorklistSize, sz = worklist.size(); i < sz; i++)
-        print.printInstr(worklist[i], ctx, true, false);
+        print.printInstr(worklist[i], true, false);
       if (lastWorklistSize == worklist.size()) {
         if (!currentReplaced.empty()) {
           dumpObj(currentReplaced[0]->fat());
@@ -2266,7 +2370,7 @@ public:
 public:
   explicit InstCombinePass(Context &ctx)
       : ctx(ctx), cbuild(ConstantBuilder{ctx.getStore<Constant>()}),
-        bitAlias(ctx), deriveBits(ctx), loopbackAnalysis(ctx) {}
+        knownBits(ctx), bitAlias(ctx), deriveBits(ctx), loopbackAnalysis(ctx) {}
   static InstCombinePass make(Context &ctx) { return InstCombinePass{ctx}; }
 #undef replaceAllUsesWith
 };

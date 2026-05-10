@@ -7,6 +7,7 @@
 #include "hw/HWContext.h"
 #include "hw/HWParser.h"
 #include "hw/HWPrinter.h"
+#include "hw/HWTypeIDs.h"
 #include "hw/PassPipeline.h"
 #include "hw/passes/HWDialectPasses.h"
 #include "meta/IDs.h"
@@ -22,9 +23,14 @@
 #include "support/DenseMap.h"
 #include "support/ErrorRecovery.h"
 #include "support/MMap.h"
+#include "support/TreeVec.h"
 #include "support/VectorLUT.h"
+#include "type/PrintParse.h"
+#include "type/TypeContext.h"
+#include "type/TypeInfo.h"
 #include <array>
 #include <string>
+
 using namespace dyno;
 
 CmdLineArg<std::string_view> argFileName{
@@ -72,12 +78,14 @@ int main(int argc, char **argv) {
   MetaDialectContext metaContext;
   OpDialectContext opContext;
   AIGDialectContext aigContext;
+  TypeDialectContext typeContext;
   ctx.registerDialect(coreContext);
   ctx.registerDialect(hwContext);
   ctx.registerDialect(opContext);
   ctx.registerDialect(aigContext);
   // meta must be registered last
   ctx.registerDialect(metaContext);
+  ctx.registerDialect(typeContext);
 
   CmdLineArgHandler cmdLineArgHandler;
   cmdLineArgHandler.registerArg(argFileName);
@@ -91,6 +99,9 @@ int main(int argc, char **argv) {
   cmdLineArgHandler.registerArg(argPrintAfterAll);
   cmdLineArgHandler.registerArg(argCheckAfterAll);
   cmdLineArgHandler.parse(argc, argv);
+
+  ctx.getCtx<TypeDialectContext>().baseTypeNames.registerDialect(
+      DIALECT_HW, hw::hwTypeDialectTypeNames);
 
   HWParser parser{ctx};
 

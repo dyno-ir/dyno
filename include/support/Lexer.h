@@ -2,12 +2,18 @@
 #include "StringRef.h"
 #include "dyno/Constant.h"
 #include "support/ArrayRef.h"
+#include "support/Debug.h"
 #include "support/ErrorRecovery.h"
+#include "support/Format.h"
+#include "support/Ranges.h"
 #include "support/SlabAllocator.h"
 #include "support/TwoLevelSet.h"
+#include <algorithm>
+#include <array>
 #include <cassert>
 #include <cctype>
 #include <cstdio>
+#include <initializer_list>
 #include <iostream>
 #include <memory>
 #include <optional>
@@ -22,16 +28,23 @@ struct Token {
     NONE,
     IDENTIFIER,
     PCT_IDENTIFIER,
-
     BIG_INT_LITERAL,
     INT_LITERAL,
-
     NUMERIC_LITERAL,
-
     STRING_LITERAL,
     INLINE_CODE_LITERAL,
     SPECIAL_END,
   };
+  static constexpr auto baseTypeNames = std::to_array({
+      "<invalid token>",
+      "<identifier>",
+      "<percent identifier>",
+      "<big int literal>",
+      "<int literal>",
+      "<numeric literal>",
+      "<string literal>",
+      "<inline code literal>",
+  });
 
   uint32_t type;
   union {
@@ -126,7 +139,7 @@ public:
 };
 
 struct ParseError {
-  const char *message;
+  Format message;
   size_t start;
   size_t end;
   unsigned lineNumber;
@@ -168,7 +181,7 @@ struct Lexer {
 private:
   std::optional<Token> peekToken;
   TwoLevelMap<SSOStringRef, uint32_t> strings = initStrings();
-  Vec<SSOStringRef> rvStrings;
+  Vec<StringRef> rvStrings;
 
   TwoLevelMap<SSOStringRef, uint32_t> initStrings() {
     TwoLevelMap<SSOStringRef, uint32_t> map;
@@ -304,7 +317,7 @@ public:
       bool pct = src[i] == '%';
       while (1) {
         char c = srcC[i + identLen];
-        if (!isdigit(c) && !isalpha(c) && c != '_')
+        if (!isdigit(c) && !isalpha(c) && c != '_' && (c != '.' || !pct))
           break;
         identLen++;
       }
@@ -393,7 +406,7 @@ public:
     return it->second - NUM_KEYWORDS;
   }
 
-  SSOStringRef GetIdent(unsigned identIdx) { return rvStrings[identIdx]; }
+  StringRef GetIdent(unsigned identIdx) { return rvStrings[identIdx]; }
 
   static std::string_view extractEnclosingLine(std::string_view input,
                                                size_t i) {
@@ -427,7 +440,7 @@ public:
     if (auto tok = tryPeekEnsure(types...)) {
       return Pop();
     } else {
-      return std::unexpected{tok.error()};
+      return std::unexpected{std::move(tok.error())};
     }
   }
 
@@ -436,8 +449,9 @@ public:
     unsigned col = &src[error.start] - line.begin() + 1;
     line = trimLeadingSpace(line);
 
-    fprintf(stderr, "%s:%u:%u: %s\n", path.c_str(), error.lineNumber, col,
-            error.message);
+    fprintf(stderr, "%s:%u:%u: ", path.c_str(), error.lineNumber, col);
+    error.message.toStream(std::cerr);
+    fprintf(stderr, "\n");
     unsigned pos;
     fprintf(stderr, "%s:%u:%u: %n", path.c_str(), error.lineNumber, col, &pos);
     std::cerr << line << "\n";
@@ -451,25 +465,60 @@ public:
     putc('\n', stderr);
   }
 
-  [[noreturn]] void printErrorOnPeekToken(const char *error) {
-    printError(makeErrorOnPeekToken(error));
+  [[noreturn]] void printErrorOnPeekToken(const char *error, auto &&...args) {
+    printError(
+        makeErrorOnPeekToken(error, std::forward<decltype(args)>(args)...));
     report_fatal_error("parser error");
   }
-  ParseError makeErrorOnPeekToken(const char *error) {
+  ParseError makeErrorOnPeekToken(const char *error, auto &&...args) {
     assert(peekToken);
-    return ParseError{error, lastState.i, state.i, state.lineNumber};
+    return ParseError{Format{error, std::forward<decltype(args)>(args)...},
+                      lastState.i, state.i, state.lineNumber};
   }
 
-  ParseError makeErrorOnNextToken(const char *error) {
+  ParseError makeErrorOnNextToken(const char *error, auto &&...args) {
     if (!peekToken)
       Peek();
-    return ParseError{error, lastState.i, state.i, state.lineNumber};
+    return ParseError{Format{error, std::forward<decltype(args)>(args)...},
+                      lastState.i, state.i, state.lineNumber};
+  }
+
+  const char *getTokenTypeString(uint32_t type) {
+    if (type < Token::SPECIAL_END)
+      return Token::baseTypeNames[type];
+    type -= TOK_OPS_START;
+    if (type < operators.size()) {
+      return operators[type];
+    }
+    type -= operators.size();
+    if (type < keywords.size()) {
+      return keywords[type];
+    }
+    type -= keywords.size();
+    return rvStrings[type].data();
+  }
+
+  template <typename... Ts>
+  ParseError makeExpectedTokenError(uint32_t actualType, Ts... types) {
+    if constexpr (sizeof...(types) > 1) {
+      std::array typesL = {types...};
+      auto rng = Range(typesL).transform(
+          [&](size_t, uint32_t t) { return getTokenTypeString(t); });
+      std::array<const char *, sizeof...(types)> arr;
+      std::copy_n(rng.begin(), sizeof...(types), arr.begin());
+      return makeErrorOnPeekToken("unexpected token: {}, expected: {}",
+                                  getTokenTypeString(actualType), arr);
+    } else {
+      return makeErrorOnPeekToken("unexpected token: {}, expected: {}",
+                                  getTokenTypeString(actualType),
+                                  getTokenTypeString(types...));
+    }
   }
 
   template <typename... Ts> Token peekEnsure(Ts... types) {
     Token t = Peek();
     if (!((t.type == types) || ...)) {
-      printErrorOnPeekToken("unexpected token");
+      printError(makeExpectedTokenError(t.type, types...));
     }
     return t;
   }
@@ -478,7 +527,7 @@ public:
   std::expected<Token, ParseError> tryPeekEnsure(Ts... types) {
     Token t = Peek();
     if (!((t.type == types) || ...)) {
-      return std::unexpected{makeErrorOnPeekToken("unexpected token")};
+      return std::unexpected{makeExpectedTokenError(t.type, types...)};
     }
     return t;
   }

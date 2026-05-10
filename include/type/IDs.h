@@ -1,8 +1,8 @@
 #pragma once
 
+#include "dyno/DialectInfo.h"
 #include "dyno/IDImpl.h"
-#include "dyno/InstrPrinter.h"
-#include "dyno/Parser.h"
+#include "dyno/Opcode.h"
 namespace dyno {
 constexpr DialectID DIALECT_TYPE{9}; // fixme: dialect ID assignment
 
@@ -37,6 +37,6 @@ template <> struct DialectTraits<DIALECT_TYPE> {
       TYPES(TYINFO_EXPAND)
 #undef TYINFO_EXPAND
   };
-  constexpr static OpcodeInfo opcInfo[] = {};
+  constexpr static std::array<OpcodeInfo, 0> opcInfo = {};
 };
 }; // namespace dyno

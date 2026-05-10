@@ -1,6 +1,7 @@
 #pragma once
 #include "support/MacroUtil.h"
 #include "support/Ranges.h"
+#include "support/SmallVec.h"
 #include <cstring>
 #include <iostream>
 #include <ostream>
@@ -60,7 +61,7 @@ inline void dbg_enable_for_id(uint32_t id) {
   _debugEnable[id / 8] |= 1 << (id % 8);
 }
 inline void dbg_disable_for_id(uint32_t id) {
-  _debugEnable[id / 8] |= ~(1 << (id % 8));
+  _debugEnable[id / 8] &= ~(1 << (id % 8));
 }
 inline bool dbg_is_enabled_for_id(uint32_t id) {
   return _debugEnable[id / 8] & (1 << (id % 8));
@@ -77,6 +78,7 @@ inline std::ostream &dbgs() {
   return std::cerr;
 }
 
+} // namespace dyno
 template <typename It> std::ostream &operator<<(std::ostream &os, Range<It> r) {
   os << '[';
   bool first = true;
@@ -90,4 +92,11 @@ template <typename It> std::ostream &operator<<(std::ostream &os, Range<It> r) {
   os << ']';
   return os;
 }
-} // namespace dyno
+template <typename T>
+inline std::ostream &operator<<(std::ostream &os, const SmallVecImpl<T> &vec) {
+  return os << Range{vec};
+}
+template <typename T, size_t N>
+inline std::ostream &operator<<(std::ostream &os, const std::array<T, N> &vec) {
+  return os << Range{vec};
+}

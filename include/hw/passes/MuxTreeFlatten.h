@@ -124,7 +124,7 @@ public:
   static constexpr auto runFuncs =
       mk_tuple(&MuxTreeFlattenPass::runProcess, &MuxTreeFlattenPass::runModule,
                &MuxTreeFlattenPass::run);
-  explicit MuxTreeFlattenPass(Context &ctx) : ctx(ctx) {}
+  explicit MuxTreeFlattenPass(Context &ctx) : ctx(ctx), knownBits(ctx) {}
   MuxTreeFlattenPass make(Context &ctx) { return MuxTreeFlattenPass{ctx}; }
 };
 }; // namespace dyno

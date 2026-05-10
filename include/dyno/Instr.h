@@ -271,8 +271,7 @@ class InstrRef : public FatObjRef<Instr> {
 
 public:
   using FatObjRef<Instr>::FatObjRef;
-  explicit constexpr InstrRef(FatObjRef<Instr> instrRef)
-      : FatObjRef<Instr>(instrRef) {}
+  constexpr InstrRef(FatObjRef<Instr> instrRef) : FatObjRef<Instr>(instrRef) {}
   constexpr static size_t max_operands =
       (size_t)std::numeric_limits<decltype(custom)>::max() + 1ull;
   constexpr static size_t max_defs = max_operands;

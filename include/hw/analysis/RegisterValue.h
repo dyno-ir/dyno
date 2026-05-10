@@ -411,7 +411,7 @@ struct RegisterValue : public RegisterFrags<RegisterValueFragment> {
     // if not aligned with source
     if (srcAddr != itO->dstAddr) {
       auto diff = srcAddr - itO->dstAddr;
-      itO = frags.insert(itO, *itO);
+      itO = src.frags.insert(itO, *itO);
       itO->len = diff;
 
       (itO + 1)->srcAddr += diff;
@@ -715,6 +715,7 @@ struct RegisterRegions : public RegisterFrags<RegisterRegionsFragment> {
       if (itEnd > end) {
         if (isContained(it, writerID))
           break;
+        assert(it->dstAddr == dstAddr); // if mismatch replace it->dstAddr below
         Fragment frag{it->writerIDs, it->dstAddr, len};
         it->len = itEnd - end;
         it->dstAddr += len;

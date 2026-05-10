@@ -14,6 +14,7 @@
 #include "hw/HWPrinter.h"
 #include "hw/HWValue.h"
 #include "hw/IDs.h"
+#include "hw/Instance.h"
 #include "hw/LoadStore.h"
 #include "hw/Memory.h"
 #include "hw/Pointer.h"
@@ -55,7 +56,8 @@ class AggressiveDeadCodeEliminationPass
         break;
 
       case *HW_INSTANCE: {
-        ModuleRef mod = instr.other(0)->as<ModuleRef>();
+        auto asInst = instr.as<InstanceIRef>();
+        ModuleRef mod = asInst.mod();
         unsigned idx = (use - instr.other_begin()) - 1;
         if (mod->ports[idx].portType == HW_INPUT_REGISTER_DEF)
           break;
@@ -189,11 +191,12 @@ class AggressiveDeadCodeEliminationPass
           visitHWValue(yieldInstr.operand(i)->as<HWValue>());
         }
       }
-      for (auto yieldInstr : asSwitch.caseYields()) {
-        if (!yieldInstr)
-          continue;
-        instrMap[yieldInstr] = 1;
-      }
+      if (asSwitch.getNumYieldValues() != 0)
+        for (auto yieldInstr : asSwitch.caseYields()) {
+          if (!yieldInstr)
+            continue;
+          instrMap[yieldInstr] = 1;
+        }
       for (auto instr : asSwitch.block()) {
         for (auto use : instr.others())
           visitHWValue(use->as<HWValue>());
@@ -313,8 +316,9 @@ class AggressiveDeadCodeEliminationPass
     case *HW_INSTANCE: {
       if (instrMap[instr])
         break;
-      for (auto op : instr.others().drop_front()) {
-        auto reg = op->as<RegisterRef>().iref();
+      auto asInst = instr.as<InstanceIRef>();
+      for (auto op : asInst.ports()) {
+        auto reg = op.iref();
         if (!instrMap[reg])
           pushInstr(reg);
       }

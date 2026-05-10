@@ -2,13 +2,14 @@
 #include "aig/AIG.h"
 #include "dyno/Constant.h"
 #include "dyno/Context.h"
+#include "dyno/DebugInfo.h"
 #include "dyno/DialectInfo.h"
 #include "dyno/FixedFlatObjStore.h"
 #include "dyno/IDs.h"
 #include "dyno/Interface.h"
 #include "dyno/NewDeleteObjStore.h"
 #include "dyno/Obj.h"
-#include "hw/DebugInfo.h"
+#include "dyno/ObjMap.h"
 #include "hw/HWValue.h"
 #include "hw/IDs.h"
 #include "hw/MemoryPort.h"
@@ -20,7 +21,9 @@
 #include "hw/Wire.h"
 #include "op/MapObj.h"
 #include "support/CallableRef.h"
+#include "support/TempBind.h"
 #include "support/TemplateUtil.h"
+#include "type/TypeInfo.h"
 #include <array>
 namespace dyno {
 
@@ -34,12 +37,16 @@ public:
   static constexpr DialectID dialect{DIALECT_HW};
 
   Tuple<StoreType_t<Wire>, StoreType_t<Register>, StoreType_t<Process>,
-             StoreType_t<Module>, StoreType_t<Trigger>,
-             StoreType_t<StdCellInfo>, StoreType_t<MemoryPort>,
-             StoreType_t<Pointer>>
+        StoreType_t<Module>, StoreType_t<Trigger>, StoreType_t<StdCellInfo>,
+        StoreType_t<MemoryPort>, StoreType_t<Pointer>>
       stores;
 
   ValueNameInfo<Register> regNameInfo;
+  TypeDebugInfo<Register> regTypeInfo;
+  ObjMapVec<Register, Init<DynObjRef, []() { return nullref; }>> regResetValue;
+
+  static constexpr DynObjRef t = DynObjRef{};
+
   template <typename T> T &get() { return stores.get<T>(); }
 
   template <typename T> StoreType_t<T> &getStore() {
@@ -52,13 +59,27 @@ public:
   }
 
   HWDialectContext() {
-    getStore<Register>().destroyHooks.emplace_back(
-        [&](RegisterRef ref) { regNameInfo.clearNames(ref); });
+    getStore<Register>().destroyHooks.emplace_back([&](RegisterRef ref) {
+      regNameInfo.clearNames(ref);
+      regTypeInfo.clearType(ref);
+      if (regResetValue.inRange(ref))
+        regResetValue[ref] = nullref;
+    });
   }
 
   void reset() {
     ContextMixin::reset();
     regNameInfo.reset();
+    regTypeInfo.reset();
+  }
+
+  void copyRegisterInfo(RegisterRef src, RegisterRef dst) {
+    regNameInfo.copyNames(src, dst);
+    regTypeInfo.copyType(src, dst);
+    if (regResetValue.inRange(src)) {
+      auto val = regResetValue[src];
+      regResetValue.get_ensure(dst) = val;
+    }
   }
 };
 

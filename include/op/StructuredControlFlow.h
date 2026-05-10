@@ -120,6 +120,12 @@ public:
       return instr.as<CaseInstrRef>().block();
     });
   }
+
+  auto caseInstrs() {
+    auto bl = block();
+    return Range{bl.begin(), bl.end()}.transform(
+        [](size_t, InstrRef instr) { return instr.as<CaseInstrRef>(); });
+  }
 };
 
 // defs: (cond_bl, body_bl, vreg...); uses: (cond_vreg, vreg...)
@@ -189,6 +195,19 @@ public:
 
   InstrRef getYield() { return getBlockYield(getBlock()); }
   InstrRef getUnyield() { return getBlockUnyield(getBlock()); }
+
+  std::optional<uint32_t> getNumIters() {
+    BigInt diff = getUpper()->as<ConstantRef>() - getLower()->as<ConstantRef>();
+    BigInt step = getStep()->as<ConstantRef>();
+    if (diff.getSignBit() != step.getSignBit())
+      return std::nullopt;
+    if (diff.getIs4S() || step.getIs4S())
+      return std::nullopt;
+    auto [div, mod] = BigInt::sdivmodOp4S(diff, step);
+    if (!mod.valueEquals(0))
+      return std::nullopt;
+    return div.getLimitedVal();
+  }
 };
 
 }; // namespace dyno
