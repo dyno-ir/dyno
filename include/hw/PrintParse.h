@@ -1,6 +1,7 @@
 #pragma once
 #include "dyno/Context.h"
 #include "dyno/DialectInfo.h"
+#include "dyno/IDs.h"
 #include "dyno/InstrPrinter.h"
 #include "dyno/Lexer.h"
 #include "dyno/Obj.h"
@@ -11,9 +12,12 @@
 #include "hw/Module.h"
 #include "hw/StdCellInfo.h"
 #include "support/CallableRef.h"
+#include "support/ErrorRecovery.h"
 #include "support/Lexer.h"
 #include "support/Ranges.h"
 #include "support/TemplateUtil.h"
+#include "type/TypeContext.h"
+#include "type/TypeInfo.h"
 #include <array>
 #include <cctype>
 #include <charconv>
@@ -65,9 +69,64 @@ public:
     case HW_REGISTER.type: {
       RegisterRef asReg = ref.as<RegisterRef>();
       str << "register";
-      if (asReg->numBits) {
-        str << "(" << *asReg->numBits << ")";
+      auto type =
+          base->ctx ? base->ctx->getCtx<HWDialectContext>().regTypeInfo.getType(
+                          *base->ctx, asReg)
+                    : nullref;
+
+      bool names = base->ctx && !base->ctx->getCtx<HWDialectContext>()
+                                     .regNameInfo.getNames(asReg)
+                                     .empty();
+      DynObjRef initVal = nullref;
+      if (base->ctx) {
+        auto &regResetValue =
+            base->ctx->getCtx<HWDialectContext>().regResetValue;
+        if (regResetValue.inRange(asReg))
+          initVal = regResetValue[asReg];
       }
+
+      if (asReg->numBits || type || names || initVal)
+        str << "(";
+      if (asReg->numBits) {
+        str << *asReg->numBits;
+
+        if (names || type || initVal)
+          str << ((names || initVal) ? ", " : ",");
+      }
+      if (initVal) {
+        base->printRefOrUse(base->ctx->resolve(initVal));
+        if (names || type)
+          str << (names ? ", " : ",");
+      }
+      if (names) {
+        for (auto [back, nm] : base->ctx->getCtx<HWDialectContext>()
+                                   .regNameInfo.getNames(asReg)
+                                   .mark_back()) {
+          str << "\"" << nm << "\"";
+          if (!back)
+            str << ", ";
+        }
+
+        if (type)
+          str << ",";
+      }
+      if (type) {
+        if (type.is<StructTypeRef>() || type.is<EnumTypeRef>()) {
+          base->indentPrint.addIndent();
+          if (!base->isIntroduced(type))
+            base->indentPrint.printNewLineIndent();
+          else
+            str << " ";
+          base->printRefOrUse(type, true);
+          base->indentPrint.removeIndent();
+        } else {
+          str << " ";
+          base->printRefOrUse(type);
+        }
+      }
+
+      if (asReg->numBits || type || names)
+        str << ")";
       break;
     }
     case HW_PROCESS.type: {
@@ -134,8 +193,6 @@ public:
     return true;
   }
 
-  using IntroducedName = PrinterBase::IntroducedName;
-
   std::optional<IntroducedName> getObjectName(FatDynObjRef<> ref) {
     switch (ref.getTyID()) {
     case HW_MODULE.type:
@@ -184,13 +241,38 @@ public:
     case *HW_REGISTER: {
       lexer->popEnsure(DynoLexer::op_rbropen);
       auto bits = lexer->popEnsure(Token::INT_LITERAL);
-      lexer->popEnsure(DynoLexer::op_rbrclose);
       auto reg = ctx->getStore<Register>().create(bits.intLit.value);
-      if (!name.empty() && !isdigit(name[0]) &&
+      auto &regNameInfo = ctx->getCtx<HWDialectContext>().regNameInfo;
+
+      while (lexer->popIf(DynoLexer::op_comma)) {
+        if (lexer->peekIs(Token::STRING_LITERAL)) {
+          auto name = lexer->Pop().strLit.value;
+          regNameInfo.addName(reg, std::string_view{name});
+        } else {
+          auto type = base.parseOperand();
+          if (!type) {
+            base.lexer->printError(type.error());
+            report_fatal_error("parse error");
+          }
+          if (type->ref.is<FatTypeRef>())
+            base.ctx.getCtx<HWDialectContext>().regTypeInfo.setType(
+                reg, type->ref.as<FatTypeRef>());
+          else if (type->ref.getType() == Any{CORE_CONSTANT, HW_REGISTER}) {
+            base.ctx.getCtx<HWDialectContext>().regResetValue.get_ensure(reg) =
+                type->ref;
+          } else
+            base.lexer->printErrorOnPeekToken(
+                "expected type or initval (constant/register)");
+        }
+      }
+      lexer->popEnsure(DynoLexer::op_rbrclose);
+
+      // only add ident name if no names listed
+      if (regNameInfo.getNames(reg).empty() && !name.empty() &&
+          !isdigit(name[0]) &&
           !(name[0] == 'r' && Range{name.begin() + 1, name.end()}.all(
                                   [](char c) { return isdigit(c); })))
-        ctx->getCtx<HWDialectContext>().regNameInfo.addName(
-            reg, std::string_view{name});
+        regNameInfo.addName(reg, std::string_view{name});
       return reg;
     }
     case *HW_WIRE: {

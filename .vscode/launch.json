@@ -118,6 +118,12 @@
       "name": "dyno-sv soomrv",
       "program": "${workspaceFolder}/build/tools/dyno-sv/dyno-sv",
       "args": [
+        "synth",
+        "--liberty",
+        "sky130_fd_sc_hd__tt_025C_1v80.lib",
+        "--debug",
+        "-s=./tools/dyno-opt/dyno-ir/flow.dyno",
+        "-s=./tools/dyno-opt/dyno-ir/run_flow.dyno",
         "sv/soomrv/lib/PriorityEncoder.sv",
         "sv/soomrv/lib/OHEncoder.sv",
         "sv/soomrv/lib/RangeMaskGen.sv",
@@ -192,14 +198,14 @@
         "sv/soomrv/PrefetchPatternDetector.sv",
         "sv/soomrv/PrefetchIssuer.sv",
         "sv/soomrv/PrefetchExecutor.sv",
-        "--allow-use-before-declare",
-        "--single-unit",
-        "--relax-enum-conversions",
-        "--allow-hierarchical-const",
-        "--allow-multi-driven-locals",
-        "--std",
-        "1800-2023",
-        "--allow-toplevel-iface-ports"
+        "--Xslang=--allow-use-before-declare",
+        "--Xslang=--single-unit",
+        "--Xslang=--relax-enum-conversions",
+        "--Xslang=--allow-hierarchical-const",
+        "--Xslang=--allow-multi-driven-locals",
+        "--Xslang=--std",
+        "--Xslang=1800-2023",
+        "--Xslang=--allow-toplevel-iface-ports"
       ],
     }
   ]

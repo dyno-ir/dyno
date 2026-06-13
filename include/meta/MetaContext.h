@@ -6,7 +6,7 @@
 #include "dyno/DialectInfo.h"
 #include "dyno/Instr.h"
 #include "dyno/NewDeleteObjStore.h"
-#include "hw/DebugInfo.h"
+#include "dyno/DebugInfo.h"
 #include "meta/IDs.h"
 #include "op/MapObj.h"
 #include "support/Tuple.h"

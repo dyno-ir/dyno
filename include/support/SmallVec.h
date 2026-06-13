@@ -3,6 +3,7 @@
 #include "support/ASAN.h"
 #include "support/Ranges.h"
 #include <algorithm>
+#include <array>
 #include <cassert>
 #include <cstddef>
 #include <initializer_list>
@@ -10,7 +11,6 @@
 #include <support/Bits.h>
 #include <support/InlineStorage.h>
 #include <utility>
-#include <array>
 
 template <typename T, unsigned N> class SmallVec;
 template <typename T> class SmallVecImpl;
@@ -416,10 +416,14 @@ public:
   }
 
   template <typename It> void push_back_range(Range<It> range) {
-    if constexpr (requires { range.size(); })
-      reserve(size() + range.size());
-    for (auto &&item : range) {
-      emplace_back(item);
+    if constexpr (requires { range.size(); }) {
+      auto oldSz = size();
+      resize_no_init(oldSz + range.size());
+      std::uninitialized_copy(range.begin(), range.end(), begin() + oldSz);
+    } else {
+      for (auto &&item : range) {
+        emplace_back(item);
+      }
     }
   }
   template <typename It> void push_back_range(It begin, It end) {
@@ -520,6 +524,15 @@ public:
     assert(!empty());
     sz--;
   }
+
+  constexpr T &emplace_back(auto &&...args) {
+    resize(sz + 1);
+    std::construct_at(&back(), std::forward<decltype(args)>(args)...);
+    return back();
+  }
+
+  constexpr T &push_back(T &&t) { return emplace_back(std::move(t)); }
+  constexpr T &push_back(const T &t) { return emplace_back(t); }
 
   constexpr T &operator[](size_type i) {
     assert(i < sz);

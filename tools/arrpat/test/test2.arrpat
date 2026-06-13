@@ -111,6 +111,13 @@ replace {
   OP_ADD $out, $lhs, const_negate($rhs)
 }
 
+match {
+  OP_SUB $out, #'1, $x
+}
+replace {
+  OP_NOT $out, $x
+}
+
 // todo: more than two operands in first add
 match {
   OP_ADD $temp, $negatedA, $negatedB
@@ -374,7 +381,7 @@ macro chk_wire_constant $self, $len [{
 macro chk_wire_like $self, $like [{
   if (!(*$self.begin())->is<WireRef>())
     goto $fail;
-  if (*(*$self.begin())->as<WireRef>().getNumBits() == *(*$like.begin())->as<WireRef>().getNumBits())
+  if (*(*$self.begin())->as<WireRef>().getNumBits() != *(*$like.begin())->as<WireRef>().getNumBits())
     goto $fail;
 }]
 
@@ -758,6 +765,10 @@ replace {
   HW_CONCAT $out, /*$pre..., */$temp2, $post...
 }
 
+match {
+  $opc{OP_TRUNC, OP_SEXT, OP_ZEXT, OP_ANYEXT} $out, $in:chk_wire_like($out)
+}
+replace $out -> $in
 
 /*
 macro wire32 -> $rv [{

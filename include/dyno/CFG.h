@@ -321,6 +321,8 @@ public:
     }
     (*this)->sorted = 1;
   }
+
+  bool isSorted() const { return (*this)->sorted; }
 };
 
 template <bool Ordered>
@@ -370,8 +372,8 @@ inline void InstrNumbering::insert(InstrRef instr, BlockRef_iterator_base it) {
   }
 
   uint64_t carry = 0;
-  uint64_t mean = __builtin_addcl(numbers[next.getObjID() + 1],
-                                  numbers[prev.getObjID() + 1], 0, &carry);
+  uint64_t mean = __builtin_add_overflow(numbers[next.getObjID() + 1],
+                                         numbers[prev.getObjID() + 1], &carry);
   mean = (mean >> 1) + (carry ? bit_mask_msb<uint64_t>() : 0);
 
   if (mean == numbers[prev.getObjID() + 1]) [[unlikely]] {

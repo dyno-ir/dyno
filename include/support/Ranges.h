@@ -524,7 +524,7 @@ public:
   mark_back_iterator() = default;
   mark_back_iterator(T it, T end) : it(it), end(end) {}
 
-  value_type operator*() { return {std::next(it) == end, *it}; }
+  value_type operator*() const { return {std::next(it) == end, *it}; }
 
   mark_back_iterator &operator++() {
     ++it;
@@ -1083,77 +1083,77 @@ public:
   using iterator_category = std::iterator_traits<It>::iterator_category;
   using value_type = std::iterator_traits<It>::value_type;
 
-  template <typename U> Range(const U &u) : Range(u.begin(), u.end()) {}
-  template <typename U> Range(U &u) : Range(u.begin(), u.end()) {}
+  template <typename U> constexpr Range(const U &u) : Range(u.begin(), u.end()) {}
+  template <typename U> constexpr Range(U &u) : Range(u.begin(), u.end()) {}
 
-  Range(It beginIt, It endIt) : beginIt(beginIt), endIt(endIt) {}
-  Range() = default;
+  constexpr Range(It beginIt, It endIt) : beginIt(beginIt), endIt(endIt) {}
+  constexpr Range() = default;
 
-  It begin() const { return beginIt; }
-  It end() const { return endIt; }
+  constexpr It begin() const { return beginIt; }
+  constexpr It end() const { return endIt; }
 
-  auto earlyincr() {
+  constexpr auto earlyincr() {
     return ::Range{earlyincr_iterator{beginIt}, earlyincr_iterator{endIt}};
   }
 
-  auto deref() {
+  constexpr auto deref() {
     return ::Range{deref_iterator{beginIt}, deref_iterator{endIt}};
   }
 
-  auto no_deref() {
+  constexpr auto no_deref() {
     return ::Range{no_deref_iterator{beginIt}, no_deref_iterator{endIt}};
   }
 
-  auto enumerate() {
+  constexpr auto enumerate() {
     return ::Range{enumerate_iterator{beginIt}, enumerate_iterator{endIt}};
   }
 
-  auto flat() {
+  constexpr auto flat() {
     return ::Range{flatten_iterator{beginIt}, flatten_iterator{endIt}};
   }
 
-  auto discard_optional() {
+  constexpr auto discard_optional() {
     return ::Range{discard_optional_iterator{beginIt, endIt},
                    discard_optional_iterator{endIt}};
   }
 
-  auto reverse() {
+  constexpr auto reverse() {
     return ::Range{std::reverse_iterator<It>{end()},
                    std::reverse_iterator<It>{begin()}};
   }
 
-  auto drop_front() {
+  constexpr auto drop_front() {
     auto rv = Range{*this};
     ++rv.beginIt;
     return rv;
   }
-  auto drop_back() {
+  constexpr auto drop_back() {
     auto rv = Range{*this};
     --rv.endIt;
     return rv;
   }
 
-  auto mark_front() {
+  constexpr auto mark_front() {
     return ::Range{mark_front_iterator{beginIt, true},
                    mark_front_iterator{endIt, false}};
   }
-  auto mark_back() {
+  constexpr auto mark_back() {
     return ::Range{mark_back_iterator{beginIt, endIt},
                    mark_back_iterator{endIt, endIt}};
   }
 
-  template <typename TransformT> auto transform(TransformT transformF) {
+  template <typename TransformT> constexpr auto transform(TransformT transformF) {
     return ::Range{transform_iterator<It, TransformT>(beginIt, transformF),
                    transform_iterator<It, TransformT>(endIt, transformF)};
   }
 
-  template <typename T> auto as() {
-    auto lambda = [](size_t, const auto &src) { return src.template as<T>(); };
+  template <typename T> constexpr auto as() {
+    auto lambda = [](size_t, auto &&src) { return src.template as<T>(); };
     return ::Range{transform_iterator<It, decltype(lambda)>(beginIt, lambda),
                    transform_iterator<It, decltype(lambda)>(endIt)};
   }
 
-  template <typename T> auto resolve(T &resolver) {
+  template <typename T> constexpr auto resolve(T &resolver) {
     auto lambda = [&resolver](size_t, auto &&obj) {
       return resolver.resolve(obj);
     };
@@ -1161,61 +1161,66 @@ public:
                    transform_iterator<It, decltype(lambda)>(endIt, lambda)};
   }
 
-  template <typename T> auto cast() {
-    auto lambda = [](size_t, const auto &src) { return static_cast<T>(src); };
+  template <typename T> constexpr auto cast() {
+    auto lambda = [](size_t, auto &&src) { return static_cast<T>(src); };
     return ::Range{transform_iterator<It, decltype(lambda)>(beginIt, lambda),
                    transform_iterator<It, decltype(lambda)>(endIt)};
   }
 
-  template <typename FilterT> auto filter(FilterT filterF) {
+  template <typename FilterT> constexpr auto filter(FilterT filterF) {
     return ::Range{filter_iterator<It, FilterT>(beginIt, endIt, filterF),
                    filter_iterator<It, FilterT>(endIt, endIt)};
   }
 
-  auto do_reverse() { return std::reverse(beginIt, endIt); }
+  constexpr auto do_reverse() { return std::reverse(beginIt, endIt); }
 
-  template <typename T> void sort(T func) { std::sort(begin(), end(), func); }
+  template <typename T> constexpr void sort(T func) { std::sort(begin(), end(), func); }
   template <typename T> void stable_sort(T func) {
     std::stable_sort(begin(), end(), func);
   }
-  template <typename T> It find(T &&val) {
+  template <typename T> constexpr It find(T &&val) {
     return std::find(begin(), end(), val);
   }
-  template <typename T> std::optional<size_t> find_idx(T &&val) {
+  template <typename T> constexpr std::optional<size_t> find_idx(T &&val) {
+    if constexpr (std::is_same_v<iterator_category,
+                                 std::random_access_iterator_tag>) {
+      auto it = find(val);
+      return (it == end()) ? std::nullopt : std::optional(it - begin());
+    }
     for (auto [i, elem] : (*this).enumerate()) {
       if (elem == val)
         return i;
     }
     return std::nullopt;
   }
-  template <typename T> It find_if(T func) {
+  template <typename T> constexpr It find_if(T func) {
     return std::find_if(begin(), end(), func);
   }
-  template <typename T> bool all(T func) {
+  template <typename T> constexpr bool all(T func) {
     return std::all_of(begin(), end(), func);
   }
-  template <typename T> bool any(T func) {
+  template <typename T> constexpr bool any(T func) {
     return std::any_of(begin(), end(), func);
   }
-  template <typename T> auto count_if(T func) {
+  template <typename T> constexpr auto count_if(T func) {
     return std::count_if(begin(), end(), func);
   }
-  template <typename T> T for_each(T func) {
+  template <typename T> constexpr T for_each(T func) {
     return std::for_each(begin(), end(), func);
   }
-  template <typename T> bool is_sorted(T func) {
+  template <typename T> constexpr bool is_sorted(T func) {
     return std::is_sorted(begin(), end(), func);
   }
   auto max() { return std::max_element(begin(), end()); }
-  template <typename T> auto max(T func) {
+  template <typename T> constexpr auto max(T func) {
     return std::max_element(begin(), end(), func);
   }
   auto min() { return std::min_element(begin(), end()); }
-  template <typename T> auto min(T func) {
+  template <typename T> constexpr auto min(T func) {
     return std::min_element(begin(), end(), func);
   }
-  auto sum() { return std::reduce(begin(), end()); }
-  auto lcm() {
+  constexpr auto sum() { return std::reduce(begin(), end()); }
+  constexpr auto lcm() {
     if (empty())
       return typename It::value_type(0);
     typename It::value_type val = front();
@@ -1223,7 +1228,7 @@ public:
       val = std::lcm(val, e);
     return val;
   }
-  auto gcd() {
+  constexpr auto gcd() {
     if (empty())
       return typename It::value_type(0);
     typename It::value_type val = front();
@@ -1231,7 +1236,7 @@ public:
       val = std::gcd(val, e);
     return val;
   }
-  template <typename T> bool equals(Range<T> other) {
+  template <typename T> constexpr bool equals(Range<T> other) {
     if constexpr (requires() {
                     this->size();
                     other.size();
@@ -1244,7 +1249,7 @@ public:
     }
     return true;
   }
-  template <typename T, typename Comp> bool equals(Range<T> other, Comp comp) {
+  template <typename T, typename Comp> constexpr bool equals(Range<T> other, Comp comp) {
     if constexpr (requires() {
                     this->size();
                     other.size();
@@ -1258,29 +1263,29 @@ public:
     return true;
   }
 
-  template <typename T> auto zip(const T &other) {
+  template <typename T> constexpr auto zip(const T &other) {
     return ::Range{zip_iterator{begin(), other.begin()},
                    zip_iterator{end(), other.end()}};
   }
-  template <typename T> auto zip(T &other) {
+  template <typename T> constexpr auto zip(T &other) {
     return ::Range{zip_iterator{begin(), other.begin()},
                    zip_iterator{end(), other.end()}};
   }
-  auto pairwise() {
+  constexpr auto pairwise() {
     if constexpr (requires { endIt - beginIt; }) {
       assert((endIt - beginIt) % 2 == 0);
     }
     return ::Range{pairwise_iterator{beginIt}, pairwise_iterator{endIt}};
   }
 
-  auto step(unsigned n) {
+  constexpr auto step(unsigned n) {
     if constexpr (requires { endIt - beginIt; }) {
       assert((endIt - beginIt) % n == 0);
     }
     return ::Range{step_iterator{beginIt, n}, step_iterator{endIt, n}};
   }
 
-  template <unsigned N> auto tuple() {
+  template <unsigned N> constexpr auto tuple() {
     if constexpr (requires { endIt - beginIt; }) {
       assert((endIt - beginIt) % N == 0);
     }
@@ -1288,22 +1293,22 @@ public:
                    tuple_iterator<N, It>{endIt}};
   }
 
-  template <typename T> auto sorted_intersect(T &other) {
+  template <typename T> constexpr auto sorted_intersect(T &other) {
     return ::Range{
         sorted_intersect_iterator{begin(), end(), other.begin(), other.end()},
         sorted_intersect_iterator{end(), other.end()},
     };
   }
 
-  bool empty() const { return begin() == end(); }
-  static Range emptyRange() { return Range(); }
+  constexpr bool empty() const { return begin() == end(); }
+  static constexpr Range emptyRange() { return Range(); }
 
-  auto size() const
+  constexpr auto size() const
     requires(requires(It a, It b) { b - a; })
   {
     return end() - begin();
   }
-  decltype(auto) operator[](size_t i) const
+  constexpr decltype(auto) operator[](size_t i) const
     requires(requires(It a) { a[i]; })
   {
     if constexpr (requires { size(); })
@@ -1311,14 +1316,14 @@ public:
     return beginIt[i];
   }
 
-  Range subrange(size_t start)
+  constexpr Range subrange(size_t start)
     requires(requires(It a) { a + start; })
   {
     assert(start <= size_t(size()));
     return {beginIt + start, endIt};
   }
 
-  Range subrange(size_t start, size_t len)
+  constexpr Range subrange(size_t start, size_t len)
     requires(requires(It a) { a + start; })
   {
     assert(start + len <= size_t(size()));
@@ -1337,11 +1342,11 @@ public:
   //   return MutArrayRef{&*beginIt, &*endIt};
   // }
 
-  decltype(auto) front() {
+  constexpr decltype(auto) front() {
     assert(!empty());
     return *beginIt;
   }
-  decltype(auto) back()
+  constexpr decltype(auto) back()
     requires(requires(It it) { std::prev(it); })
   {
     assert(!empty());

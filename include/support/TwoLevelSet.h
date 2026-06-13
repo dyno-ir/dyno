@@ -32,10 +32,10 @@ public:
     iterator(Base base) : Base(base) {}
 
   public:
-    const K &operator*() { return this->Base::val(); }
-    const K *operator->() { return &(this->Base::val()); }
+    const K &operator*() const { return this->Base::val(); }
+    const K *operator->() const { return &(this->Base::val()); }
 
-    const K &key() { return (*this); }
+    const K &key() const { return (*this); }
 
     bool operator==(const iterator &o) const { return Base::operator==(o); }
     iterator &operator++() {
@@ -72,7 +72,7 @@ public:
             [](size_t,
                auto &&val) -> std::pair<KeyT, typename Range<T>::value_type> {
               return {HashFunc(val), val};
-            })){};
+            })) {};
 };
 
 // Swiss-Table style map. This is for complex keys, use plain DenseMap for small
@@ -108,12 +108,17 @@ public:
     iterator(Base base) : Base(base) {}
 
   public:
+    using iterator_category = Base::iterator_category;
+    using difference_type = Base::difference_type;
+    using value_type = std::pair<const K, T>;
+    using reference = value_type &;
+    using pointer = value_type *;
     // prefer key()/val() for plain DenseMap compat
-    std::pair<const K, T> &operator*() { return this->Base::val(); }
-    std::pair<const K, T> *operator->() { return &(this->Base::val()); }
+    std::pair<const K, T> &operator*() const { return this->Base::val(); }
+    std::pair<const K, T> *operator->() const { return &(this->Base::val()); }
 
-    const K &key() { return (*this)->first; }
-    T &val() { return (*this)->second; }
+    const K &key() const { return (*this)->first; }
+    T &val() const { return (*this)->second; }
 
     bool operator==(const iterator &o) const { return Base::operator==(o); }
     iterator &operator++() {

@@ -1,12 +1,13 @@
 #pragma once
 #include "dyno/CFG.h"
+#include "dyno/DeepCopy.h"
 #include "dyno/Obj.h"
 #include "dyno/ObjMap.h"
 #include "dyno/Pass.h"
-#include "dyno/DeepCopy.h"
 #include "hw/HWAbstraction.h"
 #include "hw/HWPrinter.h"
 #include "hw/IDs.h"
+#include "hw/Instance.h"
 #include "hw/LoadStore.h"
 #include "hw/Process.h"
 #include "hw/analysis/RegisterValue.h"
@@ -44,17 +45,10 @@ class ProcessLinearizePass : public Pass<ProcessLinearizePass> {
   ObjMapVec<Process, Custom> map;
 
 public:
-  // struct Config {
-  //   bool retainIODeps = true;
-  //   bool retainInnerDeps = false;
-  //   enum ProcessKind { COMB, INIT };
-  //   ProcessKind kind = COMB;
-  // };
-  // Config config;
-
 #define CONFIG_STRUCT_LAMBDA(FIELD, ENUM)                                      \
   FIELD(bool, retainIODeps, true)                                              \
   FIELD(bool, retainInnerDeps, false)                                          \
+  FIELD(bool, noFuseSortOnly, false)                                           \
   ENUM(kind, COMB, COMB, INIT)
   CONFIG_STRUCT(CONFIG_STRUCT_LAMBDA)
 #undef CONFIG_STRUCT_LAMBDA
@@ -117,7 +111,7 @@ public:
         }
 
         case HW_INSTANCE.raw(): {
-          auto other = instr.other(0)->as<ModuleRef>();
+          auto other = instr.as<InstanceIRef>().mod();
           bool isInputFromInst = other->ports[access.getNum() - 1].portType.is(
               HW_INOUT_REGISTER_DEF, HW_OUTPUT_REGISTER_DEF,
               HW_REF_REGISTER_DEF);
@@ -284,7 +278,7 @@ public:
             dbgs() << "Found process loop of length " << length << ":\n";
             size_t i = 0;
             for (auto it2 = stack.end() - 1; it2 >= it.base(); --it2, ++i) {
-              dbgs() << "Process " << (i + 1) << " of " << length << "\n";
+              dbgs() << "Process " << (i + 1) << " of " << length << ": ";
               dumpInstr(it2->proc.iref(), ctx, true, false);
             }
           });
@@ -336,14 +330,18 @@ public:
 
   void linearize(ModuleIRef module) {
     SmallVec<ProcessIRef, 16> ordered;
-    // SmallVec<ProcessIRef, 16> procs;
-    // procs.push_back_range(module.procs());
-    // std::shuffle(procs.begin(), procs.end(),
-    //              std::mt19937{std::random_device{}()});
     for (auto proc : module.procs()) {
       if (ignoredKind(proc))
         continue;
       visit2(ordered, proc);
+    }
+
+    if (config.noFuseSortOnly) {
+      for (auto proc : ordered) {
+        ctx.getCFG()[proc].erase();
+        module.block().end().insertPrev(proc);
+      }
+      return;
     }
 
     if (config.retainIODeps) {
@@ -364,13 +362,13 @@ public:
         }
       }
 
-      DYNO_DBG(
-          "ProcessLinearize", std::cerr << "ordered:\n"; {
-            for (auto proc : ordered) {
-              dumpInstr(proc);
-            }
-            dbgs() << "\n\n\n";
-          })
+      DYNO_DBG({
+        dbgs() << "ordered:\n";
+        for (auto proc : ordered) {
+          dumpInstr(proc, ctx, true, false);
+        }
+        dbgs() << "\n\n";
+      })
 
       size_t cnt = ordered.size();
       SmallVec<uint32_t, 16> toMerge;
@@ -462,7 +460,7 @@ public:
   void runModule(ModuleIRef mod) {
     runWrapper([&] { runOnModule(mod); });
   }
-  static constexpr auto runFuncs = mk_tuple(
-      &ProcessLinearizePass::runModule, &ProcessLinearizePass::run);
+  static constexpr auto runFuncs =
+      mk_tuple(&ProcessLinearizePass::runModule, &ProcessLinearizePass::run);
 };
 }; // namespace dyno

@@ -1,5 +1,4 @@
 #pragma once
-
 #include "dyno/Context.h"
 #include "dyno/Pass.h"
 #include "hw/HWContext.h"
@@ -38,17 +37,35 @@ private:
   }
 
   bool runOnModule(ModuleIRef test) {
+    auto filterInputs = [](RegisterIRef reg) {
+      return reg.isOpc(HW_INPUT_REGISTER_DEF);
+    };
+    auto filterOutputs = [](RegisterIRef reg) {
+      return reg.isOpc(HW_OUTPUT_REGISTER_DEF);
+    };
+
     auto model = getModelModule(test);
     if (config.swapTestAndModel)
       std::swap(test, model);
 
     HWInterpreter modelInterp{ctx, model, std::cout, std::cerr};
     modelInterp.setup();
+    if (config.exhaustive)
+      for (auto modelIn : model.ports().filter(filterInputs))
+        modelInterp.getReg(modelIn) =
+            PatBigInt::fromFourState(FourState::S0, *modelIn.getNumBits());
+    modelInterp.initialEval();
+
     HWInterpreter testInterp{ctx, test, std::cout, std::cerr};
     testInterp.setup();
+    if (config.exhaustive)
+      for (auto testIn : test.ports().filter(filterInputs))
+        testInterp.getReg(testIn) =
+            PatBigInt::fromFourState(FourState::S0, *testIn.getNumBits());
+    testInterp.initialEval();
 
 #ifdef ENABLE_FST
-    testInterp.fstWriter.emplace("out.fst");
+    testInterp.fstWriter.emplace(ctx, "out.fst");
     testInterp.fstInitHierarchy();
 #endif
 
@@ -57,19 +74,14 @@ private:
     auto testClk = test.ports().front();
     auto modelClk = model.ports().front();
 
-    auto filterInputs = [](RegisterIRef reg) {
-      return reg.isOpc(HW_INPUT_REGISTER_DEF);
-    };
-    auto filterOutputs = [](RegisterIRef reg) {
-      return reg.isOpc(HW_OUTPUT_REGISTER_DEF);
-    };
     std::mt19937 rand(42);
-    BigInt clk = "1'b0"_bv;
+    BigInt clk = "1'b1"_bv;
     if (config.clockMode == Config::CLOCK) {
       // set these to avoid initial x -> 0 transition
       testInterp.getReg(testClk) = clk;
       modelInterp.getReg(modelClk) = clk;
     }
+
     for (uint64_t i = 0; i < config.cycles || config.exhaustive; i++) {
       bool carry = true;
       for (auto [testIn, modelIn] :
@@ -80,7 +92,9 @@ private:
           continue;
         }
         if (config.exhaustive) {
-          auto &val = (modelInterp.getReg(modelIn) += "1'b1"_bv);
+          auto &val = modelInterp.getReg(modelIn);
+          val += "1'b1"_bv;
+          // auto &val = ( += );
           testInterp.getReg(testIn) = val;
           modelInterp.regValueChanged(modelIn);
           testInterp.regValueChanged(testIn);
@@ -103,9 +117,6 @@ private:
           testInterp.regValueChanged(testIn);
         }
       }
-
-      if (config.exhaustive && carry)
-        break;
 
       if (config.clockMode == Config::COMB) {
         testInterp.eval();
@@ -155,13 +166,10 @@ private:
         }
       }
 
+      if (config.exhaustive && carry)
+        break;
+
       if (config.clockMode == Config::CLOCK) {
-        clk = ~clk;
-        testInterp.setReg(testClk, clk);
-        modelInterp.setReg(modelClk, clk);
-
-        testInterp.eval();
-        modelInterp.eval();
         testInterp.forwardTime(1);
         modelInterp.forwardTime(1);
 
@@ -173,6 +181,13 @@ private:
         modelInterp.eval();
         testInterp.forwardTime(1);
         modelInterp.forwardTime(1);
+
+        clk = ~clk;
+        testInterp.setReg(testClk, clk);
+        modelInterp.setReg(modelClk, clk);
+
+        testInterp.eval();
+        modelInterp.eval();
       }
     }
     return true;

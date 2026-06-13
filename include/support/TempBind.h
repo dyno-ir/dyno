@@ -36,6 +36,7 @@ public:
     val = toVal;
     return RAIIToken<TempBindPtr>{*this};
   }
+  void set(T *toVal) { val = toVal; }
   void unbind() { val = nullptr; }
   T *operator->() { return val; }
   T &operator*() { return *val; }
@@ -66,4 +67,11 @@ public:
 
   TempBindVal() {};
   ~TempBindVal() {};
+};
+
+template <typename T, auto InitFunc> class Init : public T {
+public:
+  using T::T;
+  constexpr Init(const T &t) : T(t) {}
+  constexpr Init() : T(InitFunc()) {}
 };

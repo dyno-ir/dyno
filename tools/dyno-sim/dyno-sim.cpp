@@ -1,3 +1,4 @@
+#define ENABLE_FST
 
 #include "dyno/Constant.h"
 #include "dyno/Context.h"
@@ -11,9 +12,7 @@
 #include "hw/Register.h"
 #include "hw/Wire.h"
 #include "hw/passes/ParseDyno.h"
-#define ENABLE_FST
 #include "hw/run/HWInterpreter.h"
-#undef ENABLE_FST
 #include "ieee1800/sv_vpi_user.h"
 #include "ieee1800/vpi_user.h"
 #include "support/SmallVec.h"
@@ -178,7 +177,7 @@ int main(int argc, char **argv) {
   auto topInstance = createTopInstance(ctx, mod.iref());
 
   HWInterpreter interpreter{ctx, mod.iref(), std::cout, std::cerr};
-  interpreter.fstWriter.emplace("trace.fst");
+  interpreter.fstWriter.emplace(ctx, "trace.fst");
   interpreter.setup();
   interpreter.fstInitHierarchy();
   interpreter.trace = true;

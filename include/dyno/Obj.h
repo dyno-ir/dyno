@@ -107,7 +107,7 @@ public:
     return {ObjTraits<T>::ty.dialect, ObjTraits<T>::ty.type, obj, custom};
   }
 
-  DynObjRef() = default;
+  constexpr DynObjRef() = default;
   constexpr DynObjRef(nullref_t)
       : dialect(0), ty(0), custom(0), obj(ObjID::invalid()) {}
 

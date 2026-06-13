@@ -79,7 +79,7 @@ public:
         break;
     }
     assert(sawTombstone && "hash map full?");
-    return std::make_pair(false, iterator{&getBuckets()[bucketIndex],
+    return std::make_pair(false, iterator{&getBuckets()[seenTombstoneBucket],
                                           cap - seenTombstoneBucket,
                                           seenTombstoneIdx, offset});
   }
@@ -135,7 +135,7 @@ public:
   bool growIfOversized(T &&reinsertFunc) {
     auto max = cap * Bucket::entriesPerBucket;
     auto pct = (max / 2) + (max / 4) + (max / 8) + (max / 16);
-    if (sz >= pct) {
+    if (sz >= pct) [[unlikely]] {
       grow(reinsertFunc, 2 * cap);
       return true;
     }
@@ -228,7 +228,7 @@ public:
 
   explicit operator bool() { return rem != 0; }
 
-  const K &key() { return bucket->keys[idx]; }
+  const K &key() const { return bucket->keys[idx]; }
   K &keyMut() { return bucket->keys[idx]; }
 };
 
@@ -258,13 +258,13 @@ public:
   //   return rv;
   // }
 
-  value_type operator*() {
+  value_type operator*() const {
     return std::pair<const K &, V &>(bucket->keys[idx], bucket->values()[idx]);
   }
   // can't support this with non-contiguous key/val (maybe w proxy object)
   auto operator->() = delete;
 
-  V &val() { return (**this).second; }
+  V &val() const { return (**this).second; }
 };
 
 template <typename Bucket, typename K, typename size_type = uint32_t>
@@ -292,8 +292,8 @@ public:
   //     return rv;
   //   }
 
-  value_type operator*() { return bucket->keys[idx]; }
-  pointer operator->() { return &bucket->keys[idx]; };
+  value_type operator*() const { return bucket->keys[idx]; }
+  pointer operator->() const { return &bucket->keys[idx]; };
 };
 
 template <typename Derived, typename K, typename V, typename Bucket,
@@ -567,9 +567,8 @@ template <typename K, typename size_type = uint32_t> struct DenseSetBucket {
     assert(entriesPerBucket % vector_len == 0);
     assert(vector_len <= 64);
     cur++;
-
     for (size_t i = cur / vector_len; i < entriesPerBucket / vector_len; i++) {
-#if __has_feature(ext_vector_type_boolean)
+#if __has_feature(ext_vector_type_boolean) && (defined(__x86_64__) || defined(_M_X64))
       typedef bool bool_vec __attribute__((ext_vector_type(vector_len)));
       using mask_unsigned = uint_of_size<sizeof(bool_vec)>::type;
       bool_vec mask =

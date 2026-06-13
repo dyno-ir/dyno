@@ -8,8 +8,10 @@
 #include "hw/passes/CommonSubexpressionElimination.h"
 #include "hw/passes/ConstantMapping.h"
 #include "hw/passes/DumpPass.h"
+#include "hw/passes/DumpSimHeader.h"
 #include "hw/passes/DumpVerilog.h"
 #include "hw/passes/EarlySharePass.h"
+#include "hw/passes/EvalInitProcs.h"
 #include "hw/passes/FindLongestPath.h"
 #include "hw/passes/FlipFlopInference.h"
 #include "hw/passes/FlipFlopMapping.h"
@@ -95,5 +97,7 @@ inline void registerDialectPasses<DIALECT_HW>(PassRegistry &passRegistry) {
   passRegistry.registerPass<NetlistToProcPass>(DIALECT_HW);
   passRegistry.registerPass<ProcToNetlistPass>(DIALECT_HW);
   passRegistry.registerPass<ResolveModulesPass>(DIALECT_HW);
+  passRegistry.registerPass<DumpSimHeaderPass>(DIALECT_HW);
+  passRegistry.registerPass<EvalInitProcsPass>(DIALECT_HW);
 }
 }; // namespace dyno

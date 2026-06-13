@@ -3,6 +3,7 @@
 #include "dyno/InstrPrinter.h"
 #include "dyno/Obj.h"
 #include "dyno/Parser.h"
+#include "op/Function.h"
 #include "op/IDs.h"
 #include "op/MapObj.h"
 #include "op/OpContext.h"
@@ -41,6 +42,11 @@ public:
       auto asString = ref.as<StringObjRef>();
       // todo: escapes and multiline string literal if this has illegal chars.
       std::print(str, "string(\"{}\")", asString->data);
+      break;
+    }
+    case OP_FUNC.type: {
+      auto asFunc = ref.as<FunctionRef>();
+      std::print(str, "func(\"{}\")", asFunc->name);
       break;
     }
 
@@ -90,6 +96,10 @@ public:
     }
 
     case OP_FUNC.type: {
+      if (lexer.popIf(DynoLexer::op_rbropen)) {
+        name = lexer.popEnsure(Token::STRING_LITERAL).strLit.value;
+        lexer.popEnsure(DynoLexer::op_rbrclose);
+      }
       return base->ctx.getStore<Function>().create(name, &base->ctx);
     }
 

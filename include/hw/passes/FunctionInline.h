@@ -2,13 +2,15 @@
 #include "dyno/CFG.h"
 #include "dyno/Context.h"
 #include "dyno/CustomInstr.h"
+#include "dyno/DeepCopy.h"
+#include "dyno/HierBlockIterator.h"
 #include "dyno/Instr.h"
 #include "dyno/Obj.h"
 #include "dyno/Pass.h"
-#include "dyno/DeepCopy.h"
 #include "hw/HWAbstraction.h"
 #include "hw/HWContext.h"
 #include "hw/HWInstr.h"
+#include "hw/HWPrinter.h"
 #include "hw/HWValue.h"
 #include "hw/IDs.h"
 #include "hw/Module.h"
@@ -30,12 +32,14 @@ class FunctionInlinePass : public Pass<FunctionInlinePass> {
 private:
   void runOnModule(ModuleIRef mod) {
     SmallVec<CallInstrRef, 8> worklist;
-    for (FunctionIRef instr : mod.funcs()) {
-      for (auto call : instr.func().uses()) {
-        auto parent = HWInstrRef{call.instr()}.parent(ctx);
+    SmallDenseSet<ObjRef<Function>> funcs;
+    for (auto instr : HierBlockRange{mod.block()}) {
+      if (auto asCall = instr.dyn_as<CallInstrRef>()) {
+        auto parent = HWInstrRef{asCall}.parent(ctx);
         if (!parent.is<FunctionIRef>())
-          worklist.emplace_back(call.instr());
-        TaggedCallRef{call.instr()}.get() = 0;
+          worklist.emplace_back(asCall);
+        TaggedCallRef{asCall}.get() = 0;
+        funcs.findOrInsert(asCall.func());
       }
     }
 
@@ -53,11 +57,10 @@ private:
 
       auto funcInstr = callInstr.func().iref();
 
-      DYNO_DBG("FunctionInline", dbgs() << "\n\n\ninlining\n";
-               dumpInstr(callInstr);)
+      DYNO_DBG(dbgs() << "inlining: "; dumpInstr(callInstr, ctx);)
 
       SmallVec<RegisterRef, 2> returnRegs{callInstr.getNumRetvals()};
-      SmallVec<RegisterRef, 4> paramRegs{callInstr.getNumParams()};
+      SmallVec<RegisterRef, 8> paramRegs{callInstr.getNumParams()};
 
       HWInstrBuilderStack build{ctx};
       build.setInsertPoint(mod.regs_end());
@@ -97,6 +100,14 @@ private:
             if (src.isOpc(OP_PARAM)) {
               self->oldToNewMap.insert(src.def(0)->fat(), paramRegs[paramIdx]);
               paramIdx++;
+              return true;
+            }
+            if (src.isOpc(HW_REGISTER_DEF)) {
+              auto asReg = src.as<RegisterIRef>();
+              auto newReg = build.buildRegister(asReg.getNumBits());
+              ctx.getCtx<HWDialectContext>().copyRegisterInfo(asReg.oref(),
+                                                              newReg);
+              self->oldToNewMap.insert(asReg.oref(), newReg);
               return true;
             }
             if (src.isOpc(OP_RETURN)) {
@@ -143,8 +154,9 @@ private:
     }
 
     HWInstrBuilder build{ctx};
-    for (auto func : mod.funcs()) {
-      build.destroyInstr(func);
+    for (auto func : Range{funcs}.resolve(ctx)) {
+      if (func.getNumUses() == 0)
+        build.destroyInstr(func.iref());
     }
   }
 
@@ -155,8 +167,8 @@ public:
     }
   }
   void runModule(ModuleIRef mod) { runOnModule(mod); }
-  static constexpr auto runFuncs = mk_tuple(
-      &FunctionInlinePass::runModule, &FunctionInlinePass::run);
+  static constexpr auto runFuncs =
+      mk_tuple(&FunctionInlinePass::runModule, &FunctionInlinePass::run);
 
   auto make(Context &ctx) { return FunctionInlinePass(ctx); }
   explicit FunctionInlinePass(Context &ctx) : ctx(ctx), copier(ctx) {}

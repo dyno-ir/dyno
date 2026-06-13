@@ -31,6 +31,7 @@
 #include "support/ErrorRecovery.h"
 #include "support/RTTI.h"
 #include "support/Ranges.h"
+#include "support/StringRef.h"
 #include "support/Utility.h"
 #include <algorithm>
 #include <dyno/NewDeleteObjStore.h>
@@ -1246,13 +1247,16 @@ public:
     return instrRef;
   }
 
-  HWInstrRef buildInstance(ModuleRef module, ArrayRef<RegisterRef> portRegs) {
-    auto instr = InstrRef{
-        ctx.getStore<Instr>().create(1 + portRegs.size(), HW_INSTANCE)};
+  HWInstrRef buildInstance(ModuleRef module, ArrayRef<RegisterRef> portRegs,
+                           StringRef name = StringRef::emptyRef()) {
+    auto instr = InstrRef{ctx.getStore<Instr>().create(
+        1 + portRegs.size() + !name.empty(), HW_INSTANCE)};
 
     assert(portRegs.size() == module->ports.size());
 
     InstrBuilder build{instr};
+    if (!name.empty())
+      build.addRef(ctx.getStore<StringObj>().create(name));
     build.other();
     build.addRef(module);
 
@@ -1554,6 +1558,14 @@ public:
       return buildInstr(HW_ASSERT_DEFER, false, value, deferTrigger.oref());
     return buildInstr(OP_ASSERT, false, value);
   }
+  template <typename T> auto buildPrint(StringRef fmtString, Range<T> args) {
+    auto ib = buildInstrRaw(HW_PRINT, getNumOperands(args) + 1);
+    ib.addRef(ctx.getStore<StringObj>().create(fmtString));
+    ib.other();
+    ib.addRefs(args);
+    return ib.instr();
+  }
+
   auto buildAssume(HWValue x, HWValue under) {
     auto w = buildInstr(HW_ASSUME, true, x, under).def()->as<WireRef>();
     w->numBits = x.getNumBits();
@@ -1581,7 +1593,8 @@ public:
     auto funcRef = FunctionRef{ctx.getStore<Function>().create(name, &ctx)};
     auto funcInstr =
         FunctionIRef{ctx.getStore<Instr>().create(2, OP_FUNCTION_DEF)};
-    insertInstr(funcInstr);
+    if (insert != BlockRef_iterator<true>::invalid())
+      insertInstr(funcInstr);
 
     InstrBuilder{funcInstr}.addRef(funcRef).addRef(
         ctx.getCtx<CoreDialectContext>().createBlock());
@@ -1720,6 +1733,10 @@ public:
     }
     case *HW_POINTER: {
       ctx.getStore<Pointer>().destroy(obj.as<PointerRef>());
+      break;
+    }
+    case *OP_STRING: {
+      ctx.getStore<StringObj>().destroy(obj.as<StringObjRef>());
       break;
     }
     default:

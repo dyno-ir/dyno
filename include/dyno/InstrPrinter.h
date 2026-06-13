@@ -3,12 +3,13 @@
 #include "DialectInfo.h"
 #include "dyno/CFG.h"
 #include "dyno/Constant.h"
+#include "dyno/DebugInfo.h"
 #include "dyno/DialectInfo.h"
 #include "dyno/IDs.h"
 #include "dyno/Obj.h"
 #include "dyno/Symbol.h"
-#include "hw/DebugInfo.h"
 #include "hw/HWContext.h"
+#include "support/Bits.h"
 #include "support/CallableRef.h"
 #include "support/DenseMap.h"
 #include "support/RTTI.h"
@@ -16,10 +17,13 @@
 #include "support/Tuple.h"
 #include "support/Utility.h"
 #include <array>
+#include <bit>
+#include <cstring>
 #include <dyno/Instr.h>
 #include <dyno/Interface.h>
 #include <initializer_list>
 #include <iostream>
+#include <limits>
 #include <ostream>
 
 namespace dyno {
@@ -59,43 +63,69 @@ public:
   IndentPrinter() : str() {}
 };
 
+struct IntroducedName {
+  enum Type : uint8_t { NUMERIC, STRING };
+  // use pointer msbit / 7th bit of last prefix char
+  auto type() { return BitField<uint8_t, 1, 7>(storage.raw.back()); }
+  auto type() const {
+    return BitField<const uint8_t, 1, 7>(storage.raw.back());
+  }
+
+  std::string str() const {
+    switch (type()) {
+    case NUMERIC: {
+      // type bit is zero so nothing to do
+      auto len = strnlen(this->storage.numeric.prefix.data(), 4);
+      auto str = StringRef{this->storage.numeric.prefix.data(), len};
+      auto rv = std::format("{}{}", str, this->storage.numeric.num);
+      return rv;
+    }
+    case STRING:
+      // set pointer msbit back to zero
+      uintptr_t val = reinterpret_cast<uintptr_t>(this->storage.string) &
+                      ~bit_mask_msb<uintptr_t>();
+      return reinterpret_cast<const char *>(val);
+    }
+    dyno_unreachable("unknown type");
+  }
+
+  IntroducedName() = default;
+
+  IntroducedName(uint32_t numeric, std::array<char, 4> prefix)
+      : storage{.numeric = {numeric, {prefix}}} {
+    type() = NUMERIC;
+  }
+  IntroducedName(uint32_t numeric)
+      : storage{.numeric = {numeric, {'\0', '\0', '\0', '\0'}}} {
+    type() = NUMERIC;
+  }
+  // non-owned string
+  IntroducedName(const char *string) : storage{.string = string} {
+    type() = STRING;
+  }
+
+  auto &asNumeric() {
+    assert(type() == NUMERIC);
+    return storage.numeric;
+  }
+  auto &asString() {
+    assert(type() == STRING);
+    return storage.string;
+  }
+
+protected:
+  union {
+    struct {
+      uint32_t num;
+      std::array<char, 4> prefix;
+    } numeric;
+    const char *string;
+    std::array<uint8_t, 8> raw;
+  } storage;
+};
+
 class PrinterBase {
 public:
-  struct IntroducedName : public RTTIUtilMixin<IntroducedName> {
-    enum Type : uint8_t { NUMERIC, STRING };
-    Type type;
-
-    std::string str() const {
-      switch (type) {
-      case NUMERIC:
-        return std::format("{}{}", this->storage.numeric.prefix.data(),
-                           this->storage.numeric.num);
-      case STRING:
-        return this->storage.string;
-      }
-      dyno_unreachable("unknown type");
-    }
-
-    IntroducedName() = default;
-
-    IntroducedName(uint32_t numeric, std::array<char, 4> prefix)
-        : type(NUMERIC), storage{.numeric = {{prefix}, numeric}} {}
-    IntroducedName(uint32_t numeric)
-        : type(NUMERIC),
-          storage{.numeric = {{'\0', '\0', '\0', '\0'}, numeric}} {}
-    IntroducedName(const char *string)
-        : type(STRING), storage{.string = string} {}
-
-  protected:
-    union {
-      struct {
-        std::array<char, 4> prefix;
-        uint32_t num;
-      } numeric;
-      const char *string;
-    } storage;
-  };
-
 private:
   DenseMap<DynObjRef, IntroducedName> introduced;
   uint32_t numericNameCnt = 0;
@@ -103,7 +133,8 @@ private:
   UnsizedBitSet<SmallVec<uint64_t, 2>> isDefault = (MAX_NUM_DIALECTS);
 
 protected:
-  TempBindPtr<SourceLocInfo<Instr>> sourceLocInfo;
+  TempBindPtr<SourceLocInfo<Instr>>
+      sourceLocInfo; // todo: remove, lookup via ctx
 
 public:
   IndentPrinter indentPrint;
@@ -189,6 +220,8 @@ public:
     str << '(' << ref.getCustom() << ')';
   }
 
+  bool isIntroduced(DynObjRef ref) { return introduced.contains(ref); }
+
   std::pair<bool, IntroducedName &> introduceNameFor(FatDynObjRef<> ref) {
     DynObjRef noCustom = ref;
     noCustom.clearCustom();
@@ -202,17 +235,17 @@ public:
     return {found, it.val()};
   }
 
-  void printRefOrUse(FatDynObjRef<> ref) {
+  void printRefOrUse(FatDynObjRef<> ref, bool forceIntroduce = false) {
     if (ref.getObjID() == ObjID::invalid() && !ref.getCustom()) {
       str << "nullref";
       return;
     }
 
-    if (Operand::isDefUseOperand(ref)) {
+    if (Operand::isDefUseOperand(ref) || forceIntroduce) {
       auto [found, name] = introduceNameFor(ref);
       str << '%' << name.str();
       if (!found) {
-        str << ":?";
+        str << (Operand::isDefUseOperand(ref) ? ":?" : ":");
         printUse(ref);
       }
       return;
@@ -246,7 +279,10 @@ public:
       printDef(ref);
   }
 
-  void reset() { introduced.clear(); }
+  void reset() {
+    introduced.clear();
+    numericNameCnt = 0;
+  }
 
   void printBlock(BlockRef block) {
     if (block.empty()) {
@@ -370,14 +406,18 @@ public:
             Interface<DialectInfo>{ctx.getDialectInfos().dialectInfoArr.data()},
             Interface<TyInfo>{ctx.getDialectInfos().typeInfoArr.data()},
             Interface<OpcodeInfo>{ctx.getDialectInfos().opcodeInfoArr.data()}),
-        printers{(static_cast<void>(sizeof(Printers)), this)...} {}
+        printers{(static_cast<void>(sizeof(Printers)), this)...} {
+    this->ctx = &ctx;
+  }
 
   ContextPrinterWrapper(Context &ctx)
       : PrinterBase(
             Interface<DialectInfo>{ctx.getDialectInfos().dialectInfoArr.data()},
             Interface<TyInfo>{ctx.getDialectInfos().typeInfoArr.data()},
             Interface<OpcodeInfo>{ctx.getDialectInfos().opcodeInfoArr.data()}),
-        printers{(static_cast<void>(sizeof(Printers)), this)...} {}
+        printers{(static_cast<void>(sizeof(Printers)), this)...} {
+    this->ctx = &ctx;
+  }
 };
 
 // context-less, carries own info
@@ -412,10 +452,13 @@ public:
         CallableRef{this, &BindMethod<&CoreDialectPrinter::getNameCore>::fv});
   }
 
-  std::optional<PrinterBase::IntroducedName> getNameCore(FatDynObjRef<> ref) {
+  std::optional<IntroducedName> getNameCore(FatDynObjRef<> ref) {
     switch (ref.getTyID()) {
     case CORE_SYMBOL.type: {
-      return PrinterBase::IntroducedName{ref.as<SymbolRef>()->name.c_str()};
+      return IntroducedName{ref.as<SymbolRef>()->name.c_str()};
+    }
+    case CORE_BLOCK.type: {
+      return IntroducedName{ref.getObjID(), std::to_array("b\0\0")};
     }
     default:
       return std::nullopt;

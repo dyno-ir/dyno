@@ -3,13 +3,13 @@
 #define FWD_ERR(x)                                                             \
   do {                                                                         \
     if (auto res = x; !res)                                                    \
-      return std::unexpected{res.error()};                                     \
+      return {std::move(res.error())};                                         \
   } while (false)
 
 #define UNWRAP_INNER(out, in, tmp)                                             \
   auto tmp = (in);                                                             \
   if (!tmp)                                                                    \
-    return std::unexpected{tmp.error()};                                       \
+    return {std::move(tmp.error())};                                           \
   auto &out = *tmp;
 
 #define CONCAT_INNER(a, b) a##b

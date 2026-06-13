@@ -19,7 +19,7 @@ class ParseVerilogPass : public Pass<ParseVerilogPass> {
 public:
   static constexpr DialectID dialect{DIALECT_HW};
   // no argument lists currently, so hack around it.
-  static constexpr size_t NumArgs = 8;
+  static constexpr size_t NumArgs = 16;
 #define CONFIG_STRUCT_LAMBDA(FIELD, ENUM)                                      \
   FIELD(StringRef, path, "")                                                   \
   FIELD(StringRef, code, "")                                                   \
@@ -30,7 +30,15 @@ public:
   FIELD(StringRef, arg4, "")                                                   \
   FIELD(StringRef, arg5, "")                                                   \
   FIELD(StringRef, arg6, "")                                                   \
-  FIELD(StringRef, arg7, "")
+  FIELD(StringRef, arg7, "")                                                   \
+  FIELD(StringRef, arg8, "")                                                   \
+  FIELD(StringRef, arg9, "")                                                   \
+  FIELD(StringRef, arg10, "")                                                  \
+  FIELD(StringRef, arg11, "")                                                  \
+  FIELD(StringRef, arg12, "")                                                  \
+  FIELD(StringRef, arg13, "")                                                  \
+  FIELD(StringRef, arg14, "")                                                  \
+  FIELD(StringRef, arg15, "")
   CONFIG_STRUCT(CONFIG_STRUCT_LAMBDA)
 #undef CONFIG_STRUCT_LAMBDA
   Config config;

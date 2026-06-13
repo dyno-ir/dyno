@@ -1,6 +1,7 @@
 #pragma once
 #include "dyno/CFG.h"
 #include "dyno/Context.h"
+#include "dyno/DebugInfo.h"
 #include "dyno/DialectInfo.h"
 #include "dyno/IDImpl.h"
 #include "dyno/IDs.h"
@@ -8,10 +9,10 @@
 #include "dyno/Interface.h"
 #include "dyno/Lexer.h"
 #include "dyno/Obj.h"
-#include "hw/DebugInfo.h"
 #include "support/ErrorRecovery.h"
 #include "support/Lexer.h"
 #include "support/RTTI.h"
+#include "support/Result.h"
 #include "support/ResultUnwrap.h"
 #include "support/SmallVec.h"
 #include "support/StringRef.h"
@@ -41,15 +42,15 @@ public:
   auto &getConstants() { return ctx.getStore<Constant>(); }
   auto &getCFG() { return ctx.getCtx<CoreDialectContext>().cfg; }
 
-private:
+public:
   struct ParseOperand {
     FatDynObjRef<> ref;
     bool isDef;
   };
 
 protected:
-  std::expected<FatDynObjRef<>, ParseError> parseObject(ArrayRef<char> name,
-                                                        bool isDef) {
+  Result<FatDynObjRef<>, ParseError> parseObject(ArrayRef<char> name,
+                                                 bool isDef) {
     auto state = lexer->getState();
     UNWRAP(type, lexer->popType());
     auto fn = interfaces.template getVal<obj_parse_fn>(type.getDialectID());
@@ -57,20 +58,19 @@ protected:
     auto ref = fn(type, std::string_view{name}, isDef);
     if (!ref) {
       lexer->restoreState(state);
-      return std::unexpected{
-          lexer->makeErrorOnNextToken("failed to parse object")};
+      return lexer->makeErrorOnNextToken("failed to parse object");
     }
     return ref;
   }
 
-  std::expected<ParseOperand, ParseError> parseConstantOperand() {
+  Result<ParseOperand, ParseError> parseConstantOperand() {
     FWD_ERR(lexer->tryPopEnsure(DynoLexer::op_hash));
     UNWRAP(litTok, lexer->tryPopEnsure(Token::BIG_INT_LITERAL));
     return ParseOperand{getConstants().findOrInsert(*litTok.bigIntLit.value),
                         false};
   }
 
-  std::expected<ParseOperand, ParseError> parseNamedObject() {
+  Result<ParseOperand, ParseError> parseNamedObject() {
     UNWRAP(ident, lexer->tryPopEnsure(Token::PCT_IDENTIFIER))
 
     bool isDef = false;
@@ -106,7 +106,7 @@ protected:
       }
     } else {
       if (!ref)
-        return std::unexpected{lexer->makeErrorOnPeekToken("undefined value")};
+        return lexer->makeErrorOnPeekToken("undefined value");
       obj = *ref;
     }
 
@@ -114,7 +114,7 @@ protected:
   }
 
 public:
-  std::expected<ParseOperand, ParseError> parseOperand() {
+  Result<ParseOperand, ParseError> parseOperand() {
     auto tok = lexer->Peek();
     if (tok.type == DynoLexer::op_hash)
       return parseConstantOperand();
@@ -133,11 +133,11 @@ public:
       return ParseOperand{ref, false};
     }
 
-    return std::unexpected{lexer->makeErrorOnPeekToken(
-        "invalid operand (expected constant or identifier)")};
+    return lexer->makeErrorOnPeekToken(
+        "invalid operand (expected constant or identifier)");
   }
 
-  std::expected<void, ParseError> parseBlockContents(BlockRef block) {
+  Result<void, ParseError> parseBlockContents(BlockRef block) {
     FWD_ERR(lexer->tryPopEnsure(DynoLexer::op_cbropen));
 
     while (!lexer->popIf(DynoLexer::op_cbrclose)) {
@@ -149,7 +149,7 @@ public:
   }
 
 protected:
-  std::expected<void, ParseError> parseSourceLoc(InstrRef instr) {
+  Result<void, ParseError> parseSourceLoc(InstrRef instr) {
     UNWRAP(tok, lexer->tryPeekEnsure(Token::STRING_LITERAL))
     auto pos = tok.strLit.value.find_first_of(':');
     auto file = tok.strLit.value.substr(0, pos);
@@ -166,8 +166,7 @@ protected:
           return val;
         }));
     if (bad)
-      return std::unexpected{
-          lexer->makeErrorOnPeekToken("invalid line numbers")};
+      return lexer->makeErrorOnPeekToken("invalid line numbers");
 
     // ignore actual syntax, just assume
     // 1: line
@@ -195,8 +194,7 @@ protected:
     case 4:
       break;
     default:
-      return std::unexpected{
-          lexer->makeErrorOnPeekToken("invalid line numbers")};
+      return lexer->makeErrorOnPeekToken("invalid line numbers");
     }
 
     lexer->Pop();
@@ -205,7 +203,7 @@ protected:
     return {};
   }
 
-  std::expected<InstrRef, ParseError> parseInstr() {
+  Result<InstrRef, ParseError> parseInstr() {
     auto startLineCol = lexer->getStartOfPeekTokenLineCol();
 
     UNWRAP(opc, lexer->popOpcode());
@@ -223,9 +221,9 @@ protected:
       UNWRAP(op, parseOperand());
       if (op.isDef) {
         if (numDefs != operands.size()) {
-          return std::unexpected{lexer->makeErrorOnPeekToken(
+          return lexer->makeErrorOnPeekToken(
               "invalid def operand position (all def "
-              "operands must be leading)")};
+              "operands must be leading)");
         }
         numDefs++;
         if (auto asBlock = op.ref.template dyn_as<BlockRef>())

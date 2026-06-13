@@ -8,7 +8,7 @@
 #include "dyno/NewDeleteObjStore.h"
 #include "dyno/Obj.h"
 #include "dyno/Symbol.h"
-#include "hw/DebugInfo.h"
+#include "dyno/DebugInfo.h"
 #include "meta/MetaPassManager.h"
 #include "support/CallableRef.h"
 #include "support/TemplateUtil.h"

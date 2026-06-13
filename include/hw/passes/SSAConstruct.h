@@ -1,5 +1,6 @@
 #pragma once
 #include "dyno/CFG.h"
+#include "dyno/Context.h"
 #include "dyno/Instr.h"
 #include "dyno/Obj.h"
 #include "dyno/ObjMap.h"
@@ -30,7 +31,8 @@ public:
 #define CONFIG_STRUCT_LAMBDA(FIELD, ENUM)                                      \
   ENUM(mode, IMMEDIATE, IMMEDIATE, DEFERRED)                                   \
   FIELD(bool, lowerAllDynamic, true)                                           \
-  FIELD(bool, dynamicToFullRegAccess, true)
+  FIELD(bool, dynamicToFullRegAccess, true)                                    \
+  FIELD(bool, hoistInvariantLoopLoads, true)
   CONFIG_STRUCT(CONFIG_STRUCT_LAMBDA)
 #undef CONFIG_STRUCT_LAMBDA
   Config config;
@@ -85,8 +87,7 @@ public:
   explicit SSAConstructPass(Context &ctx) : ctx(ctx) {}
 
   struct MultiwayResult {
-    SmallVec<Tuple<RegisterRef, std::pair<uint32_t, uint32_t>, TriggerID>,
-             2>
+    SmallVec<Tuple<RegisterRef, std::pair<uint32_t, uint32_t>, TriggerID>, 2>
         yieldRegs;
     SmallVec<SmallVec<HWValue, 4>, 2> yieldVals;
 
@@ -212,8 +213,7 @@ public:
                                   MutArrayRef<BlockRef> loopBlocks) {
     assert(loopBlocks.size() == numLoopBlocks);
     auto startDepth = depth - numLoopBlocks;
-    SmallVec<Tuple<RegisterRef, std::pair<uint32_t, uint32_t>, TriggerID>,
-             4>
+    SmallVec<Tuple<RegisterRef, std::pair<uint32_t, uint32_t>, TriggerID>, 4>
         yieldVals;
     std::array<SmallVec<HWValue, 4>, numLoopBlocks> materializedYieldVals;
     std::array<SmallVec<WireRef, 4>, numLoopBlocks> unyieldWires;
@@ -271,15 +271,28 @@ public:
       // difference with defaultVal if too slow (but prob fine).
       auto diffs = diffRegisterValues(blockVals);
 
+      // anything unmodified is invariant, fill with the outer block's value.
+      // Lambda to work around fencepost problem.
+      uint32_t prevEnd = 0;
+      auto fillGap = [&](uint32_t start) {
+        if (start != prevEnd) {
+          uint32_t len = start - prevEnd;
+          for (RegisterValue *val : Range{blockVals}.drop_front())
+            val->overwriteNoMaterialize(*parentVal, prevEnd, prevEnd, len);
+        }
+      };
+
       for (auto diff : diffs) {
-        if (diff.untouched()) {
+        fillGap(diff.addr());
+        prevEnd = diff.addr() + diff.len();
+
+        if (diff.untouched() && config.hoistInvariantLoopLoads) {
           // value not actually different, we just got a diff because value
-          // was materialized. Hoist materialization out of loop.
+          // was materialized (unconditionally). Hoist materialization out of
+          // loop.
           build.setInsertPoint(ctx.getCtx<CoreDialectContext>().cfg[loopInstr]);
           auto matVal = parentVal->get(build, diff.addr(), diff.len());
           for (auto [i, val] : Range{blockVals}.drop_front().enumerate())
-            // could also overwriteNoMaterialize here to not hoist but lazily
-            // compute.
             val->overwrite(matVal, 0, diff.addr(), diff.len(), true);
           continue;
         }
@@ -305,6 +318,7 @@ public:
                          diff.triggerID());
         }
       }
+      fillGap(*reg.getNumBits());
     }
 
     return mk_tuple(yieldVals, materializedYieldVals, unyieldWires);
@@ -320,8 +334,7 @@ public:
     unsigned startDepth = depth - 1;
     unsigned bodyDepth = depth;
 
-    SmallVec<Tuple<RegisterRef, std::pair<uint32_t, uint32_t>, TriggerID>,
-             4>
+    SmallVec<Tuple<RegisterRef, std::pair<uint32_t, uint32_t>, TriggerID>, 4>
         yieldVals;
     SmallVec<HWValue, 4> materializedYieldVals(yieldVals.size());
     SmallVec<WireRef, 4> unyieldWires;
@@ -392,8 +405,7 @@ public:
 
   bool addYieldsToLoopInstr(
       HWInstrBuilder &build, InstrRef loopInstr,
-      ArrayRef<
-          Tuple<RegisterRef, std::pair<uint32_t, uint32_t>, TriggerID>>
+      ArrayRef<Tuple<RegisterRef, std::pair<uint32_t, uint32_t>, TriggerID>>
           yieldVals) {
     if (yieldVals.size() == 0)
       return false;
@@ -850,8 +862,8 @@ public:
   }
 
   static constexpr auto runFuncs =
-      mk_tuple(&SSAConstructPass::runProcess,
-                      &SSAConstructPass::runModule, &SSAConstructPass::run);
+      mk_tuple(&SSAConstructPass::runProcess, &SSAConstructPass::runModule,
+               &SSAConstructPass::run);
 };
 
 }; // namespace dyno

@@ -411,8 +411,7 @@ private:
       auto signsDifferent = build.buildXor(signLHS, signRHS);
       // sign bit is set if b > a i.e. a < b
       HWValue signBit = build.buildSplice(sumWire, 1, numBits - 1);
-      out = build.buildMux(signsDifferent, signLHS,
-                           build.buildXor(signBit, signLHS));
+      out = build.buildMux(signsDifferent, signLHS, signBit);
     } else {
       out = build.buildSplice(sumWire, 1, numBits);
       invertResult = !invertResult;

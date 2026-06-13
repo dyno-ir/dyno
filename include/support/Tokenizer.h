@@ -19,6 +19,11 @@ public:
     size_t len;
 
   public:
+    using iterator_category = std::forward_iterator_tag;
+    using value_type = std::string_view;
+    using reference = std::string_view;
+    using difference_type = int;
+
     constexpr iterator &operator++() {
       pos += len;
       pos = parent->s.find_first_not_of(parent->delims, pos);
@@ -39,7 +44,9 @@ public:
       return copy;
     }
 
-    constexpr std::string_view operator*() { return parent->s.substr(pos, len); }
+    constexpr std::string_view operator*() const {
+      return parent->s.substr(pos, len);
+    }
 
     constexpr bool operator==(const iterator &other) const {
       auto rv = other.parent == this->parent && other.pos == this->pos;
@@ -47,7 +54,8 @@ public:
       return rv;
     }
 
-    constexpr iterator(Tokenizer *parent, size_t pos) : parent(parent), pos(pos), len(0) {
+    constexpr iterator(Tokenizer *parent, size_t pos)
+        : parent(parent), pos(pos), len(0) {
       // first increment does not advance as len == 0, just primes.
       ++(*this);
     }

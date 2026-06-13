@@ -48,8 +48,9 @@ public:
     return temp;
   }
 
-  InstrRef operator*() { return cur; }
+  InstrRef operator*() const { return cur; }
   InstrRef *operator->() { return &cur; }
+  InstrRef instr() const { return cur; }
 
   friend bool operator==(StableBlockIterator lhs, StableBlockIterator rhs) {
     return lhs.cur == rhs.cur && lhs.cfg == rhs.cfg;

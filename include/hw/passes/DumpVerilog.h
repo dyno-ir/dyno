@@ -10,10 +10,10 @@
 #include "hw/Module.h"
 #include "op/IDs.h"
 #include "support/ErrorRecovery.h"
+#include "support/Tuple.h"
 #include "support/Utility.h"
 #include <fstream>
 #include <print>
-#include "support/Tuple.h"
 namespace dyno {
 
 class void_stream final : public std::ostream {
@@ -47,17 +47,16 @@ public:
 
 private:
   // Adapter for printer's regular IntroducedName, only overrides str()
-  struct VerilogIntroducedName : public Printer::IntroducedName {
-    using Printer::IntroducedName::IntroducedName;
-    VerilogIntroducedName(Printer::IntroducedName base)
-        : Printer::IntroducedName(base) {}
+  struct VerilogIntroducedName : public IntroducedName {
+    using IntroducedName::IntroducedName;
+    VerilogIntroducedName(IntroducedName base) : IntroducedName(base) {}
     std::string str() const {
-      switch (type) {
-      case NUMERIC:
-        return "_r" +
-               std::format("{}{}", this->storage.numeric.prefix.data(),
-                           this->storage.numeric.num) +
-               "_";
+      switch (type()) {
+      case NUMERIC: {
+        auto len = strnlen(this->storage.numeric.prefix.data(), 4);
+        auto str = StringRef{this->storage.numeric.prefix.data(), len};
+        return "_r" + std::format("{}{}", str, this->storage.numeric.num) + "_";
+      }
       case STRING:
         return this->storage.string;
       }

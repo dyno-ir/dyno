@@ -100,7 +100,9 @@ class CommonSubexpressionEliminationPass
   ControlFlowAnalysis controlFlowAnalysis;
 
 public:
-#define CONFIG_STRUCT_LAMBDA(FIELD, ENUM) FIELD(bool, differentBlocks, true)
+#define CONFIG_STRUCT_LAMBDA(FIELD, ENUM)                                      \
+  FIELD(bool, differentBlocks, true)                                           \
+  FIELD(bool, keepLoadStoreOrder, false)
   CONFIG_STRUCT(CONFIG_STRUCT_LAMBDA)
 #undef CONFIG_STRUCT_LAMBDA
   Config config;
@@ -115,7 +117,8 @@ private:
                        HW_COMB_PROCESS_DEF, HW_INIT_PROCESS_DEF,
                        HW_FINAL_PROCESS_DEF, HW_SEQ_PROCESS_DEF,
                        HW_LATCH_PROCESS_DEF, HW_NETLIST_PROCESS_DEF, AIG_OUTPUT,
-                       AIG_INPUT);
+                       AIG_INPUT) ||
+           (config.keepLoadStoreOrder && instr.isOpc(HW_LOAD));
   }
 
   void runOnInstr(InstrRef instr) {

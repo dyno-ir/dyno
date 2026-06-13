@@ -4,6 +4,7 @@
 #include "dyno/CFG.h"
 #include "dyno/Context.h"
 #include "dyno/DeepCopy.h"
+#include "dyno/DialectInfo.h"
 #include "dyno/FatContext.h"
 #include "dyno/Parser.h"
 #include "dyno/Symbol.h"
@@ -27,6 +28,7 @@
 #include "test/IDs.h"
 #include "test/TestInterpreter.h"
 #include "test/passes/AssertExists.h"
+#include "type/TypeContext.h"
 #include <iterator>
 #include <optional>
 
@@ -45,8 +47,7 @@ CmdLineArg<std::string_view>
 
 CmdLineArg<std::string_view> argOutFile('o', "",
                                         "Output Verilog netlist file path.",
-                                        CmdLineArgFlags::VALUE_REQUIRED,
-                                        "dump.v");
+                                        CmdLineArgFlags::VALUE_REQUIRED);
 
 CmdLineArg<Vec<StringRef>>
     argSlangArgs('X', "Xslang",
@@ -135,20 +136,24 @@ void synth(Context &ctx) {
 
   } else {
     runScript(ctx, *argFlowScript);
-    DumpVerilogPass dumpVlog{ctx};
-    dumpVlog.config.fileName = *argOutFile;
-    dumpVlog.run();
+    if (!argOutFile->empty()) {
+      DumpVerilogPass dumpVlog{ctx};
+      dumpVlog.config.fileName = *argOutFile;
+      dumpVlog.run();
+    }
   }
 }
 
 void script(Context &ctx) { runScript(ctx, *argScriptFileName); }
 
-using TestParser = Parser<CoreDialectParser, MetaDialectParser, OpDialectParser,
-                          HWDialectParser, AIGDialectParser, TestDialectParser>;
+using TestParser = Parser<CoreDialectParser, MetaDialectParser,
+                          TypeDialectParser, OpDialectParser, HWDialectParser,
+                          AIGDialectParser, TestDialectParser>;
 class TestPrinter
     : public ContextPrinterWrapper<CoreDialectPrinter, MetaDialectPrinter,
-                                   OpDialectPrinter, HWDialectPrinter,
-                                   AIGDialectPrinter, TestDialectPrinter> {
+                                   TypeDialectPrinter, OpDialectPrinter,
+                                   HWDialectPrinter, AIGDialectPrinter,
+                                   TestDialectPrinter> {
 public:
   TestPrinter(Context &ctx, std::ostream &os) : ContextPrinterWrapper(ctx, os) {
     this->printers.get<HWDialectPrinter>().regNames =
@@ -174,6 +179,9 @@ void test(FatContext &ctx) {
   auto sandbox = ctx.create();
   sandbox.getCtx<CoreDialectContext>().setSymbols(
       *ctx.getCtx<CoreDialectContext>().symbols);
+
+  sandbox.getCtx<TypeDialectContext>().baseTypeNames.registerDialect(
+      DIALECT_HW, hw::hwTypeDialectTypeNames);
   // todo: pass registry sharing. ideally make context not own this so we can
   // just share the ref.
   sandbox.getPassRegistry().registerPass<ParseVerilogPass>();
@@ -229,6 +237,11 @@ int main(int argc, char **argv) {
   ctx.add<CoreDialectContext>();
   ctx.add<OpDialectContext>();
   ctx.add<AIGDialectContext>();
+  ctx.add<TypeDialectContext>();
+
+  ctx.getCtx<TypeDialectContext>().baseTypeNames.registerDialect(
+      DIALECT_HW, hw::hwTypeDialectTypeNames);
+
   ctx.getPassRegistry().registerPass<ParseVerilogPass>();
 
   ctx.getCtx<CoreDialectContext>().setSymbols(symbols);
@@ -236,6 +249,8 @@ int main(int argc, char **argv) {
 #ifdef DYNO_ENABLE_DEBUG
   if (*argDebug)
     dbg_enable_all();
+  dbg_disable_for_id(128); // known bits
+  dbg_disable_for_id(129); // hwinterp
   ctx.getPassRegistry().setDebugEnForPasses(*argDebugPasses, true);
 #endif
 

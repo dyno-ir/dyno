@@ -1,4 +1,5 @@
 #pragma once
+#include "support/Debug.h"
 #include "support/StringRef.h"
 #include <memory>
 #include <ostream>
@@ -6,25 +7,25 @@
 
 class FormatObjBase {
 protected:
-  using destroy_f = void(void *);
-  using print_f = void(void *, std::ostream &str);
+  using destroy_f = void(FormatObjBase *);
+  using print_f = void(FormatObjBase *, std::ostream &str);
   using funcs_t = std::pair<print_f *, destroy_f *>;
 
 public:
   FormatObjBase *next;
   const funcs_t *funcs;
 
-  ~FormatObjBase() { funcs->second(reinterpret_cast<void *>(this)); }
+  ~FormatObjBase() { funcs->second(this); }
 };
 
 template <typename T> class FormatObj : public FormatObjBase {
   T t;
 
-  static void destroy(void *obj) {
-    std::destroy_at(&reinterpret_cast<FormatObj *>(obj)->t);
+  static void destroy(FormatObjBase *obj) {
+    std::destroy_at(&static_cast<FormatObj *>(obj)->t);
   }
-  static void print(void *obj, std::ostream &str) {
-    str << reinterpret_cast<FormatObj *>(obj)->t;
+  static void print(FormatObjBase *obj, std::ostream &str) {
+    str << static_cast<FormatObj *>(obj)->t;
   }
   static constexpr funcs_t funcs{&print, &destroy};
 
@@ -38,17 +39,32 @@ class Format {
   const char *fmt;
   FormatObjBase *list = nullptr;
 
-  template <typename... Rest, typename T> void add(Rest &&...rest, T &&t) {
-    list->next = new FormatObj<T>(t, list->next);
+  template <typename T, typename... Rest> void add(T &&t, Rest &&...rest) {
     add(std::forward<Rest>(rest)...);
+    auto *newNode =
+        reinterpret_cast<FormatObj<T> *>(malloc(sizeof(FormatObj<T>)));
+    list = std::construct_at(newNode, std::forward<decltype(t)>(t), list);
   }
   void add() {}
 
 public:
+  Format(const Format &) = delete;
+  Format(Format &&o) { *this = std::move(o); }
+  Format &operator=(const Format &) = delete;
+  Format &operator=(Format &&o) {
+    memcpy((void *)this, &o, sizeof(Format));
+    o.list = nullptr;
+    return *this;
+  }
+
   template <typename... Args>
   Format(const char *fmt, Args &&...args) : fmt(fmt) {
-    add(args...);
+    add(std::forward<Args>(args)...);
   }
+  // template <typename It> Format(const char *fmt, Range<It> args) : fmt(fmt) {
+  //   for (auto arg : args.reverse())
+  //     add(arg);
+  // }
 
   void toStream(std::ostream &str) const {
     auto listP = list;
@@ -58,7 +74,7 @@ public:
       std::print(str, "{}", StringRef{fmtR.begin(), it});
       if (it == fmtR.end())
         return;
-      listP->funcs->first(reinterpret_cast<void *>(list), str);
+      listP->funcs->first(listP, str);
       listP = listP->next;
       it += 2;
       fmtR = StringRef{it, fmtR.end()};
@@ -74,7 +90,8 @@ public:
     while (list) {
       auto elem = list;
       list = list->next;
-      delete elem;
+      std::destroy_at(elem);
+      free(elem);
     }
   }
 };

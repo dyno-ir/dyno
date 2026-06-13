@@ -97,15 +97,15 @@ public:
   InstrRef moveInstr(InstrRef srcInstr, BlockRef_iterator<true> dstIt,
                      InstrHook instrCallback) {
     assert(&srcCtx == &ctx);
-    ctx.getCtx<CoreDialectContext>().cfg[srcInstr] = dstIt;
+    dstIt.blockRef().getCFG()[srcInstr].erase();
+    dstIt.insertPrev(srcInstr);
     return srcInstr;
   }
 
 private:
   template <auto Func, IsCopyHook InstrHook>
-  void copyMoveInstrsImpl(BlockRef_iterator<true> srcIt,
-                          BlockRef_iterator<true> dstIt,
-                          InstrHook &instrCallback) {
+  void copyInstrsImpl(BlockRef_iterator<true> srcIt,
+                      BlockRef_iterator<true> dstIt, InstrHook &instrCallback) {
     // insert after the passed iter
     dstIt++;
 
@@ -121,18 +121,44 @@ private:
     }
   }
 
+  template <auto Func, IsCopyHook InstrHook>
+  void moveInstrsImpl(BlockRef_iterator<true> srcIt,
+                      BlockRef_iterator<true> dstIt, InstrHook &instrCallback) {
+    if (srcIt == srcIt.blockRef().end())
+      return;
+    // insert after the passed iter
+    dstIt++;
+
+    while (1) {
+      auto srcInstr = srcIt.instr();
+      auto nextInstr = srcIt.succ() == srcIt.blockRef().end()
+                           ? nullref
+                           : srcIt.succ().instr();
+
+      if (instrCallback(this, srcInstr, dstIt)) {
+        ;
+      } else {
+        (this->*Func)(srcInstr, dstIt, instrCallback);
+      }
+
+      if (!nextInstr)
+        break;
+      srcIt = ctx.getCFG()[nextInstr];
+    }
+  }
+
   template <IsCopyHook InstrHook>
   void deepCopyInstrsImpl(BlockRef_iterator<true> srcIt,
                           BlockRef_iterator<true> dstIt,
                           InstrHook &instrCallback) {
-    return copyMoveInstrsImpl<&DeepCopier::copyInstr<InstrHook>, InstrHook>(
+    return copyInstrsImpl<&DeepCopier::copyInstr<InstrHook>, InstrHook>(
         srcIt, dstIt, instrCallback);
   }
 
   template <IsCopyHook InstrHook>
   void moveInstrsImpl(BlockRef_iterator<true> srcIt,
                       BlockRef_iterator<true> dstIt, InstrHook &instrCallback) {
-    return copyMoveInstrsImpl<&DeepCopier::moveInstr<InstrHook>, InstrHook>(
+    return moveInstrsImpl<&DeepCopier::moveInstr<InstrHook>, InstrHook>(
         srcIt, dstIt, instrCallback);
   }
 
@@ -148,6 +174,17 @@ public:
                       BlockRef_iterator<true> dstIt, InstrHook &&instrHook) {
     oldToNewMap.clear();
     deepCopyInstrsImpl(srcIt, dstIt, instrHook);
+  }
+
+  template <IsCopyHook InstrHook>
+  void moveInstrs(BlockRef_iterator<true> srcIt, BlockRef_iterator<true> dstIt,
+                  InstrHook &&instrCallback) {
+    moveInstrsImpl(srcIt, dstIt, instrCallback);
+  }
+
+  void moveInstrs(BlockRef_iterator<true> srcIt,
+                  BlockRef_iterator<true> dstIt) {
+    moveInstrsImpl(srcIt, dstIt, emptyCallback);
   }
 
 public:
