@@ -126,6 +126,7 @@ public:
       runOnRegister(reg);
 
     std::ofstream of(config.path);
+    std::print(of, "#pragma once\n#include \"hw/SimHeader.h\"\n#include <tuple>\n\n");
     dumpNode(of, &nodes[0]);
 
     nodes.clear();

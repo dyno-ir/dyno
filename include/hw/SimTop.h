@@ -10,6 +10,7 @@
 #include "support/TwoLevelSet.h"
 #include <iostream>
 #include <memory>
+#include <tuple>
 template <typename Top> class SimulationTop {
 public:
   dyno::Context &ctx;
@@ -77,8 +78,10 @@ public:
     linkRegisters();
     interp.setup();
 
+#ifdef ENABLE_FST
     interp.fstWriter.emplace(ctx, "out.fst");
     interp.fstInitHierarchy();
+#endif
 
     interp.initialEval();
     interp.initialCombEval();
