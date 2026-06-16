@@ -33,7 +33,7 @@ add_test(
 if(NOT CMAKE_BUILD_TYPE STREQUAL "Debug")
     add_test(
         NAME dyno_sv_sim_penc
-        COMMAND make -C ${CMAKE_SOURCE_DIR}/test/tools/dyno-sv/sim/penc run
+        COMMAND make -C CXX=${CMAKE_CXX_COMPILER} ${CMAKE_SOURCE_DIR}/test/tools/dyno-sv/sim/penc run
     )
 endif()
 
