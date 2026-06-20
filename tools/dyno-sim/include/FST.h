@@ -141,7 +141,7 @@ public:
 
       std::stringstream ss;
       dyno::BigInt::stream_bin_4s_vlog(
-          ss, ctx.resolve(elem.value).as<dyno::ConstantRef>(), false);
+          ss, ctx.resolve(elem.value).template as<dyno::ConstantRef>(), false);
       valueStrings.push_back(ss.str());
       valuePtrs.push_back(valueStrings.back().c_str());
     }
