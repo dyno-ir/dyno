@@ -1,12 +1,12 @@
 DYNO_ROOT ?= ../../../../..
-BUILD     := $(DYNO_ROOT)/build/release
+BUILD     := $(DYNO_ROOT)/build
 DYNO_SV   := $(BUILD)/tools/dyno-sv/dyno-sv
 INCLUDE   := $(DYNO_ROOT)/include
 LIBHW     := $(BUILD)/lib/libhw.a
 LIBCORE   := $(BUILD)/lib/libcore.a
 
 CXX       ?= clang++
-CXXFLAGS  := -std=c++23 -Wall -Wextra -Wno-unused-parameter -Wno-unused-function -fno-rtti -I$(INCLUDE) -O2
+CXXFLAGS  := -std=c++23 -Wall -Wextra -Wno-unused-parameter -Wno-unused-function -fno-rtti -I$(INCLUDE) -O2 -stdlib=c++
 LDFLAGS   :=
 
 BIN       := sim
