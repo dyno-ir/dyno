@@ -27,6 +27,16 @@ add_test(
     NAME run_dyno_test
     COMMAND dyno-sv test "${CMAKE_SOURCE_DIR}/tools/dyno-opt/dyno-ir/flow.dyno" "${CMAKE_SOURCE_DIR}/tools/dyno-test/dyno-ir/test.dyno"
 )
+
+
+# self-contained hw sim tests
+if(NOT CMAKE_BUILD_TYPE STREQUAL "Debug")
+    add_test(
+        NAME dyno_sv_sim_penc
+        COMMAND make CXX=${CMAKE_CXX_COMPILER} -C ${CMAKE_SOURCE_DIR}/test/tools/dyno-sv/sim/penc run
+    )
+endif()
+
 set_tests_properties(run_dyno_test PROPERTIES
     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
 )

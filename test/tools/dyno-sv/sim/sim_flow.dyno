@@ -1,0 +1,39 @@
+
+meta.FUNCTION_INLINE_PASS
+meta.EVAL_INIT_PROCS_PASS
+meta.REMOVE_INIT_PROCS_PASS
+meta.INST_COMBINE_PASS
+meta.MODULE_INLINE_PASS
+
+meta.TRIGGER_DEDUPE_PASS
+
+// early dedupe/simplification
+meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS map("differentBlocks": "0", "keepLoadStoreOrder": "1")
+meta.INST_COMBINE_PASS
+
+// process fusion & ssa construction
+meta.SEQ_TO_COMB_PASS
+meta.SSA_CONSTRUCT_PASS map("dynamicToFullRegAccess": "0")
+meta.SSA_CONSTRUCT_PASS map("mode": "DEFERRED", "dynamicToFullRegAccess": "0")
+// meta.AGGRESSIVE_DEAD_CODE_ELIMINATION_PASS
+meta.INST_COMBINE_PASS
+
+meta.PROCESS_LINEARIZE_PASS map("retainIODeps": "1", "retainInnerDeps": "1")
+meta.SSA_CONSTRUCT_PASS map("dynamicToFullRegAccess": "0")
+meta.SSA_CONSTRUCT_PASS map("mode": "DEFERRED", "dynamicToFullRegAccess": "0")
+
+meta.LOAD_COALESCE_PASS
+meta.LOOP_SIMPLIFY_PASS
+
+meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS map("differentBlocks": "1")
+meta.ORDER_INSTRS_PASS map("assertNoCircularDeps": "1", "moveStoresBeforeLoads": "0")
+meta.INST_COMBINE_PASS
+
+// todo: ADCE w/o deleting regs
+// meta.AGGRESSIVE_DEAD_CODE_ELIMINATION_PASS
+
+meta.INST_COMBINE_PASS
+meta.PROCESS_LINEARIZE_PASS map("noFuseSortOnly": "1")
+
+DUMP_SIM_HEADER_PASS map("path": "sim_header.h")
+DUMP_PASS map("path": "design.dyno")
