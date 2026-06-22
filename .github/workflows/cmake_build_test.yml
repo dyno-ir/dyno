@@ -13,29 +13,43 @@ env:
   # Customize the CMake build type here (Release, Debug, RelWithDebInfo, etc.)
   BUILD_TYPE: Release
   LLVM_VER: 20
+  # Configure ccache environment variables
+  CCACHE_DIR: ${{ github.workspace }}/.ccache
+  CCACHE_BASEDIR: ${{ github.workspace }}
 
 jobs:
   build:
-    # The CMake configure and build commands are platform agnostic and should work equally well on Windows or Mac.
-    # You can convert this to a matrix build if you need cross-platform coverage.
-    # See: https://docs.github.com/en/free-pro-team@latest/actions/learn-github-actions/managing-complex-workflows#using-a-build-matrix
     runs-on: ubuntu-latest
 
     steps:
     - uses: actions/checkout@v6
 
-    - name: Install Clang ${{ env.LLVM_VER }} and libc++
+    - name: Install Clang ${{ env.LLVM_VER }}, libc++, and ccache
       run: |
         # Download the official LLVM repo setup script
         wget https://apt.llvm.org/llvm.sh
         chmod +x llvm.sh
-        # Install Clang, then manually install the matching libc++ headers
+        # Install Clang, then manually install the matching libc++ headers and ccache
         sudo ./llvm.sh ${{ env.LLVM_VER }}
-        sudo apt-get install -y libc++-${{ env.LLVM_VER }}-dev libc++abi-${{ env.LLVM_VER }}-dev
+        sudo apt-get install -y libc++-${{ env.LLVM_VER }}-dev libc++abi-${{ env.LLVM_VER }}-dev ccache
+
+    - name: Restore ccache
+      uses: actions/cache/restore@v4
+      with:
+        path: ${{ env.CCACHE_DIR }}
+        key: ccache-${{ runner.os }}-${{ github.run_id }}
+        restore-keys: |
+          ccache-${{ runner.os }}-
+
+    - name: Configure ccache
+      run: |
+        mkdir -p ${{ env.CCACHE_DIR }}
+        ccache --set-config=max_size=1G
+        ccache -z
 
     - name: Get submodules
       run : git submodule update --init --recursive
-      
+
     - name: Configure CMake
       env:
         CC: clang-${{ env.LLVM_VER }}
@@ -43,16 +57,29 @@ jobs:
         CXXFLAGS: -stdlib=libc++
         LDFLAGS: -stdlib=libc++
       run: >
-        cmake -B ${{github.workspace}}/build 
+        cmake -B ${{github.workspace}}/build
         -DCMAKE_C_COMPILER=clang-${{ env.LLVM_VER }}
         -DCMAKE_CXX_COMPILER=clang++-${{ env.LLVM_VER }}
         -DCMAKE_CXX_FLAGS="-stdlib=libc++"
         -DCMAKE_EXE_LINKER_FLAGS="-stdlib=libc++"
         -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}}
+        -DCMAKE_C_COMPILER_LAUNCHER=ccache
+        -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
 
     - name: Build
       # Build your program with the given configuration
       run: cmake --build ${{github.workspace}}/build --config ${{env.BUILD_TYPE}} -j $(nproc)
+
+    - name: Save ccache
+      uses: actions/cache/save@v4
+      if: always()
+      with:
+        path: ${{ env.CCACHE_DIR }}
+        key: ccache-${{ runner.os }}-${{ github.run_id }}
+
+    - name: Show ccache stats
+      if: always()
+      run: ccache -s
 
     - name: Test
       working-directory: ${{github.workspace}}/build
@@ -66,4 +93,3 @@ jobs:
       with:
         name: LastTest-log
         path: ${{github.workspace}}/build/Testing/Temporary/LastTest.log
-
