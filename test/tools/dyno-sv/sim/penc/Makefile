@@ -1,5 +1,5 @@
 DYNO_ROOT ?= ../../../../..
-BUILD     := $(DYNO_ROOT)/build
+BUILD     := $(DYNO_ROOT)/build/release
 DYNO_SV   := $(BUILD)/tools/dyno-sv/dyno-sv
 INCLUDE   := $(DYNO_ROOT)/include
 LIBHW     := $(BUILD)/lib/libhw.a
