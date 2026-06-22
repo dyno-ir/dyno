@@ -6,7 +6,7 @@ LIBHW     := $(BUILD)/lib/libhw.a
 LIBCORE   := $(BUILD)/lib/libcore.a
 
 CXX       ?= clang++
-CXXFLAGS  := -std=c++23 -Wall -Wextra -Wno-unused-parameter -Wno-unused-function -fno-rtti -I$(INCLUDE) -O2 -stdlib=c++
+CXXFLAGS  := -std=c++23 -Wall -Wextra -Wno-unused-parameter -Wno-unused-function -fno-rtti -I$(INCLUDE) -O2 -stdlib=libc++
 LDFLAGS   :=
 
 BIN       := sim
