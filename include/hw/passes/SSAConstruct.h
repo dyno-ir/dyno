@@ -685,7 +685,7 @@ public:
 
         auto [yieldVals, materializedYieldVals, unyieldWires] =
             analyzeAndCreateLoopYields<1>(build, asWhile,
-                                          MutArrayRef{&block, 1});
+                                          MutArrayRef(&block, 1));
         if (!materializedYieldVals.empty()) {
           auto [oldY, newY] =
               build.extendOrNewYield(block, materializedYieldVals);

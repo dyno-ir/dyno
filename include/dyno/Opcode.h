@@ -51,6 +51,8 @@ public:
     return lhs.dialect == rhs.dialect && lhs.opc == rhs.opc;
   }
 
+  constexpr explicit operator bool() { return *this != invalid(); }
+
   constexpr DialectOpcode indexAdd(unsigned i, DialectOpcode max) const {
     DialectOpcode tmp = (*this);
     tmp = DialectOpcode{tmp.raw() + i};
@@ -64,7 +66,7 @@ public:
     return ((ts == *this) || ...);
   }
 
-  constexpr DialectOpcode invalid() {
+  static constexpr DialectOpcode invalid() {
     return DialectOpcode{DialectID::invalid(), OpcodeID::invalid()};
   }
 };

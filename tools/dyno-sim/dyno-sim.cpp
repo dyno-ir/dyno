@@ -527,7 +527,7 @@ vpiHandle vpi_put_value(vpiHandle object, p_vpi_value value_p,
   }
   case vpiBinStrVal: {
     std::string_view view{value_p->value.str};
-    auto val = BigInt::parseBin(ArrayRef{view});
+    auto val = BigInt::parseBin(ArrayRef(view));
     if (!val)
       abort();
     handler->interpreter->setReg(reg, *val);

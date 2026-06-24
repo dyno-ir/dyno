@@ -13,7 +13,6 @@
 #include "support/Lexer.h"
 #include "support/RTTI.h"
 #include "support/Result.h"
-#include "support/ResultUnwrap.h"
 #include "support/SmallVec.h"
 #include "support/StringRef.h"
 #include "support/TempBind.h"
@@ -52,7 +51,7 @@ protected:
   Result<FatDynObjRef<>, ParseError> parseObject(ArrayRef<char> name,
                                                  bool isDef) {
     auto state = lexer->getState();
-    UNWRAP(type, lexer->popType());
+    DYNO_EXPECT(type, lexer->popType());
     auto fn = interfaces.template getVal<obj_parse_fn>(type.getDialectID());
     assert(fn);
     auto ref = fn(type, std::string_view{name}, isDef);
@@ -64,14 +63,14 @@ protected:
   }
 
   Result<ParseOperand, ParseError> parseConstantOperand() {
-    FWD_ERR(lexer->tryPopEnsure(DynoLexer::op_hash));
-    UNWRAP(litTok, lexer->tryPopEnsure(Token::BIG_INT_LITERAL));
+    DYNO_EXPECT(lexer->popExpect(DynoLexer::op_hash));
+    DYNO_EXPECT(litTok, lexer->popExpect(Token::BIG_INT_LITERAL));
     return ParseOperand{getConstants().findOrInsert(*litTok.bigIntLit.value),
                         false};
   }
 
   Result<ParseOperand, ParseError> parseNamedObject() {
-    UNWRAP(ident, lexer->tryPopEnsure(Token::PCT_IDENTIFIER))
+    DYNO_EXPECT(ident, lexer->popExpect(Token::PCT_IDENTIFIER));
 
     bool isDef = false;
     FatDynObjRef<> obj = nullref;
@@ -86,7 +85,7 @@ protected:
       if (!isFwdDef) {
         isDef = !lexer->popIf(DynoLexer::op_qmark);
 
-        UNWRAP(newObj, parseObject(ArrayRef{identStr}, isDef))
+        DYNO_EXPECT(newObj, parseObject(ArrayRef(identStr), isDef));
         obj = newObj;
 
         identMap.insertOrAssign(ident.ident.idx, FatDynObjRef{obj});
@@ -97,7 +96,7 @@ protected:
 
         // todo: remove (legacy format support)
         if (lexer->peekType()) {
-          UNWRAP(unusedObj, parseObject(ArrayRef{identStr}, true))
+          DYNO_EXPECT(unusedObj, parseObject(ArrayRef(identStr), true));
           ctx.destroy(unusedObj);
         }
 
@@ -124,12 +123,12 @@ public:
 
     if (tok.type == DynoLexer::op_colon) {
       lexer->Pop();
-      UNWRAP(ref, parseObject(ArrayRef<char>::emptyRef(), true))
+      DYNO_EXPECT(ref, parseObject(ArrayRef<char>::emptyRef(), true));
       return ParseOperand{ref, true};
     }
 
     if (lexer->peekType()) {
-      UNWRAP(ref, parseObject(ArrayRef<char>::emptyRef(), false))
+      DYNO_EXPECT(ref, parseObject(ArrayRef<char>::emptyRef(), false));
       return ParseOperand{ref, false};
     }
 
@@ -138,10 +137,10 @@ public:
   }
 
   Result<void, ParseError> parseBlockContents(BlockRef block) {
-    FWD_ERR(lexer->tryPopEnsure(DynoLexer::op_cbropen));
+    DYNO_EXPECT(lexer->popExpect(DynoLexer::op_cbropen));
 
     while (!lexer->popIf(DynoLexer::op_cbrclose)) {
-      UNWRAP(instr, parseInstr());
+      DYNO_EXPECT(instr, parseInstr());
       block.end().insertPrev(instr);
     }
 
@@ -150,7 +149,7 @@ public:
 
 protected:
   Result<void, ParseError> parseSourceLoc(InstrRef instr) {
-    UNWRAP(tok, lexer->tryPeekEnsure(Token::STRING_LITERAL))
+    DYNO_EXPECT(tok, lexer->peekExpect(Token::STRING_LITERAL));
     auto pos = tok.strLit.value.find_first_of(':');
     auto file = tok.strLit.value.substr(0, pos);
     auto lines = tok.strLit.value.substr(pos);
@@ -206,7 +205,7 @@ protected:
   Result<InstrRef, ParseError> parseInstr() {
     auto startLineCol = lexer->getStartOfPeekTokenLineCol();
 
-    UNWRAP(opc, lexer->popOpcode());
+    DYNO_EXPECT(opc, lexer->popOpcode());
 
     SmallVec<FatDynObjRef<>, 16> operands;
     uint numDefs = 0;
@@ -218,7 +217,7 @@ protected:
     while (lexer->peekIs(DynoLexer::op_hash, DynoLexer::op_colon,
                          Token::PCT_IDENTIFIER) ||
            lexer->peekType()) {
-      UNWRAP(op, parseOperand());
+      DYNO_EXPECT(op, parseOperand());
       if (op.isDef) {
         if (numDefs != operands.size()) {
           return lexer->makeErrorOnPeekToken(
@@ -236,7 +235,7 @@ protected:
     }
 
     for (auto block : defBlocks)
-      FWD_ERR(parseBlockContents(block));
+      DYNO_EXPECT(parseBlockContents(block));
 
     auto instr = getInstrs().create(operands.size(), opc);
     auto ib = InstrBuilder{instr};
@@ -247,12 +246,12 @@ protected:
 
     if (lexer->popIf(DynoLexer::op_abropen)) {
       while (lexer->peekIs(Token::STRING_LITERAL)) {
-        FWD_ERR(parseSourceLoc(instr));
+        DYNO_EXPECT(parseSourceLoc(instr));
 
         if (!lexer->popIf(DynoLexer::op_comma))
           break;
       }
-      FWD_ERR(lexer->tryPopEnsure(DynoLexer::op_abrclose));
+      DYNO_EXPECT(lexer->popExpect(DynoLexer::op_abrclose));
     }
 
     while (lexer->popIf(DynoLexer::op_semicolon))

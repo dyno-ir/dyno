@@ -145,7 +145,7 @@ public:
       case VK_L: {
         auto &asLVal = this->as<RegLValue>();
         auto ldVal = build.buildLoad(asLVal.lvReg, asLVal.numBits,
-                                     asLVal.baseAddr, ArrayRef{asLVal.terms});
+                                     asLVal.baseAddr, ArrayRef(asLVal.terms));
         assert(ldVal->numBits == type->getBitstreamWidth());
         return ldVal;
       }
@@ -156,7 +156,7 @@ public:
         for (auto [idx, regLV] : Range{asCCLV.lvValues}.reverse().enumerate()) {
           buf[idx] = regLV->proGetValue(build);
         }
-        return build.buildConcat(ArrayRef{buf.begin(), buf.end()});
+        return build.buildConcat(ArrayRef(buf.begin(), buf.end()));
       }
       }
     }
@@ -254,7 +254,7 @@ public:
         auto asRegLV = this->as<RegLValue>();
         assert(val.getNumBits() == asRegLV.numBits);
         build.buildStore(asRegLV.lvReg, val, defer, nullref, asRegLV.baseAddr,
-                         ArrayRef{asRegLV.terms});
+                         ArrayRef(asRegLV.terms));
         break;
       }
       case Value::VK_CCL: {
@@ -264,7 +264,7 @@ public:
         for (auto &regLV : asCCLV.lvValues) {
           build.buildStore(regLV->lvReg,
                            build.buildSplice(val, regLV->numBits, offs), defer,
-                           nullref, regLV->baseAddr, ArrayRef{regLV->terms});
+                           nullref, regLV->baseAddr, ArrayRef(regLV->terms));
           offs += regLV->numBits;
         }
         break;
@@ -2040,7 +2040,7 @@ public:
       for (auto [idx, val] : Range{values}.enumerate()) {
         buf[idx] = val->proGetValue(build);
       }
-      auto val = build.buildConcat(ArrayRef{buf.begin(), buf.end()});
+      auto val = build.buildConcat(ArrayRef(buf.begin(), buf.end()));
       return std::make_unique<RValue>(val, expr.type);
     }
     case slang::ast::ExpressionKind::Replication: {

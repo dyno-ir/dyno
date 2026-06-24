@@ -153,8 +153,10 @@ public:
   }
 };
 
+using InstrStore = NewDeleteObjStore<Instr>;
+
 class CoreDialectContext {
-  using InstrStoreT = NewDeleteObjStore<Instr>;
+  using InstrStoreT = InstrStore;
   using ConstantStoreT = ConstantStore;
 
 public:
@@ -303,13 +305,13 @@ public:
     registerDialectPasses<T::dialect>(passRegistry);
 
     if constexpr (requires { context.resolverMethods; }) {
-      resolvers.registerDialect(T::dialect, ArrayRef{context.resolverMethods});
+      resolvers.registerDialect(T::dialect, ArrayRef(context.resolverMethods));
     }
     if constexpr (requires { context.copyMethods; }) {
-      copiers.registerDialect(T::dialect, ArrayRef{context.copyMethods});
+      copiers.registerDialect(T::dialect, ArrayRef(context.copyMethods));
     }
     if constexpr (requires { context.destroyMethods; }) {
-      destroyers.registerDialect(T::dialect, ArrayRef{context.destroyMethods});
+      destroyers.registerDialect(T::dialect, ArrayRef(context.destroyMethods));
     }
   }
 

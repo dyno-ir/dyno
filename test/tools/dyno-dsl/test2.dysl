@@ -1,0 +1,36 @@
+let config = struct {
+  a = true;
+};
+
+let configA = struct { b = false; };
+let configA = struct { b = true; };
+
+let config = a -> b -> struct {
+  let x = true;
+  a  = x;
+  b  = x;
+};
+
+let val = 3 * 6 + 7;
+
+let core = struct {
+  Dialect = struct {};
+  Type = struct {};
+  Instr = struct {};
+};
+let val = false & true;
+
+let config = struct {
+  a = true;
+  if a {
+    y = false;
+  }
+  if a {
+    x = false;
+  } else {
+    x = true;
+  }
+};
+
+let x = config.a + b;
+let y = "asdf";

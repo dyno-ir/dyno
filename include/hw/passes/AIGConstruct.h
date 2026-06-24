@@ -203,7 +203,7 @@ public:
     }
     wireToAIGNode[wire] = arr.index();
     return arr.resolve(
-        MutArrayRef{wireToAIGNodeStorage.begin(), wireToAIGNodeStorage.end()});
+        MutArrayRef(wireToAIGNodeStorage.begin(), wireToAIGNodeStorage.end()));
   }
   auto buildOutput(HWValue wire) {
     auto numBits = *wire.getNumBits();

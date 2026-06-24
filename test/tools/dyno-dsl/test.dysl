@@ -1,0 +1,36 @@
+let config = struct {
+  a = true;
+};
+
+let configA = config { b = false; };
+let configA = config { b = true; };
+
+let config = a -> b -> struct {
+  let x = true;
+  a  = x;
+  b  = x;
+};
+
+let val = 3 * 6 + 7;
+
+let core = struct {
+  Dialect = struct {};
+  Type = struct {};
+  Instr = struct {};
+}
+
+let hw = core.Dialect {
+  let wire = core.Type {
+  }
+  let ADD = core.Instr {
+  }
+};
+
+let opt = core.Instr.pat {
+  // match {
+
+  // }
+  // if {
+
+  // }
+}

@@ -738,7 +738,7 @@ struct CodeGen {
       assert(it.val().retvals.size() == 0);
       std::string code(it.val().inlineCode.begin(), it.val().inlineCode.end());
       replaceParamsInMacro(
-          call, ArrayRef{it.val().params.begin() + 1, it.val().params.back()},
+          call, ArrayRef(it.val().params.begin() + 1, it.val().params.back()),
           code);
 
       std::stringstream str;

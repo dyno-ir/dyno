@@ -6,6 +6,7 @@
 #include "support/ErrorRecovery.h"
 #include "support/Format.h"
 #include "support/Ranges.h"
+#include "support/Result.h"
 #include "support/SlabAllocator.h"
 #include "support/TwoLevelSet.h"
 #include <algorithm>
@@ -136,6 +137,8 @@ public:
     }
   }
   bool operator!=(Token const &b) const { return !(*this == b); }
+
+  bool isNone() { return type == NONE; }
 };
 
 struct ParseError {
@@ -194,14 +197,17 @@ private:
   const size_t NUM_KEYWORDS = strings.size();
 
 public:
-  Lexer(const std::string &src, std::string &&srcPath,
-        ArrayRef<const char *> operators, ArrayRef<const char *> keywords)
-      : path(srcPath), src(src.c_str(), src.size()), operators(operators),
-        keywords(keywords) {}
+  // Lexer(const std::string &src, std::string &&srcPath,
+  //       ArrayRef<const char *> operators, ArrayRef<const char *> keywords)
+  //     : path(srcPath), src(src.c_str(), src.size()), operators(operators),
+  //       keywords(keywords) {}
+  //
 
   Lexer(ArrayRef<char> src, std::string &&srcPath,
         ArrayRef<const char *> operators, ArrayRef<const char *> keywords)
-      : path(srcPath), src(src), operators(operators), keywords(keywords) {}
+      : path(srcPath), src(src), operators(operators), keywords(keywords) {
+    assert(src.size() > 0 && src.back() == '\0');
+  }
 
   Token lexNext() {
     auto &i = state.i;
@@ -435,12 +441,19 @@ public:
     peekEnsure(types...);
     return Pop();
   }
-  template <typename... Ts>
-  std::expected<Token, ParseError> tryPopEnsure(Ts... types) {
-    if (auto tok = tryPeekEnsure(types...)) {
+  template <typename... Ts> Result<Token, ParseError> popExpect(Ts... types) {
+    if (auto tok = peekExpect(types...)) {
       return Pop();
     } else {
-      return std::unexpected{std::move(tok.error())};
+      return {std::move(tok.error())};
+    }
+  }
+
+  template <typename... Ts> Result<Token, ParseError> popExpect() {
+    if (auto tok = peekExpect()) {
+      return Pop();
+    } else {
+      return {std::move(tok.error())};
     }
   }
 
@@ -523,12 +536,18 @@ public:
     return t;
   }
 
-  template <typename... Ts>
-  std::expected<Token, ParseError> tryPeekEnsure(Ts... types) {
+  template <typename... Ts> Result<Token, ParseError> peekExpect(Ts... types) {
     Token t = Peek();
     if (!((t.type == types) || ...)) {
-      return std::unexpected{makeExpectedTokenError(t.type, types...)};
+      return {makeExpectedTokenError(t.type, types...)};
     }
+    return t;
+  }
+
+  template <typename... Ts> Result<Token, ParseError> peekExpect() {
+    Token t = Peek();
+    if (t.type == Token::NONE)
+      return {makeErrorOnPeekToken("unexpected eof")};
     return t;
   }
 

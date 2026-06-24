@@ -22,3 +22,20 @@
 
 // quote each element in list
 #define DYNO_QUOTE_LIST(...) DYNO_VA_MACRO(DYNO_QUOTE, __VA_ARGS__)
+
+#define _DYNO_EXPECT_FWD(x)                                                    \
+  do {                                                                         \
+    if (auto tmp = x; !tmp)                                                    \
+      return {std::move(tmp.error())};                                         \
+  } while (false)
+
+#define _DYNO_EXPECT_VAL(out, in, tmp)                                         \
+  auto tmp = (in);                                                             \
+  if (!tmp)                                                                    \
+    return {std::move(tmp.error())};                                           \
+  auto &out = *tmp;
+
+#define _DYNO_EXPECT_1(in) _DYNO_EXPECT_FWD(in)
+#define _DYNO_EXPECT_2(out, in)                                                \
+  _DYNO_EXPECT_VAL(out, in, DYNO_CAT(_tmp_val, __LINE__))
+#define DYNO_EXPECT(...) DYNO_VA_MACRO(_DYNO_EXPECT, __VA_ARGS__)

@@ -101,12 +101,12 @@ public:
   template <typename T> std::optional<T> tryPopQualified() {
     auto state = getState();
     if (auto dialect = tryPopDialect()) {
-      if (auto tok = tryPopEnsure(op_dot); !tok) {
+      if (auto tok = popExpect(op_dot); !tok) {
         restoreState(state);
         return std::nullopt;
       }
 
-      auto ident = tryPeekEnsure(Token::IDENTIFIER);
+      auto ident = peekExpect(Token::IDENTIFIER);
       if (!ident) {
         restoreState(state);
         return std::nullopt;
@@ -149,16 +149,16 @@ public:
     return *entry;
   }
 
-  std::expected<DialectOpcode, ParseError> popOpcode() {
+  Result<DialectOpcode, ParseError> popOpcode() {
     if (auto opc = tryPopOpcode())
       return *opc;
-    return std::unexpected{makeErrorOnPeekToken("invalid opcode")};
+    return {makeErrorOnPeekToken("invalid opcode")};
   }
 
-  std::expected<DialectType, ParseError> popType() {
+  Result<DialectType, ParseError> popType() {
     if (auto type = tryPopType())
       return *type;
-    return std::unexpected{makeErrorOnPeekToken("invalid type")};
+    return {makeErrorOnPeekToken("invalid type")};
   }
 
   std::optional<DialectOpcode> peekOpcode() {

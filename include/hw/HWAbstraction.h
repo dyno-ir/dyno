@@ -228,7 +228,7 @@ public:
         cbuild.constFunc(last);                                                \
         index--;                                                               \
       }                                                                        \
-      operands = MutArrayRef{operands.data(), index + 2};                      \
+      operands = MutArrayRef(operands.data(), index + 2);                      \
       operands.back() = cbuild.get();                                          \
     }                                                                          \
     if (auto asConst = operands.back().dyn_as<ConstantRef>()) {                \
@@ -253,7 +253,7 @@ public:
   }                                                                            \
   template <typename T> HWValue ident(Range<T> range) {                        \
     SmallVec<HWValue, 8> vec{range};                                           \
-    return ident(MutArrayRef{vec});                                            \
+    return ident(MutArrayRef(vec));                                            \
   }                                                                            \
   HWValue ident(OperandVec<HWValue> &&vec) {                                   \
     vec.setOpcode(opcode);                                                     \
@@ -349,7 +349,7 @@ public:
   template <typename T>
   HWValue buildCommutative(DialectOpcode opc, Range<T> operands) {
     SmallVec<HWValue, 8> vec{operands};
-    return buildCommutative(opc, MutArrayRef{vec});
+    return buildCommutative(opc, MutArrayRef(vec));
   }
 
   // template <IsAnyHWValue... Ts> HWInstrRef buildAdd2(Ts... operands) {

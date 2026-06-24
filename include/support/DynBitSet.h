@@ -75,8 +75,8 @@ public:
     return at_unchecked(i);
   }
 
-  auto raw() const { return ArrayRef{storage}; }
-  auto raw() { return MutArrayRef{storage}; }
+  auto raw() const { return ArrayRef(storage); }
+  auto raw() { return MutArrayRef(storage); }
 };
 
 template <typename Container, size_t SymbolBits,

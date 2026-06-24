@@ -220,8 +220,8 @@ private:
 
     // we call this based on heuristic match of one operand.
     SmallVec<std::pair<uint16_t, uint16_t>, 4> intersectOps;
-    intersect(intersectOps, ArrayRef{lhsAbstr.operands},
-              ArrayRef{rhsAbstr.operands});
+    intersect(intersectOps, ArrayRef(lhsAbstr.operands),
+              ArrayRef(rhsAbstr.operands));
     auto matchingConstBits = intersectConstants(lhsAbstr.ref, rhsAbstr.ref);
 
     assert(intersectOps.size() != 0 && "heuristic not working?");

@@ -9,6 +9,7 @@ add_library(core STATIC
     hw/passes/InstCombine.cpp
     support/ErrorRecovery.cpp
     support/TruthTable.cpp
+    dsl/DSLParser.cpp
 )
 
 add_library(hw STATIC

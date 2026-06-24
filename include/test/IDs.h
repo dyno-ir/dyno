@@ -4,7 +4,7 @@
 #include "dyno/InstrPrinter.h"
 #include "dyno/Parser.h"
 namespace dyno {
-constexpr DialectID DIALECT_TEST{7}; // fixme: dialect ID assignment
+constexpr DialectID DIALECT_TEST{DIALECT_EXTRA0};
 
 class TestDialectPrinter {
 public:

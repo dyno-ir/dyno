@@ -18,13 +18,13 @@ inline void registerDialect<DialectID{DIALECT_META}>(
   dialectInfos[DIALECT_META] = &info;
 
   static constexpr std::array<TyInfo, 0> tyInfoArr;
-  typeInfos[DIALECT_META] = ArrayRef{tyInfoArr};
+  typeInfos[DIALECT_META] = ArrayRef(tyInfoArr);
 
   if (ctx) {
     // meta needs a context to find psses. no opcodes w/o context.
     opcodeInfos[DIALECT_META] =
-        ArrayRef{ctx->getPassRegistry().metaOpcodeInfoArr.data(),
-                 ctx->getPassRegistry().metaOpcodeInfoArr.size()};
+        ArrayRef(ctx->getPassRegistry().metaOpcodeInfoArr.data(),
+                 ctx->getPassRegistry().metaOpcodeInfoArr.size());
   } else {
     opcodeInfos[DIALECT_META] = ArrayRef<OpcodeInfo>::emptyRef();
   }

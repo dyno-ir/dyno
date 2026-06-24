@@ -2,6 +2,7 @@
 #include <cassert>
 #include <memory>
 #include <optional>
+#include <type_traits>
 #include <utility>
 
 template <typename Res, typename Err> class Result {
@@ -18,7 +19,6 @@ public:
     } else {
       std::construct_at(&err, o.err);
     }
-    return *this;
   }
   Result(Result &&o) : isRes(o.isRes) {
     if (isRes) {
@@ -26,15 +26,16 @@ public:
     } else {
       std::construct_at(&err, std::move(o.err));
     }
-    return *this;
   }
   Result &operator=(const Result &o) {
     this->~Result();
     std::construct_at(this, o);
+    return *this;
   }
   Result &operator=(Result &&o) {
     this->~Result();
     std::construct_at(this, std::move(o));
+    return *this;
   }
   ~Result() {
     if (isRes) {
@@ -48,6 +49,14 @@ public:
   constexpr Result(const Res &res) : res(res), isRes(true) {}
   constexpr Result(Err &&err) : err(std::move(err)), isRes(false) {}
   constexpr Result(const Err &err) : err(err), isRes(false) {}
+
+  // Allow construction from anything convertible to Res (e.g. via an explicit
+  // conversion), mirroring std::expected's forwarding value constructor.
+  template <typename U>
+    requires(!std::is_same_v<std::remove_cvref_t<U>, Result> &&
+             std::is_constructible_v<Res, U> &&
+             !std::is_constructible_v<Err, U>)
+  constexpr Result(U &&val) : res(std::forward<U>(val)), isRes(true) {}
 
   explicit operator bool() const { return isRes; }
   bool has_value() const { return isRes; }

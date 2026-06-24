@@ -95,6 +95,8 @@ public:
     map.clear();
   }
 
+  BlockRef createBlock();
+
   BlockRef_iterator_base operator[](ObjRef<Instr> ref);
 };
 
@@ -109,12 +111,15 @@ public:
   using pointer = value_type *;
   using reference = value_type &;
 
+  BlockRef_iterator_base(nullref_t) : block(nullptr) {}
   BlockRef_iterator_base() = default;
   BlockRef_iterator_base(BlockRef block, uint32_t pos);
 
   value_type &operator*() const { return entry().ref; }
   pointer operator->() const { return &entry().ref; }
   InstrRef instr() const { return entry().ref; }
+
+  explicit operator bool() { return bool(block); }
 
   void erase() {
     cfg().map[entry().ref] = CFG::Node{nullref, 0};
@@ -324,6 +329,8 @@ public:
 
   bool isSorted() const { return (*this)->sorted; }
 };
+
+inline BlockRef CFG::createBlock() { return blocks.create(*this); };
 
 template <bool Ordered>
 inline BlockRef_iterator<Ordered>::BlockRef_iterator(BlockRef block,

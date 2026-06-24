@@ -187,7 +187,7 @@ public:
         andOperands.emplace_back(orOperands.front());
       else {
         Range{orOperands}.sort(HWInstrBuilder::commutativeOpOperandOrder);
-        auto wire = build.buildInstr(OP_OR, true, ArrayRef{orOperands}).defW();
+        auto wire = build.buildInstr(OP_OR, true, ArrayRef(orOperands)).defW();
         wire->numBits = 1;
         andOperands.emplace_back(wire);
       }
@@ -197,7 +197,7 @@ public:
       sel = andOperands[0];
     else {
       Range{andOperands}.sort(HWInstrBuilder::commutativeOpOperandOrder);
-      auto wire = build.buildInstr(OP_AND, true, ArrayRef{andOperands}).defW();
+      auto wire = build.buildInstr(OP_AND, true, ArrayRef(andOperands)).defW();
       wire->numBits = 1;
       sel = wire;
     }
@@ -209,7 +209,7 @@ private:
   template <std::invocable<MutArrayRef<BoolExprLiteral>> Func>
   void forAllClauses(MuxTree::Entry &entry, Func &&func) {
     for (auto clause : entry.expr.clauses()) {
-      func(MutArrayRef{clause.begin(), clause.end()});
+      func(MutArrayRef(clause.begin(), clause.end()));
     }
   }
 

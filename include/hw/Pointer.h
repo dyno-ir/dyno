@@ -2,8 +2,8 @@
 
 #include "dyno/Constant.h"
 #include "dyno/Instr.h"
+#include "dyno/InstrMixin.h"
 #include "dyno/RefUnion.h"
-#include "hw/DefUseMixin.h"
 #include "hw/IDs.h"
 namespace dyno {
 class Pointer {

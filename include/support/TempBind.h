@@ -2,7 +2,10 @@
 
 #include <memory>
 
-template <typename T> struct RAIIToken {
+template <typename T> class [[nodiscard]] RAIIToken {
+  T *parent;
+
+public:
   RAIIToken(const RAIIToken &) = delete;
   RAIIToken &operator=(const RAIIToken &) = delete;
   RAIIToken(RAIIToken &&other) { this->RAIIToken::operator=(std::move(other)); }
@@ -12,8 +15,6 @@ template <typename T> struct RAIIToken {
     return *this;
   };
   RAIIToken(T &parent) : parent(&parent) {}
-
-  T *parent;
   ~RAIIToken() {
     if (parent)
       parent->unbind();

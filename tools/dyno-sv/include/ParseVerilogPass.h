@@ -42,7 +42,9 @@ public:
   CONFIG_STRUCT(CONFIG_STRUCT_LAMBDA)
 #undef CONFIG_STRUCT_LAMBDA
   Config config;
-  MutArrayRef<StringRef> configArgsArr() { return {&config.arg0, NumArgs}; };
+  MutArrayRef<StringRef> configArgsArr() {
+    return MutArrayRef<StringRef>(&config.arg0, NumArgs);
+  };
 
 public:
   std::expected<void, std::string> parse(ArrayRef<StringRef> args) {

@@ -83,7 +83,7 @@ class RegisterPartitionPass : public Pass<RegisterPartitionPass> {
     }
     assert(!frags.empty());
     std::reverse(frags.begin(), frags.end());
-    auto val = build.buildConcat(ArrayRef{frags});
+    auto val = build.buildConcat(ArrayRef(frags));
     load.def(0)->as<WireRef>().replaceAllUsesWith(val);
   }
 

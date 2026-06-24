@@ -32,7 +32,7 @@ class Operand;
 class InstrRef;
 class OperandRef;
 class InstrDefUse;
-class InsrBuilder;
+class InstrBuilder;
 template <IsFatDynObjRef T> class MutInstr;
 
 class Operand : public ByValueRTTIUtilMixin<Operand>, ByValueRTTITag2 {
@@ -682,10 +682,10 @@ public:
   InstrBuilder(const InstrBuilder &) = delete;
   InstrBuilder &operator=(const InstrBuilder &) = delete;
 
-  InstrBuilder(InstrBuilder &&other) : op(other.op) {
+  InstrBuilder(InstrBuilder &&other) noexcept : op(other.op) {
     other.op = *other.instr().end();
   };
-  InstrBuilder &operator=(InstrBuilder &&other) {
+  InstrBuilder &operator=(InstrBuilder &&other) noexcept {
     this->op = other.op;
     other.op = *other.instr().end();
     return *this;

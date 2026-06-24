@@ -75,7 +75,7 @@ class MuxTreeFlattenPass : public Pass<MuxTreeFlattenPass> {
         dyno_unreachable("invalid instr");
       }
     }
-    return build.buildOneHotMux(MutArrayRef{cases});
+    return build.buildOneHotMux(MutArrayRef(cases));
   }
 
   void runOnProcess(ProcessIRef proc) {

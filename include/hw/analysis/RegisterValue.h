@@ -364,7 +364,7 @@ struct RegisterValue : public RegisterFrags<RegisterValueFragment> {
     }
 
     std::reverse(operands.begin(), operands.end());
-    auto rv = build.buildMultiSplice(ArrayRef{operands});
+    auto rv = build.buildMultiSplice(ArrayRef(operands));
     if (update)
       overwrite(rv, 0, addrB, lenB, allUntouched);
     return rv;
@@ -382,7 +382,7 @@ struct RegisterValue : public RegisterFrags<RegisterValueFragment> {
     assert(allUntouched == untouched || frags.empty());
 
     std::reverse(operands.begin(), operands.end());
-    auto rv = build.buildMultiSplice(ArrayRef{operands});
+    auto rv = build.buildMultiSplice(ArrayRef(operands));
     if (update)
       overwrite(rv, 0, 0, len, allUntouched);
     return rv;

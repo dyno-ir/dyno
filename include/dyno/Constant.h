@@ -534,7 +534,7 @@ public:
                                       uint8_t extend, uint8_t custom) {
     auto maxWords = round_up_div(bits, WordBits);
     if (data.size() > maxWords)
-      data = ArrayRef{data.data(), maxWords};
+      data = ArrayRef(data.data(), maxWords);
     auto rv = BigIntBase{bits, (uint32_t)data.size(), extend, custom};
     std::copy(data.begin(), data.end(), rv.words.begin());
     rv.normalize();
@@ -2695,11 +2695,11 @@ public:
       }
 
       if (base == 16)
-        return std::pair(digitsEnd, parseHex(ArrayRef{ptr, digitsEnd}));
+        return std::pair(digitsEnd, parseHex(ArrayRef(ptr, digitsEnd)));
       if (base == 10)
-        return std::pair(digitsEnd, parseDec(ArrayRef{ptr, digitsEnd}));
+        return std::pair(digitsEnd, parseDec(ArrayRef(ptr, digitsEnd)));
       if (base == 2)
-        return std::pair(digitsEnd, parseBin(ArrayRef{ptr, digitsEnd}));
+        return std::pair(digitsEnd, parseBin(ArrayRef(ptr, digitsEnd)));
       dyno_unreachable("unsupported");
     };
 
@@ -2898,7 +2898,7 @@ static constexpr CBigInt operator""_b(const char *str) {
     rv = CBigInt::parseHex(
         ArrayRef<const char>{str + 2, std::char_traits<char>::length(str) - 2});
   } else
-    rv = CBigInt::parseDec(ArrayRef{str, std::char_traits<char>::length(str)});
+    rv = CBigInt::parseDec(ArrayRef(str, std::char_traits<char>::length(str)));
   assert(rv && "invalid str literal");
   return *rv;
 }
@@ -3285,7 +3285,7 @@ public:
   constexpr uint8_t getExtend() const { return extend(); }
   constexpr uint8_t getIs4S() const { return custom(); }
   constexpr ArrayRef<uint32_t> getWords() const {
-    return inlineF() ? ArrayRef{&inlineWord, 1} : words;
+    return inlineF() ? ArrayRef(&inlineWord, 1) : words;
   }
 
   explicit GenericBigIntRef(const BigInt &bigInt)

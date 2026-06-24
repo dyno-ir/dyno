@@ -4,7 +4,6 @@
 #include "dyno/IDImpl.h"
 #include "dyno/Opcode.h"
 namespace dyno {
-constexpr DialectID DIALECT_TYPE{9}; // fixme: dialect ID assignment
 
 using TypeDialectType = SpecificDialectType<DialectID{DIALECT_TYPE}>;
 using TypeDialectOpcode = SpecificDialectOpcode<DialectID{DIALECT_TYPE}>;

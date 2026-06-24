@@ -1,5 +1,6 @@
 #pragma once
 #include "dyno/Instr.h"
+
 namespace dyno {
 
 template <typename Derived> class InstrDefUseMixin {

@@ -1,8 +1,8 @@
 #pragma once
 #include "dyno/CFG.h"
 #include "dyno/Instr.h"
+#include "dyno/InstrMixin.h"
 #include "dyno/Obj.h"
-#include "hw/DefUseMixin.h"
 #include "op/IDs.h"
 #include "support/ArrayRef.h"
 

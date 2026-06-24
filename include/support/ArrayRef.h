@@ -52,16 +52,16 @@ public:
 
   constexpr ArrayRef drop_front() const {
     assert(sz >= 1);
-    return ArrayRef{ptr + 1, sz - 1};
+    return ArrayRef(ptr + 1, sz - 1);
   }
   constexpr ArrayRef drop_back() const {
     assert(sz >= 1);
-    return ArrayRef{ptr, sz - 1};
+    return ArrayRef(ptr, sz - 1);
   }
 
   constexpr const_pointer data() const { return ptr; }
 
-  static constexpr ArrayRef emptyRef() { return ArrayRef{nullptr, size_t(0)}; }
+  static constexpr ArrayRef emptyRef() { return ArrayRef(nullptr, size_t(0)); }
   template <typename U>
   constexpr ArrayRef(const U &u) : ArrayRef(u.begin(), u.end()) {}
 
@@ -73,11 +73,17 @@ public:
   constexpr ArrayRef(const U (&c_arr)[N]) : ArrayRef(c_arr, c_arr + N) {}
 
   constexpr ArrayRef() : ArrayRef(ArrayRef::emptyRef()) {}
+
+  constexpr ArrayRef(std::initializer_list<T> list)
+      : ArrayRef(list.begin(), list.size()) {}
 };
 
 template <typename U, size_t N>
 ArrayRef(const U (&c_arr)[N]) -> ArrayRef<typename std::decay_t<U>>;
+
 template <typename U> ArrayRef(const U &u) -> ArrayRef<typename U::value_type>;
+
+template <typename T> ArrayRef(std::initializer_list<T>) -> ArrayRef<T>;
 
 template <typename T>
 concept IsArrayRef = (requires {
@@ -122,11 +128,11 @@ public:
 
   constexpr MutArrayRef drop_front() const {
     assert(sz >= 1);
-    return MutArrayRef{ptr + 1, sz - 1};
+    return MutArrayRef(ptr + 1, sz - 1);
   }
   constexpr MutArrayRef drop_back() const {
     assert(sz >= 1);
-    return MutArrayRef{ptr, sz - 1};
+    return MutArrayRef(ptr, sz - 1);
   }
 
   template <typename U> bool all(U func) {
@@ -143,8 +149,10 @@ public:
   constexpr const_pointer data() const { return ptr; }
 
   static constexpr MutArrayRef emptyRef() {
-    return MutArrayRef{nullptr, size_t(0)};
+    return MutArrayRef(nullptr, size_t(0));
   }
+
+  constexpr MutArrayRef(std::initializer_list<T>) = delete;
 
   // FIXME: Check for data and size instead of iterator arith
   template <typename U>
