@@ -169,7 +169,7 @@ FUNCTION_DEF %synthMemoryFFMuxHandling:func, :block {
   meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS
   meta.INST_COMBINE_PASS map("muxToOneHotMux": "1")
   meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS
-  meta.INST_COMBINE_PASS map("muxToOneHotMux": "1", "findFlipFlopEnables": "1")
+  meta.INST_COMBINE_PASS map("muxToOneHotMux": "1", "findFlipFlopEnables": "1", "findFlipFlopSyncResets": "1")
   meta.DUMP_PASS map("path": "post_critical.dyno")
 
 }
@@ -189,7 +189,7 @@ FUNCTION_DEF %synthLowerMemoryFF:func, :block {
   // lower unmapped memories back to load/store
   meta.LOWER_MEM_ACCESS_PASS
   // and map flip flops
-  meta.INST_COMBINE_PASS map("muxToOneHotMux": "1")
+  meta.INST_COMBINE_PASS map("muxToOneHotMux": "1", "findFlipFlopEnables": "1", "findFlipFlopSyncResets": "1")
   meta.FLIP_FLOP_INFERENCE_PASS
 
   meta.CHECK_PASS

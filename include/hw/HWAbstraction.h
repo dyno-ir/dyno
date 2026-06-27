@@ -1129,9 +1129,11 @@ public:
   template <typename T>
   WireRef buildFlipFlop(HWValue clk, HWValue d,
                         HWValue en = ConstantRef::fromBool(1),
-                        Range<T> resets = Range<T>::emptyRange()) {
+                        Range<T> resets = Range<T>::emptyRange(),
+                        bool syncReset = false) {
     auto defW = ctx.getStore<Wire>().create(d.getNumBits());
-    auto ib = buildInstrRaw(HW_FLIP_FLOP, 4 + resets.size());
+    auto ib = buildInstrRaw(syncReset ? HW_FLIP_FLOP_SRST : HW_FLIP_FLOP,
+                            4 + 2 * resets.size());
     ib.addRef(defW).other().addRef(clk).addRef(d).addRef(en);
     for (auto [rst, rstval] : resets) {
       ib.addRef(rst).addRef(rstval);

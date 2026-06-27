@@ -87,6 +87,7 @@ public:
   FIELD(bool, boolExprSimplify, true)                                          \
   FIELD(bool, removeAssumes, false)                                            \
   FIELD(bool, findFlipFlopEnables, false)                                      \
+  FIELD(bool, findFlipFlopSyncResets, false)                                   \
   FIELD(bool, muxToOneHotMux, false)                                           \
   FIELD(bool, inferMuxs, true)
   CONFIG_STRUCT(CONFIG_STRUCT_LAMBDA)
@@ -170,6 +171,8 @@ private:
     if (!load || !load.as<LoadIRef>().isFullReg())
       return false;
 
+    // todo: netlist version of this (and findResets) where we just use q wire
+    // directly.
     auto part = loopbackAnalysis.get(instr.d(), load.as<LoadIRef>().value());
     if (Range{part.frags}.all([](auto frag) { return !frag; }))
       return false;
@@ -189,12 +192,59 @@ private:
           en = ConstantRef::fromBool(false);
         } else {
           auto newEn = build.buildNot(build.buildAnd(Range{frag}.resolve(ctx)));
-          d = build.buildAssume(d, newEn);
           en = build.buildAnd(en, newEn);
         }
       }
 
       auto val = build.buildFlipFlop(instr.clk(), d, en, instr.rsts());
+      concat.emplace_back(val);
+    }
+    concat.others().do_reverse();
+
+    instr.def().replace(FatDynObjRef<>{nullref});
+    deleteMatchedInstr(instr);
+    build.buildConcat(std::move(concat));
+
+    return PAT_TRUE;
+  }
+
+  PatBool findFlipFlopSyncResets(FlipFlopIRef instr) {
+    if (!config.findFlipFlopSyncResets)
+      return false;
+
+    // already has async resets
+    if (instr.isOpc(HW_FLIP_FLOP) && !instr.rsts().empty())
+      return PAT_FALSE;
+
+    auto part = loopbackAnalysis.get(instr.d(), nullref);
+
+    if (Range{part.frags}.all([](auto frag) { return !frag; }))
+      return false;
+
+    HWInstrBuilder build{ctx, instr};
+    OperandVec<HWValue> concat(ctx, 1, part.frags.size());
+    concat.emplace_back(instr.q());
+
+    for (auto &frag : part.frags) {
+      HWValue d = build.buildSplice(instr.d(), frag.len, frag.dstAddr);
+      SmallVec<std::tuple<HWValue, HWValue>, 4> rsts(instr.rsts());
+
+      if (frag) {
+        // Loopback analysis does not return the found constant value. Recompute
+        // it based on en signals with local known bits.
+        KnownBitsAnalysis knownBits{ctx};
+        SmallVec<std::pair<ObjRef<Wire>, BigInt>, 4> assignments{
+            Range{frag}.resolve(ctx).transform([](size_t, auto ref) {
+              return std::make_pair(ref, BigInt::fromU32(true, 1));
+            })};
+        auto rstVal = knownBits.getKnownBitsWith(instr.d(), assignments);
+        BigInt::rangeSelectOp4S(rstVal, rstVal, frag.dstAddr, frag.len);
+        rsts.emplace_back(build.buildAnd(Range{frag}.resolve(ctx)),
+                          ctx.getStore<Constant>().findOrInsert(rstVal));
+      }
+
+      auto val =
+          build.buildFlipFlop(instr.clk(), d, instr.clkEn(), Range{rsts}, true);
       concat.emplace_back(val);
     }
     concat.others().do_reverse();
@@ -227,8 +277,9 @@ private:
 
     HWInstrBuilder build{ctx, instr};
     auto rebuild = [&](MutArrayRef<std::tuple<HWValue, HWValue>> rstVals) {
-      auto ib =
-          build.buildInstrRaw(instr.getDialectOpcode(), instr.getNumOperands());
+      auto ib = build.buildInstrRaw(instr.getDialectOpcode(),
+                                    1 + FlipFlopIRef::numBaseOperands +
+                                        rstVals.size() * 2);
       ib.addRef(instr.def()->fat()).other();
       instr.def().replace(FatDynObjRef{nullref});
       ib.addRefs(instr.others()
@@ -360,6 +411,8 @@ private:
     return false;
   }
 
+  // Helper function for derived bits, try to replace root or its exclusive
+  // dependencies with derived known values.
   bool boolExprSimplifySub(OperandRef root) {
     SmallVec<OperandRef, 16> stack{root};
     bool change = false;
@@ -471,6 +524,37 @@ private:
     if (rv)
       currentMatched.emplace_back(instr);
     return PAT_BOOL(rv);
+  }
+
+  PatBool simplifyFlipFlopCtrl(FlipFlopIRef instr) {
+    // en can assume !rst
+    // data can assume en, !rst
+
+    for (auto [rstEn, rstVal] : instr.rsts()) {
+      if (auto enAsWire = rstEn.dyn_as<WireRef>())
+        // ignore contradict for now. there could in theory be contradicting
+        // resets, then we should run with each of them turned on separately
+        deriveBits.propKnownValueUp(enAsWire, BigInt::fromU32(false, 1));
+    }
+
+    bool change = false;
+
+    if (auto clkEnWire = instr.clkEn().dyn_as<WireRef>()) {
+      change |= boolExprSimplifySub(*clkEnWire.getSingleDef());
+      // assume clkEn true for rest
+      if (!change)
+        deriveBits.propKnownValueUp(clkEnWire, BigInt::fromU32(true, 1));
+    }
+
+    if (auto dWire = instr.d().dyn_as<WireRef>())
+      change |= boolExprSimplifySub(*dWire.getSingleDef());
+
+    deriveBits.clearCache();
+
+    if (change)
+      currentMatched.emplace_back(instr);
+
+    return PAT_BOOL(change);
   }
 
   PatBool optimizeOneHotMuxUndef(InstrRef instr) {
@@ -2082,9 +2166,13 @@ private:
 
     case *HW_FLIP_FLOP:
     case *HW_FLIP_FLOP_SRST: {
+      if (auto trueV = simplifyFlipFlopCtrl(instr))
+        return trueV;
       if (auto trueV = simplifyFlipFlopEnable(instr))
         return trueV;
       if (auto trueV = simplifyFlipFlopResets(instr))
+        return trueV;
+      if (auto trueV = findFlipFlopSyncResets(instr))
         return trueV;
       if (auto trueV = findFlipFlopEnables(instr))
         return trueV;

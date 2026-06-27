@@ -204,7 +204,6 @@ private:
 
     build.pushInsertPoint(storeI);
     HWValue rstVal;
-    HWValue rstValInv;
 
     if (hasReset) {
       SmallVec<std::pair<RegisterRef, bool>, 2> resetCandidates;
@@ -221,19 +220,19 @@ private:
       clkReg = hasIFF ? resetCandidates[0] : (resetCandidates[1 - resetIndex]);
 
       rstVal = build.buildLoad(rstReg.first);
-      rstValInv = build.buildNot(rstVal);
       if (!rstReg.second)
-        std::swap(rstVal, rstValInv);
+        rstVal = build.buildNot(rstVal);
 
-      dValue = build.buildAssume(dValue, rstValInv);
+      // dValue = build.buildAssume(dValue, rstValInv);
     } else
       clkReg = get(0);
 
-    if (clkEnVal) {
-      if (hasReset)
-        clkEnVal = build.buildAssume(clkEnVal, rstValInv);
-      dValue = build.buildAssume(dValue, build.buildNot(clkEnVal));
-    }
+    // assume information is encoded in ff itself
+    // if (clkEnVal) {
+    //   if (hasReset)
+    //     clkEnVal = build.buildAssume(clkEnVal, rstValInv);
+    //   dValue = build.buildAssume(dValue, build.buildNot(clkEnVal));
+    // }
 
     HWValue clkVal = build.buildLoad(clkReg.first);
     if (!clkReg.second)
@@ -242,6 +241,7 @@ private:
     WireRef qWire = ctx.getStore<Wire>().create(dValue.getNumBits());
 
     auto ib = build.buildInstrRaw(HW_FLIP_FLOP, 4 + hasReset * 2);
+    build.pushInsertPoint(ib.instr());
     ib.addRef(qWire).other().addRef(clkVal).addRef(dValue);
 
     ib.addRef(clkEnVal ? build.buildNot(clkEnVal) : ConstantRef::fromBool(1));
@@ -249,6 +249,7 @@ private:
     if (hasReset)
       ib.addRef(rstVal).addRef(resetValue);
 
+    build.popInsertPoint();
     build.buildStore(storeI.reg(), qWire);
     build.destroyInstr(storeI);
 

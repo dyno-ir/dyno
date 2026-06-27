@@ -38,10 +38,12 @@ class FlipFlopMappingPass : public Pass<FlipFlopMappingPass> {
       EN_POL,
       HAS_RST,
       RST_POL,
+      SET_RST_SYNC,
       HAS_SET,
       SET_POL,
       HAS_INV_OUT,
-      HAS_REGULAR_OUT
+      HAS_REGULAR_OUT,
+      NUM_INDICES
     };
 
   private:
@@ -53,6 +55,7 @@ class FlipFlopMappingPass : public Pass<FlipFlopMappingPass> {
     auto enPol() { return BitField<uint16_t, 1, EN_POL>{raw}; }
     auto hasRst() { return BitField<uint16_t, 1, HAS_RST>{raw}; }
     auto rstPol() { return BitField<uint16_t, 1, RST_POL>{raw}; }
+    auto setRstSync() { return BitField<uint16_t, 1, SET_RST_SYNC>{raw}; }
     auto hasSet() { return BitField<uint16_t, 1, HAS_SET>{raw}; }
     auto setPol() { return BitField<uint16_t, 1, SET_POL>{raw}; }
     auto hasInvOut() { return BitField<uint16_t, 1, HAS_INV_OUT>{raw}; }
@@ -97,6 +100,8 @@ class FlipFlopMappingPass : public Pass<FlipFlopMappingPass> {
     TIE1_RST,
     TIE1_SET,
     TIE1_EN,
+    ADD_SYNC_RST,
+    ADD_SYNC_SET,
     INVERT_RST,
     INVERT_SET,
     INVERT_EN,
@@ -108,7 +113,8 @@ class FlipFlopMappingPass : public Pass<FlipFlopMappingPass> {
   };
 
   using StdCellOrFixupF = PointersIntsVariant<FixupType, StdCellFF *>;
-  Vec<StdCellOrFixupF> ffMap = Vec<StdCellOrFixupF>(512, FixupType::FAIL);
+  Vec<StdCellOrFixupF> ffMap =
+      Vec<StdCellOrFixupF>(1ull << AbstractFF::NUM_INDICES, FixupType::FAIL);
   SlabAllocator<StdCellFF> stdCellFFs;
 
   struct FatFF {
@@ -143,6 +149,8 @@ class FlipFlopMappingPass : public Pass<FlipFlopMappingPass> {
     // todo: fuse NOTs
     abstr.hasInvOut() = 0;
     abstr.hasRegularOut() = 1;
+
+    abstr.setRstSync() = instr.isOpc(HW_FLIP_FLOP_SRST);
 
     SmallVec<WireRef, 2> rstWires;
     for (unsigned i = 0; i < instr.numRsts(); i++)
@@ -295,6 +303,25 @@ class FlipFlopMappingPass : public Pass<FlipFlopMappingPass> {
           abstr.hasEn() = 1;
           break;
 
+        case FixupType::ADD_SYNC_RST:
+          // reset is active low when we get here
+          wires.d = build.buildAnd(wires.rst, wires.d);
+          abstr.hasRst() = 0;
+          abstr.rstPol() = 0;
+          abstr.setRstSync() = 0;
+          if (abstr.hasEn())
+            wires.en = build.buildOr(wires.en, build.buildNot(wires.rst));
+          break;
+        case FixupType::ADD_SYNC_SET:
+          // reset is active high when we get here
+          wires.d = build.buildOr(wires.set, wires.d);
+          abstr.hasSet() = 0;
+          abstr.setPol() = 0;
+          abstr.setRstSync() = 0;
+          if (abstr.hasEn())
+            wires.en = build.buildOr(wires.en, wires.set);
+          break;
+
         case FixupType::INVERT_RST:
           wires.rst = build.buildNot(wires.rst);
           abstr.rstPol() = !abstr.rstPol();
@@ -340,7 +367,7 @@ class FlipFlopMappingPass : public Pass<FlipFlopMappingPass> {
     regBuild.setInsertPoint(mod.regs_end());
     for (auto proc : mod.procs()) {
       for (auto instr : proc.block().unordered())
-        if (instr.isOpc(HW_FLIP_FLOP))
+        if (instr.isOpc(HW_FLIP_FLOP, HW_FLIP_FLOP_SRST))
           runOnInstr(instr.as<FlipFlopIRef>());
     }
   }
@@ -364,7 +391,7 @@ public:
       pol = false;
     }
 
-    if (!use->instr().isOpc(HW_FLIP_FLOP))
+    if (!use->instr().isOpc(HW_FLIP_FLOP, HW_FLIP_FLOP_SRST))
       return false;
     auto asFF = use->instr().as<FlipFlopIRef>();
 
@@ -394,12 +421,14 @@ public:
           return false; // multiple resets?
         ff.abstr.hasRst() = 1;
         ff.abstr.rstPol() = pol;
+        ff.abstr.setRstSync() = use->instr().isOpc(HW_FLIP_FLOP_SRST);
         ff.stdcell.ports.emplace_back(FFPortType::RST);
       } else if (val.as<ConstantRef>().valueEqualsS(-1)) {
         if (ff.abstr.hasSet())
           return false; // multiple sets?
         ff.abstr.hasSet() = 1;
         ff.abstr.setPol() = pol;
+        ff.abstr.setRstSync() = use->instr().isOpc(HW_FLIP_FLOP_SRST);
         ff.stdcell.ports.emplace_back(FFPortType::SET);
       }
       return true;
@@ -511,6 +540,24 @@ public:
         break;
       abstr.hasEn() = 0;
       abstr.enPol() = 0;
+      fixupIfNone();
+      break;
+    }
+    case FixupType::ADD_SYNC_RST: {
+      if (abstr.hasRst() || (abstr.hasSet() && !abstr.setRstSync()))
+        break;
+      abstr.setRstSync() = 1;
+      abstr.hasRst() = 1;
+      abstr.rstPol() = 0;
+      fixupIfNone();
+      break;
+    }
+    case FixupType::ADD_SYNC_SET: {
+      if (abstr.hasSet() || (abstr.hasRst() && !abstr.setRstSync()))
+        break;
+      abstr.setRstSync() = 1;
+      abstr.hasSet() = 1;
+      abstr.setPol() = 1;
       fixupIfNone();
       break;
     }

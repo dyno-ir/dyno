@@ -105,6 +105,11 @@ public:
       addr = 0;
 
       if (auto asConst = val.dyn_as<ConstantRef>()) {
+        // use loopback=nullref as wildcard for any constant (used for finding
+        // reset values).
+        if (loopback == nullref) // return always-on loopback
+          FRAME_RET(nullref);
+
         if (auto loopbackConst = loopback.dyn_as<ConstantRef>()) {
           BigInt out;
           BigInt::rangeSelectOp4S(out, loopbackConst, addr,
@@ -206,11 +211,28 @@ public:
       case *HW_ONEHOT_MUX: {
         if (idx != 0) {
           // add condition to loopback frags
-          for (auto &frag : retVal.frags) {
-            if (!frag)
+          auto val = instr.other((idx - 1) * 2)->as<HWValue>();
+          if (auto asConst = val.dyn_as<ConstantRef>()) {
+            assert(!asConst.allBitsUndef());
+            // select is zero i.e. unreachable
+            if (asConst.valueEquals(0)) {
+              // return if last
+              if (idx == instr.getNumOthers() / 2) {
+                retVal = std::move(acc);
+                stack.pop_back();
+                break;
+              }
+              // else skip, move on to next
+              ++idx;
               continue;
-            frag.push_back(instr.other((idx - 1) * 2)->as<WireRef>());
+            }
           }
+          if (val.is<WireRef>())
+            for (auto &frag : retVal.frags) {
+              if (!frag)
+                continue;
+              frag.push_back(val.as<WireRef>());
+            }
 
           if (idx == 1)
             acc = std::move(retVal);
@@ -228,8 +250,12 @@ public:
         FRAME_CALL(nextVal)
       }
 
+        // todo: support AND (to find zero resets), OR (to find one resets).
+        // Doing it properly would also require tackling negative polarity
+        // support.
+
       default: {
-        if (wire == loopback)
+        if (wire == loopback) // return always-on loopback
           FRAME_RET(nullref);
         FRAME_RET();
       }
@@ -240,6 +266,8 @@ public:
 
     return retVal;
   }
+#undef FRAME_CALL
+#undef FRAME_RET
 
 public:
   explicit LoopbackAnalysis(Context &ctx) : ctx(ctx) {}

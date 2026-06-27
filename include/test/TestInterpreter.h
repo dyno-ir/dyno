@@ -78,6 +78,9 @@ public:
       pipeline.interpretPassPipeline(passes, args);
     }
 
+    if (verbose)
+      print.printInstr(instr);
+
     std::print(os, "passed test: \"{}\"\n", name);
     return true;
   }
@@ -127,6 +130,9 @@ public:
         return std::unexpected(Format("{}", std::move(str).str()));
       }
     }
+
+    if (verbose)
+      print.printInstr(instr);
 
     std::print(os, "passed test: \"{}\"\n", name);
     return {};

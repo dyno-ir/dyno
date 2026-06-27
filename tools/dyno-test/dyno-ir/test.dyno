@@ -422,30 +422,20 @@ TEST_CASE :string("flip-flop-inference-rst-clk-en"), :block, :block, :block {
     }
   }
 }{
-hw.MODULE_DEF :module("mod"), :core.block {
-    hw.INPUT_REGISTER_DEF %r5:register(1)
-    hw.INPUT_REGISTER_DEF %r6:register(1)
-    hw.INPUT_REGISTER_DEF %r7:register(32)
-    hw.INPUT_REGISTER_DEF %r8:register(1)
-    hw.OUTPUT_REGISTER_DEF %r9:register(32)
-    hw.TRIGGER_DEF :trigger(pos, pos), %r5, %r6
-    hw.COMB_PROCESS_DEF :process, :core.block {
-      hw.LOAD %w9:wire(32), %r7
-      hw.LOAD %w10:wire(1), %r8
-      hw.LOAD %w11:wire(1), %r6
-      hw.LOAD %w12:wire(32), %r9
-      op.NOT %w13:wire(1), %w11
-      op.OR %w14:wire(1), %w10, %w11
-      op.NOT %w15:wire(1), %w14
-      hw.ONEHOT_MUX %w16:wire(32), %w10, %w9, %w15, %w12
-      hw.ASSUME %w17:wire(1), %w15, %w13
-      op.NOT %w18:wire(1), %w17
-      op.OR %w19:wire(1), %w11, %w17
-      op.NOT %w20:wire(1), %w19
-      hw.ASSUME %w21:wire(32), %w16, %w20
-      hw.LOAD %w22:wire(1), %r5
-      hw.FLIP_FLOP %w23:wire(32), %w22, %w21, %w18, %w11, #32'd0
-      hw.STORE %w23, %r9
+  hw.MODULE_DEF %mod:module("mod"), %b1:core.block {
+    hw.INPUT_REGISTER_DEF %r0:register(1)
+    hw.INPUT_REGISTER_DEF %r1:register(1)
+    hw.INPUT_REGISTER_DEF %r2:register(32)
+    hw.INPUT_REGISTER_DEF %r3:register(1)
+    hw.OUTPUT_REGISTER_DEF %r4:register(32)
+    hw.TRIGGER_DEF %1:trigger(pos, pos), %r0, %r1
+    hw.COMB_PROCESS_DEF %2:process, %b2:core.block {
+      hw.LOAD %w1:wire(1), %r3
+      hw.LOAD %w2:wire(1), %r1
+      hw.LOAD %w3:wire(32), %r4
+      hw.LOAD %w25:wire(1), %r0
+      hw.FLIP_FLOP %w26:wire(32), %w25, %w3, %w1, %w2, #32'd0
+      hw.STORE %w26, %r4
     }
   }
 }{
@@ -679,53 +669,48 @@ TEST_CASE :string("test-reg-split"), :block, :block, :block {
     }
   }
 }{
-  hw.MODULE_DEF %Test:module("Test"), %4:core.block {
+  hw.MODULE_DEF %Test:module("Test"), %b1:core.block {
     hw.INPUT_REGISTER_DEF %r0:register(1)
     hw.INPUT_REGISTER_DEF %r1:register(2)
     hw.INPUT_REGISTER_DEF %r2:register(1)
     hw.OUTPUT_REGISTER_DEF %r3:register(1)
     hw.REGISTER_DEF %r4:register(4)
-    hw.TRIGGER_DEF %5:trigger(pos), %r0
-    hw.COMB_PROCESS_DEF %6:process, %7:core.block {
+    hw.TRIGGER_DEF %1:trigger(pos), %r0
+    hw.COMB_PROCESS_DEF %2:process, %b2:core.block {
       hw.LOAD %w0:wire(4), %r4
       hw.LOAD %w1:wire(2), %r1
       op.ZEXT %w2:wire(32), %w1
-      op.TRUNC %w39:wire(1), %w0
-      hw.SPLICE %w40:wire(1), %w0, #32'd1
-      hw.SPLICE %w41:wire(1), %w0, #32'd2
-      hw.SPLICE %w42:wire(1), %w0, #32'd3
-      op.TRUNC %w43:wire(1), %w1
-      op.NOT %w56:wire(1), %w43
-      hw.SPLICE %w55:wire(1), %w1, #32'd1
-      op.NOT %w54:wire(1), %w55
-      op.AND %w57:wire(1), %w43, %w55
-      op.AND %w58:wire(1), %w55, %w56
-      op.AND %w61:wire(1), %w43, %w54
-      op.OR %w64:wire(1), %w43, %w55
-      op.NOT %w65:wire(1), %w64
-      hw.ONEHOT_MUX %w63:wire(1), %w65, %w39, %w61, %w40, %w58, %w41, %w57, %w42
-      hw.STORE %w63, %r3
+      op.TRUNC %w63:wire(1), %w0
+      hw.SPLICE %w64:wire(1), %w0, #32'd1
+      hw.SPLICE %w65:wire(1), %w0, #32'd2
+      hw.SPLICE %w66:wire(1), %w0, #32'd3
+      op.TRUNC %w67:wire(1), %w1
+      op.NOT %w80:wire(1), %w67
+      hw.SPLICE %w79:wire(1), %w1, #32'd1
+      op.NOT %w78:wire(1), %w79
+      op.AND %w81:wire(1), %w67, %w79
+      op.AND %w82:wire(1), %w79, %w80
+      op.AND %w85:wire(1), %w67, %w78
+      op.OR %w88:wire(1), %w67, %w79
+      op.NOT %w89:wire(1), %w88
+      hw.ONEHOT_MUX %w87:wire(1), %w89, %w63, %w85, %w64, %w82, %w65, %w81, %w66
+      hw.STORE %w87, %r3
       hw.LOAD %w4:wire(1), %r2
-      op.OR %w52:wire(1), %w4, %w63
-      op.NOT %w53:wire(1), %w52
-      op.NOT %w16:wire(32), %w2
-      op.TRUNC %w18:wire(1), %w16
-      hw.SPLICE %w20:wire(1), %w16, #32'd1
-      op.AND %w22:wire(1), %w18, %w55
-      op.AND %w23:wire(1), %w20, %w43
-      op.AND %w24:wire(1), %w18, %w20
-      hw.LOAD %w50:wire(1), %r0
-      hw.ASSUME %w30:wire(1), %w53, %w24
-      // register split into 4 ffs with different clock enables
-      hw.FLIP_FLOP %w21:wire(1), %w50, %w30, %w24
-      hw.ASSUME %w17:wire(1), %w53, %w23
-      hw.FLIP_FLOP %w67:wire(1), %w50, %w17, %w23
-      hw.ASSUME %w68:wire(1), %w53, %w22
-      hw.FLIP_FLOP %w70:wire(1), %w50, %w68, %w22
-      hw.ASSUME %w71:wire(1), %w53, %w57
-      hw.FLIP_FLOP %w73:wire(1), %w50, %w71, %w57
-      hw.CONCAT %w36:wire(4), %w73, %w70, %w67, %w21
-      hw.STORE %w36, %r4
+      op.OR %w76:wire(1), %w4, %w87
+      op.NOT %w77:wire(1), %w76
+      op.NOT %w40:wire(32), %w2
+      op.TRUNC %w42:wire(1), %w40
+      hw.SPLICE %w44:wire(1), %w40, #32'd1
+      hw.LOAD %w74:wire(1), %r0
+      op.AND %w50:wire(1), %w42, %w44
+      hw.FLIP_FLOP %w45:wire(1), %w74, %w77, %w50
+      op.AND %w90:wire(1), %w44, %w67
+      hw.FLIP_FLOP %w91:wire(1), %w74, %w77, %w90
+      op.AND %w93:wire(1), %w42, %w79
+      hw.FLIP_FLOP %w94:wire(1), %w74, %w77, %w93
+      hw.FLIP_FLOP %w97:wire(1), %w74, %w77, %w81
+      hw.CONCAT %w60:wire(4), %w97, %w94, %w91, %w45
+      hw.STORE %w60, %r4
     }
   }
 }{
@@ -735,6 +720,45 @@ TEST_CASE :string("test-reg-split"), :block, :block, :block {
 
   meta.FLIP_FLOP_INFERENCE_PASS
   meta.INST_COMBINE_PASS map("findFlipFlopEnables": "1")
+}
+
+
+TEST_CASE :string("test-ff-sync-rst"), :block, :block, :block {
+  MODULE_DEF :module("Test"), :block {
+    INPUT_REGISTER_DEF %clk:register(1)
+    INPUT_REGISTER_DEF %rst:register(1)
+    INPUT_REGISTER_DEF %d:register(1)
+    INPUT_REGISTER_DEF %q:register(1)
+
+    COMB_PROCESS_DEF :process, :block {
+      LOAD %rst_w:wire(1), %rst
+      NOT %rst_w_inv:wire(1), %rst_w
+
+      LOAD %d_w:wire(1), %d
+      LOAD %clk_w:wire(1), %clk
+
+      ONEHOT_MUX %d_with_reset:wire(1), %rst_w, #1'd0, %rst_w_inv, %d_w
+      FLIP_FLOP %q_w:wire(1), %clk_w, %d_with_reset, #1'd1
+
+      STORE %q_w, %q
+    }
+  }
+}{
+  hw.MODULE_DEF %Test:module("Test"), %b1:core.block {
+    hw.INPUT_REGISTER_DEF %r0:register(1)
+    hw.INPUT_REGISTER_DEF %r1:register(1)
+    hw.INPUT_REGISTER_DEF %r2:register(1)
+    hw.INPUT_REGISTER_DEF %r3:register(1)
+    hw.COMB_PROCESS_DEF %0:process, %b2:core.block {
+      hw.LOAD %w0:wire(1), %r1
+      hw.LOAD %w2:wire(1), %r2
+      hw.LOAD %w3:wire(1), %r0
+      hw.FLIP_FLOP_SRST %w6:wire(1), %w3, %w2, #1'd1, %w0, #1'd0
+      hw.STORE %w6, %r3
+    }
+  }
+}{
+  meta.INST_COMBINE_PASS map("findFlipFlopEnables": "1", "findFlipFlopSyncResets": "1")
 }
 
 // lower down to memory mapping
