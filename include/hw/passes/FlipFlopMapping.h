@@ -113,8 +113,8 @@ class FlipFlopMappingPass : public Pass<FlipFlopMappingPass> {
   };
 
   using StdCellOrFixupF = PointersIntsVariant<FixupType, StdCellFF *>;
-  Vec<StdCellOrFixupF> ffMap =
-      Vec<StdCellOrFixupF>(1ull << AbstractFF::NUM_INDICES, FixupType::FAIL);
+  Vec<StdCellOrFixupF> ffMap = Vec<StdCellOrFixupF>(
+      1ull << unsigned(AbstractFF::NUM_INDICES), FixupType::FAIL);
   SlabAllocator<StdCellFF> stdCellFFs;
 
   struct FatFF {
