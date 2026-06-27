@@ -203,7 +203,10 @@ private:
 
     instr.def().replace(FatDynObjRef<>{nullref});
     deleteMatchedInstr(instr);
-    build.buildConcat(std::move(concat));
+    if (concat.getNumOthers() == 1)
+      replaceUses(concat[0].as<WireRef>(), concat[1]);
+    else
+      build.buildConcat(std::move(concat));
 
     return PAT_TRUE;
   }
@@ -218,8 +221,9 @@ private:
 
     auto part = loopbackAnalysis.get(instr.d(), nullref);
 
-    if (Range{part.frags}.all([](auto frag) { return !frag; }))
-      return false;
+    if (Range{part.frags}.all(
+            [](auto frag) { return !frag || frag.size() == 0; }))
+      return PAT_FALSE;
 
     HWInstrBuilder build{ctx, instr};
     OperandVec<HWValue> concat(ctx, 1, part.frags.size());
@@ -229,7 +233,7 @@ private:
       HWValue d = build.buildSplice(instr.d(), frag.len, frag.dstAddr);
       SmallVec<std::tuple<HWValue, HWValue>, 4> rsts(instr.rsts());
 
-      if (frag) {
+      if (frag && frag.size() != 0 /*todo: allow empty*/) {
         // Loopback analysis does not return the found constant value. Recompute
         // it based on en signals with local known bits.
         KnownBitsAnalysis knownBits{ctx};
@@ -239,7 +243,9 @@ private:
             })};
         auto rstVal = knownBits.getKnownBitsWith(instr.d(), assignments);
         BigInt::rangeSelectOp4S(rstVal, rstVal, frag.dstAddr, frag.len);
-        rsts.emplace_back(build.buildAnd(Range{frag}.resolve(ctx)),
+        rsts.emplace_back(frag.size() == 0
+                              ? ConstantRef::fromBool(true)
+                              : build.buildAnd(Range{frag}.resolve(ctx)),
                           ctx.getStore<Constant>().findOrInsert(rstVal));
       }
 
@@ -251,7 +257,10 @@ private:
 
     instr.def().replace(FatDynObjRef<>{nullref});
     deleteMatchedInstr(instr);
-    build.buildConcat(std::move(concat));
+    if (concat.getNumOthers() == 1)
+      replaceUses(concat[0].as<WireRef>(), concat[1]);
+    else
+      build.buildConcat(std::move(concat));
 
     return PAT_TRUE;
   }
@@ -1382,7 +1391,10 @@ private:
     }
 
     concatOut.others().do_reverse();
-    build.buildConcat(std::move(concatOut));
+    if (concatOut.getNumOthers() == 1)
+      replaceUses(concatOut[0].as<WireRef>(), concatOut[1]);
+    else
+      build.buildConcat(std::move(concatOut));
     deleteMatchedInstr(concat);
     return PAT_TRUE;
   }
