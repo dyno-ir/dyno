@@ -1681,6 +1681,14 @@ public:
     return val;
   }
 
+  HWValue buildLUT(MutInstr<FatDynObjRef<>> &&templ) {
+    if (!templ[0])
+      templ[0] = ctx.getStore<Wire>().create();
+    auto defW = templ[0];
+    insertInstr(templ.build());
+    return defW;
+  }
+
   void destroyObj(FatDynObjRef<> obj) {
     if (obj == nullref)
       return;

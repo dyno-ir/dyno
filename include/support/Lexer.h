@@ -205,9 +205,7 @@ public:
 
   Lexer(ArrayRef<char> src, std::string &&srcPath,
         ArrayRef<const char *> operators, ArrayRef<const char *> keywords)
-      : path(srcPath), src(src), operators(operators), keywords(keywords) {
-    assert(src.size() > 0 && src.back() == '\0');
-  }
+      : path(srcPath), src(src), operators(operators), keywords(keywords) {}
 
   Token lexNext() {
     auto &i = state.i;

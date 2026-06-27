@@ -41,7 +41,7 @@ public:
 
   UnsizedSymbSet() = default;
   UnsizedSymbSet(size_t preallocSymbs)
-      : storage(round_up_div(preallocSymbs, WordSymbs)) {}
+      : storage(round_up_div(preallocSymbs, WordSymbs), DefaultWord) {}
 
   void ensureSymbs(size_t i) { ensureWords(round_up_div(i, WordSymbs)); }
   void ensureSymbsExp(size_t i) { ensureWordsExp(round_up_div(i, WordSymbs)); }

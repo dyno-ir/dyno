@@ -488,12 +488,14 @@ inline Vec<T, N>::Vec(Range<It> range) : Vec() {
 }
 
 template <typename T, size_t NumInline> class CexprVec {
+public:
   using value_type = T;
   using size_type = uint32_t;
   using iterator = T *;
   using const_iterator = const T *;
   using param_type = T &;
 
+private:
   std::array<T, NumInline> arr = {};
   uint32_t sz = 0;
 
@@ -557,12 +559,14 @@ public:
 
 template <typename T, size_t NumInline, typename SzT = uint32_t>
 class StaticVec {
+public:
   using value_type = T;
   using size_type = SzT;
   using iterator = T *;
   using const_iterator = const T *;
   using param_type = T &;
 
+private:
   std::array<T, NumInline> arr;
   size_type sz = 0;
 
@@ -663,4 +667,7 @@ public:
 
   constexpr StaticVec() = default;
   constexpr StaticVec(size_type sz) : sz(sz) {}
+  constexpr StaticVec(size_type sz, const T &templ) : sz(sz) {
+    std::fill_n(begin(), sz, templ);
+  }
 };

@@ -11,12 +11,17 @@
 #include "hw/HWContext.h"
 #include "hw/HWInstr.h"
 #include "hw/IDs.h"
+#include "hw/LUT.h"
 #include "hw/Process.h"
+#include "support/DynBitSet.h"
 #include "support/ErrorRecovery.h"
+#include "support/SmallVec.h"
 #include "support/TemplateUtil.h"
+#include "support/Tokenizer.h"
 #include "support/Tuple.h"
 #include "support/Utility.h"
 #include <fstream>
+#include <regex>
 #include <type_traits>
 
 namespace dyno {
@@ -154,7 +159,8 @@ public:
         std::getline(is, rem);
         line = line.substr(0, line.size() - 1) + rem;
       }
-
+      if (line.empty() || line.starts_with("#") || line.starts_with(".end"))
+        continue;
       if (line.starts_with(".inputs")) {
         for (auto [i, tok] : split(line).drop_front().enumerate()) {
           auto def = *aigObj->aig.inputs[i]->defUse.getSingleDef();
@@ -263,6 +269,79 @@ public:
           ib.addRefs(defs).other().addRef(mod).addRefs(uses);
         }
       }
+      if (line.starts_with(".names")) {
+        auto iosRange = Tokenizer{line, " \t"};
+        SmallVec<std::string_view, 2> ios(Range{iosRange}.drop_front());
+
+        auto inputIdents = Range{ios}.subrange(0, ios.size() - 1);
+        if (inputIdents.size() > 28)
+          // maybe use a different lowering
+          report_fatal_error("BLIF too many inputs for LUT");
+        auto outputIdent = ios.back();
+        BigInt lut;
+
+        while (is.peek() == Any{'0', '1', '-'}) {
+          std::getline(is, line);
+          auto lineRange = Tokenizer{line, " \t"};
+          SmallVec<std::string_view, 2> parts(Range{lineRange});
+          if (parts.size() < 2)
+            report_fatal_error("BLIF format");
+
+          auto inputs = parts[0];
+          auto output = parts[1];
+
+          if (inputs.size() != size_t(inputIdents.size()) ||
+              output.size() != 1 || output != Any{"0", "1"})
+            report_fatal_error("BLIF format");
+
+          if (lut.getRawNumBits() == 0) {
+            lut = PatBigInt::fromFourState(!(output == "1"),
+                                           1ull << inputIdents.size());
+          }
+
+          UnsizedBitSet<StaticVec<uint32_t, 1>> set(inputs.size());
+          StaticVec<uint32_t, 32> freeBits;
+          for (auto [i, c] : Range{inputs}.reverse().enumerate()) {
+            switch (c) {
+            case '0':
+              set[i] = 0;
+              break;
+            case '1':
+              set[i] = 1;
+              break;
+            case '-':
+              freeBits.push_back(i);
+              break;
+            }
+          }
+
+          uint32_t max = 1ull << freeBits.size();
+          for (uint32_t i = 0; i < max; i++) {
+            DynBitField bits(i, 0, freeBits.size());
+            for (uint32_t j = 0; j < freeBits.size(); j++) {
+              set[freeBits[j]] = !!bits.at(j);
+            }
+
+            lut.setBit(set.raw().front(), output == "1");
+          }
+        }
+
+        LUTMutInstr lutInstr{
+            ctx,
+            names
+                .findOrInsert(outputIdent,
+                              [&]() { return ctx.getStore<Wire>().create(1); })
+                .second.val()
+                .as<WireRef>(),
+            ctx.getStore<Constant>().findOrInsert(lut),
+            inputIdents.transform([&](size_t, auto name) {
+              return names
+                  .findOrInsert(
+                      name, [&]() { return ctx.getStore<Wire>().create(1); })
+                  .second.val();
+            })};
+        build.buildLUT(std::move(lutInstr));
+      }
     }
   }
 };
@@ -334,16 +413,29 @@ class ABCPass : public Pass<ABCPass> {
       BLIF_Printer print{ctx, blifFile};
       print.print(aigRef);
     }
-    system(("yosys-abc -q \"read_blif aig.blif; read_lib -X "
-            "sky130_fd_sc_hd__lpflow_inputiso1p_1 -X "
-            "sky130_fd_sc_hd__lpflow_isobufsrc_1 -X sky130_fd_sc_hd__clkinv_1 "
-            "-w " +
-            config.path +
-            "; strash; &get -n; &fraig -x; "
-            "&put; scorr; dc2; dretime; strash; &get -n; &dch -f; &nf; &put;"
-            "print_stats; write_blif "
-            "mapped.blif\"")
-               .c_str());
+
+    auto cmd = std::regex_replace(config.abcCmd, std::regex("${liberty-path}"),
+                                  config.path);
+
+    system(("yosys-abc -q \"" + cmd + "\"").c_str());
+    // system(("yosys-abc -q \"read_blif aig.blif; read_lib -X "
+    //         "sky130_fd_sc_hd__lpflow_inputiso1p_1 -X "
+    //         "sky130_fd_sc_hd__lpflow_isobufsrc_1 -X sky130_fd_sc_hd__clkinv_1
+    //         "
+    //         "-w " +
+    //         config.path +
+    //         "; strash; &get -n; &fraig -x; "
+    //         "&put; scorr; dc2; dretime; strash; &get -n; &dch -f; &nf; &put;"
+    //         "print_stats; write_blif "
+    //         "mapped.blif\"")
+    //            .c_str());
+
+    // system("yosys-abc -q \"read_blif aig.blif; strash; &get -n; &fraig -x; "
+    //        "&put; scorr; dc2; "
+    //        "dretime; strash;"
+    //        "dch -f; if; mfs2;"
+    //        "print_stats; write_blif "
+    //        "mapped.blif\"");
 
     // system("yosys-abc -q \"read_blif aig.blif; read_library "
     //        "stdcells.genlib; strash; &get -n; &fraig -x; "
@@ -378,7 +470,17 @@ class ABCPass : public Pass<ABCPass> {
   }
 
 public:
-#define CONFIG_STRUCT_LAMBDA(FIELD, ENUM) FIELD(std::string, path, )
+#define CONFIG_STRUCT_LAMBDA(FIELD, ENUM)                                      \
+  FIELD(std::string, path, )                                                   \
+  FIELD(std::string, abcCmd,                                                   \
+        "read_blif aig.blif; read_lib -X "                                     \
+        "sky130_fd_sc_hd__lpflow_inputiso1p_1 -X "                             \
+        "sky130_fd_sc_hd__lpflow_isobufsrc_1 -X sky130_fd_sc_hd__clkinv_1 "    \
+        "-w ${liberty-path}"                                                   \
+        "; strash; &get -n; &fraig -x; "                                       \
+        "&put; scorr; dc2; dretime; strash; &get -n; &dch -f; &nf; &put;"      \
+        "print_stats; write_blif "                                             \
+        "mapped.blif")
   CONFIG_STRUCT(CONFIG_STRUCT_LAMBDA)
 #undef CONFIG_STRUCT_LAMBDA
   Config config;
@@ -416,10 +518,9 @@ public:
 
   static constexpr auto runFuncs =
       mk_tuple(&ABCPass::runModule, &ABCPass::runProcess, &ABCPass::runAIG,
-                 &ABCPass::run);
+               &ABCPass::run);
 
   auto make(Context &ctx) { return ABCPass(ctx); }
   explicit ABCPass(Context &ctx) : ctx(ctx) {}
 };
-
 }; // namespace dyno

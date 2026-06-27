@@ -50,6 +50,8 @@ public:
    * read. mainly useful for wide ROMs or asymmetric r/w width, otherwise      \
    * limited by other port */                                                  \
   FIELD(bool, virtualWidePorts, false)                                         \
+  /* 1 / this is maximum bits or bandwidth wasted, whatever is more limiting   \
+   */                                                                          \
   FIELD(uint32_t, maxRepeatCountFactor, 8)
   CONFIG_STRUCT(CONFIG_STRUCT_LAMBDA)
 #undef CONFIG_STRUCT_LAMBDA
