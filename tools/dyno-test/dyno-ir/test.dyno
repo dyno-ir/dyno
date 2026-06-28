@@ -430,12 +430,12 @@ TEST_CASE :string("flip-flop-inference-rst-clk-en"), :block, :block, :block {
     hw.OUTPUT_REGISTER_DEF %r4:register(32)
     hw.TRIGGER_DEF %1:trigger(pos, pos), %r0, %r1
     hw.COMB_PROCESS_DEF %2:process, %b2:core.block {
+      hw.LOAD %w0:wire(32), %r2
       hw.LOAD %w1:wire(1), %r3
       hw.LOAD %w2:wire(1), %r1
-      hw.LOAD %w3:wire(32), %r4
-      hw.LOAD %w25:wire(1), %r0
-      hw.FLIP_FLOP %w26:wire(32), %w25, %w3, %w1, %w2, #32'd0
-      hw.STORE %w26, %r4
+      hw.LOAD %w15:wire(1), %r0
+      hw.FLIP_FLOP %w16:wire(32), %w15, %w0, %w1, %w2, #32'd0
+      hw.STORE %w16, %r4
     }
   }
 }{
@@ -701,15 +701,15 @@ TEST_CASE :string("test-reg-split"), :block, :block, :block {
       op.NOT %w40:wire(32), %w2
       op.TRUNC %w42:wire(1), %w40
       hw.SPLICE %w44:wire(1), %w40, #32'd1
+      op.AND %w46:wire(1), %w42, %w79
+      op.AND %w47:wire(1), %w44, %w67
+      op.AND %w48:wire(1), %w42, %w44
       hw.LOAD %w74:wire(1), %r0
-      op.AND %w50:wire(1), %w42, %w44
-      hw.FLIP_FLOP %w45:wire(1), %w74, %w77, %w50
-      op.AND %w90:wire(1), %w44, %w67
-      hw.FLIP_FLOP %w91:wire(1), %w74, %w77, %w90
-      op.AND %w93:wire(1), %w42, %w79
-      hw.FLIP_FLOP %w94:wire(1), %w74, %w77, %w93
-      hw.FLIP_FLOP %w97:wire(1), %w74, %w77, %w81
-      hw.CONCAT %w60:wire(4), %w97, %w94, %w91, %w45
+      hw.FLIP_FLOP %w54:wire(1), %w74, %w77, %w48
+      hw.FLIP_FLOP %w50:wire(1), %w74, %w77, %w47
+      hw.FLIP_FLOP %w45:wire(1), %w74, %w77, %w46
+      hw.FLIP_FLOP %w41:wire(1), %w74, %w77, %w81
+      hw.CONCAT %w60:wire(4), %w41, %w45, %w50, %w54
       hw.STORE %w60, %r4
     }
   }

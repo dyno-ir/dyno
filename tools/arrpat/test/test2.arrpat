@@ -770,6 +770,21 @@ match {
 }
 replace $out -> $in
 
+// elaborate d flip flops
+match {
+  HW_FLIP_FLOP_SRST $q, $clk, #1'd0, #1'd1, $other_rsts..., $d, #1'd1
+}
+replace {
+  HW_FLIP_FLOP $q, $clk, $d, #1'd1, $other_rsts...
+}
+match {
+  HW_FLIP_FLOP_SRST $q, $clk, #1'd1, #1'd1, $other_rsts..., $d, #1'd0
+}
+replace {
+  OP_NOT $d_inv:wire_like($d)
+  HW_FLIP_FLOP $q, $clk, $d_inv, #1'd1, $other_rsts...
+}
+
 /*
 macro wire32 -> $rv [{
   FatDynObjRef<> w = ctx.getStore<Wire>().create(32);

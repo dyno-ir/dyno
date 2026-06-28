@@ -191,8 +191,12 @@ private:
           // assuming no initval/rst behavior.
           en = ConstantRef::fromBool(false);
         } else {
-          auto newEn = build.buildNot(build.buildAnd(Range{frag}.resolve(ctx)));
-          en = build.buildAnd(en, newEn);
+          auto newEn =
+              build.buildOr(Range{frag}.transform([&](size_t, auto pair) {
+                auto ref = ctx.resolve(pair.first);
+                return pair.second ? build.buildNot(ref) : ref;
+              }));
+          en = build.buildAnd(InitListRange{en, newEn});
         }
       }
 
@@ -207,19 +211,20 @@ private:
       replaceUses(concat[0].as<WireRef>(), concat[1]);
     else
       build.buildConcat(std::move(concat));
-
     return PAT_TRUE;
   }
 
   PatBool findFlipFlopSyncResets(FlipFlopIRef instr) {
     if (!config.findFlipFlopSyncResets)
       return false;
-
     // already has async resets
     if (instr.isOpc(HW_FLIP_FLOP) && !instr.rsts().empty())
       return PAT_FALSE;
 
     auto part = loopbackAnalysis.get(instr.d(), nullref);
+
+    assert(!instr.d().is<WireRef>() ||
+           instr.d().as<WireRef>().getNumDefs() == 1);
 
     if (Range{part.frags}.all(
             [](auto frag) { return !frag || frag.size() == 0; }))
@@ -238,19 +243,24 @@ private:
         // it based on en signals with local known bits.
         KnownBitsAnalysis knownBits{ctx};
         SmallVec<std::pair<ObjRef<Wire>, BigInt>, 4> assignments{
-            Range{frag}.resolve(ctx).transform([](size_t, auto ref) {
-              return std::make_pair(ref, BigInt::fromU32(true, 1));
+            Range{frag}.transform([&](size_t, auto ref) {
+              return std::make_pair(ctx.resolve(ref.first),
+                                    BigInt::fromU32(ref.second, 1));
             })};
         auto rstVal = knownBits.getKnownBitsWith(instr.d(), assignments);
         BigInt::rangeSelectOp4S(rstVal, rstVal, frag.dstAddr, frag.len);
-        rsts.emplace_back(frag.size() == 0
-                              ? ConstantRef::fromBool(true)
-                              : build.buildAnd(Range{frag}.resolve(ctx)),
-                          ctx.getStore<Constant>().findOrInsert(rstVal));
+        rsts.emplace_back(
+            frag.size() == 0
+                ? ConstantRef::fromBool(true)
+                : build.buildAnd(Range{frag}.transform([&](size_t, auto pair) {
+                    auto ref = ctx.resolve(pair.first);
+                    return pair.second ? ref : build.buildNot(ref);
+                  })),
+            ctx.getStore<Constant>().findOrInsert(rstVal));
       }
 
-      auto val =
-          build.buildFlipFlop(instr.clk(), d, instr.clkEn(), Range{rsts}, true);
+      auto val = build.buildFlipFlop(instr.clk(), d, instr.clkEnRaw(),
+                                     Range{rsts}, true);
       concat.emplace_back(val);
     }
     concat.others().do_reverse();
@@ -320,7 +330,7 @@ private:
     for (auto [val, idxs] : map) {
       auto sel = instr.rstRaw(idxs.front());
       for (auto other : Range{idxs}.drop_front()) {
-        sel = build.buildOr(instr.rstRaw(other));
+        sel = build.buildOr(sel, instr.rstRaw(other));
       }
       rstVals.emplace_back(sel, ctx.resolve(val));
     }
@@ -333,7 +343,8 @@ private:
     // could still be used as latch with multiple
     // rests (or change state away from init with single)
     if (instr.numRsts() == 0)
-      if (auto c = instr.clkEn().dyn_as<ConstantRef>(); c && c.valueEquals(0)) {
+      if (auto c = instr.clkEnRaw().dyn_as<ConstantRef>();
+          c && c.valueEquals(0)) {
         auto w = instr.def()->as<WireRef>();
         // todo: init val
         replaceUses(w, cbuild.undef(*w.getNumBits()).get());
@@ -423,6 +434,8 @@ private:
   // Helper function for derived bits, try to replace root or its exclusive
   // dependencies with derived known values.
   bool boolExprSimplifySub(OperandRef root) {
+    if (!root->is<WireRef>())
+      return false;
     SmallVec<OperandRef, 16> stack{root};
     bool change = false;
     while (!stack.empty()) {
@@ -445,8 +458,10 @@ private:
 
       auto instr = wire.getDefI();
       for (auto op : instr.others()) {
-        if (op->is<WireRef>())
+        if (op->is<WireRef>()) {
+          assert(op->as<WireRef>().getNumDefs() == 1);
           stack.emplace_back(op);
+        }
       }
     }
     return change;
@@ -548,15 +563,15 @@ private:
 
     bool change = false;
 
-    if (auto clkEnWire = instr.clkEn().dyn_as<WireRef>()) {
-      change |= boolExprSimplifySub(*clkEnWire.getSingleDef());
+    change |= boolExprSimplifySub(instr.clkEnRawOp());
+
+    if (auto clkEnWire = instr.clkEnRaw().dyn_as<WireRef>()) {
       // assume clkEn true for rest
       if (!change)
         deriveBits.propKnownValueUp(clkEnWire, BigInt::fromU32(true, 1));
     }
 
-    if (auto dWire = instr.d().dyn_as<WireRef>())
-      change |= boolExprSimplifySub(*dWire.getSingleDef());
+    change |= boolExprSimplifySub(instr.dOp());
 
     deriveBits.clearCache();
 
@@ -2184,9 +2199,9 @@ private:
         return trueV;
       if (auto trueV = simplifyFlipFlopResets(instr))
         return trueV;
-      if (auto trueV = findFlipFlopSyncResets(instr))
-        return trueV;
       if (auto trueV = findFlipFlopEnables(instr))
+        return trueV;
+      if (auto trueV = findFlipFlopSyncResets(instr))
         return trueV;
       break;
     }

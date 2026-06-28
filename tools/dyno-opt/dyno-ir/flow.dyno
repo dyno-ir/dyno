@@ -148,8 +148,6 @@ FUNCTION_DEF %synthMemoryFFMuxHandling:func, :block {
     "lowerOneHotMux"         : "0",
   )
 
-  meta.DUMP_PASS map("path": "post_lower.dyno")
-
   // lift MUXs up the dep chain for reg partition
   // (s.t. regs with e.g. concat input can be split)
   meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS
@@ -170,8 +168,6 @@ FUNCTION_DEF %synthMemoryFFMuxHandling:func, :block {
   meta.INST_COMBINE_PASS map("muxToOneHotMux": "1")
   meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS
   meta.INST_COMBINE_PASS map("muxToOneHotMux": "1", "findFlipFlopEnables": "1", "findFlipFlopSyncResets": "1")
-  meta.DUMP_PASS map("path": "post_critical.dyno")
-
 }
 
 FUNCTION_DEF %synthLowerMemoryFF:func, :block {

@@ -158,7 +158,7 @@ public:
     destroy(ref);
   }
 
-  bool exists(ObjRef<T> ref) { return !!map[ref]; }
+  bool exists(ObjRef<T> ref) { return map.inRange(ref) && !!map[ref]; }
 
   FatRefT resolve(ObjRef<T> ref) { return FatRefT{ref, map[ref]}; }
   FatDynObjRef<> resolveGeneric(DynObjRef ref) {

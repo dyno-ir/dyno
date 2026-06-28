@@ -28,10 +28,12 @@ public:
   bool clkPol() const { return clkAndPol().second; }
 
   HWValue d() const { return other(1)->as<HWValue>(); }
+  OperandRef dOp() const { return other(1); }
 
   WireRef q() const { return def(0)->as<WireRef>(); }
 
   HWValue clkEnRaw() const { return other(2)->as<HWValue>(); }
+  OperandRef clkEnRawOp() const { return other(2); }
   bool hasClkEn() const {
     return !(clkEnRaw().is<ConstantRef>() &&
              clkEnRaw().as<ConstantRef>().valueEquals(1));
