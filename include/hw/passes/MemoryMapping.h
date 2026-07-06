@@ -52,7 +52,9 @@ public:
   FIELD(bool, virtualWidePorts, false)                                         \
   /* 1 / this is maximum bits or bandwidth wasted, whatever is more limiting   \
    */                                                                          \
-  FIELD(uint32_t, maxRepeatCountFactor, 8)
+  FIELD(uint32_t, maxRepeatCountFactor, 8)                                     \
+  /* Mostly for performance (todo: bump when matching no longer quadratic) */  \
+  FIELD(uint32_t, maxInitRepeatCount, 100)
   CONFIG_STRUCT(CONFIG_STRUCT_LAMBDA)
 #undef CONFIG_STRUCT_LAMBDA
   Config config;
@@ -208,7 +210,8 @@ private:
     // here is easy to recompute (done in constructor).
     MemoryMapping mapping;
 
-    MemoryMapper(Config &config, RegisterIRef actual, RegisterIRef model)
+    MemoryMapper(Context &ctx, Config &config, RegisterIRef actual,
+                 RegisterIRef model)
         : config(config), actual(actual), model(model),
           actualStores(
               actual.oref().uses().filter(filterStore).transform(getInstr)),
@@ -220,6 +223,29 @@ private:
               model.oref().uses().filter(filterLoad).transform(getInstr)),
           mapping{{}, {}, (actualStores.size()), (actualLoads.size()), {}, 0,
                   0,  0} {
+      // sort by actual position in parent block
+      auto sort = [&](auto range) {
+        range.sort([&](auto a, auto b) {
+          return a.iter(ctx).getPos() < b.iter(ctx).getPos();
+        });
+      };
+      auto sortLoadStoresByPriority = [&](auto &loads, auto &stores) {
+        assert(loads.front().parentBlock(ctx) ==
+               stores.front().parentBlock(ctx));
+        assert(Range{stores}
+                   .tf([&](auto st) { return st.parentBlock(ctx); })
+                   .all_equal());
+        assert(Range{loads}
+                   .tf([&](auto ld) { return ld.parentBlock(ctx); })
+                   .all_equal());
+        // sort the block to make pos comparable
+        loads.front().parentBlock(ctx).sort();
+        sort(Range{loads});
+        sort(Range{stores});
+      };
+      sortLoadStoresByPriority(modelLoads, modelStores);
+      sortLoadStoresByPriority(actualLoads, actualStores);
+
       modelPortWidth = *getMinFact(modelStores[0]);
       assert(Range{modelStores}.all(
           [&](auto st) { return *getMinFact(st) == modelPortWidth; }));
@@ -477,7 +503,7 @@ private:
 
           // sub instance stores may not cross the striping boundaries
           if constexpr (std::is_same_v<RefT, MemStoreIRef>) {
-            // todo: relax this rule for known-fused stores (e.g. capacity
+            // todo: relax this rule for known-fused stores (e.g. bandwidth
             // increasing repeats)
             auto lowIdx = baseAddr / subPortBoundary;
             auto highIdx = (baseAddr + adjModPortLen - 1) / subPortBoundary;
@@ -496,8 +522,9 @@ private:
 
           // constant stuff - we can probably just define no const addr for
           // model mems
-          assert(!modSt.addr().template is<ConstantRef>() &&
-                 !actSt.addr().template is<ConstantRef>());
+          if (modSt.addr().template is<ConstantRef>() ||
+              actSt.addr().template is<ConstantRef>())
+            report_fatal_error("expected non-constant address");
 
           auto fragAccessLen = std::min(part.getLen() - adjAddr, adjModPortLen);
           // If already covered attempt to move forward and cover more via idx
@@ -555,6 +582,28 @@ private:
       }
 
       if constexpr (std::is_same_v<RefT, MemStoreIRef>) {
+        auto getModelPortPriorities = [&](size_t s) {
+          return Range{partitions[s].frags}.tf(
+              [](PortFrag frag) { return *frag.mapping; });
+        };
+        // for multiple stores, check that priority matches what's specified in
+        // model. We greedily match in correct order, so if possible it should.
+        // Thus just catch late here and fail if not.
+        bool storePrioOK =
+            IntRange{actualPorts.size()}.is_sorted([&](size_t lhs, size_t rhs) {
+              // lowest prio model port of higher prio actual port
+              // always has higher prio than
+              // highest prio model port of lower prio actual port
+              unsigned lowestPrioModPortOfHigherPrioActPort =
+                  *getModelPortPriorities(lhs).max();
+              unsigned highestPrioModPortOfLowerPrioActPort =
+                  *getModelPortPriorities(rhs).min();
+              return lowestPrioModPortOfHigherPrioActPort <
+                     highestPrioModPortOfLowerPrioActPort;
+            });
+        if (!storePrioOK)
+          return false;
+
         // Mask off unused ports
         for (const auto globIdx : usedModelPort.unsetBitIdxs()) {
           uint32_t modStIdx = globIdx % modelPorts.size();
@@ -988,7 +1037,7 @@ private:
 
     // todo: prune search space based on score
     for (auto modelCand : Range{memStdCells}.resolve(ctx)) {
-      MemoryMapper mapper{config, actual, modelCand.iref()};
+      MemoryMapper mapper{ctx, config, actual, modelCand.iref()};
 
       if (mapper.actualPortsLCM == 0) {
         DYNO_DBG(dumpInstr(actual, ctx);
@@ -1009,7 +1058,7 @@ private:
       };
 
       uint32_t repCount = mapper.mapping.repeatCount;
-      if (repCount > 100)
+      if (repCount > config.maxInitRepeatCount)
         continue;
       uint32_t maxRepCount = repCount * config.maxRepeatCountFactor;
 
@@ -1048,7 +1097,7 @@ private:
     if (!best)
       return false;
 
-    MemoryMapper mapper{config, actual, ctx.resolve(best->first).iref()};
+    MemoryMapper mapper{ctx, config, actual, ctx.resolve(best->first).iref()};
     mapper.mapping = std::move(best->second);
     mapper.apply(ctx);
 

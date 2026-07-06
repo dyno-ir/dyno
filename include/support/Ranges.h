@@ -361,6 +361,86 @@ public:
   }
 };
 
+template <typename T, typename TransformT>
+class transform_iterator_noindex
+    : public base_iterator<transform_iterator_noindex<T, TransformT>,
+                           typename std::iterator_traits<T>::iterator_category,
+                           typename std::iterator_traits<T>::difference_type> {
+  T it;
+  TransformT transformF;
+
+public:
+  using iterator_category = std::iterator_traits<T>::iterator_category;
+  using reference = decltype(transformF(*it));
+  using value_type = std::remove_cvref_t<reference>;
+  using pointer = value_type *;
+  using difference_type = std::iterator_traits<T>::difference_type;
+
+private:
+  static constexpr bool isRandom =
+      std::is_same_v<iterator_category, std::random_access_iterator_tag>;
+  static constexpr bool isBidir =
+      std::is_same_v<iterator_category, std::bidirectional_iterator_tag> ||
+      isRandom;
+
+public:
+  transform_iterator_noindex()
+    requires std::is_default_constructible_v<TransformT>
+  = default;
+
+  transform_iterator_noindex(T it)
+    requires std::is_default_constructible_v<TransformT>
+      : it(it) {}
+
+  transform_iterator_noindex(T it, TransformT transformF)
+      : it(it), transformF(transformF) {}
+
+  auto operator*() const { return transformF(*it); }
+  auto operator*() { return transformF(*it); }
+
+  transform_iterator_noindex &operator++() {
+    ++it;
+    return *this;
+  }
+  // for some reason the base_iterator version can't be resolved
+  transform_iterator_noindex operator++(int) {
+    transform_iterator_noindex tmp(*this);
+    ++(*this);
+    return tmp;
+  }
+
+  transform_iterator_noindex &operator--()
+    requires(isBidir)
+  {
+    --it;
+    return *this;
+  }
+  transform_iterator_noindex &
+  operator+=(std::conditional_t<isRandom, difference_type, int> n)
+    requires(isRandom)
+  {
+    it += n;
+    return *this;
+  }
+
+  difference_type operator-(const transform_iterator_noindex &o)
+    requires(isRandom)
+  {
+    return it - o.it;
+  }
+
+  friend bool operator==(const transform_iterator_noindex &a,
+                         const transform_iterator_noindex &b) {
+    return a.it == b.it;
+  }
+  friend auto operator<=>(const transform_iterator_noindex &a,
+                          const transform_iterator_noindex &b)
+    requires(isRandom)
+  {
+    return a.it <=> b.it;
+  }
+};
+
 template <typename T> class enumerate_iterator {
   T it;
   size_t i;
@@ -1162,6 +1242,11 @@ public:
     return ::Range{transform_iterator<It, TransformT>(beginIt, transformF),
                    transform_iterator<It, TransformT>(endIt, transformF)};
   }
+  template <typename TransformT> constexpr auto tf(TransformT transformF) {
+    return ::Range{
+        transform_iterator_noindex<It, TransformT>(beginIt, transformF),
+        transform_iterator_noindex<It, TransformT>(endIt, transformF)};
+  }
 
   template <typename T> constexpr auto as() {
     auto lambda = [](size_t, auto &&src) { return src.template as<T>(); };
@@ -1216,6 +1301,12 @@ public:
   }
   template <typename T> constexpr bool all(T func) {
     return std::all_of(begin(), end(), func);
+  }
+  constexpr bool all_equal() {
+    if (begin() == end())
+      return true;
+    return std::all_of(begin() + 1, end(),
+                       [&](auto elem) { return elem == front(); });
   }
   template <typename T> constexpr bool any(T func) {
     return std::any_of(begin(), end(), func);

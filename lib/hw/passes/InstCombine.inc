@@ -2968,11 +2968,7 @@ InstrRef::iterator r5;
 InstrRef::iterator r6;
 InstrRef::iterator r7;
 InstrRef::iterator r8;
-if (!r0.isOpc(HW_MEM_LOAD)) goto cont_65_0;
-goto goto_65_0;
-cont_65_0:;
 if (!r0.isOpc(HW_MEM_STORE)) goto fail_65;
-goto_65_0:;
 if (r0.getNumOperands() > 6) goto fail_65;
 if (r0.getNumOperands() < 5) goto fail_65;
 r1 = r0.begin();
@@ -2989,7 +2985,7 @@ if (r8 == r2) break;
 loop_65_0_continue:;
 }
 loop_65_0_break:;
-auto r9 = build.buildInstrRaw(r0.getDialectOpcode(), (r3-r1)+(r4-r3)+(r5-r4)+(r7-r6)+(r8-r7));
+auto r9 = build.buildInstrRaw(HW_MEM_STORE, (r3-r1)+(r4-r3)+(r5-r4)+(r7-r6)+(r8-r7));
 copyOperands(r9, r1, r3);
 r9.other();
 copyOperands(r9, r3, r4);
@@ -3009,7 +3005,7 @@ InstrRef::iterator r5;
 InstrRef::iterator r6;
 InstrRef::iterator r7;
 InstrRef::iterator r8;
-if (!r0.isOpc(HW_MEM_STORE)) goto fail_66;
+if (!r0.isOpc(HW_MEM_LOAD)) goto fail_66;
 if (r0.getNumOperands() > 6) goto fail_66;
 if (r0.getNumOperands() < 5) goto fail_66;
 r1 = r0.begin();
@@ -3018,7 +3014,7 @@ r3 = std::next(r1);
 r4 = std::next(r3);
 r5 = std::next(r4);
 if ((*r5)->as<FatDynObjRef<>>().getType() != CORE_CONSTANT) goto fail_66;
-if ((*r5)->as<ConstantRef>() != "1'h0"_bv) goto fail_66;
+if ((*r5)->as<ConstantRef>() != "1'h1"_bv) goto fail_66;
 r6 = std::next(r5);
 r7 = std::next(r6);
 for (r8 = r7;; r8++) {
@@ -3026,10 +3022,13 @@ if (r8 == r2) break;
 loop_66_0_continue:;
 }
 loop_66_0_break:;
-
-  FatDynObjRef<> ref = (*RefRange{r1, r3}.begin())->fat();
-  RefRange{r1, r3}.begin()->replace(FatDynObjRef<>{nullref});
-  ctx.destroy(ref.as<MemoryPortRef>());
+auto r9 = build.buildInstrRaw(HW_MEM_LOAD, (r3-r1)+(r4-r3)+(r5-r4)+(r7-r6)+(r8-r7));
+copyOperands(r9, r1, r3);
+copyOperands(r9, r3, r4);
+r9.other();
+copyOperands(r9, r4, r5);
+copyOperands(r9, r6, r7);
+copyOperands(r9, r7, r8);
 deleteF(matched, ctx, r0);
 return true;
 }
@@ -3043,9 +3042,7 @@ InstrRef::iterator r5;
 InstrRef::iterator r6;
 InstrRef::iterator r7;
 InstrRef::iterator r8;
-FatDynObjRef<>* r9;
-FatDynObjRef<>* r10;
-if (!r0.isOpc(HW_MEM_LOAD)) goto fail_67;
+if (!r0.isOpc(HW_MEM_STORE)) goto fail_67;
 if (r0.getNumOperands() > 6) goto fail_67;
 if (r0.getNumOperands() < 5) goto fail_67;
 r1 = r0.begin();
@@ -3063,13 +3060,9 @@ loop_67_0_continue:;
 }
 loop_67_0_break:;
 
-  FatDynObjRef<> ref = (*RefRange{r3, r4}.begin())->fat();
-  RefRange{r3, r4}.begin()->replace(FatDynObjRef<>{nullref});
+  FatDynObjRef<> ref = (*RefRange{r1, r3}.begin())->fat();
+  RefRange{r1, r3}.begin()->replace(FatDynObjRef<>{nullref});
   ctx.destroy(ref.as<MemoryPortRef>());
-
-  FatDynObjRef<> undefStore = cbuild.undef(*((*RefRange{r1, r3}.begin())->as<WireRef>().getNumBits())).get();
-  RefRange{r9, r10} = undefStore;
-replaceAllUses(replaced, r1, r9);
 deleteF(matched, ctx, r0);
 return true;
 }
@@ -3080,9 +3073,49 @@ InstrRef::iterator r2;
 InstrRef::iterator r3;
 InstrRef::iterator r4;
 InstrRef::iterator r5;
-if (!r0.isOpc(HW_ONEHOT_MUX)) goto fail_68;
-if (r0.getNumOperands() > 3) goto fail_68;
-if (r0.getNumOperands() < 3) goto fail_68;
+InstrRef::iterator r6;
+InstrRef::iterator r7;
+InstrRef::iterator r8;
+FatDynObjRef<>* r9;
+FatDynObjRef<>* r10;
+if (!r0.isOpc(HW_MEM_LOAD)) goto fail_68;
+if (r0.getNumOperands() > 6) goto fail_68;
+if (r0.getNumOperands() < 5) goto fail_68;
+r1 = r0.begin();
+r2 = r0.end();
+r3 = std::next(r1);
+r4 = std::next(r3);
+r5 = std::next(r4);
+if ((*r5)->as<FatDynObjRef<>>().getType() != CORE_CONSTANT) goto fail_68;
+if ((*r5)->as<ConstantRef>() != "1'h0"_bv) goto fail_68;
+r6 = std::next(r5);
+r7 = std::next(r6);
+for (r8 = r7;; r8++) {
+if (r8 == r2) break;
+loop_68_0_continue:;
+}
+loop_68_0_break:;
+
+  FatDynObjRef<> ref = (*RefRange{r3, r4}.begin())->fat();
+  RefRange{r3, r4}.begin()->replace(FatDynObjRef<>{nullref});
+  ctx.destroy(ref.as<MemoryPortRef>());
+
+  FatDynObjRef<> undefStore = cbuild.undef(*((*RefRange{r1, r3}.begin())->as<WireRef>().getNumBits())).get();
+  RefRange{r9, r10} = undefStore;
+replaceAllUses(replaced, r1, r9);
+deleteF(matched, ctx, r0);
+return true;
+}
+fail_68:;
+{
+InstrRef::iterator r1;
+InstrRef::iterator r2;
+InstrRef::iterator r3;
+InstrRef::iterator r4;
+InstrRef::iterator r5;
+if (!r0.isOpc(HW_ONEHOT_MUX)) goto fail_69;
+if (r0.getNumOperands() > 3) goto fail_69;
+if (r0.getNumOperands() < 3) goto fail_69;
 r1 = r0.begin();
 r2 = r0.end();
 r3 = std::next(r1);
@@ -3096,7 +3129,7 @@ copyOperands(r6, r3, r4);
 deleteF(matched, ctx, r0);
 return true;
 }
-fail_68:;
+fail_69:;
 {
 InstrRef::iterator r1;
 InstrRef::iterator r2;
@@ -3108,9 +3141,9 @@ FatDynObjRef<>* r7;
 FatDynObjRef<>* r8;
 FatDynObjRef<>* r10;
 FatDynObjRef<>* r11;
-if (!r0.isOpc(HW_MUX)) goto fail_69;
-if (r0.getNumOperands() > 4) goto fail_69;
-if (r0.getNumOperands() < 4) goto fail_69;
+if (!r0.isOpc(HW_MUX)) goto fail_70;
+if (r0.getNumOperands() > 4) goto fail_70;
+if (r0.getNumOperands() < 4) goto fail_70;
 r1 = r0.begin();
 r2 = r0.end();
 r3 = std::next(r1);
@@ -3119,7 +3152,7 @@ r5 = std::next(r4);
 r6 = std::next(r5);
 
   if (!config.muxToOneHotMux)
-    goto fail_69;
+    goto fail_70;
 
   FatDynObjRef<> w = ctx.getStore<Wire>().create((*Range{r3, r4}.begin())->as<HWValue>().getNumBits()); RefRange{r10, r11} = w;
 auto r9 = build.buildInstrRaw(OP_NOT, (r11-r10)+(r4-r3));
@@ -3136,7 +3169,7 @@ copyOperands(r12, r5, r6);
 deleteF(matched, ctx, r0);
 return true;
 }
-fail_69:;
+fail_70:;
 {
 InstrRef::iterator r1;
 InstrRef::iterator r2;
@@ -3145,19 +3178,19 @@ InstrRef::iterator r4;
 InstrRef::iterator r5;
 FatDynObjRef<>* r6;
 FatDynObjRef<>* r7;
-if (!r0.isOpc(OP_SDIV)) goto cont_70_0;
-goto goto_70_0;
-cont_70_0:;
-if (!r0.isOpc(OP_UDIV)) goto fail_70;
-goto_70_0:;
-if (r0.getNumOperands() > 3) goto fail_70;
-if (r0.getNumOperands() < 3) goto fail_70;
+if (!r0.isOpc(OP_SDIV)) goto cont_71_0;
+goto goto_71_0;
+cont_71_0:;
+if (!r0.isOpc(OP_UDIV)) goto fail_71;
+goto_71_0:;
+if (r0.getNumOperands() > 3) goto fail_71;
+if (r0.getNumOperands() < 3) goto fail_71;
 r1 = r0.begin();
 r2 = r0.end();
 r3 = std::next(r1);
 r4 = std::next(r3);
-if ((*r4)->as<FatDynObjRef<>>().getType() != CORE_CONSTANT) goto fail_70;
-if (!(*r4)->as<ConstantRef>().valueEqualsS("1'h0"_bv)) goto fail_70;
+if ((*r4)->as<FatDynObjRef<>>().getType() != CORE_CONSTANT) goto fail_71;
+if (!(*r4)->as<ConstantRef>().valueEqualsS("1'h0"_bv)) goto fail_71;
 r5 = std::next(r4);
 
   FatDynObjRef<> undefStore = cbuild.undef(*((*RefRange{r1, r3}.begin())->as<WireRef>().getNumBits())).get();
@@ -3166,4 +3199,4 @@ replaceAllUses(replaced, r1, r6);
 deleteF(matched, ctx, r0);
 return true;
 }
-fail_70:;
+fail_71:;
