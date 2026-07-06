@@ -1023,7 +1023,7 @@ public:
   using difference_type = int;
 
   bool curSymb() {
-    return Inv ^ DynBitField<WordT>{*word, symb & (WordBits - 1), 1};
+    return Inv ^ DynBitField<const WordT>{*word, symb & (WordBits - 1), 1};
   }
 
   auto getWord() { return Inv ? ~*word : *word; }
@@ -1083,7 +1083,8 @@ public:
   using iterator_category = std::iterator_traits<It>::iterator_category;
   using value_type = std::iterator_traits<It>::value_type;
 
-  template <typename U> constexpr Range(const U &u) : Range(u.begin(), u.end()) {}
+  template <typename U>
+  constexpr Range(const U &u) : Range(u.begin(), u.end()) {}
   template <typename U> constexpr Range(U &u) : Range(u.begin(), u.end()) {}
 
   constexpr Range(It beginIt, It endIt) : beginIt(beginIt), endIt(endIt) {}
@@ -1141,8 +1142,23 @@ public:
     return ::Range{mark_back_iterator{beginIt, endIt},
                    mark_back_iterator{endIt, endIt}};
   }
+  constexpr auto set_bits() {
+    return ::Range{
+        set_bits_iterator{beginIt, endIt, 0},
+        set_bits_iterator{endIt, endIt,
+                          (endIt - beginIt) *
+                              sizeof(std::remove_cvref_t<value_type>)}};
+  }
+  constexpr auto unset_bits() {
+    return ::Range{
+        set_bits_iterator<It, true>{beginIt, endIt, 0},
+        set_bits_iterator<It, true>{
+            endIt, endIt,
+            (endIt - beginIt) * sizeof(std::remove_cvref_t<value_type>)}};
+  }
 
-  template <typename TransformT> constexpr auto transform(TransformT transformF) {
+  template <typename TransformT>
+  constexpr auto transform(TransformT transformF) {
     return ::Range{transform_iterator<It, TransformT>(beginIt, transformF),
                    transform_iterator<It, TransformT>(endIt, transformF)};
   }
@@ -1174,7 +1190,9 @@ public:
 
   constexpr auto do_reverse() { return std::reverse(beginIt, endIt); }
 
-  template <typename T> constexpr void sort(T func) { std::sort(begin(), end(), func); }
+  template <typename T> constexpr void sort(T func) {
+    std::sort(begin(), end(), func);
+  }
   template <typename T> void stable_sort(T func) {
     std::stable_sort(begin(), end(), func);
   }
@@ -1249,7 +1267,8 @@ public:
     }
     return true;
   }
-  template <typename T, typename Comp> constexpr bool equals(Range<T> other, Comp comp) {
+  template <typename T, typename Comp>
+  constexpr bool equals(Range<T> other, Comp comp) {
     if constexpr (requires() {
                     this->size();
                     other.size();

@@ -139,7 +139,7 @@ public:
       : opc(old.opc), dialect(old.dialect), _unused(old._unused),
         numOperands(numOperands), numDefs(old.numDefs),
         customStorage(old.customStorage) {
-    assert(numOperands <= 0x1000);
+    assert(numOperands < 0x10000);
   }
 
 private:

@@ -295,8 +295,19 @@ public:
     return arr[pos];
   }
 
-  template <typename... Args> T &emplace_back(Args &&...args) {
+private:
+  template <typename... Args>
+  __attribute__((noinline)) T &emplace_back_slow_path(Args &&...args) {
     grow(sz + 1);
+    T *obj = std::construct_at<T>(end(), std::forward<Args>(args)...);
+    ++sz;
+    return *obj;
+  }
+
+public:
+  template <typename... Args> T &emplace_back(Args &&...args) {
+    if (sz == cap) [[unlikely]]
+      return emplace_back_slow_path(std::forward<Args>(args)...);
     T *obj = std::construct_at<T>(end(), std::forward<Args>(args)...);
     ++sz;
     return *obj;
@@ -394,8 +405,7 @@ public:
   iterator insert(iterator it, T &&val) {
     assert(it <= end());
     if (it == end()) {
-      emplace_back(val);
-      return end() - 1;
+      return &emplace_back(val);
     }
     size_t pos = it - begin();
     grow(sz + 1);
@@ -571,6 +581,7 @@ private:
   size_type sz = 0;
 
 public:
+  constexpr iterator data() { return arr.begin(); }
   constexpr iterator begin() { return arr.begin(); }
   constexpr iterator end() { return arr.begin() + sz; }
   constexpr const_iterator begin() const { return arr.begin(); }
@@ -609,6 +620,12 @@ public:
     assert(sz < NumInline);
     arr[sz] = val;
     ++sz;
+  }
+  constexpr T &emplace_back(auto &&...args) {
+    assert(sz < NumInline);
+    std::construct_at(&arr[sz], std::forward<decltype(args)>(args)...);
+    ++sz;
+    return back();
   }
 
   constexpr iterator insert(iterator it, const T &val) {

@@ -837,6 +837,38 @@ replace {
   HW_ASSUME $y, $a, $both
 }
 
+// remove constant 1 enable
+match {
+  // port/data swapped for load but harmless
+  $opc{HW_MEM_LOAD, HW_MEM_STORE} $port, $data, $register, #1'd1, $addr, $trigger...{0,1}
+}
+replace {
+  $opc $port, $data, $register, $addr, $trigger...
+}
+
+// constant 0 enable
+match {
+  HW_MEM_STORE $port, $data, $register, #1'd0, $addr, $trigger...{0,1}
+}
+with [{
+  FatDynObjRef<> ref = (*$port.begin())->fat();
+  $port.begin()->replace(FatDynObjRef<>{nullref});
+  ctx.destroy(ref.as<MemoryPortRef>());
+}]
+replace {}
+match {
+  HW_MEM_LOAD $data, $port, $register, #1'd0, $addr, $trigger...{0,1}
+}
+with [{
+  FatDynObjRef<> ref = (*$port.begin())->fat();
+  $port.begin()->replace(FatDynObjRef<>{nullref});
+  ctx.destroy(ref.as<MemoryPortRef>());
+
+  FatDynObjRef<> undefStore = cbuild.undef(*((*$data.begin())->as<WireRef>().getNumBits())).get();
+  $undef = undefStore;
+}]
+replace $data -> $undef
+
 match {
   HW_ONEHOT_MUX $out, $sel, $val
 }

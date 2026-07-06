@@ -61,15 +61,16 @@ public:
     return false;
   }
 
-  auto useInstrs(DialectOpcode opc) {
+  auto useInstrs(auto... opcs) {
     return oref()
         .uses()
-        .filter([opc](auto use) { return use.instr().isOpc(opc); })
+        .filter([opcs...](auto use) { return use.instr().isOpc(opcs...); })
         .transform([](size_t, auto op) { return op.instr(); });
   }
   auto loads() { return useInstrs(HW_LOAD); }
   auto stores() { return useInstrs(HW_STORE); }
   auto storeDefers() { return useInstrs(HW_STORE_DEFER); }
+  auto storeOrStoreDefers() { return useInstrs(HW_STORE_DEFER, HW_STORE); }
   auto memLoads() { return useInstrs(HW_MEM_LOAD); }
   auto memStores() { return useInstrs(HW_MEM_STORE); }
 

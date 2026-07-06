@@ -10,6 +10,7 @@
 #include "hw/analysis/RegisterValue.h"
 #include "op/IDs.h"
 #include "support/DenseMap.h"
+#include "support/DynBitSet.h"
 #include "support/RTTI.h"
 #include "support/Ranges.h"
 #include "support/SmallVec.h"
@@ -23,45 +24,32 @@ class LoopbackFrag {
 public:
   uint32_t dstAddr;
   uint32_t len;
-  std::array<ObjRef<Wire>, 4> enable{invalid, nullref, nullref, nullref};
-  std::array<bool, 4> polarity;
+  SmallVec<ObjRef<Wire>, 4> enable{invalid};
+  DynBitSet<SmallVec<uint64_t, 1>> polarity;
 
   LoopbackFrag() = default;
-  LoopbackFrag(uint32_t dstAddr, uint32_t len) : dstAddr(dstAddr), len(len) {}
+  LoopbackFrag(uint32_t dstAddr, uint32_t len) : dstAddr(dstAddr), len(len) {
+    this->polarity.push_back(1);
+  }
   LoopbackFrag(uint32_t dstAddr, uint32_t len, ObjRef<Wire> en, bool polarity)
       : dstAddr(dstAddr), len(len) {
     this->enable[0] = en;
-    this->polarity[0] = polarity;
+    this->polarity.push_back(polarity);
   }
   LoopbackFrag(uint32_t dstAddr, uint32_t len, const LoopbackFrag &frag)
-      : dstAddr(dstAddr), len(len), enable(frag.enable) {}
+      : dstAddr(dstAddr), len(len), enable(frag.enable) {
+    this->polarity.push_back(1);
+  }
 
-  bool push_back(ObjRef<Wire> en, bool polarity) {
+  void push_back(ObjRef<Wire> en, bool polarity) {
     if (!*this)
-      return true; // nothing to do
-    for (unsigned i = 0; i < enable.size(); i++) {
-      if (enable[i])
-        continue;
-      enable[i] = en;
-      this->polarity[i] = polarity;
-      return true;
-    }
-    assert(0);
-    // return false;
+      return; // nothing to do
+    enable.push_back(en);
+    this->polarity.push_back(polarity);
   }
-  uint32_t size() const {
-    if (!*this)
-      return 0;
-    for (unsigned i = 0; i < enable.size(); i++) {
-      if (!enable[i])
-        return i;
-    }
-    return enable.size();
-  }
+  uint32_t size() const { return enable[0] ? enable.size() : 0; }
   auto begin() { return zip_iterator{enable.begin(), polarity.begin()}; }
-  auto end() {
-    return zip_iterator{enable.begin() + size(), polarity.begin() + size()};
-  }
+  auto end() { return zip_iterator{enable.end(), polarity.end()}; }
 
   explicit operator bool() const { return enable[0] != invalid; }
 
@@ -169,7 +157,6 @@ public:
       switch (*instr.getDialectOpcode()) {
       case *HW_SPLICE: {
         auto asSplice = instr.as<SpliceIRef>();
-        assert(asSplice.isConstantOffs());
         if (idx == 0) {
           if (!asSplice.isConstantOffs())
             FRAME_RET();
@@ -229,8 +216,9 @@ public:
 
       case *HW_INSERT: {
         auto asInsert = instr.as<InsertIRef>();
-        assert(asInsert.isConstantOffs());
         if (idx == 0) {
+          if (!asInsert.isConstantOffs())
+            FRAME_RET();
           idx++;
           FRAME_CALL(asInsert.val()->as<HWValue>());
         }
@@ -251,9 +239,13 @@ public:
           acc = {*val.getNumBits()};
         if (idx != 0 && retVal.hasAnyLoopback()) {
           // add condition to loopback frags
-          auto val = instr.other((idx - 1) * 2)->as<HWValue>();
-          if (auto asConst = val.dyn_as<ConstantRef>()) {
-            assert(!asConst.allBitsUndef());
+          auto cond = instr.other((idx - 1) * 2)->as<HWValue>();
+          if (auto asConst = cond.dyn_as<ConstantRef>()) {
+
+            // give up if undef select
+            if (asConst.allBitsUndef())
+              FRAME_RET();
+
             // select is zero i.e. unreachable
             if (asConst.valueEquals(0)) {
               // return if last
@@ -267,7 +259,7 @@ public:
               continue;
             }
           }
-          retVal.addConditionToLoopbackFrags(val, true);
+          retVal.addConditionToLoopbackFrags(cond, true);
           acc.write(retVal, 0, 0, acc.getLen());
         }
 
@@ -279,59 +271,61 @@ public:
         FRAME_CALL(nextVal)
       }
 
-        // todo: support AND (to find zero resets), OR (to find one resets).
-        // Doing it properly would also require tackling negative polarity
-        // support.
+        // AND/OR are important for single bit MUXs, gets very tricky however.
+        // We can't enable this currently as boolean opt isn't powerful enough
+        // to actually prune the loopback or reset path even once we extract the
+        // control signal. Thus no guaranteed forward progress.
 
-      // case *OP_AND:
-      // case *OP_OR: {
-      //   if (loopback != nullref) {
-      //     if (idx == 0) // reset acc unconditionally
-      //       acc = {*val.getNumBits()};
+        // case *OP_AND:
+        // case *OP_OR: {
+        //   if (loopback != nullref) {
+        //     if (idx == 0) // reset acc unconditionally
+        //       acc = {*val.getNumBits()};
 
-      //     // check last, include in acc
-      //     if (idx != 0 && retVal.hasAnyLoopback()) {
-      //       unsigned i = idx - 1;
-      //       for (unsigned j = 0; j < instr.getNumOthers(); j++) {
-      //         if (i == j)
-      //           continue;
-      //         retVal.addConditionToLoopbackFrags(
-      //             isBooleanValue(instr.other(j)->as<HWValue>()), instr.isOpc(OP_AND));
-      //       }
-      //       acc.write(retVal, 0, 0, acc.getLen());
-      //     }
+        //     // check last, include in acc
+        //     if (idx != 0 && retVal.hasAnyLoopback()) {
+        //       unsigned i = idx - 1;
+        //       for (unsigned j = 0; j < instr.getNumOthers(); j++) {
+        //         if (i == j)
+        //           continue;
+        //         retVal.addConditionToLoopbackFrags(
+        //             isBooleanValue(instr.other(j)->as<HWValue>()),
+        //             instr.isOpc(OP_AND));
+        //       }
+        //       acc.write(retVal, 0, 0, acc.getLen());
+        //     }
 
-      //     // find candidate
-      //     unsigned i = idx;
-      //     for (; i < instr.getNumOthers(); i++) {
-      //       // check that all others are boolean-compatible
-      //       for (unsigned j = 0; j < instr.getNumOthers(); j++) {
-      //         if (i == j)
-      //           continue;
-      //         auto val = isBooleanValue(instr.other(j)->as<HWValue>());
-      //         if (!val || val.is<ConstantRef>())
-      //           goto next;
-      //       }
-      //       goto found;
-      //     next:
-      //     }
-      //     FRAME_RET_ACC;
-      //   found:
+        //     // find candidate
+        //     unsigned i = idx;
+        //     for (; i < instr.getNumOthers(); i++) {
+        //       // check that all others are boolean-compatible
+        //       for (unsigned j = 0; j < instr.getNumOthers(); j++) {
+        //         if (i == j)
+        //           continue;
+        //         auto val = isBooleanValue(instr.other(j)->as<HWValue>());
+        //         if (!val || val.is<ConstantRef>())
+        //           goto next;
+        //       }
+        //       goto found;
+        //     next:
+        //     }
+        //     FRAME_RET_ACC;
+        //   found:
 
-      //     idx = i + 1;
-      //     FRAME_CALL(instr.other(i)->as<HWValue>())
+        //     idx = i + 1;
+        //     FRAME_CALL(instr.other(i)->as<HWValue>())
 
-      //   } else {
-      //     // if we're looking for constants, check for short circuit
-      //     auto it = instr.others().find_if([](OperandRef op) {
-      //       auto val = isBooleanValue(op->template as<HWValue>());
-      //       return val && val.template is<WireRef>();
-      //     });
-      //     if (it == instr.other_end())
-      //       FRAME_RET();
-      //     FRAME_RET(it->as<WireRef>(), instr.isOpc(OP_OR));
-      //   }
-      // }
+        //   } else {
+        //     // if we're looking for constants, check for short circuit
+        //     auto it = instr.others().find_if([](OperandRef op) {
+        //       auto val = isBooleanValue(op->template as<HWValue>());
+        //       return val && val.template is<WireRef>();
+        //     });
+        //     if (it == instr.other_end())
+        //       FRAME_RET();
+        //     FRAME_RET(it->as<WireRef>(), instr.isOpc(OP_OR));
+        //   }
+        // }
 
       default: {
         if (wire == loopback) // return always-on loopback

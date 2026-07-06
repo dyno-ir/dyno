@@ -24,6 +24,12 @@
       "name": "Debug",
       "program": "${workspaceFolder}/build/tools/dyno-sv/dyno-sv",
       "args": [
+        "synth",
+        "--liberty",
+        "sky130_fd_sc_hd__tt_025C_1v80.lib",
+        "--debug",
+        "-s=./tools/dyno-opt/dyno-ir/flow.dyno",
+        "-s=./tools/dyno-opt/dyno-ir/run_flow.dyno",
         "${workspaceFolder}/sv/counter.sv"
       ],
     },
@@ -76,7 +82,21 @@
     {
       "type": "lldb",
       "request": "launch",
-      "name": "dyno-test",
+      "name": "dyno-test specific",
+      "program": "${workspaceFolder}/build/tools/dyno-sv/dyno-sv",
+      "args": [
+        "test",
+        "${workspaceFolder}/tools/dyno-opt/dyno-ir/flow.dyno",
+        "${workspaceFolder}/tools/dyno-test/dyno-ir/test.dyno",
+        "--only=test-memory-byte-write",
+        "--debug",
+        "--print-after-all"
+      ],
+    },
+    {
+      "type": "lldb",
+      "request": "launch",
+      "name": "dyno-test all",
       "program": "${workspaceFolder}/build/tools/dyno-sv/dyno-sv",
       "args": [
         "test",
@@ -205,7 +225,8 @@
         "--Xslang=--allow-multi-driven-locals",
         "--Xslang=--std",
         "--Xslang=1800-2023",
-        "--Xslang=--allow-toplevel-iface-ports"
+        "--Xslang=--allow-toplevel-iface-ports",
+        "--Xslang=--default-lifetime-automatic"
       ],
     }
   ]

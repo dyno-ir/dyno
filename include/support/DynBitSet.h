@@ -176,15 +176,19 @@ public:
     using difference_type = ptrdiff_t;
 
     iterator &operator+=(ssize_t val) {
-      symb += val;
-      auto incr = symb / Base::WordSymbs;
-      symb %= Base::WordSymbs;
+      ssize_t incr = (ssize_t(symb) + val) / ssize_t(Base::WordSymbs);
+      ssize_t mod = (ssize_t(symb) + val) % ssize_t(Base::WordSymbs);
+      if (mod < 0) {
+        incr -= 1;
+        mod += Base::WordSymbs;
+      }
+      symb = mod;
       word += incr;
       return *this;
     }
     iterator &operator-=(ssize_t val) { *this += -val; }
 
-    iterator operator+(ssize_t val) {
+    iterator operator+(ssize_t val) const {
       auto copy{*this};
       copy += val;
       return copy;

@@ -174,7 +174,8 @@ private:
     // todo: netlist version of this (and findResets) where we just use q wire
     // directly.
     auto part = loopbackAnalysis.get(instr.d(), load.as<LoadIRef>().value());
-    if (Range{part.frags}.all([](auto frag) { return !frag; }))
+    if (Range{part.frags}.all(
+            [](auto frag) { return !frag || frag.size() == 0; }))
       return false;
 
     HWInstrBuilder build{ctx, instr};
@@ -216,7 +217,9 @@ private:
 
   PatBool findFlipFlopSyncResets(FlipFlopIRef instr) {
     if (!config.findFlipFlopSyncResets)
-      return false;
+      return PAT_FALSE;
+    if (!instr.rsts().empty()) // fixme, to avoid looping
+      return PAT_FALSE;
     // already has async resets
     if (instr.isOpc(HW_FLIP_FLOP) && !instr.rsts().empty())
       return PAT_FALSE;
@@ -478,6 +481,8 @@ private:
            instr.def(0)->as<WireRef>().getNumBits() == 1);
 
     if (instr.getNumOperands() > 16)
+      return false;
+    if (!instr.others().all([](auto o) { return o.template is<WireRef>(); }))
       return false;
 
     auto trueV = instr.isOpc(OP_AND) ? true : false;
@@ -1246,7 +1251,17 @@ private:
       auto repl = operandEqualsFrag(defW, frag);
       if (!repl)
         return false;
-      replaceUses(defW, repl);
+      // keep old wire to avoid sorting all uses
+      // todo: do this properly with builder def arg
+      if (repl.is<WireRef>() && repl.as<WireRef>().getNumUses() == 0) {
+        instr.def(0).replace(FatDynObjRef{nullref});
+        repl.as<WireRef>().getSingleDef()->replace(defW);
+        knownBits.recomputeAt(defW);
+        bitAlias.recomputeAt(defW);
+        ctx.getStore<Wire>().destroy(repl.as<WireRef>());
+      } else {
+        replaceUses(defW, repl);
+      }
       deleteMatchedInstr(instr);
       return PAT_TRUE;
     }
@@ -2256,9 +2271,8 @@ private:
     currentReplaced.clear();
 
     if (instr.getNumDefs() == 1) {
-      if (!instr.def(0)->is<WireRef>())
-        return false;
-      if (instr.def(0)->as<WireRef>().getNumUses() == 0) {
+      if (instr.def(0)->is<WireRef>() &&
+          instr.def(0)->as<WireRef>().getNumUses() == 0) {
         // DCE unused instruction
         deleteMatchedInstr(instr);
         return PatBool{"deleteDeadInstr"};
@@ -2271,8 +2285,6 @@ private:
     currentMatched.clear();
     currentReplaced.clear();
 
-    if (instr.getNumDefs() > 1)
-      return false;
     return PAT_BOOL(
         generated(ctx, config, currentMatched, currentReplaced, instr));
   }

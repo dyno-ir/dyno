@@ -17,13 +17,13 @@ class CheckPass : public Pass<CheckPass> {
   bool hasError = false;
 
 public:
-  struct Config {
-    bool dominance = true;
-    bool operandsDefined = true;
-    bool danglingBlocks = false;
-    bool noLoops = false;
-  };
-
+#define CONFIG_STRUCT_LAMBDA(FIELD, ENUM)                                      \
+  FIELD(bool, dominance, true)                                                 \
+  FIELD(bool, operandsDefined, true)                                           \
+  FIELD(bool, danglingBlocks, false)                                           \
+  FIELD(bool, noLoops, false)
+  CONFIG_STRUCT(CONFIG_STRUCT_LAMBDA)
+#undef CONFIG_STRUCT_LAMBDA
   Config config;
 
   // bool optimizeOneHotMux(InstrRef instr) {
@@ -89,9 +89,12 @@ public:
           error(instr, "undefined operand");
         }
 
-        if (op.isDef() && op->is<WireRef>())
-          if (op->as<WireRef>().getNumDefs() != 1)
+        if (op->fat().getType() == Any{HW_WIRE, HW_POINTER}) {
+          if (op->as<FatDynObjRef<InstrDefUse>>()->getNumDefs() > 1)
             error(instr, "multi-def operand");
+          if (op->as<FatDynObjRef<InstrDefUse>>()->getNumDefs() == 0)
+            error(instr, "zero-def operand");
+        }
 
         switch (*instr.getDialectOpcode()) {
 #define LAMBDA(opc, ib, cb, bi) case *opc:

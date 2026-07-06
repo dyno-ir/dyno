@@ -388,14 +388,14 @@ public:
   using OpcodeInstrRef::OpcodeInstrRef;
 
   MemoryPortRef port() { return def(0)->as<MemoryPortRef>(); }
-  WireRef value() { return other(0)->as<WireRef>(); }
+  HWValue value() { return other(0)->as<HWValue>(); }
 
   RegisterRef reg() { return other(1)->as<RegisterRef>(); }
 
-  WireRef en() const {
+  HWValue en() const {
     if (getNumOthers() < 3)
       return nullref;
-    return other(2)->dyn_as<WireRef>();
+    return other(2)->dyn_as<HWValue>();
   }
   bool hasEn() const { return !!en(); }
 

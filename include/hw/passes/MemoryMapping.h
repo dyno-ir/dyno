@@ -659,7 +659,7 @@ private:
                                                     BigInt::ICMP_EQ));
           }
 
-          connect(en, modLoad.en(), repIdx);
+          connect(en, modLoad.en().template as<WireRef>(), repIdx);
         }
 
         HWValue adjAddr = addr;
@@ -731,7 +731,7 @@ private:
           // todo: remove assert
           assert(!wrval.is<ConstantRef>() ||
                  !wrval.as<ConstantRef>().allBitsUndef());
-          connect(wrval, modLoad.value(), repIdx);
+          connect(wrval, modLoad.value().template as<WireRef>(), repIdx);
         }
         adjFragAddr += frag.len;
       }
@@ -1009,6 +1009,8 @@ private:
       };
 
       uint32_t repCount = mapper.mapping.repeatCount;
+      if (repCount > 100)
+        continue;
       uint32_t maxRepCount = repCount * config.maxRepeatCountFactor;
 
       // fast path if heuristic repeat count correct

@@ -207,6 +207,15 @@ public:
   }                                                                            \
   /*note: Destroys the operands array!*/                                       \
   HWValue ident(MutArrayRef<HWValue> operands) {                               \
+    if (operands.empty()) {                                                    \
+      /* support empty operands for and/or (and assume boolean) as it occurs   \
+       * commonly */                                                           \
+      if constexpr (opcode == OP_AND)                                          \
+        return ConstantRef::fromBool(true);                                    \
+      if constexpr (opcode == OP_OR)                                           \
+        return ConstantRef::fromBool(false);                                   \
+      dyno_unreachable("empty operands");                                      \
+    }                                                                          \
     Range{operands}.sort(commutativeOpOperandOrder);                           \
     bool multipleConstants = operands.size() >= 2 &&                           \
                              operands.end()[-1].is<ConstantRef>() &&           \
