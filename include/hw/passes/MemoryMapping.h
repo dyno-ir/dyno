@@ -15,6 +15,8 @@
 #include "hw/IDs.h"
 #include "hw/LoadStore.h"
 #include "hw/Module.h"
+#include "hw/Wire.h"
+#include "hw/analysis/KnownBits.h"
 #include "hw/analysis/PipelineAnalysis.h"
 #include "hw/analysis/RegisterValue.h"
 #include "hw/analysis/WireVariable.h"
@@ -210,6 +212,96 @@ private:
     // here is easy to recompute (done in constructor).
     MemoryMapping mapping;
 
+    // (i*numPorts+:numPorts) is bit field of ports mutually exclusive with port
+    // i
+    UnsizedBitSet<SmallVec<uint64_t, 1>> modExclMatrix;
+    UnsizedBitSet<SmallVec<uint64_t, 1>> actExclMatrix;
+
+    static UnsizedBitSet<SmallVec<uint64_t, 1>>
+    computeExclusionMatrix(Context &ctx, ArrayRef<MemLoadIRef> loads,
+                           ArrayRef<MemStoreIRef> stores) {
+      unsigned totalPorts = loads.size() + stores.size();
+      UnsizedBitSet<SmallVec<uint64_t, 1>> mat(totalPorts * totalPorts);
+      DeriveBitsAnalysis deriveBits{ctx};
+
+      // check for implicit load enables. instead of these could also prop
+      // FF/MUXs enable in instcombine, requires disabling assume opt
+      // transiently tho.
+      auto getLoadImplicitEn = [](MemLoadIRef load) -> WireRef {
+        // todo: multiple uses but same/common enable?
+        auto data = load.def()->as<WireRef>();
+        auto use = data.getSingleUse();
+        if (!use)
+          return nullref;
+        auto instr = use->instr();
+        switch (*instr.getDialectOpcode()) {
+        case *HW_ONEHOT_MUX: {
+          auto idx = *use - instr.other_begin();
+          if ((idx & 1) != 1) // must be mux data, not sel
+            return nullref;
+          return instr.other(idx & ~1ULL).dyn_as<WireRef>();
+        }
+        case *HW_FLIP_FLOP:
+        case *HW_FLIP_FLOP_SRST: {
+          auto asFF = instr.as<FlipFlopIRef>();
+          if (asFF.classifyUse(*use) != FlipFlopIRef::D)
+            return nullref;
+          return asFF.clkEnRaw().dyn_as<WireRef>();
+        }
+        case *HW_ASSUME: {
+          if (*use != instr.other_begin())
+            return nullref;
+          return instr.other(1)->as<WireRef>();
+        }
+        }
+        return nullref;
+      };
+
+      auto markDependant = [&](unsigned enabledPort) {
+        for (auto [i, port] : Range{loads}.enumerate()) {
+          if (i == enabledPort)
+            continue;
+          auto en = port.en();
+          if (!en && !(en = getLoadImplicitEn(port)))
+            continue;
+          auto val = deriveBits.knownBits.getKnownBits(en);
+          if (val.valueEquals(0))
+            mat[enabledPort * totalPorts + i] = 1;
+        }
+        for (auto [i_st, port] : Range{stores}.enumerate()) {
+          auto i = i_st + loads.size();
+          if (i == enabledPort)
+            continue;
+          auto en = port.en();
+          if (!en)
+            continue;
+          auto val = deriveBits.knownBits.getKnownBits(en);
+          if (val.valueEquals(0))
+            mat[enabledPort * totalPorts + i] = 1;
+        }
+      };
+
+      for (auto [i, port] : Range{loads}.enumerate()) {
+        auto en = port.en();
+        if (!en && !(en = getLoadImplicitEn(port)))
+          continue;
+        deriveBits.propKnownValueUp(en, BigInt::fromU32(true, 1));
+        markDependant(i);
+        deriveBits.clearCache();
+      }
+      for (auto [i_st, port] : Range{stores}.enumerate()) {
+        auto i = i_st + loads.size();
+        auto en = port.en().dyn_as<WireRef>();
+        if (!en)
+          continue;
+        deriveBits.propKnownValueUp(en, BigInt::fromU32(true, 1));
+        markDependant(i);
+        deriveBits.clearCache();
+      }
+
+      return mat;
+    }
+
     MemoryMapper(Context &ctx, Config &config, RegisterIRef actual,
                  RegisterIRef model)
         : config(config), actual(actual), model(model),
@@ -295,6 +387,9 @@ private:
               round_up_div(actualLoadsWidth, modelLoadsWidth),
               round_up_div(*actual.getNumBits(), *model.getNumBits())}
                .max();
+
+      modExclMatrix = computeExclusionMatrix(ctx, modelLoads, modelStores);
+      actExclMatrix = computeExclusionMatrix(ctx, actualLoads, actualStores);
     }
 
     // if true & newly mapped also returns functor to undo the mapping
@@ -395,8 +490,62 @@ private:
       std::print(os, "{}\n", enableRow);
     }
 
-    template <typename RefT>
+    auto findMutuallyExclusive(uint32_t portIdx, uint32_t numPorts,
+                               UnsizedBitSet<SmallVec<uint64_t, 1>> &mat)
+        -> Optional<uint32_t> {
+      auto rng = IntRange(portIdx * numPorts, (portIdx + 1) * numPorts);
+      for (auto i : rng) {
+        if (!mat[i])
+          continue;
+        return i % numPorts;
+      }
+      return nullopt;
+    }
 
+    template <typename RefT>
+    auto checkExclusivity(uint32_t actPortIdx, uint32_t modPortIdx) {
+      unsigned numModLoadsStores = modelLoads.size() + modelStores.size();
+      unsigned numActLoadsStores = actualLoads.size() + actualStores.size();
+
+      // check exclusivity: if model port is only available when certain
+      // others disabled we need the same restriction in actual to proceed
+      auto depIdx = findMutuallyExclusive(
+          modPortIdx +
+              (std::is_same_v<RefT, MemStoreIRef> ? modelLoads.size() : 0),
+          numModLoadsStores, modExclMatrix);
+      if (!depIdx)
+        return true;
+
+      // actually needs to consider all possible deps, not just greedy first
+      auto actDepIdx = findMutuallyExclusive(
+          actPortIdx +
+              (std::is_same_v<RefT, MemStoreIRef> ? actualLoads.size() : 0),
+          numActLoadsStores, actExclMatrix);
+      if (!actDepIdx)
+        return false; // act port can't cover model port's dep
+      if (!(*actDepIdx >= modelLoads.size()))
+        return false; // load/load deps don't help (model has only load/store)
+      auto actDepStIdx = *actDepIdx - modelLoads.size();
+
+      // in act port we're trying to map,
+      // check mapping for dependant port
+      auto exclPortIdx = *depIdx;
+      if (!(exclPortIdx >= modelLoads.size()))
+        report_fatal_error(
+            "load/load exclusivity in model memory not supported");
+      exclPortIdx -= modelLoads.size();
+
+      auto &frags = mapping.storePartitions[actDepStIdx].frags;
+      auto it = Range{frags}.find_if(
+          [&](auto &frag) { return frag.mapping == actDepStIdx; });
+      if (it == frags.end())
+        return false;
+      // todo: check that's actually in right spot? can also add as req for
+      // model memories.
+      return true;
+    }
+
+    template <typename RefT>
     bool mapPorts(SmallVecImpl<PortPartition> &partitions,
                   SmallVecImpl<RefT> &actualPorts,
                   SmallVecImpl<RefT> &modelPorts) {
@@ -473,8 +622,13 @@ private:
         for (const auto globIdx : usedModelPort.unsetBitIdxs()) {
           uint32_t modStIdx = globIdx % modelPorts.size();
           auto &modSt = modelPorts[modStIdx];
-
           uint32_t repIdx = globIdx / modelPorts.size();
+
+          if (std::is_same_v<RefT, MemLoadIRef>) {
+            if (!checkExclusivity<MemLoadIRef>(actStIdx, modStIdx))
+              continue;
+          }
+
           auto adjModPortLen = mapping.modelRangeEnable.getNumCoveredBits(
               repIdx * modelPortWidth + modSt.base(), modSt.getLen());
 
@@ -1036,7 +1190,8 @@ private:
         std::nullopt;
 
     // todo: prune search space based on score
-    for (auto modelCand : Range{memStdCells}.resolve(ctx)) {
+    for (auto [front, modelCand] :
+         Range{memStdCells}.resolve(ctx).mark_front()) {
       MemoryMapper mapper{ctx, config, actual, modelCand.iref()};
 
       if (mapper.actualPortsLCM == 0) {
@@ -1044,6 +1199,36 @@ private:
                  dbgs() << ": no read or no write ports, ROM todo\n");
         return false;
       }
+
+      auto printExclMatrix = [&](UnsizedBitSet<SmallVec<uint64_t, 1>> &mat,
+                                 uint32_t numRead, uint32_t numWrite) {
+        DYNO_DBG({
+          auto dim = numRead + numWrite;
+          for (uint32_t i = 0; i < dim; i++) {
+            std::print(dbgs(),
+                       "{:c} port {:02d} excludes: ", (i < numRead ? 'r' : 'w'),
+                       i);
+            for (uint32_t j = 0; j < dim; j++) {
+              if (i == j)
+                dbgs() << '\\';
+              else
+                dbgs() << char(mat[i * dim + j] + '0');
+            }
+            dbgs() << "\n";
+          }
+        })
+      };
+      if (front) {
+        DYNO_DBG(std::print(dbgs(), "actual mem exclusion matrix\n"));
+        printExclMatrix(mapper.actExclMatrix, mapper.actualLoads.size(),
+                        mapper.actualStores.size());
+      }
+
+      DYNO_DBG(
+          std::print(dbgs(), "candidate \"{}\" exclusion matrix\n",
+                     HWInstrRef{modelCand.iref()}.parentMod(ctx).mod()->name));
+      printExclMatrix(mapper.actExclMatrix, mapper.actualLoads.size(),
+                      mapper.actualStores.size());
 
       auto vis = [&]() {
         DYNO_DBG({
