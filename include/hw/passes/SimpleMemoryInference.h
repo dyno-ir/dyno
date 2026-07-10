@@ -2,6 +2,7 @@
 
 #include "dyno/Constant.h"
 #include "dyno/Context.h"
+#include "dyno/FatContext.h"
 #include "dyno/Instr.h"
 #include "dyno/Pass.h"
 #include "hw/HWAbstraction.h"
@@ -15,6 +16,7 @@
 #include "hw/MemoryPort.h"
 #include "hw/Register.h"
 #include "hw/SensList.h"
+#include "op/OpContext.h"
 #include "support/Any.h"
 #include "support/BoolExpr.h"
 #include "support/DynBitSet.h"
@@ -276,8 +278,7 @@ class SimpleMemoryInferencePass : public Pass<SimpleMemoryInferencePass> {
   //   } else
   //     return std::unexpected("expected insert");
   // }
-  using BoolExpr =
-      TypedSmallBoolExprDNF<HWValue>;
+  using BoolExpr = TypedSmallBoolExprDNF<HWValue>;
 
   struct WritePort2 {
     InstrRef instr; // insert/concat
@@ -337,13 +338,14 @@ class SimpleMemoryInferencePass : public Pass<SimpleMemoryInferencePass> {
     bool sawStore = false;
 
     SmallDenseMap<ObjRef<Instr>, BoolExpr> muxMemo;
-
     while (!stack.empty()) {
       auto wire = ctx.resolve(stack.back().ref);
       if (stack.back().idx == wire.getNumUses()) {
 
         // combine final retval with acc
         if (rvValid) {
+          rv.simplify();
+          stack.back().acc.simplify();
           stack.back().acc.addTerms(rv);
         }
         rvValid = true;
@@ -359,10 +361,14 @@ class SimpleMemoryInferencePass : public Pass<SimpleMemoryInferencePass> {
           muxMemo.findOrInsert(wire.getDefI(), rv);
           auto use = ctx.resolve(stack.back().ref).uses()[stack.back().idx - 1];
           assert(use.instr() == wire.getDefI());
+          std::cout << "pre: " << rv.toString() << "\n";
           bool polarity = use.getNum() == 2;
+          rv.simplify();
           rv.addAND(wire.getDefI().other(0)->as<HWValue>(), polarity);
 
-          std::cout << rv.toString() << "\n";
+          std::cout << "adding and ";
+          dumpObj(wire.getDefI().other(0)->as<HWValue>());
+          std::cout << " " << rv.toString() << "\n";
           rv.simplify();
           std::cout << rv.toString() << "\n\n";
         }
@@ -370,7 +376,9 @@ class SimpleMemoryInferencePass : public Pass<SimpleMemoryInferencePass> {
         continue;
       } else if (stack.back().idx != 0 && rvValid) {
         // or RV into expression
+        rv.simplify();
         stack.back().acc.addTerms(rv);
+        stack.back().acc.simplify();
         rvValid = false;
       }
 

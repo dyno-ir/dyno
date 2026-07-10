@@ -149,7 +149,7 @@ private:
 
   struct BoundPort {
     ObjRef<Pointer> addr = nullref;
-    uint32_t idxOffs = 0;
+    uint32_t idxOffs = 0; // only used for virtual wide ports
   };
   struct MemoryMapping {
     // metadata attached to model ports (small vec forrepeatCount duplicated
@@ -322,18 +322,26 @@ private:
         });
       };
       auto sortLoadStoresByPriority = [&](auto &loads, auto &stores) {
-        assert(loads.front().parentBlock(ctx) ==
-               stores.front().parentBlock(ctx));
+        assert(loads.empty() || stores.empty() ||
+               loads.front().parentBlock(ctx) ==
+                   stores.front().parentBlock(ctx));
         assert(Range{stores}
                    .tf([&](auto st) { return st.parentBlock(ctx); })
                    .all_equal());
         assert(Range{loads}
                    .tf([&](auto ld) { return ld.parentBlock(ctx); })
                    .all_equal());
+
         // sort the block to make pos comparable
-        loads.front().parentBlock(ctx).sort();
-        sort(Range{loads});
-        sort(Range{stores});
+        if (!loads.empty())
+          loads.front().parentBlock(ctx).sort();
+        else if (!stores.empty())
+          stores.front().parentBlock(ctx).sort();
+
+        if (!loads.empty())
+          sort(Range{loads});
+        if (!stores.empty())
+          sort(Range{stores});
       };
       sortLoadStoresByPriority(modelLoads, modelStores);
       sortLoadStoresByPriority(actualLoads, actualStores);
@@ -503,6 +511,7 @@ private:
     }
 
     template <typename RefT>
+    // todo: check with reverse priority on the two mutex ports.
     auto checkExclusivity(uint32_t actPortIdx, uint32_t modPortIdx) {
       unsigned numModLoadsStores = modelLoads.size() + modelStores.size();
       unsigned numActLoadsStores = actualLoads.size() + actualStores.size();
@@ -553,6 +562,10 @@ private:
                                                      mapping.repeatCount);
 
       SmallVec<uint32_t, 32> worklist(IntRange(actualPorts.size()).reverse());
+
+      if constexpr (std::is_same_v<RefT, MemLoadIRef>) {
+        // Range{worklist}.do_reverse();
+      }
 
       // Usually the modelWidth is mapping.repeatCount * modelPortWidth. We can
       // slightly reduce it to e.g. implement a 32-bit wide memory with 2x
@@ -616,6 +629,19 @@ private:
             part.writeSingle(baseIdx + idx, *actFact - idx, undefModelInst);
           }
         }
+
+        // SmallVec<uint32_t, 16> modPortIdxs(usedModelPort.unsetBitIdxs());
+        // // check more constrained ports first, we want to try to use those
+        // first if (std::is_same_v<RefT, MemLoadIRef>) {
+        //   Range{modPortIdxs}.stable_sort(
+        //       [this, size = modelPorts.size()](uint32_t a, uint32_t b) {
+        //         uint32_t modLdIdxA = a % size;
+        //         uint32_t modLdIdxB = b % size;
+        //         auto aCnt = modExclMatrix.countRange(modLdIdxA * size, size);
+        //         auto bCnt = modExclMatrix.countRange(modLdIdxB * size, size);
+        //         return aCnt < bCnt;
+        //       });
+        // }
 
         // operates on conceptual duplicated model stores. one
         // actualStore might need to be covered by multiple modelStores
@@ -709,15 +735,16 @@ private:
             triggerMapping = std::move(pair.second);
           }
 
-          auto &modelPortMeta =
+          auto &boundPorts =
               mapping.boundPorts
                   .findOrInsert(modPtr,
                                 SmallVec<BoundPort, 4>(mapping.repeatCount))
-                  .second.val()[repIdx];
+                  .second.val();
+          auto &modelPortMeta = boundPorts[repIdx];
           // address object is already bound to something else.
-          if (modelPortMeta.addr != Any{actPtr, nullref}) {
-            continue;
-          }
+          // if (modelPortMeta.addr != Any{actPtr, nullref}) {
+          //   continue;
+          // }
           modelPortMeta.addr = actPtr;
 
           modelPortMeta.idxOffs =
@@ -727,6 +754,8 @@ private:
           triggerMapping.commit();
           usedModelPort[globIdx] = 1;
           part.writeSingle(adjAddr, fragAccessLen, unsigned(globIdx));
+          if constexpr (std::is_same_v<RefT, MemLoadIRef>)
+            visualize(dbgs());
           if (part.isCovered(0, part.getLen()))
             break;
         }
@@ -758,13 +787,30 @@ private:
         if (!storePrioOK)
           return false;
 
-        // Mask off unused ports
-        for (const auto globIdx : usedModelPort.unsetBitIdxs()) {
+        // Mask off unused ports: regenerate modelRangeEnable, mark only
+        // actually used ports.
+        PortPartition mask(mapping.repeatCount * modelPortWidth);
+        // Also find totally unused model stores
+        DynBitSet<SmallVec<uint64_t, 1>> modelStoreUsed(modelPorts.size());
+        for (const auto globIdx : usedModelPort.setBitIdxs()) {
           uint32_t modStIdx = globIdx % modelPorts.size();
           auto &modSt = modelPorts[modStIdx];
           uint32_t repIdx = globIdx / modelPorts.size();
-          mapping.modelRangeEnable.writeSingle(
+
+          auto adjModPortLen = mapping.modelRangeEnable.getNumCoveredBits(
               repIdx * modelPortWidth + modSt.base(), modSt.getLen());
+          auto unadjAddr = repIdx * modelPortWidth + modSt.base();
+
+          mask.writeSingle(unadjAddr, adjModPortLen, 1u);
+          modelStoreUsed[modStIdx] = 1;
+        }
+        mapping.modelRangeEnable = std::move(mask);
+        // Remove dependencies on totally unused store ports
+        for (auto idx : modelStoreUsed.unsetBitIdxs()) {
+          // clear matrix column
+          auto dim = modelLoads.size() + modelStores.size();
+          for (size_t i = idx + modelLoads.size(); i < (dim * dim); i += dim)
+            modExclMatrix[i] = 0;
         }
       }
       return true;
@@ -804,8 +850,8 @@ private:
     template <typename RefT>
     void applyPort(Context &ctx, uint32_t actLoadIdx, RefT actLoad,
                    PortPartition &part, uint32_t factor, auto &&connect,
-                   auto &&connectReverse, OperandVec<HWValue> *outWires,
-                   HWValue &outSubIdx) {
+                   auto &&connectReverse, auto &&getConnection,
+                   OperandVec<HWValue> *outWires, HWValue &outSubIdx) {
       HWInstrBuilder build{ctx, actLoad};
 
       HWValue subIdx = nullref;
@@ -824,6 +870,7 @@ private:
         uint32_t repIdx;
         RefT modLoad;
         uint32_t modLoadIdx;
+        HWValue portAddressInputEnable = nullref;
 
         if constexpr (std::is_same_v<RefT, MemLoadIRef>) {
           repIdx = idx / modelLoads.size();
@@ -861,7 +908,8 @@ private:
                                                     ConstantRef::fromU32(idx),
                                                     BigInt::ICMP_EQ));
           }
-
+          if (en != ConstantRef::fromBool(true))
+            portAddressInputEnable = en;
           connect(en, modLoad.en().template as<WireRef>(), repIdx);
         }
 
@@ -880,9 +928,6 @@ private:
           adjAddr =
               build.buildAdd(adjAddr, ConstantRef::fromU32(binding.idxOffs));
         }
-        connect(adjAddr,
-                modLoad.terms().front().getIdx().template as<WireRef>(),
-                repIdx);
 
         if constexpr (std::is_same_v<RefT, MemLoadIRef>) {
           const auto &modPipe = modLoadPipelines[modLoadIdx];
@@ -910,6 +955,14 @@ private:
             connect(actualVal, modW, repIdx);
           }
 
+          // // Extract load enable
+          // if (!modLoadPipelines[modLoadIdx].stages.empty()) {
+          //   auto ff = modLoadPipelines[modLoadIdx].stages.front().ff;
+          //   auto val = ff.clkEnRaw();
+          //   if (val != ConstantRef::fromBool(true))
+          //     portAddressInputEnable = val;
+          // }
+
           auto ldValPostPipe = ctx.resolve(modPipe.slice.wire);
           assert(modPipe.slice.addr == 0 &&
                  modPipe.slice.len == ldValPostPipe.getNumBits() && "todo");
@@ -936,6 +989,22 @@ private:
                  !wrval.as<ConstantRef>().allBitsUndef());
           connect(wrval, modLoad.value().template as<WireRef>(), repIdx);
         }
+
+        // Connected address, possibly MUX'd by port enable if shared
+        auto existingConn = getConnection(
+            modLoad.terms().front().getIdx().template as<WireRef>(), repIdx);
+        if (existingConn) {
+          if (!portAddressInputEnable)
+            report_fatal_error(
+                "not supported: shared address on non-shared port");
+          assert(!portAddressInputEnable.is<ConstantRef>());
+          adjAddr =
+              build.buildMux(portAddressInputEnable, adjAddr, existingConn);
+        }
+        connect(adjAddr,
+                modLoad.terms().front().getIdx().template as<WireRef>(),
+                repIdx);
+
         adjFragAddr += frag.len;
       }
 
@@ -1043,6 +1112,18 @@ private:
         instances[repIdx].defs()[idx] = w;
         return w;
       };
+      auto getConnection = [&](WireRef mod, unsigned repIdx) -> HWValue {
+        auto port = WireVariable::checkIsInputLookthru(mod);
+        if (!port)
+          report_fatal_error("expected port");
+        auto idx = inputIdxMap.find(port->reg.oref()).val();
+        auto &inp = instanceInputs[repIdx * numInputs + idx];
+        auto it = inp.getInsertIt(port->addr);
+        if (it->dstAddr == port->addr && it->len == port->len &&
+            it->srcAddr == 0)
+          return ctx.resolve(it->ref);
+        return nullref;
+      };
 
       for (auto [actLoadIdx, part, actLoad] :
            Range{mapping.loadPartitions}.zip(actualLoads).enumerate().flat()) {
@@ -1055,7 +1136,7 @@ private:
 
         HWValue subIdx;
         applyPort(ctx, actLoadIdx, actLoad, part, factor, connect,
-                  connectReverse, &wires, subIdx);
+                  connectReverse, getConnection, &wires, subIdx);
 
         wires.others().do_reverse();
         auto val = build.buildConcat(std::move(wires));
@@ -1097,7 +1178,7 @@ private:
 
         HWValue subIdx;
         applyPort(ctx, actStoreIdx, actStore, part, factor, connect,
-                  connectReverse, nullptr, subIdx);
+                  connectReverse, getConnection, nullptr, subIdx);
       }
 
       // Flatten inputs
@@ -1176,10 +1257,36 @@ private:
     if (!mapper.mapPorts(mapper.mapping.storePartitions, mapper.actualStores,
                          mapper.modelStores))
       return false;
+    mapper.visualize(dbgs());
+    auto printExclMatrix = [&](UnsizedBitSet<SmallVec<uint64_t, 1>> &mat,
+                               uint32_t numRead, uint32_t numWrite) {
+      DYNO_DBG({
+        auto dim = numRead + numWrite;
+        for (uint32_t i = 0; i < dim; i++) {
+          std::print(dbgs(),
+                     "{:c} port {:02d} excludes: ", (i < numRead ? 'r' : 'w'),
+                     i);
+          for (uint32_t j = 0; j < dim; j++) {
+            if (i == j)
+              dbgs() << '\\';
+            else
+              dbgs() << char(mat[i * dim + j] + '0');
+          }
+          dbgs() << "\n";
+        }
+      })
+    };
+
+    DYNO_DBG(std::print(dbgs(), "candidate exclusion matrix\n"));
+    printExclMatrix(mapper.modExclMatrix, mapper.modelLoads.size(),
+                    mapper.modelStores.size());
 
     if (!mapper.mapPorts(mapper.mapping.loadPartitions, mapper.actualLoads,
-                         mapper.modelLoads))
+                         mapper.modelLoads)) {
+      mapper.visualize(dbgs());
       return false;
+    }
+    mapper.visualize(dbgs());
 
     mapper.computeMappingCost();
     return true;
@@ -1227,8 +1334,8 @@ private:
       DYNO_DBG(
           std::print(dbgs(), "candidate \"{}\" exclusion matrix\n",
                      HWInstrRef{modelCand.iref()}.parentMod(ctx).mod()->name));
-      printExclMatrix(mapper.actExclMatrix, mapper.actualLoads.size(),
-                      mapper.actualStores.size());
+      printExclMatrix(mapper.modExclMatrix, mapper.modelLoads.size(),
+                      mapper.modelStores.size());
 
       auto vis = [&]() {
         DYNO_DBG({
