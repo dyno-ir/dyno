@@ -67,4 +67,11 @@ __attribute__((used)) void dumpObj(FatDynObjRef<> obj) {
     dbgs() << "[" << obj.getObjID() << "]";
 };
 
+__attribute__((used)) void dumpBlock(BlockRef block, Context& ctx) {
+  print.reset();
+  auto tok = print.bindCtx(ctx);
+  print.printBlock(block);
+}
+
+
 }; // namespace dyno

@@ -1226,15 +1226,15 @@ public:
     return ::Range{
         set_bits_iterator{beginIt, endIt, 0},
         set_bits_iterator{endIt, endIt,
-                          (endIt - beginIt) *
-                              sizeof(std::remove_cvref_t<value_type>)}};
+                          size_t(endIt - beginIt) *
+                              bit_mask_sz<std::remove_cvref_t<value_type>>}};
   }
   constexpr auto unset_bits() {
-    return ::Range{
-        set_bits_iterator<It, true>{beginIt, endIt, 0},
-        set_bits_iterator<It, true>{
-            endIt, endIt,
-            (endIt - beginIt) * sizeof(std::remove_cvref_t<value_type>)}};
+    return ::Range{set_bits_iterator<It, true>{beginIt, endIt, 0},
+                   set_bits_iterator<It, true>{
+                       endIt, endIt,
+                       size_t(endIt - beginIt) *
+                           bit_mask_sz<std::remove_cvref_t<value_type>>}};
   }
 
   template <typename TransformT>

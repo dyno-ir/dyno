@@ -20,7 +20,7 @@ public:
   using iterator_category = std::bidirectional_iterator_tag;
   using value_type = InstrRef;
   using pointer = value_type *;
-  using reference = value_type &;
+  using reference = value_type;
   using difference_type = ptrdiff_t;
 
   StableBlockIterator &operator++() {

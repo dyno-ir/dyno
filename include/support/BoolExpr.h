@@ -1,16 +1,18 @@
 #pragma once
 #include "support/ArrayRef.h"
 #include "support/Bits.h"
+#include "support/Debug.h"
 #include "support/DenseMap.h"
 #include "support/DenseMapInfo.h"
+#include "support/Optional.h"
 #include "support/Ranges.h"
 #include "support/SmallVec.h"
 #include "support/TwoLevelSet.h"
 #include "support/Utility.h"
-#include "support/Optional.h"
 #include <bit>
 #include <cstdint>
 #include <iterator>
+#include <print>
 #include <type_traits>
 
 struct SmallBoolExprTerm {
@@ -22,17 +24,23 @@ struct SmallBoolExprTerm {
   bool isFalse() const { return pos & neg; }
   bool isTrue() const { return pos == 0 && neg == 0; }
 
-  auto literalIdxs() { return IntRange{pos | neg, (pos | neg) + 1}.set_bits(); }
+  auto literalIdxs() {
+    return IntRange<term_mask_t>{pos | neg, (pos | neg) + 1}.set_bits();
+  }
   auto enumerate() {
     return literalIdxs().transform([pos = this->pos](size_t, size_t idx) {
-      return std::make_pair(idx, !!(pos & (1 << idx)));
+      return std::make_pair(idx, !!(pos & (1ull << idx)));
     });
   }
 
+  void mark(unsigned idx) {
+    pos = pos | (1ull << idx);
+    neg = neg | (1ull << idx);
+  }
   void set(unsigned idx, bool val) {
     term_mask_t mask = bit_mask_zeros<term_mask_t>(1, idx);
-    pos = (pos & mask) | (val << idx);
-    neg = (neg & mask) | (!val << idx);
+    pos = (pos & mask) | (term_mask_t(val) << idx);
+    neg = (neg & mask) | (term_mask_t(!val) << idx);
   }
   void inv(unsigned idx) {
     pos ^= 1ull << idx;
@@ -66,9 +74,9 @@ struct SmallBoolExprTerm {
   }
 
   dyno::Optional<bool> get(unsigned idx) {
-    if (!((pos | neg) & (1 << idx)))
+    if (!((pos | neg) & (1ull << idx)))
       return dyno::nullopt;
-    return pos & (1 << idx);
+    return pos & (1ull << idx);
   }
 
   void mark_delete() {
@@ -110,17 +118,27 @@ template <> struct DenseMapInfo<SmallBoolExprTerm> {
 class SmallBoolExprDNF {
   SmallVec<SmallBoolExprTerm, 16> terms;
 
-  void insertTerm(SmallDenseMap<SmallBoolExprTerm, uint32_t> &termsSet,
+  void dedupeTerm(SmallDenseMap<SmallBoolExprTerm, uint32_t> &termsSet,
                   SmallBoolExprTerm term, unsigned termIdx) {
     for (auto [idx, val] : term.enumerate()) {
       // create copy with term negated
       auto copy = term;
       // set to constant value s.t. terms can find each other.
       // either full match (dedupe) or single lit inverse
-      copy.set(idx, 0);
+      copy.mark(idx);
       auto it = termsSet.find(copy);
+#ifdef BOOL_EXPR_DBG
+      std::print(dyno::dbgs(),
+                 "{}: search {} of {:04b}/{:04b}: {:04b}/{:04b}\n", termIdx,
+                 idx, term.pos, term.neg, copy.pos, copy.neg);
+#endif
       if (it == termsSet.end())
         continue;
+#ifdef BOOL_EXPR_DBG
+      std::print(dyno::dbgs(),
+                 "{}: found {}, {} of {:04b}/{:04b}: {:04b}/{:04b}\n", termIdx,
+                 it.val(), idx, term.pos, term.neg, copy.pos, copy.neg);
+#endif
 
       // found, check if perfect match or literal inverted
       auto otherIdx = it.val();
@@ -130,23 +148,35 @@ class SmallBoolExprDNF {
         term.mark_delete();
         return; // done
       } else if (otherTerm == term.with_inv(idx)) {
-        term.mark_delete();
 
         // unhash otherTerm
         for (auto [idx, val] : otherTerm.enumerate()) {
           auto copy = term;
-          copy.set(idx, 0);
-          if (auto it = termsSet.find(copy))
+          copy.mark(idx);
+#ifdef BOOL_EXPR_DBG
+          std::print(dyno::dbgs(),
+                     "erasing {} of {:04b}/{:04b}: {:04b}/{:04b}\n", idx,
+                     term.pos, term.neg, copy.pos, copy.neg);
+#endif
+
+          if (auto it = termsSet.find(copy)) {
             termsSet.erase(it);
+#ifdef BOOL_EXPR_DBG
+            std::print(dyno::dbgs(),
+                       "erased {} of {:04b}/{:04b}: {:04b}/{:04b}\n", idx,
+                       term.pos, term.neg, copy.pos, copy.neg);
+#endif
+          }
         }
+        term.mark_delete();
         otherTerm.unset(idx);
 
         // recursive call
-        insertTerm(termsSet, otherTerm, otherIdx);
+        dedupeTerm(termsSet, otherTerm, otherIdx);
         return;
 
       } else
-        unreachable();
+        assert(0);
 
       assert(otherTerm == term || otherTerm == term.with_inv(idx));
     }
@@ -157,8 +187,13 @@ class SmallBoolExprDNF {
       auto copy = term;
       // set to constant value s.t. terms can find each other.
       // either full match (dedupe) or single lit inverse
-      copy.set(idx, 0);
+      copy.mark(idx);
       termsSet.findOrInsert(copy, termIdx);
+#ifdef BOOL_EXPR_DBG
+      std::print(dyno::dbgs(),
+                 "{}: insert {} of {:04b}/{:04b}: {:04b}/{:04b}\n", termIdx,
+                 idx, term.pos, term.neg, copy.pos, copy.neg);
+#endif
     }
   }
 
@@ -193,7 +228,7 @@ public:
     for (auto [termIdx, term] : Range{terms}.enumerate()) {
       if (term.size() < 2 || term.is_marked_delete())
         continue;
-      insertTerm(termsSet, term, termIdx);
+      dedupeTerm(termsSet, term, termIdx);
     }
 
     gcTerms();
@@ -252,7 +287,7 @@ public:
 };
 
 template <typename LitType> class TypedSmallBoolExprDNF {
-  StaticVec<LitType, 64> table;
+  std::array<LitType, 64> table;
   SmallBoolExprDNF expr;
 
 public:
@@ -272,8 +307,8 @@ public:
     for (auto [val, pol] : literals) {
       auto idx = Range{table}.find_idx(val);
       if (!idx) {
-        idx = table.size();
-        table.push_back(val);
+        idx = getFreeIdx();
+        table[*idx] = val;
       }
       term.set(*idx, pol);
     }
@@ -288,17 +323,23 @@ public:
   void addAND(LitType lit, bool pol) {
     auto idx = Range{table}.find_idx(lit);
     if (!idx) {
-      idx = table.size();
-      table.push_back(lit);
+      idx = getFreeIdx();
+      table[*idx] = lit;
     }
 
     expr.addAND(*idx, pol);
   }
 
-  void simplify() {
-    // todo: consolidate terms (or do when allocing new)
-    return expr.simplify();
+  unsigned getFreeIdx() {
+    uint64_t mask = 0;
+    for (auto term : expr) {
+      mask |= term.neg | term.pos;
+    }
+    assert(mask != ~0ULL);
+    return std::countr_one(mask);
   }
+
+  void simplify() { expr.simplify(); }
 
   auto size() const { return expr.size(); }
   auto empty() const { return expr.empty(); }
@@ -336,16 +377,29 @@ public:
   __attribute__((used)) std::string toString() {
     std::string str;
     for (auto term : Range{iterator{expr.begin(), table.data()},
-                           iterator{expr.end(), table.data()}}) {
+                           iterator{expr.end(), table.data()}}
+                         .no_deref()) {
       str += "(";
 
-      for (auto [ref, inv] : term) {
+      unsigned cnt = 0;
+      for (auto [ref, inv] : *term) {
         if (inv)
           str += "!";
         str += std::to_string(ref.getObjID().num);
         str += "&";
+        cnt++;
       }
-      if (!term.empty())
+      if (cnt != term.val().size()) {
+        cnt = 0;
+        for (auto [ref, inv] : *term) {
+          if (inv)
+            str += "!";
+          str += std::to_string(ref.getObjID().num);
+          str += "&";
+          cnt++;
+        }
+      }
+      if (!(*term).empty())
         str.resize(str.size() - 1);
       str += ") |";
     }

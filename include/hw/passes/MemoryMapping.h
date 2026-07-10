@@ -563,10 +563,6 @@ private:
 
       SmallVec<uint32_t, 32> worklist(IntRange(actualPorts.size()).reverse());
 
-      if constexpr (std::is_same_v<RefT, MemLoadIRef>) {
-        // Range{worklist}.do_reverse();
-      }
-
       // Usually the modelWidth is mapping.repeatCount * modelPortWidth. We can
       // slightly reduce it to e.g. implement a 32-bit wide memory with 2x
       // 18-bit model memories. This is done greedily via this function.
@@ -629,19 +625,6 @@ private:
             part.writeSingle(baseIdx + idx, *actFact - idx, undefModelInst);
           }
         }
-
-        // SmallVec<uint32_t, 16> modPortIdxs(usedModelPort.unsetBitIdxs());
-        // // check more constrained ports first, we want to try to use those
-        // first if (std::is_same_v<RefT, MemLoadIRef>) {
-        //   Range{modPortIdxs}.stable_sort(
-        //       [this, size = modelPorts.size()](uint32_t a, uint32_t b) {
-        //         uint32_t modLdIdxA = a % size;
-        //         uint32_t modLdIdxB = b % size;
-        //         auto aCnt = modExclMatrix.countRange(modLdIdxA * size, size);
-        //         auto bCnt = modExclMatrix.countRange(modLdIdxB * size, size);
-        //         return aCnt < bCnt;
-        //       });
-        // }
 
         // operates on conceptual duplicated model stores. one
         // actualStore might need to be covered by multiple modelStores
@@ -754,8 +737,6 @@ private:
           triggerMapping.commit();
           usedModelPort[globIdx] = 1;
           part.writeSingle(adjAddr, fragAccessLen, unsigned(globIdx));
-          if constexpr (std::is_same_v<RefT, MemLoadIRef>)
-            visualize(dbgs());
           if (part.isCovered(0, part.getLen()))
             break;
         }
@@ -1257,36 +1238,10 @@ private:
     if (!mapper.mapPorts(mapper.mapping.storePartitions, mapper.actualStores,
                          mapper.modelStores))
       return false;
-    mapper.visualize(dbgs());
-    auto printExclMatrix = [&](UnsizedBitSet<SmallVec<uint64_t, 1>> &mat,
-                               uint32_t numRead, uint32_t numWrite) {
-      DYNO_DBG({
-        auto dim = numRead + numWrite;
-        for (uint32_t i = 0; i < dim; i++) {
-          std::print(dbgs(),
-                     "{:c} port {:02d} excludes: ", (i < numRead ? 'r' : 'w'),
-                     i);
-          for (uint32_t j = 0; j < dim; j++) {
-            if (i == j)
-              dbgs() << '\\';
-            else
-              dbgs() << char(mat[i * dim + j] + '0');
-          }
-          dbgs() << "\n";
-        }
-      })
-    };
-
-    DYNO_DBG(std::print(dbgs(), "candidate exclusion matrix\n"));
-    printExclMatrix(mapper.modExclMatrix, mapper.modelLoads.size(),
-                    mapper.modelStores.size());
 
     if (!mapper.mapPorts(mapper.mapping.loadPartitions, mapper.actualLoads,
-                         mapper.modelLoads)) {
-      mapper.visualize(dbgs());
+                         mapper.modelLoads))
       return false;
-    }
-    mapper.visualize(dbgs());
 
     mapper.computeMappingCost();
     return true;

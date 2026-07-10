@@ -35,6 +35,7 @@ void dumpDeps(InstrRef instr);
 void dumpDeps(InstrRef instr, Context &ctx);
 void dumpDeps(InstrRef instr, Context &ctx, unsigned depth);
 void dumpObj(FatDynObjRef<> obj);
+void dumpBlock(BlockRef block, Context& ctx);
 
 template <typename Derived> class HWPrinterImpl {
   auto &self() { return *reinterpret_cast<Derived *>(this); }

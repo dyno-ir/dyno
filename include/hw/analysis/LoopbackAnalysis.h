@@ -33,8 +33,13 @@ public:
   }
   LoopbackFrag(uint32_t dstAddr, uint32_t len, ObjRef<Wire> en, bool polarity)
       : dstAddr(dstAddr), len(len) {
+
     this->enable[0] = en;
     this->polarity.push_back(polarity);
+    if (!en) {
+      enable.pop_back();
+      this->polarity.pop_back();
+    }
   }
   LoopbackFrag(uint32_t dstAddr, uint32_t len, const LoopbackFrag &frag)
       : dstAddr(dstAddr), len(len), enable(frag.enable) {
@@ -47,11 +52,13 @@ public:
     enable.push_back(en);
     this->polarity.push_back(polarity);
   }
-  uint32_t size() const { return enable[0] ? enable.size() : 0; }
+  uint32_t size() const { return bool(*this) ? enable.size() : 0; }
   auto begin() { return zip_iterator{enable.begin(), polarity.begin()}; }
   auto end() { return zip_iterator{enable.end(), polarity.end()}; }
 
-  explicit operator bool() const { return enable[0] != invalid; }
+  explicit operator bool() const {
+    return enable.size() != 1 || enable[0] != invalid;
+  }
 
   bool overwrites(LoopbackFrag &other) { return false; }
   bool fuses(LoopbackFrag &other) { return false; }

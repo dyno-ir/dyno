@@ -171,8 +171,6 @@ private:
     if (!load || !load.as<LoadIRef>().isFullReg())
       return false;
 
-    // todo: netlist version of this (and findResets) where we just use q wire
-    // directly.
     auto part = loopbackAnalysis.get(instr.d(), load.as<LoadIRef>().value());
     if (Range{part.frags}.all(
             [](auto frag) { return !frag || frag.size() == 0; }))
@@ -2047,13 +2045,14 @@ private:
         cCond && !cCond.getIs4S()) {
       auto activeBlock =
           cCond.valueEquals(1) ? instr.getTrueBlock() : instr.getFalseBlock();
-      replaceMultiwayWithBlock(instr, activeBlock);
+      if (activeBlock) // if w/o else may not have false block
+        replaceMultiwayWithBlock(instr, activeBlock);
       deleteMatchedInstr(instr);
       return PAT_TRUE;
     }
 
     if (!instr.yieldValues().empty() && instr.getTrueBlock().size() == 1 &&
-        instr.getFalseBlock().size() == 1) {
+        instr.getFalseBlock() && instr.getFalseBlock().size() == 1) {
 
       HWInstrBuilder build{ctx, instr};
       for (auto [outW, trueV, falseV] :

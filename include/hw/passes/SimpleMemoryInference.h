@@ -2,8 +2,11 @@
 
 #include "dyno/Constant.h"
 #include "dyno/Context.h"
+#include "dyno/DeepCopy.h"
 #include "dyno/FatContext.h"
+#include "dyno/HierBlockIterator.h"
 #include "dyno/Instr.h"
+#include "dyno/MutInstr.h"
 #include "dyno/Pass.h"
 #include "hw/HWAbstraction.h"
 #include "hw/HWContext.h"
@@ -282,7 +285,7 @@ class SimpleMemoryInferencePass : public Pass<SimpleMemoryInferencePass> {
 
   struct WritePort2 {
     InstrRef instr; // insert/concat
-    BoolExpr enables;
+    HWValue enables;
     uint32_t dly;
     TriggerIRef trigger;
   };
@@ -320,11 +323,11 @@ class SimpleMemoryInferencePass : public Pass<SimpleMemoryInferencePass> {
     struct Frame {
       ObjRef<Wire> ref;
       uint32_t idx = 0;
-      BoolExpr acc = {};
+      HWValue acc = ConstantRef::fromBool(false);
     };
     SmallVec<Frame, 32> stack{{load.value()}};
 
-    BoolExpr rv;
+    HWValue rv;
     bool rvValid = false;
 
     // every MUX must be visited exactly twice (via both inputs)
@@ -337,23 +340,30 @@ class SimpleMemoryInferencePass : public Pass<SimpleMemoryInferencePass> {
     int unaccountedInserts = 0;
     bool sawStore = false;
 
-    SmallDenseMap<ObjRef<Instr>, BoolExpr> muxMemo;
+    SmallDenseMap<ObjRef<Instr>, HWValue> muxMemo;
+    BlockRef scratchBlock = ctx.getCFG().createBlock();
+
+    Defer destroyScratchBlock([&]() {
+      for (auto instr : scratchBlock.unordered().reverse())
+        ctx.destroyInstr(instr);
+      ctx.destroy(scratchBlock);
+    });
+
+    HWInstrBuilder scratchBuild{ctx, scratchBlock.end()};
+
     while (!stack.empty()) {
       auto wire = ctx.resolve(stack.back().ref);
       if (stack.back().idx == wire.getNumUses()) {
 
         // combine final retval with acc
         if (rvValid) {
-          rv.simplify();
-          stack.back().acc.simplify();
-          stack.back().acc.addTerms(rv);
+          stack.back().acc = scratchBuild.buildOr(stack.back().acc, rv);
         }
         rvValid = true;
-        rv = std::move(stack.pop_back_val().acc);
+        rv = stack.pop_back_val().acc;
 
         if (wire.getDefI().isOpc(HW_INSERT)) {
           unaccountedInserts--;
-          rv.simplify();
           memory.writes.emplace_back(
               WritePort2{wire.getDefI(), rv, store && store.trigger(),
                          store ? store.trigger() : nullref});
@@ -361,24 +371,16 @@ class SimpleMemoryInferencePass : public Pass<SimpleMemoryInferencePass> {
           muxMemo.findOrInsert(wire.getDefI(), rv);
           auto use = ctx.resolve(stack.back().ref).uses()[stack.back().idx - 1];
           assert(use.instr() == wire.getDefI());
-          std::cout << "pre: " << rv.toString() << "\n";
           bool polarity = use.getNum() == 2;
-          rv.simplify();
-          rv.addAND(wire.getDefI().other(0)->as<HWValue>(), polarity);
-
-          std::cout << "adding and ";
-          dumpObj(wire.getDefI().other(0)->as<HWValue>());
-          std::cout << " " << rv.toString() << "\n";
-          rv.simplify();
-          std::cout << rv.toString() << "\n\n";
+          auto sel = wire.getDefI().other(0)->as<HWValue>();
+          rv = scratchBuild.buildAnd(rv, polarity ? sel
+                                                  : scratchBuild.buildNot(sel));
         }
 
         continue;
       } else if (stack.back().idx != 0 && rvValid) {
         // or RV into expression
-        rv.simplify();
-        stack.back().acc.addTerms(rv);
-        stack.back().acc.simplify();
+        stack.back().acc = scratchBuild.buildOr(stack.back().acc, rv);
         rvValid = false;
       }
 
@@ -393,7 +395,7 @@ class SimpleMemoryInferencePass : public Pass<SimpleMemoryInferencePass> {
         if (asStore != store)
           return Format{"saw store to wrong register"};
 
-        rv = BoolExpr::trueExpr();
+        rv = ConstantRef::fromBool(true);
         rvValid = true;
         sawStore = true;
         break;
@@ -442,7 +444,9 @@ class SimpleMemoryInferencePass : public Pass<SimpleMemoryInferencePass> {
         if (auto it = muxMemo.find(instr); it != muxMemo.end()) {
           rv = it.val();
           bool polarity = use.getNum() == 2;
-          rv.addAND(instr.other(0)->as<HWValue>(), polarity);
+          auto sel = instr.other(0)->as<HWValue>();
+          rv = scratchBuild.buildAnd(rv, polarity ? sel
+                                                  : scratchBuild.buildNot(sel));
           rvValid = true;
           break;
         }
@@ -474,6 +478,9 @@ class SimpleMemoryInferencePass : public Pass<SimpleMemoryInferencePass> {
       return Format{"unaccounted for inserts"};
     if (store && !sawStore)
       return Format{"DAG walk did not find store"};
+    // move exprs out of scratch block s.t. they're not deleted
+    DeepCopier copier{ctx};
+    copier.moveInstrs(scratchBlock.begin(), store.iter(ctx));
     return memory;
   }
 
@@ -493,114 +500,6 @@ class SimpleMemoryInferencePass : public Pass<SimpleMemoryInferencePass> {
     return InputRegister{store, load};
   }
 
-  template <typename T> void buildPort(T &rd) {}
-
-  void buildMemory(RegisterIRef reg, Memory &&memory) {
-    auto mod = HWInstrRef{reg}.parentMod(ctx);
-    HWInstrBuilder rbuild{ctx, mod.regs_end()};
-
-    auto block = ctx.getCFG().blocks.create(ctx.getCFG());
-    auto memI = InstrBuilder{ctx.getStore<Instr>().create(2, HW_MEMORY_DEF)}
-                    .addRef(block)
-                    .other()
-                    .addRef(ConstantRef::fromU32(*reg.getNumBits()))
-                    .instr();
-
-    auto mem = MemoryInstrRef{memI};
-
-    for (auto &rd : memory.reads) {
-      auto oldDef = rd.instr.def()->as<WireRef>();
-      MemoryInstrRef::Port port;
-
-      // not set for read, inferred later
-      port.en = nullref;
-      port.enPol = 0;
-
-      port.delay = 0;
-      port.clkReg = nullref;
-      port.clkPol = 0;
-
-      port.data = rbuild.buildRegister(oldDef.getNumBits());
-      HWInstrBuilder build{ctx, rd.instr};
-
-      if (auto asSplice = rd.instr.as<SpliceIRef>(); asSplice) {
-        assert(asSplice.getNumTerms() == 1);
-
-        auto terms = asSplice.terms().transform([&](size_t, auto term) {
-          auto reg = rbuild.buildRegister(32);
-          build.buildStore(reg, term.getIdx());
-          return MemoryInstrRef::Port::Term{
-              .addr = reg,
-              .fact = term.getFact(),
-              .max = term.getMax() ? *term.getMax() : ~0U};
-        });
-        port.terms.push_back_range(terms);
-        port.base = asSplice.getBase();
-      } else {
-        assert(rd.instr.isOpc(OP_TRUNC));
-        port.base = 0;
-      }
-
-      oldDef.replaceAllUsesWith(build.buildLoad(port.data));
-
-      mem.appendPort(ctx, port, HW_READ_PORT_DEF);
-    }
-
-    for (auto &wr : memory.writes) {
-      auto asInsert = wr.instr.as<InsertIRef>();
-      MemoryInstrRef::Port port;
-      HWInstrBuilder build{ctx, wr.instr};
-
-      if (!wr.enables.empty()) {
-        port.en = rbuild.buildRegister(1);
-        port.enPol = 1;
-        auto enW = build.buildOr(
-            Range{wr.enables}.transform([&build](size_t, auto term) {
-              return build.buildAnd(
-                  Range{term}.transform([&build](size_t, auto pair) {
-                    if (pair.second)
-                      return pair.first;
-                    return build.buildNot(pair.first);
-                  }));
-            }));
-        build.buildStore(port.en, enW);
-      }
-
-      if (wr.dly == 0) {
-        port.delay = 0;
-        port.clkReg = nullref;
-        port.clkPol = 0;
-      } else {
-        port.delay = wr.dly;
-        assert(wr.trigger.others().size() == 1 &&
-               (wr.trigger.oref()->getMode(0) ==
-                Any{SensMode::POSEDGE, SensMode::NEGEDGE}));
-        port.clkReg = wr.trigger.other(0)->as<RegisterRef>();
-        port.clkPol = wr.trigger.oref()->getMode(0) == SensMode::POSEDGE;
-      }
-
-      port.data = rbuild.buildRegister(asInsert.getLen());
-      build.buildStore(port.data, asInsert.val()->as<HWValue>());
-
-      assert(asInsert.getNumTerms() == 1);
-
-      auto terms = asInsert.terms().transform([&](size_t, auto term) {
-        auto reg = rbuild.buildRegister(32);
-        build.buildStore(reg, term.getIdx());
-        return MemoryInstrRef::Port::Term{.addr = reg,
-                                          .fact = term.getFact(),
-                                          .max = term.getMax() ? *term.getMax()
-                                                               : ~0U};
-      });
-      port.terms.push_back_range(terms);
-      port.base = asInsert.getBase();
-
-      mem.appendPort(ctx, port, HW_WRITE_PORT_DEF);
-    }
-
-    rbuild.insertInstr(memI);
-  }
-
   void buildMemory2(ModuleIRef mod, RegisterIRef reg, Memory &&memory) {
     HWInstrBuilder build{ctx, mod.regs_end()};
     auto newReg = build.buildRegister(reg.getNumBits());
@@ -609,19 +508,7 @@ class SimpleMemoryInferencePass : public Pass<SimpleMemoryInferencePass> {
     for (auto &wr : memory.writes) {
       build.setInsertPoint(wr.instr);
       auto asInsert = wr.instr.as<InsertIRef>();
-      HWValue en = nullref;
-      if (!wr.enables.empty()) {
-        en = build.buildOr(
-            Range{wr.enables}.transform([&build](size_t, auto term) {
-              return build.buildAnd(
-                  Range{term}.transform([&build](size_t, auto pair) {
-                    if (pair.second)
-                      return pair.first;
-                    return build.buildNot(pair.first);
-                  }));
-            }));
-      }
-
+      HWValue en = wr.enables;
       auto ref = build.buildMemStore(
           newReg, asInsert.val()->as<HWValue>(), en, wr.dly, wr.trigger,
           build.buildGEP(asInsert.getBase(), asInsert.terms()));
@@ -664,18 +551,6 @@ class SimpleMemoryInferencePass : public Pass<SimpleMemoryInferencePass> {
 
         dbgs() << "write ports:\n";
         for (auto &port : res->writes) {
-          dbgs() << "en{";
-          for (auto term : port.enables) {
-            dbgs() << "(";
-            for (auto [ref, inv] : term) {
-              if (inv)
-                dbgs() << "!";
-              dumpObj(ref);
-              dbgs() << "&";
-            }
-            dbgs() << ") |";
-          }
-          dbgs() << "}:";
           dumpInstr(port.instr, ctx);
         }
 

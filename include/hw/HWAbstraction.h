@@ -201,9 +201,10 @@ public:
         ([&] { build.constFunc(rest.template as<ConstantRef>()); }(), ...);    \
         return build.get();                                                    \
       }                                                                        \
-    auto rv = buildInstr(opcode, true, first, rest...).defW();                 \
-    rv->numBits = first.getNumBits();                                          \
-    return rv;                                                                 \
+    OtherVec<HWValue> operands{ctx, 1, getNumOperands(first, rest...)};        \
+    operands.push_back(first);                                                 \
+    (operands.push_back(rest), ...);                                           \
+    return ident(std::move(operands));                                         \
   }                                                                            \
   /*note: Destroys the operands array!*/                                       \
   HWValue ident(MutArrayRef<HWValue> operands) {                               \
@@ -335,6 +336,17 @@ public:
 
     if (templ.getNumOthers() == 1)
       return templ.other(0);
+
+    if (auto asConst = templ.other_end()[-1].dyn_as<ConstantRef>()) {
+      if ((asConst.valueEqualsS(-1) &&
+           templ.getDialectOpcode() == Any{OP_AND}) ||
+          (asConst.valueEquals(0) &&
+           templ.getDialectOpcode() == Any{OP_ADD, OP_OR, OP_XOR})) {
+        templ.resize(templ.size() - 1);
+        if (templ.getNumOthers() == 1)
+          return templ.other(0);
+      }
+    }
 
     if (!templ.def())
       templ.def() = ctx.getStore<Wire>().create(bits);

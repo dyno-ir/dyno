@@ -648,13 +648,15 @@ public:
     }
 
 #ifdef ENABLE_FST
-    // if (fstWriter)
-    //   for (auto def : instr.defs()) {
-    //     if (def->is<WireRef>()) {
-    //       fstWriter->updateValue(def->as<WireRef>(),
-    //                              wireVals[def->as<WireRef>()]);
-    //     }
-    //   }
+#ifdef DUMP_WIRES
+    if (fstWriter)
+      for (auto def : instr.defs()) {
+        if (def->is<WireRef>()) {
+          fstWriter->updateValue(def->as<WireRef>(),
+                                 wireVals[def->as<WireRef>()]);
+        }
+      }
+#endif
 #endif
   }
 
@@ -886,18 +888,19 @@ public:
       fstWriter->createVar(reg, regType, RegWireFSTWriter::VarDir::INPUT,
                            *reg.getNumBits(), namesVec.front());
     }
-
-    // for (auto [ref, val] : wireVals) {
-    //   if (!ctx.getStore<Wire>().exists(ref))
-    //     continue;
-    //   auto wire = ctx.getStore<Wire>().resolve(ref);
-    //   if (!wire.hasSingleDef() ||
-    //       HWInstrRef{wire.getDefI()}.parentMod(ctx) != module)
-    //     continue;
-    //   auto name = std::string("w") + std::to_string(wire.getObjID().num);
-    //   fstWriter->createVar(wire, nullref, RegWireFSTWriter::VarDir::INPUT,
-    //                        *wire.getNumBits(), name.c_str());
-    // }
+#ifdef DUMP_WIRES
+    for (auto [ref, val] : wireVals) {
+      if (!ctx.getStore<Wire>().exists(ref))
+        continue;
+      auto wire = ctx.getStore<Wire>().resolve(ref);
+      if (!wire.hasSingleDef() ||
+          HWInstrRef{wire.getDefI()}.parentMod(ctx) != module)
+        continue;
+      auto name = std::string("w") + std::to_string(wire.getObjID().num);
+      fstWriter->createVar(wire, nullref, RegWireFSTWriter::VarDir::INPUT,
+                           *wire.getNumBits(), name.c_str());
+    }
+#endif
 
     fstWriter->endDefinitions();
 
@@ -910,17 +913,19 @@ public:
         continue;
       fstWriter->updateValue(reg, regVals[reg]);
     }
-    // for (auto [ref, val] : wireVals) {
-    //   if (!ctx.getStore<Wire>().exists(ref))
-    //     continue;
-    //   auto wire = ctx.getStore<Wire>().resolve(ref);
-    //   if (!wire.hasSingleDef() ||
-    //       HWInstrRef{wire.getDefI()}.parentMod(ctx) != module)
-    //     continue;
-    //   fstWriter->updateValue(wire, wireVals[wire].getNumBits() == 0
-    //                                    ? PatBigInt::undef(*wire.getNumBits())
-    //                                    : wireVals[wire]);
-    // }
+#ifdef DUMP_WIRES
+    for (auto [ref, val] : wireVals) {
+      if (!ctx.getStore<Wire>().exists(ref))
+        continue;
+      auto wire = ctx.getStore<Wire>().resolve(ref);
+      if (!wire.hasSingleDef() ||
+          HWInstrRef{wire.getDefI()}.parentMod(ctx) != module)
+        continue;
+      fstWriter->updateValue(wire, wireVals[wire].getNumBits() == 0
+                                       ? PatBigInt::undef(*wire.getNumBits())
+                                       : wireVals[wire]);
+    }
+#endif
   }
 #endif
 

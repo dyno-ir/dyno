@@ -839,11 +839,16 @@ replace {
 
 // remove constant 1 enable
 match {
-  // port/data swapped for load but harmless
-  $opc{HW_MEM_LOAD, HW_MEM_STORE} $port, $data, $register, #1'd1, $addr, $trigger...{0,1}
+  HW_MEM_STORE $port, $data, $register, #1'd1, $addr, $trigger...{0,1}
 }
 replace {
-  $opc $port, $data, $register, $addr, $trigger...
+  HW_MEM_STORE $port, $data, $register, $addr, $trigger...
+}
+match {
+  HW_MEM_LOAD $data, $port, $register, #1'd1, $addr, $trigger...{0,1}
+}
+replace {
+  HW_MEM_LOAD defs=2 $data, $port, $register, $addr, $trigger...
 }
 
 // constant 0 enable
@@ -856,6 +861,7 @@ with [{
   ctx.destroy(ref.as<MemoryPortRef>());
 }]
 replace {}
+
 match {
   HW_MEM_LOAD $data, $port, $register, #1'd0, $addr, $trigger...{0,1}
 }
@@ -868,6 +874,36 @@ with [{
   $undef = undefStore;
 }]
 replace $data -> $undef
+
+// copy en into read port
+// commented, to enable this need to (transiently) disable flip flop assume en=1 for data path opt otherwise loops as copied en is set to 1.
+/*match {
+  HW_MEM_LOAD $data, $port, $register, $addr, $trigger:HW_TRIGGER...{0,1}
+  //HW_FLIP_FLOP_SRST
+  HW_FLIP_FLOP $out, $clk, $data:HW_WIRE, $en:HW_WIRE, $rsts...
+}
+with [{
+  if ($data.begin()->as<WireRef>().getNumUses() != 1)
+    goto $fail;
+  auto dataRef = (*$data.begin())->fat();
+  $dataCopy = dataRef;
+  // hack: replace old load's wire with unused new one (else we double def)
+  $data.begin()->replace(ctx.getStore<Wire>().create(dataRef.as<WireRef>().getNumBits()));
+}]
+replace {
+  HW_MEM_LOAD defs=2 $dataCopy, $port, $register, $en, $addr, $trigger...
+  // recreate FF as is. can't nicely say that it does not change
+  HW_FLIP_FLOP $out, $clk, $dataCopy:HW_WIRE, $en:HW_WIRE, $rsts...
+}*/
+
+/*match {
+  HW_MEM_LOAD $data, $port, $register, $addr, $trigger...{0,1}
+  HW_ONEHOT_MUX $out, $pre..., $en, $data, $post...
+}
+replace {
+  HW_MEM_LOAD $data, $port, $register, $en, $addr, $trigger...{0,1}
+  HW_FLIP_FLOP $out, $clk, $data:HW_WIRE, $en:HW_WIRE, $rsts...
+}*/
 
 match {
   HW_ONEHOT_MUX $out, $sel, $val

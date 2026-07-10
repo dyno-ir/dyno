@@ -299,7 +299,7 @@ class FlipFlopMappingPass : public Pass<FlipFlopMappingPass> {
         case FixupType::TIE0_EN:
         case FixupType::TIE1_EN:
           wires.en = ConstantRef::fromBool(type == FixupType::TIE1_EN);
-          abstr.enPol() = (type == FixupType::TIE0_EN);
+          abstr.enPol() = (type == FixupType::TIE1_EN);
           abstr.hasEn() = 1;
           break;
 
@@ -536,7 +536,7 @@ public:
     }
     case FixupType::TIE0_EN:
     case FixupType::TIE1_EN: {
-      if (!abstr.hasEn() || abstr.enPol() != (type == FixupType::TIE0_EN))
+      if (!abstr.hasEn() || abstr.enPol() != (type == FixupType::TIE1_EN))
         break;
       abstr.hasEn() = 0;
       abstr.enPol() = 0;
