@@ -63,7 +63,7 @@ public:
   void renumber(BlockRef block);
   void insert(InstrRef instr, BlockRef_iterator_base it);
   void replace(InstrRef oldI, InstrRef newI);
-  uint64_t operator[](InstrRef instr) const {
+  uint64_t operator[](ObjRef<Instr> instr) const {
     return numbers[instr.getObjID() + 1];
   }
   uint64_t get(InstrRef instr) { return numbers[instr.getObjID() + 1]; }

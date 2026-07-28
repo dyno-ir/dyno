@@ -32,7 +32,11 @@ public:
 
   WireRef q() const { return def(0)->as<WireRef>(); }
 
-  HWValue clkEnRaw() const { return other(2)->as<HWValue>(); }
+  HWValue clkEnRaw() const {
+    auto rv = other(2)->as<HWValue>();
+    assert(rv.getNumBits() == 1);
+    return rv;
+  }
   OperandRef clkEnRawOp() const { return other(2); }
   bool hasClkEn() const {
     return !(clkEnRaw().is<ConstantRef>() &&

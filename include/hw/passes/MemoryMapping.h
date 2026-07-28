@@ -573,7 +573,6 @@ private:
 
         // not enough bits -> downsize stripe count
         if (mapping.getAdjModelWidth() < mapping.tgtAdjModelWidth) {
-          // todo: fail if can't fulfill bandwidth or depth requirements.
           mapping.tgtAdjModelWidth =
               (mapping.getAdjModelWidth() / actualPortsLCM) * actualPortsLCM;
           // if depth too small, fail
@@ -725,9 +724,23 @@ private:
                   .second.val();
           auto &modelPortMeta = boundPorts[repIdx];
           // address object is already bound to something else.
-          // if (modelPortMeta.addr != Any{actPtr, nullref}) {
-          //   continue;
-          // }
+          if (modelPortMeta.addr != Any{actPtr, nullref}) {
+            if (std::is_same_v<RefT, MemLoadIRef>) {
+              auto dim = modelLoads.size() + modelStores.size();
+              // mutually exclusive store bound to load's addr is OK
+              for (size_t i = modStIdx * dim + modelLoads.size();
+                   i < modStIdx * dim + dim; i++) {
+                auto idx = i - modStIdx * dim;
+                if (modExclMatrix[i]) {
+                  auto store = modelStores[idx - modelLoads.size()];
+                  if (store.addr().as<ObjRef<Pointer>>() == modPtr)
+                    goto is_mut_excl_stores_addr;
+                }
+              }
+            }
+            continue;
+          is_mut_excl_stores_addr:
+          }
           modelPortMeta.addr = actPtr;
 
           modelPortMeta.idxOffs =
@@ -1236,12 +1249,14 @@ private:
     mapper.mapping.modelRangeEnable = PortPartition(canonicalModelWidth, 1u);
 
     if (!mapper.mapPorts(mapper.mapping.storePartitions, mapper.actualStores,
-                         mapper.modelStores))
+                         mapper.modelStores)) {
       return false;
+    }
 
     if (!mapper.mapPorts(mapper.mapping.loadPartitions, mapper.actualLoads,
-                         mapper.modelLoads))
+                         mapper.modelLoads)) {
       return false;
+    }
 
     mapper.computeMappingCost();
     return true;
@@ -1250,6 +1265,25 @@ private:
   bool findBestAndMap(RegisterIRef actual) {
     std::optional<std::pair<ObjRef<Register>, MemoryMapping>> best =
         std::nullopt;
+
+    auto printExclMatrix = [&](UnsizedBitSet<SmallVec<uint64_t, 1>> &mat,
+                               uint32_t numRead, uint32_t numWrite) {
+      DYNO_DBG({
+        auto dim = numRead + numWrite;
+        for (uint32_t i = 0; i < dim; i++) {
+          std::print(dbgs(),
+                     "{:c} port {:02d} excludes: ", (i < numRead ? 'r' : 'w'),
+                     i);
+          for (uint32_t j = 0; j < dim; j++) {
+            if (i == j)
+              dbgs() << '\\';
+            else
+              dbgs() << char(mat[i * dim + j] + '0');
+          }
+          dbgs() << "\n";
+        }
+      })
+    };
 
     // todo: prune search space based on score
     for (auto [front, modelCand] :
@@ -1262,35 +1296,17 @@ private:
         return false;
       }
 
-      auto printExclMatrix = [&](UnsizedBitSet<SmallVec<uint64_t, 1>> &mat,
-                                 uint32_t numRead, uint32_t numWrite) {
-        DYNO_DBG({
-          auto dim = numRead + numWrite;
-          for (uint32_t i = 0; i < dim; i++) {
-            std::print(dbgs(),
-                       "{:c} port {:02d} excludes: ", (i < numRead ? 'r' : 'w'),
-                       i);
-            for (uint32_t j = 0; j < dim; j++) {
-              if (i == j)
-                dbgs() << '\\';
-              else
-                dbgs() << char(mat[i * dim + j] + '0');
-            }
-            dbgs() << "\n";
-          }
-        })
-      };
-      if (front) {
-        DYNO_DBG(std::print(dbgs(), "actual mem exclusion matrix\n"));
-        printExclMatrix(mapper.actExclMatrix, mapper.actualLoads.size(),
-                        mapper.actualStores.size());
-      }
+      // if (front) {
+      //   DYNO_DBG(std::print(dbgs(), "actual mem exclusion matrix\n"));
+      //   printExclMatrix(mapper.actExclMatrix, mapper.actualLoads.size(),
+      //                   mapper.actualStores.size());
+      // }
 
-      DYNO_DBG(
-          std::print(dbgs(), "candidate \"{}\" exclusion matrix\n",
-                     HWInstrRef{modelCand.iref()}.parentMod(ctx).mod()->name));
-      printExclMatrix(mapper.modExclMatrix, mapper.modelLoads.size(),
-                      mapper.modelStores.size());
+      // DYNO_DBG(
+      //     std::print(dbgs(), "candidate \"{}\" exclusion matrix\n",
+      //                HWInstrRef{modelCand.iref()}.parentMod(ctx).mod()->name));
+      // printExclMatrix(mapper.modExclMatrix, mapper.modelLoads.size(),
+      //                 mapper.modelStores.size());
 
       auto vis = [&]() {
         DYNO_DBG({
@@ -1341,8 +1357,24 @@ private:
       }
     }
 
-    if (!best)
+    if (!best) {
+      DYNO_DBG({
+        std::print(dbgs(), "failed to map memory:\n");
+        dumpInstr(actual, ctx);
+        std::print(dbgs(), " loads:\n");
+        for (auto memLoad : actual.memLoads()) {
+          std::print(dbgs(), "  ");
+          dumpInstr(memLoad, ctx);
+        }
+        std::print(dbgs(), " stores:\n");
+        for (auto memStore : actual.memStores()) {
+          std::print(dbgs(), "  ");
+          dumpInstr(memStore, ctx);
+        }
+        std::print(dbgs(), "\n\n");
+      })
       return false;
+    }
 
     MemoryMapper mapper{ctx, config, actual, ctx.resolve(best->first).iref()};
     mapper.mapping = std::move(best->second);

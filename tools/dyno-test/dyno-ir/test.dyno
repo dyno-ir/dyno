@@ -1170,6 +1170,9 @@ TEST_SCRIPT :string("test-memory-tdp"), :block {
   endmodule
   }])
   CALL %memoryTestSynth
+  meta.ASSERT_EXISTS_PASS map("regex":
+    "STDCELL_INSTANCE.+%RAMB18_TDP",
+    "num": "16")
   CALL %memoryTestLift
   meta.RANDOM_EQUIVALENCE_CHECK_PASS map("cycles": "10000", "clockMode": "CLOCK")
 }

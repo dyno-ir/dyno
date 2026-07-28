@@ -202,7 +202,7 @@ inline InstrRef LoopSimplifer::runOnLoop(InstrRef loop) {
     yieldVals.resize(loop.as<ForInstrRef>().getNumYieldValues());
     for (auto [i, val] : Range{yieldVals}.enumerate())
       val.init =
-          (*(loop.as<ForInstrRef>().inputValues().begin() + i))->as<WireRef>();
+          (*(loop.as<ForInstrRef>().inputValues().begin() + i))->as<HWValue>();
     break;
   default:
     dyno_unreachable("unknown loop instr");

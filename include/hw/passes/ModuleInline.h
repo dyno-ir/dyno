@@ -4,6 +4,7 @@
 #include "dyno/Context.h"
 #include "dyno/DeepCopy.h"
 #include "dyno/DestroyMap.h"
+#include "dyno/HierBlockIterator.h"
 #include "dyno/ObjMap.h"
 #include "dyno/Pass.h"
 #include "hw/HWAbstraction.h"
@@ -49,6 +50,7 @@ class ModuleInlinePass : public Pass<ModuleInlinePass> {
         }
       }
     };
+    StableBlockIterator regsIt{ctx.getCFG(), *parentMod.regs_end().pred()};
 
     unsigned portIndex = 0;
     auto inlineHook = [&](DeepCopier *self, InstrRef src,
@@ -67,9 +69,10 @@ class ModuleInlinePass : public Pass<ModuleInlinePass> {
       }
       if (src.isOpc(HW_REGISTER_DEF)) {
         HWInstrBuilder build{ctx};
-        build.setInsertPoint(parentMod.regs_end());
+        build.setInsertPoint(std::next(regsIt).getBlockIter());
         auto reg =
             build.buildRegister(src.as<RegisterIRef>().oref().getNumBits());
+        regsIt = StableBlockIterator{ctx.getCFG(), reg.iref()};
         self->oldToNewMap.insert(src.def(0)->fat(), reg);
 
         addNames(src.as<RegisterIRef>().oref(), reg);
@@ -104,9 +107,11 @@ class ModuleInlinePass : public Pass<ModuleInlinePass> {
       deleteRec(HWInstrRef{use.instr()}.parentMod(ctx));
     }
     DYNO_DBG({
-      dbgs() << "deleting module: \"";
-      dbgs() << ref.mod()->name;
-      dbgs() << "\"\n";
+      if (!destroyMap.isMarked(ref.mod())) {
+        dbgs() << "deleting module: \"";
+        dbgs() << ref.mod()->name;
+        dbgs() << "\"\n";
+      }
     })
     destroyMap.mark(ref.mod());
   }

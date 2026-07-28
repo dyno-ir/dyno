@@ -40,6 +40,36 @@ public:
     return nullref;
   }
 
+  static RegisterIRef checkIsLoadedReg(HWValue val) {
+    if (!val.is<WireRef>())
+      return nullref;
+    auto wire = val.as<WireRef>();
+    auto instr = wire.getDefI();
+
+    if (instr.isOpc(HW_LOAD)) {
+      auto load = instr.as<LoadIRef>();
+      if (!load.isFullReg())
+        return nullref;
+      auto reg = load.reg().iref();
+      return reg;
+    }
+
+    return nullref;
+  }
+
+  static HWValue lookThruTrivialRegs(HWValue val) {
+    while (1) {
+      auto reg = checkIsLoadedReg(val);
+      if (!reg)
+        return val;
+      auto singleStore = reg.getSingleStore();
+      if (!singleStore || !singleStore.isOpc(HW_STORE) ||
+          !singleStore.as<StoreIRef>().isFullReg())
+        return val;
+      val = singleStore.as<StoreIRef>().value();
+    }
+  }
+
   struct RegSlice {
     RegisterIRef reg;
     uint32_t addr;

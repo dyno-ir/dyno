@@ -359,10 +359,9 @@ private:
 
     HWInstrBuilder build{ctx, instr};
     auto rebuildWithEn = [&](HWValue newEn) {
+      assert(newEn.getNumBits() == 1);
       newEn = build.buildAnd(newEn, instr.clkEnRaw());
       auto d = instr.d();
-      // todo: ff en as implicit assume rather than explicit
-      d = build.buildAssume(d, newEn);
 
       auto ib =
           build.buildInstrRaw(instr.getDialectOpcode(), instr.getNumOperands());
@@ -1939,7 +1938,8 @@ private:
     uint32_t baseOffs = instr.getBase();
     SmallVec<AddressGenTerm, 4> terms;
     for (auto term : instr.terms()) {
-      if (auto asConst = term.getIdx().template dyn_as<ConstantRef>()) {
+      if (auto asConst = term.getIdx().template dyn_as<ConstantRef>();
+          asConst && !asConst.getIs4S()) {
         baseOffs += checkedMul(asConst.getExactVal(), term.getFact());
         change = true;
         continue;

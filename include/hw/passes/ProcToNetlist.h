@@ -15,17 +15,19 @@ namespace dyno {
 class ProcToNetlistPass : public Pass<ProcToNetlistPass> {
   Context &ctx;
 
+public:
 #define CONFIG_STRUCT_LAMBDA(FIELD, ENUM) FIELD(bool, keepRegs, false)
   CONFIG_STRUCT(CONFIG_STRUCT_LAMBDA)
 #undef CONFIG_STRUCT_LAMBDA
   Config config;
 
+private:
   bool runOnRegister(RegisterIRef reg) {
     // ignore I/Os
     if (!reg.isOpc(HW_REGISTER_DEF))
       return false;
     auto store = StoreIRef{reg.getSingleStore()};
-    if (!store || !store.isFullReg())
+    if (!store || !store.isFullReg() || store.isOpc(HW_STORE_DEFER))
       return false;
     auto load = LoadIRef{reg.getSingleLoad()};
     if (!load || !load.isFullReg())
@@ -49,7 +51,8 @@ class ProcToNetlistPass : public Pass<ProcToNetlistPass> {
   }
 
   void runOnModule(ModuleIRef mod) {
-    for (auto reg : mod.regs().earlyincr()) {
+    SmallVec<InstrRef, 64> regs(mod.regs());
+    for (auto reg : regs) {
       runOnRegister(reg);
     }
   }

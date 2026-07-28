@@ -309,7 +309,7 @@ public:
 
       unsigned cnt = 0;
       for (auto val : templ.others().reverse()) {
-        auto constant = val.as<ConstantRef>();
+        auto constant = val.dyn_as<ConstantRef>();
         if (!constant)
           break;
         switch (*templ.getDialectOpcode()) {

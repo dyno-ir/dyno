@@ -110,14 +110,32 @@ public:
           break;
         }
 
+        case HW_STDCELL_INSTANCE.raw(): {
+          auto other = instr.as<InstanceIRef>().mod();
+          bool isInputFromInst =
+              other->ports[access - instr.other_begin() - 1].portType.is(
+                  HW_INOUT_REGISTER_DEF, HW_OUTPUT_REGISTER_DEF,
+                  HW_REF_REGISTER_DEF);
+          bool isOutputToInst =
+              other->ports[access - instr.other_begin() - 1].portType.is(
+                  HW_INOUT_REGISTER_DEF, HW_INPUT_REGISTER_DEF,
+                  HW_REF_REGISTER_DEF);
+
+          regIsAnyInput |= isInputFromInst;
+          regIsAnyOutput |= isOutputToInst;
+          break;
+        }
+
         case HW_INSTANCE.raw(): {
           auto other = instr.as<InstanceIRef>().mod();
-          bool isInputFromInst = other->ports[access.getNum() - 1].portType.is(
-              HW_INOUT_REGISTER_DEF, HW_OUTPUT_REGISTER_DEF,
-              HW_REF_REGISTER_DEF);
-          bool isOutputToInst = other->ports[access.getNum() - 1].portType.is(
-              HW_INOUT_REGISTER_DEF, HW_INPUT_REGISTER_DEF,
-              HW_REF_REGISTER_DEF);
+          bool isInputFromInst =
+              other->ports[access - instr.other_begin() - 1].portType.is(
+                  HW_INOUT_REGISTER_DEF, HW_OUTPUT_REGISTER_DEF,
+                  HW_REF_REGISTER_DEF);
+          bool isOutputToInst =
+              other->ports[access - instr.other_begin() - 1].portType.is(
+                  HW_INOUT_REGISTER_DEF, HW_INPUT_REGISTER_DEF,
+                  HW_REF_REGISTER_DEF);
 
           regIsAnyInput |= isInputFromInst;
           regIsAnyOutput |= isOutputToInst;

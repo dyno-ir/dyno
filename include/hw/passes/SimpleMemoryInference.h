@@ -8,6 +8,7 @@
 #include "dyno/Instr.h"
 #include "dyno/MutInstr.h"
 #include "dyno/Pass.h"
+#include "hw/AutoDebugInfo.h"
 #include "hw/HWAbstraction.h"
 #include "hw/HWContext.h"
 #include "hw/HWInstr.h"
@@ -414,6 +415,12 @@ class SimpleMemoryInferencePass : public Pass<SimpleMemoryInferencePass> {
                       0});
         break;
       }
+      case *HW_ASSUME: {
+        if (use != instr.other(0))
+          return Format{"expected assume in"};
+        stack.emplace_back(instr.def()->as<WireRef>());
+        break;
+      }
       // case *OP_TRUNC: {
       //   if (stack.size() != 1)
       //     return Format{"not implemented: store forwarding load (todo)"};
@@ -480,7 +487,7 @@ class SimpleMemoryInferencePass : public Pass<SimpleMemoryInferencePass> {
       return Format{"DAG walk did not find store"};
     // move exprs out of scratch block s.t. they're not deleted
     DeepCopier copier{ctx};
-    copier.moveInstrs(scratchBlock.begin(), store.iter(ctx));
+    copier.moveInstrs(scratchBlock.begin(), load.iter(ctx));
     return memory;
   }
 
@@ -507,6 +514,9 @@ class SimpleMemoryInferencePass : public Pass<SimpleMemoryInferencePass> {
 
     for (auto &wr : memory.writes) {
       build.setInsertPoint(wr.instr);
+      AutoCopyDebugInfoStack autoDbgInfo{ctx};
+      auto tok = autoDbgInfo.addWithToken(wr.instr);
+
       auto asInsert = wr.instr.as<InsertIRef>();
       HWValue en = wr.enables;
       auto ref = build.buildMemStore(
@@ -518,6 +528,9 @@ class SimpleMemoryInferencePass : public Pass<SimpleMemoryInferencePass> {
     for (auto &rd : memory.reads) {
       build.setInsertPoint(rd.instr);
       if (auto asSplice = rd.instr.as<SpliceIRef>()) {
+        AutoCopyDebugInfoStack autoDbgInfo{ctx};
+        auto tok = autoDbgInfo.addWithToken(rd.instr);
+
         auto val = build.buildMemLoad(
             newReg, asSplice.getLen(), nullref, 0, nullref,
             build.buildGEP(asSplice.getBase(), asSplice.terms()),

@@ -41,6 +41,11 @@ class AggressiveDeadCodeEliminationPass
   SmallVec<InstrRef, 256> worklist;
 
   void visitRegister(RegisterIRef reg) {
+    auto &regInitValues = ctx.getCtx<HWDialectContext>().regResetValue;
+    if (regInitValues.inRange(reg.oref()) && regInitValues[reg.oref()]) {
+      visitHWValue(ctx.resolve(regInitValues[reg.oref()]));
+    }
+
     for (auto use : reg.oref().uses()) {
       auto instr = use.instr();
       // none of our sources want to re-inspect so this is fine.

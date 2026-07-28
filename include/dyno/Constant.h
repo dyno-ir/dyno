@@ -109,7 +109,8 @@ protected:
       dyno_unreachable("out of bounds");
     return getWord(i, self().getNumWords());
   }
-  constexpr uint32_t __attribute__((always_inline)) getWordMasked(uint32_t i) const {
+  constexpr uint32_t __attribute__((always_inline))
+  getWordMasked(uint32_t i) const {
     if (i == self().getExtNumWords() - 1)
       return getWord(i) & modulo_mask<uint32_t>(self().getRawNumBits());
     return getWord(i);
@@ -3205,11 +3206,6 @@ public:
       auto ref = store.resolve(it.val());
       if (bigInt == ConstantRef{ref})
         return ref;
-    }
-
-    for (auto [k, v] : map) {
-      auto ref = store.resolve(v);
-      assert(bigInt != ConstantRef{ref});
     }
 
     auto ref = store.create(bigInt.getNumWords(), bigInt);

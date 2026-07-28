@@ -371,6 +371,13 @@ macro chk_constant_unsized $self, $len [{
     goto $fail;
 }]
 
+macro chk_constant_all_unk $self [{
+  if (!$self.begin()->is<ConstantRef>())
+    goto $fail;
+  if (!$self.begin()->as<ConstantRef>().allBitsUndef())
+    goto $fail;
+}]
+
 macro chk_wire_constant $self, $len [{
   if (!(*$self.begin())->is<WireRef>())
     goto $fail;
@@ -911,6 +918,22 @@ match {
 replace {
   HW_ASSUME $out, $val, $sel
 }
+
+match {
+  HW_MUX $out, $sel, $val, chk_constant_all_unk()
+}
+replace {
+  HW_ASSUME $out, $val, $sel
+}
+
+match {
+  HW_MUX $out, $sel, chk_constant_all_unk(), $val
+}
+replace {
+  OP_NOT $inv:wire_like($sel), $sel
+  HW_ASSUME $out, $val, $inv
+}
+
 
 match {
   HW_MUX $out, $sel, $trueV, $falseV

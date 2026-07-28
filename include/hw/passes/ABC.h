@@ -280,6 +280,21 @@ public:
         auto outputIdent = ios.back();
         BigInt lut;
 
+        // Constant assignment
+        if (inputIdents.size() == 0) {
+          std::getline(is, line);
+          auto lineRange = Tokenizer{line, " \t"};
+          SmallVec<std::string_view, 1> parts(Range{lineRange});
+          if (parts.size() != 1 || parts.front() != Any{"0", "1"})
+            report_fatal_error("BLIF format");
+          auto val = ConstantRef::fromBool(parts.front() == "1");
+          auto [found, it] =
+              names.findOrInsert(outputIdent, [&]() { return val; });
+          if (found)
+            it.val().as<WireRef>().replaceAllUsesWith(val);
+          continue;
+        }
+
         while (is.peek() == Any{'0', '1', '-'}) {
           std::getline(is, line);
           auto lineRange = Tokenizer{line, " \t"};
@@ -325,6 +340,8 @@ public:
             lut.setBit(set.raw().front(), output == "1");
           }
         }
+
+        assert(lut.getNumBits() != 0);
 
         LUTMutInstr lutInstr{
             ctx,
@@ -413,11 +430,13 @@ class ABCPass : public Pass<ABCPass> {
       BLIF_Printer print{ctx, blifFile};
       print.print(aigRef);
     }
+    //
 
-    auto cmd = std::regex_replace(config.abcCmd, std::regex("${liberty-path}"),
-                                  config.path);
+    auto cmd = std::regex_replace(
+        config.abcCmd, std::regex("\\$\\{liberty-path\\}"), config.path);
 
     system(("yosys-abc -q \"" + cmd + "\"").c_str());
+
     // system(("yosys-abc -q \"read_blif aig.blif; read_lib -X "
     //         "sky130_fd_sc_hd__lpflow_inputiso1p_1 -X "
     //         "sky130_fd_sc_hd__lpflow_isobufsrc_1 -X sky130_fd_sc_hd__clkinv_1

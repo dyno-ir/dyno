@@ -6,8 +6,10 @@
 #include "hw/HWContext.h"
 #include "hw/HWPrinter.h"
 #include "hw/IDs.h"
+#include "hw/LUT.h"
 #include "hw/LoadStore.h"
 #include "hw/Module.h"
+#include "hw/Wire.h"
 #include "op/IDs.h"
 #include "support/ErrorRecovery.h"
 #include "support/Tuple.h"
@@ -187,6 +189,19 @@ private:
                    *def.getNumBits() - *wire.getNumBits(),
                    *wire.getNumBits() - 1, wireToID(wire),
                    *def.getNumBits() - 1);
+        break;
+      }
+
+      case *HW_LUT: {
+        auto asLUT = instr.as<LUTInstrRef>();
+        std::print(os, "LUT{}#({}) lut_{}(.O(_w{}_)", asLUT.numInputs(),
+                   asLUT.truthTable().toString(), asLUT.getObjID().num,
+                   wireToID(asLUT.def()->as<WireRef>()));
+        for (unsigned i = 0; i < asLUT.numInputs(); i++) {
+          std::print(os, ", .I{}(_w{}_)", i,
+                     wireToID(asLUT.inputs()[i].as<WireRef>()));
+        }
+        std::print(os, ");\n");
         break;
       }
 

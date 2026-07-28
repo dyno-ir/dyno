@@ -3137,10 +3137,6 @@ InstrRef::iterator r3;
 InstrRef::iterator r4;
 InstrRef::iterator r5;
 InstrRef::iterator r6;
-FatDynObjRef<>* r7;
-FatDynObjRef<>* r8;
-FatDynObjRef<>* r10;
-FatDynObjRef<>* r11;
 if (!r0.isOpc(HW_MUX)) goto fail_70;
 if (r0.getNumOperands() > 4) goto fail_70;
 if (r0.getNumOperands() < 4) goto fail_70;
@@ -3149,10 +3145,82 @@ r2 = r0.end();
 r3 = std::next(r1);
 r4 = std::next(r3);
 r5 = std::next(r4);
+
+  if (!Range{r5, std::next(r5)}.begin()->is<ConstantRef>())
+    goto fail_70;
+  if (!Range{r5, std::next(r5)}.begin()->as<ConstantRef>().allBitsUndef())
+    goto fail_70;
+r6 = std::next(r5);
+auto r7 = build.buildInstrRaw(HW_ASSUME, (r3-r1)+(r5-r4)+(r4-r3));
+copyOperands(r7, r1, r3);
+r7.other();
+copyOperands(r7, r4, r5);
+copyOperands(r7, r3, r4);
+deleteF(matched, ctx, r0);
+return true;
+}
+fail_70:;
+{
+InstrRef::iterator r1;
+InstrRef::iterator r2;
+InstrRef::iterator r3;
+InstrRef::iterator r4;
+InstrRef::iterator r5;
+InstrRef::iterator r6;
+FatDynObjRef<>* r8;
+FatDynObjRef<>* r9;
+if (!r0.isOpc(HW_MUX)) goto fail_71;
+if (r0.getNumOperands() > 4) goto fail_71;
+if (r0.getNumOperands() < 4) goto fail_71;
+r1 = r0.begin();
+r2 = r0.end();
+r3 = std::next(r1);
+r4 = std::next(r3);
+
+  if (!Range{r4, std::next(r4)}.begin()->is<ConstantRef>())
+    goto fail_71;
+  if (!Range{r4, std::next(r4)}.begin()->as<ConstantRef>().allBitsUndef())
+    goto fail_71;
+r5 = std::next(r4);
+r6 = std::next(r5);
+
+  FatDynObjRef<> w = ctx.getStore<Wire>().create((*Range{r3, r4}.begin())->as<HWValue>().getNumBits()); RefRange{r8, r9} = w;
+auto r7 = build.buildInstrRaw(OP_NOT, (r9-r8)+(r4-r3));
+copyOperands(r7, r8, r9);
+r7.other();
+copyOperands(r7, r3, r4);
+auto r10 = build.buildInstrRaw(HW_ASSUME, (r3-r1)+(r6-r5)+(r9-r8));
+copyOperands(r10, r1, r3);
+r10.other();
+copyOperands(r10, r5, r6);
+copyOperands(r10, r8, r9);
+deleteF(matched, ctx, r0);
+return true;
+}
+fail_71:;
+{
+InstrRef::iterator r1;
+InstrRef::iterator r2;
+InstrRef::iterator r3;
+InstrRef::iterator r4;
+InstrRef::iterator r5;
+InstrRef::iterator r6;
+FatDynObjRef<>* r7;
+FatDynObjRef<>* r8;
+FatDynObjRef<>* r10;
+FatDynObjRef<>* r11;
+if (!r0.isOpc(HW_MUX)) goto fail_72;
+if (r0.getNumOperands() > 4) goto fail_72;
+if (r0.getNumOperands() < 4) goto fail_72;
+r1 = r0.begin();
+r2 = r0.end();
+r3 = std::next(r1);
+r4 = std::next(r3);
+r5 = std::next(r4);
 r6 = std::next(r5);
 
   if (!config.muxToOneHotMux)
-    goto fail_70;
+    goto fail_72;
 
   FatDynObjRef<> w = ctx.getStore<Wire>().create((*Range{r3, r4}.begin())->as<HWValue>().getNumBits()); RefRange{r10, r11} = w;
 auto r9 = build.buildInstrRaw(OP_NOT, (r11-r10)+(r4-r3));
@@ -3169,7 +3237,7 @@ copyOperands(r12, r5, r6);
 deleteF(matched, ctx, r0);
 return true;
 }
-fail_70:;
+fail_72:;
 {
 InstrRef::iterator r1;
 InstrRef::iterator r2;
@@ -3178,19 +3246,19 @@ InstrRef::iterator r4;
 InstrRef::iterator r5;
 FatDynObjRef<>* r6;
 FatDynObjRef<>* r7;
-if (!r0.isOpc(OP_SDIV)) goto cont_71_0;
-goto goto_71_0;
-cont_71_0:;
-if (!r0.isOpc(OP_UDIV)) goto fail_71;
-goto_71_0:;
-if (r0.getNumOperands() > 3) goto fail_71;
-if (r0.getNumOperands() < 3) goto fail_71;
+if (!r0.isOpc(OP_SDIV)) goto cont_73_0;
+goto goto_73_0;
+cont_73_0:;
+if (!r0.isOpc(OP_UDIV)) goto fail_73;
+goto_73_0:;
+if (r0.getNumOperands() > 3) goto fail_73;
+if (r0.getNumOperands() < 3) goto fail_73;
 r1 = r0.begin();
 r2 = r0.end();
 r3 = std::next(r1);
 r4 = std::next(r3);
-if ((*r4)->as<FatDynObjRef<>>().getType() != CORE_CONSTANT) goto fail_71;
-if (!(*r4)->as<ConstantRef>().valueEqualsS("1'h0"_bv)) goto fail_71;
+if ((*r4)->as<FatDynObjRef<>>().getType() != CORE_CONSTANT) goto fail_73;
+if (!(*r4)->as<ConstantRef>().valueEqualsS("1'h0"_bv)) goto fail_73;
 r5 = std::next(r4);
 
   FatDynObjRef<> undefStore = cbuild.undef(*((*RefRange{r1, r3}.begin())->as<WireRef>().getNumBits())).get();
@@ -3199,4 +3267,4 @@ replaceAllUses(replaced, r1, r6);
 deleteF(matched, ctx, r0);
 return true;
 }
-fail_71:;
+fail_73:;

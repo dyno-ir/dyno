@@ -125,7 +125,7 @@ private:
   }
   HWValue findClockEnable2(RegisterIRef q, StoreIRef store) {
     if (isQLoad(q, store.value().as<HWValue>()))
-      return ConstantRef::fromU32(1);
+      return ConstantRef::fromBool(true);
     if (store.value().is<ConstantRef>())
       return nullref;
     auto wire = store.value().as<WireRef>();
@@ -201,6 +201,7 @@ private:
     };
 
     HWValue clkEnVal = findClockEnable2(storeI.reg().iref(), storeI);
+    assert(!clkEnVal || clkEnVal.getNumBits() == 1);
 
     build.pushInsertPoint(storeI);
     HWValue rstVal;

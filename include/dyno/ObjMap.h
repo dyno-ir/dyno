@@ -6,7 +6,6 @@
 #include <cassert>
 #include <support/Ranges.h>
 
-
 namespace dyno {
 
 template <typename K, typename Container> class ObjMap {
@@ -23,7 +22,7 @@ public:
     resize(ceil_to_pow2(ref.getObjID().num + 1));
   }
 
-  bool inRange(ObjRef<K> ref) { return ref.getObjID() < elements.size(); }
+  bool inRange(ObjRef<K> ref) const { return ref.getObjID() < elements.size(); }
 
   void reserve(size_t sz) { elements.reserve(sz); }
 
@@ -40,6 +39,10 @@ public:
   using value_reference = decltype(elements)::reference;
 
   value_reference operator[](ObjRef<K> ref) {
+    assert(inRange(ref));
+    return elements[ref.getObjID()];
+  }
+  decltype(auto) operator[](ObjRef<K> ref) const {
     assert(inRange(ref));
     return elements[ref.getObjID()];
   }
