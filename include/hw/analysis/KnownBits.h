@@ -148,7 +148,7 @@ public:
   case *opc:                                                                   \
     getICMPKnownBits(frame, instr, pred);                                      \
     break;
-        FOR_OP_ALL_COMPARE_OPS(LAMBDA)
+        FOR_OP_COMPARE_OPS(LAMBDA)
 #undef LAMBDA
 
       case *HW_CONCAT: {

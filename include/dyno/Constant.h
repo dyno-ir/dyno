@@ -582,8 +582,8 @@ public:
       for (auto &word : words) {
         word = rand();
       }
-      this->conv4To2StateIfPossible();
       normalize();
+      this->conv4To2StateIfPossible();
     } else {
       randomize(rand);
     }
