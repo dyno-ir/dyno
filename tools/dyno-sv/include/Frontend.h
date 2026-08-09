@@ -111,6 +111,7 @@ public:
   DenseMap<const slang::ast::InstanceBodySymbol *, ObjRef<Module>> moduleMap;
   DenseMap<const slang::ast::SubroutineSymbol *, ObjRef<Function>> functionMap;
   bool curModIsInterface;
+  bool strictXZ = true;
 
   SmallVec<Value *, 4> assignLVStack;
 
@@ -1171,6 +1172,10 @@ public:
 
       auto condVal = handle_expr(*cond.expr)->proGetValue(build);
       auto condBool = makeBool(condVal);
+      if (strictXZ) {
+        condBool = build.buildICmp(ConstantRef::fromBool(0), condBool,
+                                   BigInt::ICMP_WNE);
+      }
 
       if (!asCond.ifFalse) {
         auto ifInstr = build.buildIf(condBool);
@@ -1603,27 +1608,53 @@ public:
         auto lhs = handle_expr(binop.left());
         auto lhsVal = lhs->proGetValue(build);
 
-        auto lhsBool =
-            makeBool(lhsVal, binop.op == slang::ast::BinaryOperator::LogicalOr);
-        auto ifElse = build.buildIfElse(lhsBool);
-        build.pushInsertPoint(ifElse.getTrueBlock().end());
+        if (strictXZ) {
+          bool isAnd = binop.op == slang::ast::BinaryOperator::LogicalAnd;
+          auto lhsBool = makeBool(lhsVal);
+          // wildcard equal to one means _not_ short circuit, eval second
+          auto doEvalRHS = build.buildICmp(ConstantRef::fromBool(isAnd),
+                                           lhsBool, BigInt::ICMP_WEQ);
 
-        auto rhs = handle_expr(binop.right());
-        auto rhsVal = rhs->proGetValue(build);
+          auto ifElse = build.buildIfElse(doEvalRHS, 1);
+          build.pushInsertPoint(ifElse.getTrueBlock().end());
 
-        auto rhsBool = makeBool(rhsVal);
-        ifElse = build.buildYield(rhsBool).second;
+          auto rhs = handle_expr(binop.right());
+          auto rhsVal = rhs->proGetValue(build);
+          auto rhsBool = makeBool(rhsVal);
 
-        build.popInsertPoint();
-        build.pushInsertPoint(ifElse.getFalseBlock().end());
-        ifElse = build
-                     .buildYield(ConstantRef::fromBool(
-                         binop.op != slang::ast::BinaryOperator::LogicalAnd))
-                     .second;
-        build.popInsertPoint();
+          // with strict semantics we need another plain and/or to handle the
+          // lhs==unk case.
+          build.buildYield(isAnd ? build.buildAnd(lhsBool, rhsBool)
+                                 : build.buildOr(lhsBool, rhsBool));
 
-        return std::make_unique<RValue>(ifElse.getYieldValue(0)->as<WireRef>(),
-                                        expr.type);
+          build.popInsertPoint();
+          build.pushInsertPoint(ifElse.getFalseBlock().end());
+          build.buildYield(ConstantRef::fromBool(!isAnd));
+          build.popInsertPoint();
+          return std::make_unique<RValue>(
+              ifElse.getYieldValue(0)->as<WireRef>(), expr.type);
+        } else {
+          auto lhsBool = makeBool(
+              lhsVal, binop.op == slang::ast::BinaryOperator::LogicalOr);
+          auto ifElse = build.buildIfElse(lhsBool);
+          build.pushInsertPoint(ifElse.getTrueBlock().end());
+
+          auto rhs = handle_expr(binop.right());
+          auto rhsVal = rhs->proGetValue(build);
+
+          auto rhsBool = makeBool(rhsVal);
+          ifElse = build.buildYield(rhsBool).second;
+
+          build.popInsertPoint();
+          build.pushInsertPoint(ifElse.getFalseBlock().end());
+          ifElse = build
+                       .buildYield(ConstantRef::fromBool(
+                           binop.op != slang::ast::BinaryOperator::LogicalAnd))
+                       .second;
+          build.popInsertPoint();
+          return std::make_unique<RValue>(
+              ifElse.getYieldValue(0)->as<WireRef>(), expr.type);
+        }
       };
       default:
         break;
@@ -2006,18 +2037,56 @@ public:
         return std::make_unique<RValue>(val, expr.type);
       }
 
-      auto ifElse = build.buildIfElse(makeBool(sel), 1);
+      if (strictXZ) {
+        auto selBool = makeBool(sel);
 
-      build.pushInsertPoint(ifElse.getTrueBlock().end());
-      build.buildYield(handle_expr(asCond.left())->proGetValue(build));
-      build.popInsertPoint();
+        auto evalTrue =
+            build.buildIfElse(build.buildICmp(ConstantRef::fromBool(true),
+                                              selBool, BigInt::ICMP_WEQ),
+                              1);
+        build.pushInsertPoint(evalTrue.getTrueBlock().end());
+        auto trueV = handle_expr(asCond.left())->proGetValue(build);
+        build.buildYield(trueV);
+        build.popInsertPoint();
 
-      build.pushInsertPoint(ifElse.getFalseBlock().end());
-      build.buildYield(handle_expr(asCond.right())->proGetValue(build));
-      build.popInsertPoint();
+        build.pushInsertPoint(evalTrue.getFalseBlock().end());
+        auto undef = ConstantBuilder{ctx.getStore<Constant>()}
+                         .undef(*trueV.getNumBits())
+                         .get();
+        build.buildYield(undef);
+        build.popInsertPoint();
 
-      return std::make_unique<RValue>(ifElse.getYieldValue(0)->as<HWValue>(),
-                                      expr.type);
+        auto evalFalse =
+            build.buildIfElse(build.buildICmp(ConstantRef::fromBool(false),
+                                              selBool, BigInt::ICMP_WEQ),
+                              1);
+        build.pushInsertPoint(evalFalse.getTrueBlock().end());
+        auto falseV = handle_expr(asCond.right())->proGetValue(build);
+        build.buildYield(falseV);
+        build.popInsertPoint();
+
+        build.pushInsertPoint(evalFalse.getFalseBlock().end());
+        build.buildYield(undef);
+        build.popInsertPoint();
+
+        auto rv =
+            build.buildMux(selBool, evalTrue.getYieldValue().as<WireRef>(),
+                           evalFalse.getYieldValue().as<WireRef>());
+        return std::make_unique<RValue>(rv, expr.type);
+      } else {
+        auto ifElse = build.buildIfElse(makeBool(sel), 1);
+
+        build.pushInsertPoint(ifElse.getTrueBlock().end());
+        build.buildYield(handle_expr(asCond.left())->proGetValue(build));
+        build.popInsertPoint();
+
+        build.pushInsertPoint(ifElse.getFalseBlock().end());
+        build.buildYield(handle_expr(asCond.right())->proGetValue(build));
+        build.popInsertPoint();
+
+        return std::make_unique<RValue>(ifElse.getYieldValue(0)->as<HWValue>(),
+                                        expr.type);
+      }
     }
 
     case slang::ast::ExpressionKind::SimpleAssignmentPattern:
