@@ -30,6 +30,8 @@ public:
       if (module->defUse.getNumDefs() == 1) {
         if (config.onlyLinkToInactive && !module->ignore)
           continue;
+        if (module.iref().isOpc(HW_BLACKBOX_MODULE_DEF))
+          continue;
         auto it = strings.insertOrAssign(module->name, module);
         if (it.val() != module)
           it.val() = nullref;
@@ -39,10 +41,18 @@ public:
     for (auto module : ctx.getStore<Module>()) {
       if (module->name.empty())
         continue;
-      if (module->defUse.getNumDefs() == 0) {
+      if (module->defUse.getNumDefs() == 0 ||
+          module.iref().isOpc(HW_BLACKBOX_MODULE_DEF)) {
         auto it = strings.find(module->name);
         if (it == strings.end())
           continue;
+
+        if (module->defUse.getNumDefs() != 0) {
+          auto ref = module.iref();
+          module.iref().def().replace(FatDynObjRef{nullref});
+          ctx.destroy(ref);
+        }
+
         module.replaceAllUsesWith(ctx.resolve(it.val()));
         ctx.destroy(module);
       }

@@ -254,7 +254,7 @@ public:
     case *HW_REPEAT: {
       auto &val = wireVals[instr.def(0)->as<WireRef>()];
       auto cnt = *instr.def(0)->as<WireRef>().getNumBits() /
-                 *instr.other(0)->as<WireRef>().getNumBits();
+                 *instr.other(0)->as<HWValue>().getNumBits();
       BigInt::repeatOp4S(val, getValue(instr.other(0)->as<HWValue>()), cnt);
       assert(val.getNumBits() == instr.def(0)->as<WireRef>().getNumBits());
       break;
@@ -641,6 +641,42 @@ public:
       break;
     }
 
+    case *HW_LUT: {
+      auto &out = wireVals[instr.def(0)->as<WireRef>()];
+      auto table = instr.other(0)->as<ConstantRef>();
+
+      uint32_t fixed = 0;
+      uint32_t free = 0;
+
+      for (auto [i, other] :
+           instr.others().drop_front().reverse().enumerate()) {
+        auto val = getValue(other->as<HWValue>());
+        if (val.valueEquals(1))
+          fixed |= 1ULL << i;
+        else if (val.allBitsUndef())
+          free |= 1ULL << i;
+      }
+
+      std::optional<FourState> val = std::nullopt;
+
+      uint32_t curFree = 0;
+      do {
+        uint32_t index = curFree | fixed;
+
+        auto entry = table.getBit(index);
+        if (val && *val != entry) {
+          val = FourState::SX;
+          break;
+        }
+        val = entry;
+
+        curFree = (curFree - free) & free;
+      } while (curFree != 0);
+
+      out = ConstantRef::fromFourState(*val);
+      break;
+    }
+
     default: {
       dumpInstr(instr);
       report_fatal_error("unsupported opcode");
@@ -807,7 +843,7 @@ public:
         regVals[reg] = ctx.getStore<Constant>().resolve(regResetValues[reg]);
       else if (reg.getNumBits())
         regVals[reg] =
-            PatBigInt::fromFourState(FourState::SX, *reg.getNumBits());
+            PatBigInt::fromFourState(FourState::S0, *reg.getNumBits());
     }
 
     for (auto trigger : ctx.getStore<Trigger>()) {

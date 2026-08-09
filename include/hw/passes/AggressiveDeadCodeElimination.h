@@ -4,6 +4,7 @@
 #include "aig/IDs.h"
 #include "dyno/Constant.h"
 #include "dyno/Context.h"
+#include "dyno/HierBlockIterator.h"
 #include "dyno/IDs.h"
 #include "dyno/ObjMap.h"
 #include "dyno/Pass.h"
@@ -40,6 +41,13 @@ class AggressiveDeadCodeEliminationPass
 
   SmallVec<InstrRef, 256> worklist;
 
+public:
+#define CONFIG_STRUCT_LAMBDA(FIELD, ENUM) ENUM(keepRegs, NONE, NONE, NAMED, ALL)
+  CONFIG_STRUCT(CONFIG_STRUCT_LAMBDA)
+#undef CONFIG_STRUCT_LAMBDA
+  Config config;
+
+private:
   void visitRegister(RegisterIRef reg) {
     auto &regInitValues = ctx.getCtx<HWDialectContext>().regResetValue;
     if (regInitValues.inRange(reg.oref()) && regInitValues[reg.oref()]) {
@@ -281,6 +289,8 @@ class AggressiveDeadCodeEliminationPass
         break;
       auto asStore = instr.as<StoreIRef>();
       visitHWValue(asStore.value());
+      if (auto trig = asStore.trigger())
+        worklist.emplace_back(trig);
       auto reg = asStore.reg().iref();
       assert(instrMap[reg]);
       for (auto term : asStore.terms()) {
@@ -417,6 +427,14 @@ class AggressiveDeadCodeEliminationPass
       break;
     }
 
+    case *HW_ASSERT_DEFER: {
+      if (instrMap[instr])
+        break;
+      visitHWValue(instr.other(0)->as<HWValue>());
+      worklist.emplace_back(instr.other(1)->as<TriggerRef>().iref());
+      break;
+    }
+
     default: {
       if (instrMap[instr])
         break;
@@ -434,7 +452,13 @@ class AggressiveDeadCodeEliminationPass
     // initially, only i/os are live
     for (auto instr : module.block()) {
       if (instr.isOpc(HW_INPUT_REGISTER_DEF, HW_OUTPUT_REGISTER_DEF,
-                      HW_INOUT_REGISTER_DEF, HW_REF_REGISTER_DEF)) {
+                      HW_INOUT_REGISTER_DEF, HW_REF_REGISTER_DEF) ||
+          (instr.isOpc(HW_REGISTER_DEF) &&
+           (config.keepRegs == Config::ALL ||
+            (config.keepRegs == Config::NAMED &&
+             !ctx.getCtx<HWDialectContext>()
+                  .regNameInfo.getNames(instr.as<RegisterIRef>().oref())
+                  .empty())))) {
         worklist.emplace_back(instr);
         continue;
       }
@@ -445,6 +469,14 @@ class AggressiveDeadCodeEliminationPass
 
     for (auto instr : module.triggers()) {
       worklist.emplace_back(instr);
+    }
+
+    for (auto proc : module.procs()) {
+      for (auto instr : HierBlockRange{proc.block()}) {
+        // todo: keep instr bit
+        if (instr.isOpc(HW_PRINT, HW_PRINT_DEFER, OP_ASSERT, HW_ASSERT_DEFER))
+          worklist.emplace_back(instr);
+      }
     }
   }
 
@@ -556,7 +588,7 @@ class AggressiveDeadCodeEliminationPass
       auto instr = worklist.pop_back_val();
       instrMap[instr] = 1;
 
-      if (instr.isOpc(HW_MODULE_DEF, HW_STDCELL_DEF)) {
+      if (instr.isOpc(HW_MODULE_DEF, HW_STDCELL_DEF, HW_BLACKBOX_MODULE_DEF)) {
         // contents of non-ignored modules are DCEd, don't mark alive
         if (activeMod ? instr.as<ModuleIRef>() == activeMod
                       : !instr.as<ModuleIRef>().mod()->ignore)

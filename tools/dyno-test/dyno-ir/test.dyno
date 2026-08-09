@@ -54,6 +54,44 @@ TEST_CASE :string("instcombine-repeat-not"), :block, :block, :block {
   meta.INST_COMBINE_PASS
 }
 
+TEST_CASE :string("loop-unroll"), :block, :block, :block {
+  MODULE_DEF :module("mod"), :block {
+    OUTPUT_REGISTER_DEF %out_a:register(32)
+    REGISTER_DEF %i_reg:register(32)
+    hw.COMB_PROCESS_DEF :process, :block {
+      STORE #32'd0, %out_a
+      STORE #32'd0, %i_reg
+      WHILE :block, :block {
+        LOAD %cmpval:wire(32), %i_reg
+        ICMP_ULT %cont:wire(1), %cmpval, #32'd10
+        YIELD %cont
+      }{
+        LOAD %val:wire(32), %i_reg
+        LOAD %val_a:wire(32), %out_a
+        ADD %incr:wire(32), %val_a, %val
+        STORE %incr, %out_a
+
+        ADD %incr2:wire(32), %val, #32'd1
+        STORE %incr2, %i_reg
+      }
+    }
+  }
+}{
+  hw.MODULE_DEF %mod:module("mod"), %b1:core.block {
+    hw.OUTPUT_REGISTER_DEF %r0:register(32)
+    hw.COMB_PROCESS_DEF %0:process, %b2:core.block {
+      hw.STORE #32'd45, %r0
+    }
+  }
+}{
+  meta.SSA_CONSTRUCT_PASS
+  meta.INST_COMBINE_PASS
+  meta.LOOP_SIMPLIFY_PASS
+  meta.LINEARIZE_CONTROL_FLOW_PASS map("flattenLoops": "1")
+  meta.INST_COMBINE_PASS
+}
+
+
 TEST_CASE :string("fuzzy-cse-basic"), :block, :block, :block {
   MODULE_DEF :module("mod"), :block {
     INPUT_REGISTER_DEF %in_a:register(32)
@@ -637,6 +675,34 @@ TEST_CASE :string("test-extract"), :block, :block, :block {
   meta.MUX_TREE_FLATTEN_PASS
   meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS
   meta.INST_COMBINE_PASS
+}
+
+TEST_EQUIVALENCE :string("lowerops-sub"), :block, :block {
+  MODULE_DEF :module("mod"), :block {
+    INPUT_REGISTER_DEF %in_a:register(32)
+    OUTPUT_REGISTER_DEF %out_a:register(32)
+    hw.COMB_PROCESS_DEF :process, :block {
+      LOAD %a:wire(32), %in_a
+      SUB %d:wire(32), #32'd4, %a
+      STORE %d, %out_a
+    }
+  }
+}{
+  meta.LOWER_OPS_PASS map(
+    "lowerMultiInputAdd"     : "0",
+    "lowerAddCompress"       : "0",
+    "lowerSimpleAdd"         : "0",
+    "lowerSub"               : "1",
+    "lowerMul"               : "0",
+    "lowerMultiInputBitwise" : "0",
+    "lowerEqualityICMP"      : "0",
+    "lowerOrderingICMP"      : "0",
+    "lowerShift"             : "0",
+    "lowerInsert"            : "0",
+    "lowerExtract"           : "0",
+    "lowerOneHotMux"         : "0",
+  )
+  meta.RANDOM_EQUIVALENCE_CHECK_PASS map("cycles": "20")
 }
 
 TEST_CASE :string("test-reg-split"), :block, :block, :block {

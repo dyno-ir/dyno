@@ -33,7 +33,8 @@ class LinearizeControlFlowPass : public Pass<LinearizeControlFlowPass> {
 public:
 #define CONFIG_STRUCT_LAMBDA(FIELD, ENUM)                                      \
   FIELD(bool, flattenLoops, true)                                              \
-  FIELD(bool, flattenMultiway, true)
+  FIELD(bool, flattenMultiway, true)                                           \
+  FIELD(bool, autoSimplifyLoops, true)
   CONFIG_STRUCT(CONFIG_STRUCT_LAMBDA)
 #undef CONFIG_STRUCT_LAMBDA
   Config config;
@@ -287,6 +288,8 @@ private:
 
       case *OP_WHILE:
       case *OP_DO_WHILE: {
+        if (!config.autoSimplifyLoops)
+          return;
         // run instcombine in and around the loop
         instCombine.runBlock(HWInstrRef{instr}.parentBlock(ctx));
         instCombine.runBlock(instr.def(0)->as<BlockRef>());

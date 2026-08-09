@@ -118,7 +118,7 @@ private:
           build.buildLoad(resultReg, reqBits));
     }
 
-    build.setInsertPoint(mod.regs_end());
+    build.setInsertPoint(mod.header_end());
     auto proc = build.buildProcess();
     build.setInsertPoint(proc.block().end());
     auto range = Range{regs}.transform(
@@ -235,7 +235,7 @@ private:
           build.buildLoad(resultReg));
     }
 
-    build.setInsertPoint(mod.regs_end());
+    build.setInsertPoint(mod.header_end());
     auto proc = build.buildProcess();
     build.setInsertPoint(proc.block().end());
 

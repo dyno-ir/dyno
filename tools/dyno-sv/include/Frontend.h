@@ -6,6 +6,7 @@
 #include "hw/HWAbstraction.h"
 #include "hw/HWContext.h"
 #include "hw/HWTypeIDs.h"
+#include "hw/IDs.h"
 #include "hw/LoadStore.h"
 #include "op/IDs.h"
 #include "slang/ast/ASTVisitor.h"
@@ -526,18 +527,37 @@ public:
     build.setInsertPoint(BlockRef_iterator<true>::invalid());
     handle_subr(subr);
   }
+  bool isBlackbox(const slang::ast::InstanceBodySymbol &body) {
+    for (auto *attr :
+         body.getCompilation().getAttributes(body.getDefinition())) {
+      if (attr->name == "black_box" && !attr->getValue().isFalse())
+        return true;
+    }
+    return false;
+  }
 
   void handle(const slang::ast::InstanceSymbol &node) {
     if (!(node.isModule() || node.isInterface()))
       report_fatal_error("only module and interface supported");
+    if (node.isInterface() && node.instanceDepth == 0) {
+      // skip top level (ie unused) interfaces, we expect module top level
+      return;
+    }
     auto &body = *(node.getCanonicalBody() ?: &node.body);
+    bool blackbox = isBlackbox(body);
     auto [found, it] = moduleMap.findOrInsert(&body, [&] {
-      std::string name = node.getHierarchicalPath();
-      preprocessName(name);
-      return HWInstrBuilder{ctx}
-          .buildModule(std::move(name))
-          .def()
-          ->as<ObjRef<Module>>();
+      std::string name = [&]() {
+        if (!blackbox) {
+          std::string name = node.getHierarchicalPath();
+          preprocessName(name);
+          return name;
+        } else {
+          return std::string(body.getDefinition().name);
+        }
+      }();
+
+      return HWInstrBuilder{ctx}.buildModule(
+          std::move(name), blackbox ? HW_BLACKBOX_MODULE_DEF : HW_MODULE_DEF);
     });
 
     if (found)
@@ -618,6 +638,8 @@ public:
 
     // can probably do this in parallel
     for (auto [slangMod, dynoMod] : modules) {
+      if (isBlackbox(*slangMod))
+        continue;
       ModuleRef fDynoMod{dynoMod, ctx.getStore<Module>()[dynoMod]};
       mod = fDynoMod.getSingleDef()->instr();
       vars.clear();
@@ -643,10 +665,7 @@ public:
               asIFS->getConnection().first->as<slang::ast::InstanceSymbol>();
 
           auto [found, ifMod] = moduleMap.findOrInsert(&ifInstance.body, [&] {
-            return HWInstrBuilder{ctx}
-                .buildModule(ifInstance.name)
-                .def()
-                ->as<ObjRef<Module>>();
+            return HWInstrBuilder{ctx}.buildModule(ifInstance.name);
           });
 
           // auto ifMod = moduleMap.find(&ifInstance.body);
@@ -2169,7 +2188,8 @@ public:
               std::min(fmtValC.getWords().size() * sizeof(uint32_t),
                        *fmtVal.getNumBits() / 8zu);
           auto ptr = reinterpret_cast<const char *>(fmtValC.getWords().data());
-          buf.append_range(Range{ptr, ptr + directSize}.reverse());
+          for (auto c : Range{ptr, ptr + directSize}.reverse())
+            buf.push_back(c);
           int32_t expand =
               fmtValC.getNumBits() - fmtValC.getWords().size() * WordBits;
           // edge case for extend

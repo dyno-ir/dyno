@@ -491,35 +491,35 @@ public:
   using reference = value_type &;
   using difference_type = std::iterator_traits<T>::difference_type;
 
-  zip_iterator() = default;
-  zip_iterator(T it, U it2) : it(it), it2(it2) {}
+  constexpr zip_iterator() = default;
+  constexpr zip_iterator(T it, U it2) : it(it), it2(it2) {}
 
-  value_type operator*() const {
+  constexpr value_type operator*() const {
     return std::pair<decltype(*it), decltype(*it2)>(*it, *it2);
   }
-  value_type operator*() {
+  constexpr value_type operator*() {
     return std::pair<decltype(*it), decltype(*it2)>(*it, *it2);
   }
 
-  zip_iterator &operator++() {
+  constexpr zip_iterator &operator++() {
     ++it;
     ++it2;
     return *this;
   }
 
-  zip_iterator operator++(int) {
+  constexpr zip_iterator operator++(int) {
     zip_iterator tmp(*this);
     ++(*this);
     return tmp;
   }
 
-  friend bool operator==(const zip_iterator &a, const zip_iterator &b) {
+  constexpr friend bool operator==(const zip_iterator &a, const zip_iterator &b) {
     auto rv = a.it == b.it;
     assert(rv == (a.it2 == b.it2));
     return rv;
   }
 
-  friend bool operator!=(const zip_iterator &a, const zip_iterator &b) {
+  constexpr friend bool operator!=(const zip_iterator &a, const zip_iterator &b) {
     return !(a == b);
   }
 };
@@ -1474,7 +1474,7 @@ template <typename T>
 class InitListRange
     : public Range<typename std::initializer_list<T>::iterator> {
 public:
-  InitListRange(std::initializer_list<T> ilist)
+  constexpr InitListRange(std::initializer_list<T> ilist)
       : Range<typename std::initializer_list<T>::iterator>(ilist.begin(),
                                                            ilist.end()) {}
 };

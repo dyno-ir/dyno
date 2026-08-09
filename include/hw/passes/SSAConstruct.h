@@ -616,7 +616,7 @@ public:
         destroyList.emplace_back(asIf);
         break;
       }
-
+      // todo: for loop
       case *OP_WHILE: {
         auto asWhile = instr.as<WhileInstrRef>();
         auto startDepth = depth;

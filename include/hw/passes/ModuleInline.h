@@ -81,6 +81,11 @@ class ModuleInlinePass : public Pass<ModuleInlinePass> {
         sourceLocInfo.copyDebugInfo(src, reg.iref());
         return true;
       }
+      if (src.isOpc(HW_TRIGGER_DEF)) {
+        auto insert = std::next(regsIt).getBlockIter();
+        self->copyInstr(src, insert);
+        return true;
+      }
       if (src.isOpc(HW_INSTANCE)) {
         auto instr = copier.copyInstr(src, dstIt);
         if (auto *name = instr.as<InstanceIRef>().nameRaw()) {

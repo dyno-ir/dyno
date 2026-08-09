@@ -41,12 +41,14 @@ public:
 
     if (verbose)
       print.printInstr(instr);
+    print.reset();
 
     BlockCompare compare{};
     if (auto diff = compare.compareBlocks(pre, post)) {
       std::print(os, "failed test: \"{}\"\n", name);
       std::print(os, "actual  : {}\n",
                  diff->first ? print.toString(diff->first) : "<none>");
+      print.reset();
       std::print(os, "expected: {}\n\n",
                  diff->second ? print.toString(diff->second) : "<none>");
 
@@ -75,7 +77,8 @@ public:
     for (auto instr : Range{pre}.drop_back()) {
       FatDynObjRef<> ref{instr};
       std::array<void *, 1> args = {reinterpret_cast<void *>(&ref)};
-      pipeline.interpretPassPipeline(passes, args);
+      if (!pipeline.interpretPassPipeline(passes, args))
+        return false;
     }
 
     if (verbose)

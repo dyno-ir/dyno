@@ -144,7 +144,7 @@ VPIHandler *handler;
 // This is so we have an instance of our top module to point to.
 InstrRef createTopInstance(Context &ctx, ModuleIRef topLevelModule) {
   HWInstrBuilder build{ctx};
-  ModuleIRef mod = build.buildModule("__Top");
+  ModuleIRef mod = build.buildModule("__Top").iref();
   build.setInsertPoint(mod.block().begin());
 
   SmallVec<RegisterRef, 16> ports;
@@ -166,7 +166,7 @@ int main(int argc, char **argv) {
   args = Args{argc, argv};
 
   ParseDynoPass parse{ctx};
-  parse.config.fileName = std::string(argv[1]);
+  parse.config.path = std::string(argv[1]);
 
   parse.run();
   HWPrinter print{std::cout};

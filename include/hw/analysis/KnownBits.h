@@ -387,8 +387,13 @@ public:
         for (auto op : instr.others()) {
           if (auto asConst = op->dyn_as<ConstantRef>()) {
             // contradiction
-            if ((asConst & oneBits) != oneBits)
-              return false;
+            if (instr.getDialectOpcode().is(OP_AND)) {
+              if ((asConst & oneBits) != oneBits)
+                return false;
+            } else {
+              if ((asConst | oneBits) != oneBits)
+                return false;
+            }
             continue;
           }
           auto asWire = op->as<WireRef>();

@@ -6,6 +6,7 @@
 #include "dyno/MutInstr.h"
 #include "dyno/Obj.h"
 #include "dyno/Pass.h"
+#include "hw/AutoDebugInfo.h"
 #include "hw/FlipFlop.h"
 #include "hw/HWAbstraction.h"
 #include "hw/HWContext.h"
@@ -608,6 +609,10 @@ private:
         // every port needs access to the full memory array. If a port is too
         // narrow, artifically widen it - we then later add MUXs to reduce it.
         assert(mapping.tgtAdjModelWidth % actSt.getLen() == 0);
+        if (mapping.tgtAdjModelWidth % *actFact != 0) {
+          // todo: canonicalize strided accesses early, then no need for this
+          return false;
+        }
         assert(mapping.tgtAdjModelWidth % *actFact == 0);
         if (adjActPortLen < mapping.tgtAdjModelWidth) {
           adjActPortLen = mapping.tgtAdjModelWidth;
@@ -1010,6 +1015,11 @@ private:
       auto cell = HWInstrRef{model}.parentMod(ctx);
       assert(cell.isOpc(HW_STDCELL_DEF));
 
+      AutoDebugInfoStack autoDbgInfo{ctx};
+      for (auto nm :
+           ctx.getCtx<HWDialectContext>().regNameInfo.getNames(actual.oref()))
+        autoDbgInfo.addDebugInfo(false, std::string_view(nm));
+
       uint32_t numPorts = 0, numOutputs = 0;
       for (auto p : cell.ports()) {
         numOutputs += p.isOpc(HW_OUTPUT_REGISTER_DEF);
@@ -1228,6 +1238,13 @@ private:
         auto instr = inst.build();
         block.end().insertPrev(instr);
       }
+
+      // Destroy manually
+      for (auto store : actualStores)
+        build.destroyInstr(store);
+      for (auto load : actualLoads)
+        build.destroyInstr(load);
+      build.destroyInstr(actual);
     }
   };
 
@@ -1285,6 +1302,18 @@ private:
       })
     };
 
+    auto vis = [&](MemoryMapper &mapper) {
+      DYNO_DBG({
+        dumpInstr(actual, ctx);
+        std::print(dbgs(), "mapping {}x {}, cost = {}\n",
+                   mapper.mapping.repeatCount,
+                   HWInstrRef{mapper.model}.parentMod(ctx).mod()->name,
+                   mapper.mapping.cost);
+        mapper.visualize(dbgs());
+        std::print(dbgs(), "\n");
+      })
+    };
+
     // todo: prune search space based on score
     for (auto [front, modelCand] :
          Range{memStdCells}.resolve(ctx).mark_front()) {
@@ -1308,18 +1337,6 @@ private:
       // printExclMatrix(mapper.modExclMatrix, mapper.modelLoads.size(),
       //                 mapper.modelStores.size());
 
-      auto vis = [&]() {
-        DYNO_DBG({
-          dumpInstr(actual, ctx);
-          std::print(dbgs(), "possible mapping {}x {}, cost = {}\n",
-                     mapper.mapping.repeatCount,
-                     HWInstrRef{modelCand.iref()}.parentMod(ctx).mod()->name,
-                     mapper.mapping.cost);
-          mapper.visualize(dbgs());
-          std::print(dbgs(), "\n");
-        })
-      };
-
       uint32_t repCount = mapper.mapping.repeatCount;
       if (repCount > config.maxInitRepeatCount)
         continue;
@@ -1327,7 +1344,7 @@ private:
 
       // fast path if heuristic repeat count correct
       if (tryMap(mapper, repCount)) {
-        vis();
+        // vis();
         if (!best || mapper.mapping.cost < best->second.cost) {
           best.emplace(modelCand, std::move(mapper.mapping));
         }
@@ -1351,7 +1368,7 @@ private:
           continue;
       }
 
-      vis();
+      // vis();
       if (!best || mapper.mapping.cost < best->second.cost) {
         best.emplace(modelCand, std::move(mapper.mapping));
       }
@@ -1378,6 +1395,7 @@ private:
 
     MemoryMapper mapper{ctx, config, actual, ctx.resolve(best->first).iref()};
     mapper.mapping = std::move(best->second);
+    vis(mapper);
     mapper.apply(ctx);
 
     return true;
@@ -1389,7 +1407,7 @@ public:
   void runOnModule(ModuleIRef mod) {
     if (mod.isOpc(HW_STDCELL_DEF))
       return;
-    for (auto reg : mod.regs()) {
+    for (auto reg : Vec<RegisterIRef>{mod.regs()}) {
       auto uses = reg.oref().uses();
       if (uses.empty())
         continue;

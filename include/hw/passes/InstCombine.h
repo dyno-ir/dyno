@@ -447,16 +447,25 @@ private:
       auto known = deriveBits.knownBits.get(wire);
       assert(known.getNumBits() == wire.getNumBits());
       if (!known.getIs4S()) {
+        DYNO_DBG({
+          dbgs() << "boolExprSimplifySub:\nreplacing ";
+          dumpObj(ref->fat());
+          dbgs() << " in ";
+          dumpInstr(ref.instr(), ctx);
+        })
         replaceUse(ref, ConstantBuilder{ctx.getStore<Constant>()}
                             .val(std::move(known))
                             .get());
         change = true;
       }
 
-      if (!singleUse)
+      auto instr = wire.getDefI();
+      if (!singleUse || instr.getNumDefs() != 1 ||
+          // todo: instr type bits
+          instr.isOpc(OP_IF, OP_SWITCH, OP_WHILE, OP_FOR, OP_DO_WHILE, OP_CALL,
+                      HW_INSTANCE))
         continue;
 
-      auto instr = wire.getDefI();
       for (auto op : instr.others()) {
         if (op->is<WireRef>()) {
           assert(op->as<WireRef>().getNumDefs() == 1);
@@ -486,6 +495,8 @@ private:
 
     bool change = false;
 
+    assert(deriveBits.knownBits.cache.raw().empty());
+
     for (auto op : instr.others()) {
       bool contradiction = false;
       for (auto other : instr.others()) {
@@ -498,13 +509,18 @@ private:
       }
 
       auto known = deriveBits.knownBits.getKnownBits(op->as<HWValue>());
+      Defer defer{[&]() { deriveBits.clearCache(); }};
+
       // contradiction setting all other operands, or operand is known and short
       // circuits -> whole instr is known
       if (contradiction || known.valueEquals(!trueV)) {
+        DYNO_DBG({
+          auto num = op - op.instr().other_begin();
+          std::print(dbgs(), "boolExprSimplify: contradict={}, num={}\n",
+                     contradiction, num);
+        })
         replaceUses(instr.def(0)->as<WireRef>(), ConstantRef::fromBool(!trueV));
         deleteMatchedInstr(instr);
-        std::destroy_at(&deriveBits);
-        std::construct_at(&deriveBits, ctx);
         return PAT_TRUE;
       } //  operand is known but not short circuit -> delete
       else if (known.valueEquals(trueV)) {
@@ -516,15 +532,10 @@ private:
                 .as<HWValue>());
         replaceUses(instr.def(0)->as<WireRef>(), newV);
         deleteMatchedInstr(instr);
-        std::destroy_at(&deriveBits);
-        std::construct_at(&deriveBits, ctx);
         return PAT_TRUE;
       } else {
         change |= boolExprSimplifySub(op);
       }
-
-      std::destroy_at(&deriveBits);
-      std::construct_at(&deriveBits, ctx);
     }
     currentMatched.emplace_back(instr);
     return PAT_BOOL(change);
@@ -1123,11 +1134,10 @@ private:
   }
 
   PatBool fuseInserts(InsertIRef insert) {
-    // todo: directly fuse all in chain instead of just two
-    auto inWire = insert.in()->dyn_as<WireRef>();
-    while (inWire && inWire.getNumUses() == 1 &&
-           inWire.getDefI().isOpc(HW_INSERT)) {
-      auto other = inWire.getDefI().as<InsertIRef>();
+    auto outWire = insert.out()->as<WireRef>();
+    while (outWire.getNumUses() == 1 &&
+           outWire.getSingleUse()->instr().isOpc(HW_INSERT)) {
+      auto other = outWire.getSingleUse()->instr().as<InsertIRef>();
       // todo: doesn't actually have to be exactly equal. Constant offset is
       // also fine.
       if (!addressingFragsEqual(insert, other))
@@ -1139,10 +1149,10 @@ private:
       auto otherBase = other.getBase();
       auto otherLen = other.getLen();
 
-      // no intersect or touching
+      // no intersect or touching -> continue walking the chain
       if (std::max(thisBase, otherBase) >
           std::min(thisBase + thisLen, otherBase + otherLen)) {
-        inWire = other.in()->dyn_as<WireRef>();
+        outWire = other.out().as<WireRef>();
         continue;
       }
 
@@ -1150,19 +1160,18 @@ private:
       auto high = std::max(thisBase + thisLen, otherBase + otherLen);
       auto len = high - low;
 
-      HWInstrBuilder build{ctx, insert};
+      HWInstrBuilder build{ctx, other};
 
       // use RegisterValue for easy merging
       RegisterValue val{nullref, len, 0, false, nullopt};
-      val.overwrite(other.val()->as<HWValue>(), 0, otherBase - low, otherLen);
       val.overwrite(insert.val()->as<HWValue>(), 0, thisBase - low, thisLen);
+      val.overwrite(other.val()->as<HWValue>(), 0, otherBase - low, otherLen);
 
-      auto outWire =
-          build.buildInsert(insert.in()->as<HWValue>(), val.get(build, false),
-                            low, insert.terms());
-      replaceUses(insert.out()->as<WireRef>(), outWire);
-      // skip inserting other
-      replaceUses(other.out()->as<WireRef>(), other.in()->as<HWValue>());
+      auto outWire = build.buildInsert(
+          other.in()->as<HWValue>(), val.get(build, false), low, other.terms());
+      replaceUses(other.out()->as<WireRef>(), outWire);
+      // skip inserting, fused version handles instead
+      replaceUses(insert.out()->as<WireRef>(), insert.in()->as<HWValue>());
       deleteMatchedInstr(other);
       deleteMatchedInstr(insert);
       return PAT_TRUE;
@@ -2266,6 +2275,10 @@ private:
   }
 
   PatBool matchPatternsOnInstr(InstrRef instr) {
+    knownBits.clearCache();
+    deriveBits.clearCache();
+    bitAlias.clearCache();
+
     currentMatched.clear();
     currentReplaced.clear();
 
@@ -2373,17 +2386,20 @@ private:
 
     DYNO_DBG({
       HWCtxPrinter print(ctx, dbgs());
-      dbgs() << "initial instructions (" << result.function << "):\n";
+      dbgs() << result.function << ":\n";
 
-      for (auto instr : currentMatched)
-        print.printInstr(instr);
+      for (auto instr : currentMatched) {
+        dbgs() << (TaggedIRef{instr}.get() ? "< " : "  ");
+        print.printInstr(instr, true, false);
+      }
 
-      dbgs() << "replaced with:\n";
-
-      for (size_t i = lastWorklistSize, sz = worklist.size(); i < sz; i++)
+      for (size_t i = lastWorklistSize, sz = worklist.size(); i < sz; i++) {
+        dbgs() << "> ";
         print.printInstr(worklist[i], true, false);
+      }
       if (lastWorklistSize == worklist.size()) {
         if (!currentReplaced.empty()) {
+          dbgs() << "> ";
           dumpObj(currentReplaced[0]->fat());
           dbgs() << "\n";
         } else

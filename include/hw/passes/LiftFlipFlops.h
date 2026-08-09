@@ -20,6 +20,8 @@ class LiftFlipFlopsPass : public Pass<LiftFlipFlopsPass> {
     pbuild.setInsertPoint(instr);
 
     auto state = build.buildRegister(instr.q().getNumBits());
+    if (auto init = instr.initValue())
+      ctx.getCtx<HWDialectContext>().regResetValue.get_ensure(state) = init;
     auto stateVal = pbuild.buildLoad(state);
     instr.q().replaceAllUsesWith(stateVal);
 

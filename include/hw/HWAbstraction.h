@@ -128,14 +128,14 @@ public:
   }
 
   // does not place in CFG
-  ModuleIRef buildModule(std::string_view name,
-                         DialectOpcode defOpc = HW_MODULE_DEF) {
+  ModuleRef buildModule(std::string_view name,
+                        DialectOpcode defOpc = HW_MODULE_DEF) {
     auto moduleRef = ctx.getStore<Module>().create(std::string(name));
     auto moduleInstr = ctx.getStore<Instr>().create(2, defOpc);
 
     InstrBuilder{moduleInstr}.addRef(moduleRef).addRef(
         ctx.getCtx<CoreDialectContext>().createBlock());
-    return moduleInstr;
+    return moduleRef;
   }
   ModuleIRef buildStdCell(std::string_view name, StdCellInfoRef info,
                           DialectOpcode defOpc = HW_STDCELL_DEF) {
@@ -331,7 +331,8 @@ public:
         }
         cnt++;
       }
-      templ.resize(templ.size() - cnt);
+      templ.resize(templ.size() - cnt + 1);
+      templ.other_end()[-1] = cbuild.get();
     }
 
     if (templ.getNumOthers() == 1)
@@ -1137,28 +1138,32 @@ public:
   }
 
   WireRef buildFlipFlop(HWValue clk, HWValue d,
-                        HWValue en = ConstantRef::fromBool(1), auto... resets) {
+                        HWValue en = ConstantRef::fromBool(1),
+                        HWValue initValue = nullref, auto... resets) {
     auto defW = ctx.getStore<Wire>().create(d.getNumBits());
-    auto ib = buildInstrRaw(HW_FLIP_FLOP, 4 + sizeof...(resets) * 2);
+    auto ib =
+        buildInstrRaw(HW_FLIP_FLOP, 4 + sizeof...(resets) * 2 + !!initValue);
     ib.addRef(defW).other().addRef(clk).addRef(d).addRef(en);
     if constexpr (sizeof...(resets) != 0)
       for (auto [rst, rstval] : InitListRange{resets...}.pairwise()) {
         ib.addRef(rst).addRef(rstval);
       }
+    ib.addRef(initValue);
     return defW;
   }
   template <typename T>
   WireRef buildFlipFlop(HWValue clk, HWValue d,
                         HWValue en = ConstantRef::fromBool(1),
                         Range<T> resets = Range<T>::emptyRange(),
-                        bool syncReset = false) {
+                        bool syncReset = false, HWValue initValue = nullref) {
     auto defW = ctx.getStore<Wire>().create(d.getNumBits());
     auto ib = buildInstrRaw(syncReset ? HW_FLIP_FLOP_SRST : HW_FLIP_FLOP,
-                            4 + 2 * resets.size());
+                            4 + 2 * resets.size() + !!initValue);
     ib.addRef(defW).other().addRef(clk).addRef(d).addRef(en);
     for (auto [rst, rstval] : resets) {
       ib.addRef(rst).addRef(rstval);
     }
+    ib.addRef(initValue);
     return defW;
   }
 

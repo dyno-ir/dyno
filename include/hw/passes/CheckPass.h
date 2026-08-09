@@ -56,7 +56,7 @@ public:
     dumpInstr(instr, ctx, true, false);
     dbgs() << "error: ";
     ((dbgs() << ts), ...);
-    dbgs() << "\n";
+    dbgs() << "\n\n";
     hasError = true;
   }
 
@@ -64,7 +64,7 @@ public:
     dumpObj(ctx.resolve(ref));
     dbgs() << "\nerror: ";
     ((dbgs() << ts), ...);
-    dbgs() << "\n";
+    dbgs() << "\n\n";
     hasError = true;
   }
 
@@ -76,7 +76,7 @@ public:
     dbgs() << "}\n";
     dbgs() << "error: ";
     ((dbgs() << ts), ...);
-    dbgs() << "\n";
+    dbgs() << "\n\n";
     hasError = true;
   }
 
