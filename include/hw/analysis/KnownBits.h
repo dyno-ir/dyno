@@ -102,6 +102,23 @@ class KnownBitsAnalysis : public CacheInvalidation<KnownBitsAnalysis> {
     pushNextOrReturn(frame, instr);
   }
 
+  void getICMPKnownBits4S(Frame &frame, InstrRef instr, BigInt::ICmpPred pred) {
+    if (frame.idx == 0)
+      ;
+    else if (frame.idx == 1)
+      frame.acc = retVal;
+    else {
+      // x in knownbits has a different meaning vs for these comparison
+      // functions
+      if (frame.acc.val.getIs4S() || retVal.val.getIs4S())
+        frame.acc.val = ConstantRef::fromFourState(FourState::SX);
+      else
+        frame.acc.val = ConstantRef::fromFourState(
+            BigInt::icmpOp4S(frame.acc.val, retVal.val, pred));
+    }
+    pushNextOrReturn(frame, instr);
+  }
+
 public:
   KnownBitsAnalysis(Context &ctx) : ctx(ctx) {}
   AnalysisCache<ObjRef<Wire>, BigInt> cache;
@@ -149,6 +166,12 @@ public:
     getICMPKnownBits(frame, instr, pred);                                      \
     break;
         FOR_OP_COMPARE_OPS(LAMBDA)
+#undef LAMBDA
+#define LAMBDA(opc, pred)                                                      \
+  case *opc:                                                                   \
+    getICMPKnownBits4S(frame, instr, pred);                                    \
+    break;
+        FOR_OP_SPECIAL_COMPARE_OPS(LAMBDA)
 #undef LAMBDA
 
       case *HW_CONCAT: {

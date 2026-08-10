@@ -70,8 +70,8 @@ struct MatchConstant : public Object {
 };
 
 struct MatchOperand : public Object {
-  dyno::Optional<uint32_t> nameID;
-  dyno::Optional<uint32_t> typeID;
+  dyno::Optional<uint32_t> nameID = dyno::nullopt;
+  dyno::Optional<uint32_t> typeID = dyno::nullopt;
 
   static bool is_impl(const Object &obj) { return obj.kind == OPERAND; }
   MatchOperand() : Object(OPERAND) {}
@@ -96,8 +96,8 @@ struct MatchBlock : public Object {
 
 struct MatchPack : public Object {
   SmallVec<Object *, 4> objects;
-  dyno::Optional<uint32_t> min;
-  dyno::Optional<uint32_t> max;
+  dyno::Optional<uint32_t> min = dyno::nullopt;
+  dyno::Optional<uint32_t> max = dyno::nullopt;
 
   static bool is_impl(const Object &obj) { return obj.kind == PACK; }
   MatchPack() : Object(PACK) {}
@@ -112,7 +112,7 @@ struct MatchAnyorder : public Object {
 
 struct MatchMacro : public Object {
   uint nameID;
-  dyno::Optional<uint32_t> bindName;
+  dyno::Optional<uint32_t> bindName = dyno::nullopt;
   SmallVec<Object *, 4> objects;
 
   static bool is_impl(const Object &obj) { return obj.kind == MACRO; }

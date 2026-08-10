@@ -1,4 +1,6 @@
 #include "hw/passes/InstCombine.h"
+#include "dyno/Instr.h"
+#include "dyno/Obj.h"
 #include "hw/HWAbstraction.h"
 #include "hw/Wire.h"
 
@@ -28,7 +30,7 @@ static void copyOperand(InstrBuilder &build, FatDynObjRef<> ref) {
 }
 
 static InstrRef getDefInstr(InstrRef::iterator use) {
-  return (*use)->as<WireRef>().getDefI();
+  return (*use)->as<FatDynObjRef<InstrDefUse>>()->getSingleDef()->instr();
 }
 
 static void deleteF(SmallVecImpl<InstrRef> &matched, Context &ctx,

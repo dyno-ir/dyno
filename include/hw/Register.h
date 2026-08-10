@@ -26,6 +26,8 @@ public:
 
   Register(DynObjRef, Optional<uint32_t> numBits = nullopt)
       : numBits(numBits) {}
+  // todo: pass context into copier s.t. we can copy reg name and init value
+  // (side tables) as well
   Register(DynObjRef, FatObjRef<Register> other) : numBits(other->numBits) {}
 };
 

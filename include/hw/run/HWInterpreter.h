@@ -1,4 +1,6 @@
 #pragma once
+#include "hw/Pointer.h"
+#include "hw/passes/DumpPass.h"
 #include "op/StringObj.h"
 #ifdef ENABLE_FST
 #include "../../../tools/dyno-sim/include/FST.h"
@@ -165,10 +167,14 @@ private:
         Func);
   }
 
-  std::optional<uint32_t> evalAddress(OperandRef op) {
-    if (op == op.instr().end())
+  std::optional<uint32_t> evalAddress(HWAddress hwAddr) {
+    if (!hwAddr)
       return 0;
-    auto base = op->as<ConstantRef>();
+    if (auto asConst = hwAddr.dyn_as<ConstantRef>())
+      return asConst.getExactVal();
+    auto instr = hwAddr.as<PointerRef>().getSingleDef()->instr();
+    auto op = *instr.other_begin();
+    auto base = op.as<ConstantRef>();
     uint32_t addr = base.getExactVal();
 
     while ((op + 1) != op.instr().end()) {
@@ -265,7 +271,7 @@ public:
       auto outW = splice.out()->as<WireRef>();
       auto &out = wireVals[outW];
       auto in = getValue(splice.in()->as<HWValue>());
-      auto addr = evalAddress(splice.base());
+      auto addr = evalAddress(splice.addr());
       if (!addr)
         out = PatBigInt::undef(splice.getLen());
       else
@@ -279,7 +285,7 @@ public:
       auto base = getValue(insert.in()->as<HWValue>());
       auto val = getValue(insert.val()->as<HWValue>());
 
-      auto addr = evalAddress(insert.base());
+      auto addr = evalAddress(insert.addr());
 
       if (!addr) {
         if (!config.undefAddressInsertIsNOP)
@@ -322,7 +328,7 @@ public:
 
     case *HW_STORE_DEFER: {
       auto store = instr.as<StoreIRef>();
-      auto addr = evalAddress(store.base());
+      auto addr = evalAddress(store.addr());
 
       TriggerIRef trig = store.trigger();
       if (!trig) {
@@ -342,7 +348,7 @@ public:
     case *HW_STORE: {
       auto store = instr.as<StoreIRef>();
       auto val = getValue(store.value());
-      runStore(store.reg().iref(), val, *evalAddress(store.base()));
+      runStore(store.reg().iref(), val, *evalAddress(store.addr()));
       break;
     }
 
@@ -358,7 +364,7 @@ public:
 
         break;
       }
-      auto addr = evalAddress(load.base());
+      auto addr = evalAddress(load.addr());
       if (!addr) {
         val = PatBigInt::undef(load.getLen());
         break;
@@ -677,6 +683,10 @@ public:
       break;
     }
 
+    // todo: currently still executed in use instructions
+    case *HW_GEP:
+      break;
+
     default: {
       dumpInstr(instr);
       report_fatal_error("unsupported opcode");
@@ -711,9 +721,10 @@ public:
         print.printInstr(instr, true, false);
       }
 
-      bool debug = false;//instr.getNumDefs() == 1 && instr.def()->is<WireRef>() &&
-                   //instr.def()->as<WireRef>().getObjID() ==
-                   //    Any{23756u, 19616u, 19614u, 19615u, 5458u};
+      bool debug =
+          false; // instr.getNumDefs() == 1 && instr.def()->is<WireRef>() &&
+                 // instr.def()->as<WireRef>().getObjID() ==
+                 //     Any{23756u, 19616u, 19614u, 19615u, 5458u};
       if (debug) {
         for (auto other : instr.others()) {
           if (!other->is<WireRef>())
@@ -841,8 +852,9 @@ public:
     auto &regResetValues = ctx.getCtx<HWDialectContext>().regResetValue;
 
     for (auto reg : ctx.getStore<Register>()) {
-      if (regResetValues.inRange(reg) && regResetValues[reg])
+      if (regResetValues.inRange(reg) && regResetValues[reg]) {
         regVals[reg] = ctx.getStore<Constant>().resolve(regResetValues[reg]);
+      }
       else if (reg.getNumBits())
         regVals[reg] =
             PatBigInt::fromFourState(FourState::S0, *reg.getNumBits());

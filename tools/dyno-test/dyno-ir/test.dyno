@@ -640,7 +640,8 @@ TEST_CASE :string("test-extract"), :block, :block, :block {
 
       LOAD %data_v:wire(4), %data
 
-      SPLICE %out_v:wire(1), %data_v, #32'd0, %addr32, #32'd1, #32'd4
+      GEP %ptr:ptr, #32'd0, %addr32, #32'd1, #32'd4
+      SPLICE %out_v:wire(1), %data_v, %ptr
 
       STORE %out_v, %out
     }
@@ -735,7 +736,7 @@ TEST_SCRIPT :string("strict-verilog-xz-semantics"), :block {
     endmodule
   }])
   meta.INACTIVE_COPY_PASS
-  // make sure inst combine does not destory semantics (i.e. frontend adds necessary extra instructions for verilog semantics)
+  // make sure inst combine does not destroy semantics (i.e. frontend adds necessary extra instructions for verilog semantics)
   meta.INST_COMBINE_PASS
 
   meta.RANDOM_EQUIVALENCE_CHECK_PASS map("cycles": "100", "relaxXZ": "0", "inputXZ": "1")
@@ -762,7 +763,7 @@ TEST_SCRIPT :string("strict-verilog-xz-semantics2"), :block {
   }])
   meta.INACTIVE_COPY_PASS
   meta.SSA_CONSTRUCT_PASS
-  // make sure inst combine does not destory semantics (i.e. frontend adds necessary extra instructions for verilog semantics)
+  // make sure inst combine does not destroy semantics (i.e. frontend adds necessary extra instructions for verilog semantics)
   meta.INST_COMBINE_PASS
   meta.LINEARIZE_CONTROL_FLOW_PASS
 
@@ -785,7 +786,8 @@ TEST_CASE :string("test-reg-split"), :block, :block, :block {
       LOAD %addr_v:wire(2), %addr
       ZEXT %addr32:wire(32), %addr_v
 
-      SPLICE %bit_v:wire(1), %state_v, #32'd0, %addr32, #32'd1, #32'd4
+      GEP %ptr:ptr, #32'd0, %addr32, #32'd1, #32'd4
+      SPLICE %bit_v:wire(1), %state_v, %ptr
 
       STORE %bit_v, %out_a
 
@@ -793,7 +795,7 @@ TEST_CASE :string("test-reg-split"), :block, :block, :block {
       NOT %bit_v_inv:wire(1), %bit_v
       MUX %bit_v_out:wire(1), %in_op_v, #1'b0, %bit_v_inv
 
-      INSERT %res_v:wire(4), %state_v, %bit_v_out, #32'd0, %addr32, #32'd1, #32'd4
+      INSERT %res_v:wire(4), %state_v, %bit_v_out, %ptr
 
       STORE_DEFER %res_v, %state, %trig
     }
@@ -903,6 +905,8 @@ FUNCTION_DEF %memoryTestSynth:func, :block {
 }
 // lift back up for sim
 FUNCTION_DEF %memoryTestLift:func, :block {
+    meta.DUMP_PASS map("path": "dumpx.dyno")
+
   meta.LIFT_STD_CELLS_PASS
   meta.SELECT_MODULES_PASS map("regex": "^(?!.*__inactive$).*")
   meta.MODULE_INLINE_PASS
@@ -964,7 +968,6 @@ TEST_SCRIPT :string("test-memory-different-port-widths"), :block {
   CALL %memoryTestSynth
   meta.ASSERT_EXISTS_PASS map("regex": "STDCELL_INSTANCE.+%FakeMem_3r1w_1x16.+#4'd0, #4'd0", "num": "16")
   CALL %memoryTestLift
-
   meta.RANDOM_EQUIVALENCE_CHECK_PASS map("cycles": "10000", "clockMode": "CLOCK")
 }
 

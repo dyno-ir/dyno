@@ -57,6 +57,11 @@ __attribute__((used)) void dumpDepsByID(uint32_t id, Context &ctx,
   dumpDeps(ctx.getStore<Instr>().resolve(ObjRef<Instr>{ObjID{id}}), ctx,
            maxDepth);
 }
+__attribute__((used)) void dumpRegByID(uint32_t id, Context &ctx) {
+  dumpInstr(
+      ctx.getStore<Register>().resolve(ObjRef<Register>{ObjID{id}}).iref(),
+      ctx);
+}
 
 __attribute__((used)) void dumpObj(FatDynObjRef<> obj) {
   print.reset();
@@ -67,11 +72,10 @@ __attribute__((used)) void dumpObj(FatDynObjRef<> obj) {
     dbgs() << "[" << obj.getObjID() << "]";
 };
 
-__attribute__((used)) void dumpBlock(BlockRef block, Context& ctx) {
+__attribute__((used)) void dumpBlock(BlockRef block, Context &ctx) {
   print.reset();
   auto tok = print.bindCtx(ctx);
   print.printBlock(block);
 }
-
 
 }; // namespace dyno

@@ -147,7 +147,7 @@ public:
       case VK_L: {
         auto &asLVal = this->as<RegLValue>();
         auto ldVal = build.buildLoad(asLVal.lvReg, asLVal.numBits,
-                                     asLVal.baseAddr, ArrayRef(asLVal.terms));
+                                     asLVal.baseAddr, Range{asLVal.terms});
         assert(ldVal->numBits == type->getBitstreamWidth());
         return ldVal;
       }
@@ -210,7 +210,7 @@ public:
         // [[fallthrough]];
       case Value::VK_R: {
         auto splice = build.buildSplice(value.proGetValue(build), numBits,
-                                        baseAddr, terms);
+                                        baseAddr, Range{terms});
         if (auto asWire = splice.dyn_as<WireRef>())
           asWire->numBits = type->getBitstreamWidth();
         return std::make_unique<RValue>(splice, type);
@@ -256,7 +256,7 @@ public:
         auto asRegLV = this->as<RegLValue>();
         assert(val.getNumBits() == asRegLV.numBits);
         build.buildStore(asRegLV.lvReg, val, defer, nullref, asRegLV.baseAddr,
-                         ArrayRef(asRegLV.terms));
+                         Range(asRegLV.terms));
         break;
       }
       case Value::VK_CCL: {
@@ -266,7 +266,7 @@ public:
         for (auto &regLV : asCCLV.lvValues) {
           build.buildStore(regLV->lvReg,
                            build.buildSplice(val, regLV->numBits, offs), defer,
-                           nullref, regLV->baseAddr, ArrayRef(regLV->terms));
+                           nullref, regLV->baseAddr, Range(regLV->terms));
           offs += regLV->numBits;
         }
         break;

@@ -71,6 +71,7 @@ public:
     ContextMixin::reset();
     regNameInfo.reset();
     regTypeInfo.reset();
+    regResetValue.clear();
   }
 
   void copyRegisterInfo(RegisterRef src, RegisterRef dst) {

@@ -6,6 +6,7 @@
 #include "dyno/Context.h"
 #include "dyno/HierBlockIterator.h"
 #include "dyno/IDs.h"
+#include "dyno/Obj.h"
 #include "dyno/ObjMap.h"
 #include "dyno/Pass.h"
 #include "hw/FlipFlop.h"
@@ -101,7 +102,7 @@ private:
   void visitHWValue(HWValue value) {
     assert(value);
     if (auto asConst = value.dyn_as<ConstantRef>()) {
-      if (asConst.isInline())
+      if (asConst.isInline()) [[likely]]
         return;
       constantMap[asConst] = 1;
     } else {
@@ -277,9 +278,8 @@ private:
       auto reg = asLoad.reg().iref();
       if (!instrMap[reg])
         pushInstr(reg);
-      for (auto term : asLoad.terms()) {
-        visitHWValue(term.getIdx());
-      }
+      if (auto addr = asLoad.addr())
+        visitHWAddr(addr);
       break;
     }
 
@@ -293,9 +293,8 @@ private:
         worklist.emplace_back(trig);
       auto reg = asStore.reg().iref();
       assert(instrMap[reg]);
-      for (auto term : asStore.terms()) {
-        visitHWValue(term.getIdx());
-      }
+      if (auto addr = asStore.addr())
+        visitHWAddr(addr);
       break;
     }
 
@@ -324,6 +323,27 @@ private:
       if (asStore.hasEn())
         visitHWValue(asStore.en());
       if (auto addr = asStore.addr())
+        visitHWAddr(addr);
+      break;
+    }
+
+    case *HW_SPLICE: {
+      if (instrMap[instr])
+        break;
+      auto asSplice = instr.as<SpliceIRef>();
+      visitHWValue(asSplice.in()->as<HWValue>());
+      if (auto addr = asSplice.addr())
+        visitHWAddr(addr);
+      break;
+    }
+
+    case *HW_INSERT: {
+      if (instrMap[instr])
+        break;
+      auto asInsert = instr.as<InsertIRef>();
+      visitHWValue(asInsert.in()->as<HWValue>());
+      visitHWValue(asInsert.val()->as<HWValue>());
+      if (auto addr = asInsert.addr())
         visitHWAddr(addr);
       break;
     }
@@ -481,9 +501,7 @@ private:
   }
 
   void destroyDeadInstrs() {
-    ObjMapVec<Block, bool> blockDestroyMap;
-    blockDestroyMap.resize(
-        ctx.getCtx<CoreDialectContext>().cfg.blocks.numIDs());
+    Vec<FatDynObjRef<>> destroyList;
 
     for (auto [obj, live] : instrMap) {
       if (!ctx.getStore<Instr>().exists(obj) || live)
@@ -497,55 +515,58 @@ private:
       case *HW_LATCH_PROCESS_DEF:
       case *HW_FINAL_PROCESS_DEF:
       case *HW_NETLIST_PROCESS_DEF: {
-        blockDestroyMap[instr.as<ProcessIRef>().block()] = 1;
+        destroyList.emplace_back(instr.as<ProcessIRef>().block());
         break;
       }
       case *OP_IF: {
-        blockDestroyMap[instr.as<IfInstrRef>().getTrueBlock()] = 1;
+        destroyList.emplace_back(instr.as<IfInstrRef>().getTrueBlock());
         if (instr.as<IfInstrRef>().hasFalseBlock())
-          blockDestroyMap[instr.as<IfInstrRef>().getFalseBlock()] = 1;
+          destroyList.emplace_back(instr.as<IfInstrRef>().getFalseBlock());
         break;
       }
       case *OP_WHILE: {
-        blockDestroyMap[instr.as<WhileInstrRef>().getCondBlock()] = 1;
-        blockDestroyMap[instr.as<WhileInstrRef>().getBodyBlock()] = 1;
+        destroyList.emplace_back(instr.as<WhileInstrRef>().getCondBlock());
+        destroyList.emplace_back(instr.as<WhileInstrRef>().getBodyBlock());
         break;
       }
       case *OP_DO_WHILE: {
-        blockDestroyMap[instr.as<DoWhileInstrRef>().getBlock()] = 1;
+        destroyList.emplace_back(instr.as<DoWhileInstrRef>().getBlock());
         break;
       }
       case *OP_FOR: {
-        blockDestroyMap[instr.as<ForInstrRef>().getBlock()] = 1;
+        destroyList.emplace_back(instr.as<ForInstrRef>().getBlock());
         break;
       }
       case *OP_CASE:
       case *OP_CASE_DEFAULT: {
-        blockDestroyMap[instr.as<CaseInstrRef>().block()] = 1;
+        destroyList.emplace_back(instr.as<CaseInstrRef>().block());
         break;
       }
       case *OP_SWITCH: {
-        blockDestroyMap[instr.as<SwitchInstrRef>().block()] = 1;
+        destroyList.emplace_back(instr.as<SwitchInstrRef>().block());
         break;
       }
       case *OP_FUNC: {
-        blockDestroyMap[instr.as<FunctionIRef>().getBlock()] = 1;
+        destroyList.emplace_back(instr.as<FunctionIRef>().getBlock());
         break;
       }
       }
 
       if (ctx.getCtx<CoreDialectContext>().cfg.contains(instr))
         ctx.getCtx<CoreDialectContext>().cfg[instr].erase();
-      instr.destroyOperands();
+      for (auto def : instr.defs()) {
+        // destroy if no special handling, else just unlink
+        if (def->fat().getType() != Any{HW_WIRE, CORE_BLOCK})
+          destroyList.emplace_back(def->fat());
+        else // unlink
+          def.destroy();
+      }
+      instr.destroyOthers();
       ctx.getStore<Instr>().destroy(instr);
     }
 
-    for (auto [obj, destroy] : blockDestroyMap) {
-      if (!ctx.getCtx<CoreDialectContext>().cfg.blocks.exists(obj) || !destroy)
-        continue;
-      auto block = ctx.getCtx<CoreDialectContext>().cfg.blocks.resolve(obj);
-      ctx.getCtx<CoreDialectContext>().cfg.blocks.destroy(block);
-    }
+    for (auto ref : destroyList)
+      ctx.destroy(ref);
   }
 
   void destroyDeadWires() {

@@ -1140,7 +1140,7 @@ private:
       auto other = outWire.getSingleUse()->instr().as<InsertIRef>();
       // todo: doesn't actually have to be exactly equal. Constant offset is
       // also fine.
-      if (!addressingFragsEqual(insert, other))
+      if (insert.addr() != other.addr())
         return false;
 
       auto thisBase = insert.getBase();
@@ -1915,6 +1915,7 @@ private:
     return PAT_TRUE;
   }
 
+  // todo: rewrite GEP specific (replace uses of ptr if constant)
   template <typename RefT> PatBool simplifyAddressing(RefT instr) {
     HWInstrBuilder build{ctx, instr};
     if (instr.getNumTerms() == 0) {
@@ -2113,18 +2114,6 @@ private:
       if (auto trueV = knownBitsConstProp(instr))
         return trueV;
 
-    if (instr.isOpc(HW_SPLICE))
-      if (auto trueV = simplifyAddressing(instr.as<SpliceIRef>()))
-        return trueV;
-    if (instr.isOpc(HW_INSERT))
-      if (auto trueV = simplifyAddressing(instr.as<InsertIRef>()))
-        return trueV;
-    if (instr.isOpc(HW_LOAD))
-      if (auto trueV = simplifyAddressing(instr.as<LoadIRef>()))
-        return trueV;
-    if (instr.isOpc(HW_STORE, HW_STORE_DEFER))
-      if (auto trueV = simplifyAddressing(instr.as<StoreIRef>()))
-        return trueV;
     if (instr.isOpc(HW_GEP))
       if (auto trueV = simplifyAddressing(instr.as<GEPIRef>()))
         return trueV;
@@ -2283,8 +2272,8 @@ private:
     currentReplaced.clear();
 
     if (instr.getNumDefs() == 1) {
-      if (instr.def(0)->is<WireRef>() &&
-          instr.def(0)->as<WireRef>().getNumUses() == 0) {
+      if (instr.def(0)->thin().getType() == Any{HW_WIRE, HW_POINTER} &&
+          instr.def(0)->as<FatDynObjRef<InstrDefUse>>()->getNumUses() == 0) {
         // DCE unused instruction
         deleteMatchedInstr(instr);
         return PatBool{"deleteDeadInstr"};
@@ -2349,11 +2338,21 @@ private:
             auto defI = asWire.getDefI();
             if (!TaggedIRef{defI}.get() && defI.getNumDefs() == 1)
               deleteMatchedInstr(defI);
+          } else if (auto asPtr = op->dyn_as<PointerRef>();
+                     asPtr && asPtr.hasSingleUse() && asPtr.hasSingleDef()) {
+            auto defI = asPtr.getSingleDef()->instr();
+            if (!TaggedIRef{defI}.get() && defI.getNumDefs() == 1)
+              deleteMatchedInstr(defI);
           }
+          op.replace(FatDynObjRef<>{nullref});
         }
 
-        // todo: delete
-        op.replace(FatDynObjRef<>{nullref});
+        if (op.isDef() && Operand::isDefUseOperand(op->thin())) {
+          if (op->as<FatDynObjRef<InstrDefUse>>()->getNumDefs() != 1)
+            // else we keep and let it be destroyed with the instr
+            op.replace(FatDynObjRef<>{nullref});
+        } else
+          op.replace(FatDynObjRef<>{nullref});
       }
     } else {
       // if not explicitly ok to delete, re-inspect

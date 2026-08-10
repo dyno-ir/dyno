@@ -151,13 +151,6 @@ private:
   template <typename T = SpliceIRef>
   InstrRef tryMergeSpliceInsert(BlockRef parentBlock,
                                 ArrayRef<InstrRef> instrs) {
-    if (Range{instrs}.find_if([](auto instr) {
-          return instr.def().template as<WireRef>().getObjID() == 101;
-        }) != instrs.end() &&
-        Range{instrs}.find_if([](auto instr) {
-          return instr.def().template as<WireRef>().getObjID() == 99;
-        }) != instrs.end())
-      std::cout << "here\n";
     auto base = instrs.front().as<T>();
     auto baseIn = lookThruRemaps(base.in()->template as<HWValue>());
     // todo: relax comparison. addressing does not have to be exactly equal,

@@ -240,15 +240,20 @@ replace {
 }
 
 match {
-  HW_SPLICE $temp, $in, $addrA, $termsA...
-  HW_SPLICE $out, $temp:HW_WIRE, $addrB, $termsB...
+  HW_GEP $ptrA, $addrA, $termsA...
+  HW_SPLICE $temp, $in, $ptrA:HW_POINTER
+  HW_GEP $ptrB, $addrB, $termsB...
+  HW_SPLICE $out, $temp:HW_WIRE, $ptrB:HW_POINTER
 }
 with [{
   if (!(*$temp.begin())->as<WireRef>().hasSingleUse())
     goto $fail;
 }]
 replace {
-  HW_SPLICE $out, $in, const_add($addrA, $addrB), $termsA..., $termsB...
+  // pretty sure this leaks ptrB, emit unused instr for DCE
+  HW_GEP $ptrB, #32'd0
+  HW_GEP $ptrA, const_add($addrA, $addrB), $termsA..., $termsB...
+  HW_SPLICE $out, $in, $ptrA
 }
 
 match {
@@ -272,6 +277,8 @@ macro chk_const_diff_lens $self, $lhs, $rhs [{
     goto $fail;
 }]
 macro chk_const_len_of_minus1 $self, $obj [{
+  if (!(*$self.begin())->is<PointerRef>())
+    goto $fail;
   FatDynObjRef<> c = ConstantRef::fromU32(*(*$obj.begin())->as<HWValue>().getNumBits() - 1);
   if ((*$self.begin())->as<FatDynObjRef<>>() != c)
     goto $fail;
@@ -733,7 +740,8 @@ replace $out -> $zeroR
 // low side -> add to base offset
 match {
   HW_SPLICE $short, $in, $offs:CORE_CONSTANT
-  HW_INSERT $inserted, $short:HW_WIRE, $insval, $base, $terms...
+  HW_GEP $ptr, $base, $terms...
+  HW_INSERT $inserted, $short:HW_WIRE, $insval, $ptr:HW_POINTER
   OP_TRUNC $low, $in
   HW_CONCAT $out, $pre..., $inserted:HW_WIRE, $low:chk_wire_constant($offs), $post...
 }
@@ -747,15 +755,17 @@ with [{
 }]
 replace {
   OP_TRUNC $temp, $in
-  HW_INSERT $temp2, $temp, $insval, const_add($offs, $base), $terms...
+  HW_GEP $ptr, const_add($offs, $base), $terms...
+  HW_INSERT $temp2, $temp, $insval, $ptr
   HW_CONCAT $out, $pre..., $temp2, $post...
 }
 
 // high side -> limited w/ max bounds
 match {
   OP_TRUNC $short, $in
-  HW_INSERT $inserted, $short:HW_WIRE, $insval, $base, $terms...
-  HW_SPLICE $high, $in, $offs
+  HW_GEP $ptr, $base, $terms...
+  HW_INSERT $inserted, $short:HW_WIRE, $insval, $ptr:HW_POINTER
+  HW_SPLICE $high, $in, $offs:CORE_CONSTANT
   HW_CONCAT $out, /*$pre..., */$high:HW_WIRE, $inserted:chk_wire_constant($offs), $post...
 }
 with [{
@@ -768,7 +778,8 @@ with [{
 }]
 replace {
   OP_TRUNC $temp, $in
-  HW_INSERT $temp2, $temp, $insval, $base, $terms...
+  HW_GEP $ptr, const_add($offs, $base), $terms...
+  HW_INSERT $temp2, $temp, $insval, $base, $ptr
   HW_CONCAT $out, /*$pre..., */$temp2, $post...
 }
 
@@ -779,17 +790,31 @@ replace $out -> $in
 
 // elaborate d flip flops
 match {
-  HW_FLIP_FLOP_SRST $q, $clk, #1'd0, #1'd1, $other_rsts..., $d, #1'd1, $init...{0,1}
+  HW_FLIP_FLOP_SRST $q, $clk, #1'd0, #1'd1, $other_rsts..., $d, #1'd1, $init
 }
 replace {
-  HW_FLIP_FLOP $q, $clk, $d, #1'd1, $other_rsts..., $init...
+  HW_FLIP_FLOP $q, $clk, $d, #1'd1, $other_rsts..., $init
 }
 match {
-  HW_FLIP_FLOP_SRST $q, $clk, #1'd1, #1'd1, $other_rsts..., $d, #1'd0, $init...{0,1}
+  HW_FLIP_FLOP_SRST $q, $clk, #1'd1, #1'd1, $other_rsts..., $d, #1'd0, $init
 }
 replace {
   OP_NOT $d_inv:wire_like($d)
-  HW_FLIP_FLOP $q, $clk, $d_inv, #1'd1, $other_rsts..., $init...
+  HW_FLIP_FLOP $q, $clk, $d_inv, #1'd1, $other_rsts..., $init
+}
+
+match {
+  HW_FLIP_FLOP_SRST $q, $clk, #1'd0, #1'd1, $other_rsts..., $d, #1'd1
+}
+replace {
+  HW_FLIP_FLOP $q, $clk, $d, #1'd1, $other_rsts...
+}
+match {
+  HW_FLIP_FLOP_SRST $q, $clk, #1'd1, #1'd1, $other_rsts..., $d, #1'd0
+}
+replace {
+  OP_NOT $d_inv:wire_like($d)
+  HW_FLIP_FLOP $q, $clk, $d_inv, #1'd1, $other_rsts...
 }
 
 /*
@@ -809,7 +834,7 @@ match {
 replace {
   OP_TRUNC $truncShamt:wire32(), $shamt
   OP_OR $temp:wire_like($out), $others...
-  HW_SPLICE $origVal:wire_like($x), $temp, $truncShamt
+  HW_SPLICE $origVal:wire_like($x), $temp, $truncShamt:CORE_CONSTANT
   OP_OR $modVal:wire_like($x), $origVal, $x
   HW_INSERT $out, $temp, $modVal, $truncShamt
 
@@ -846,13 +871,13 @@ replace {
 
 // remove constant 1 enable
 match {
-  HW_MEM_STORE $port, $data, $register, #1'd1, $addr, $trigger...{0,1}
+  HW_MEM_STORE $port, $data, $register, #1'd1, $addr, anyorder($trigger...{0,1})
 }
 replace {
   HW_MEM_STORE $port, $data, $register, $addr, $trigger...
 }
 match {
-  HW_MEM_LOAD $data, $port, $register, #1'd1, $addr, $trigger...{0,1}
+  HW_MEM_LOAD $data, $port, $register, #1'd1, $addr, anyorder($trigger...{0,1})
 }
 replace {
   HW_MEM_LOAD defs=2 $data, $port, $register, $addr, $trigger...
@@ -860,7 +885,7 @@ replace {
 
 // constant 0 enable
 match {
-  HW_MEM_STORE $port, $data, $register, #1'd0, $addr, $trigger...{0,1}
+  HW_MEM_STORE $port, $data, $register, #1'd0, $addr, anyorder($trigger...{0,1})
 }
 with [{
   FatDynObjRef<> ref = (*$port.begin())->fat();
@@ -870,7 +895,7 @@ with [{
 replace {}
 
 match {
-  HW_MEM_LOAD $data, $port, $register, #1'd0, $addr, $trigger...{0,1}
+  HW_MEM_LOAD $data, $port, $register, #1'd0, $addr, anyorder($trigger...{0,1})
 }
 with [{
   FatDynObjRef<> ref = (*$port.begin())->fat();
