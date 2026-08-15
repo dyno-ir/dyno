@@ -23,21 +23,23 @@ FUNCTION_DEF %earlyCanonFlow:func, :block {
   // process fusion & ssa construction
   meta.SEQ_TO_COMB_PASS
   meta.SSA_CONSTRUCT_PASS
+
   meta.PROCESS_LINEARIZE_PASS map("retainIODeps": "1", "retainInnerDeps": "1")
   meta.SSA_CONSTRUCT_PASS
   meta.SSA_CONSTRUCT_PASS map("mode": "DEFERRED")
+
   meta.INST_COMBINE_PASS
   meta.LOAD_COALESCE_PASS
   meta.INST_COMBINE_PASS
 
   // canonicalize
-  meta.LOOP_SIMPLIFY_PASS
-  meta.AGGRESSIVE_DEAD_CODE_ELIMINATION_PASS
+  meta.AGGRESSIVE_DEAD_CODE_ELIMINATION_PASS map("keepRegs": "NAMED")
   meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS map("differentBlocks": "1")
   meta.ORDER_INSTRS_PASS map("assertNoCircularDeps": "1", "moveStoresBeforeLoads": "0")
   meta.INST_COMBINE_PASS
-  meta.AGGRESSIVE_DEAD_CODE_ELIMINATION_PASS
+  meta.AGGRESSIVE_DEAD_CODE_ELIMINATION_PASS map("keepRegs": "NAMED")
   meta.INST_COMBINE_PASS
+  meta.LOOP_SIMPLIFY_PASS
 }
 
 // Early synthesis: unroll loops, fuse processes, canonicalize
@@ -70,6 +72,7 @@ FUNCTION_DEF %synthCanonicalize:func, :block {
   )
   meta.INST_COMBINE_PASS
   meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS
+  meta.ORDER_INSTRS_PASS map("assertNoCircularDeps": "1", "moveStoresBeforeLoads": "0")
 }
 
 FUNCTION_DEF %synthEarlyOpt:func, :block {
@@ -172,9 +175,10 @@ FUNCTION_DEF %synthMemoryFFMuxHandling:func, :block {
 
 FUNCTION_DEF %synthLowerMemoryFF:func, :block {
   // load pre-parsed liberty
-  meta.PARSE_DYNO_PASS map("fileName": "tools/dyno-opt/dyno-ir/sky130_fd_sc_hd.dyno", "newModulesActive": "0")
+
+  meta.PARSE_DYNO_PASS map("path": /*"xilinx/flipflops.dyno"*/ "tools/dyno-opt/dyno-ir/sky130_fd_sc_hd.dyno", "newModulesActive": "0")
   // load memories
-  meta.PARSE_DYNO_PASS map("fileName": "tools/dyno-opt/dyno-ir/example_memories.dyno", "newModulesActive": "0")
+  meta.PARSE_DYNO_PASS map("path": /*"xilinx/memories.dyno"*/ "tools/dyno-opt/dyno-ir/example_memories.dyno", "newModulesActive": "0")
   meta.POPULATE_INLINE_CACHES_PASS
 
   // map memories
