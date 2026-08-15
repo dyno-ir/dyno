@@ -905,8 +905,6 @@ FUNCTION_DEF %memoryTestSynth:func, :block {
 }
 // lift back up for sim
 FUNCTION_DEF %memoryTestLift:func, :block {
-    meta.DUMP_PASS map("path": "dumpx.dyno")
-
   meta.LIFT_STD_CELLS_PASS
   meta.SELECT_MODULES_PASS map("regex": "^(?!.*__inactive$).*")
   meta.MODULE_INLINE_PASS
@@ -966,7 +964,6 @@ TEST_SCRIPT :string("test-memory-different-port-widths"), :block {
   }])
 
   CALL %memoryTestSynth
-  DUMP_PASS map("path": "/dev/stdout")
   meta.ASSERT_EXISTS_PASS map("regex": "STDCELL_INSTANCE.+%FakeMem_3r1w_1x16.+#4'd0, #4'd0", "num": "16")
   CALL %memoryTestLift
   meta.RANDOM_EQUIVALENCE_CHECK_PASS map("cycles": "10000", "clockMode": "CLOCK")
