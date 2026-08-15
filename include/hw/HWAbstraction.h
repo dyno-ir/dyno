@@ -708,12 +708,13 @@ public:
                       Range<T> terms) {
     if (terms.empty())
       return buildSplice(src, numBits, baseAddr);
+    auto ptr = buildGEP(baseAddr, terms);
     auto len = std::distance(terms.begin(), terms.end());
     auto ib = buildInstrRaw(HW_SPLICE, 1 + 2);
     auto defW = ctx.getStore<Wire>().create(numBits);
     ib.addRef(defW).other();
     ib.addRef(src);
-    ib.addRef(buildGEP(baseAddr, terms));
+    ib.addRef(ptr);
     return defW;
   }
 

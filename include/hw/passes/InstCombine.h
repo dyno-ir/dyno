@@ -20,6 +20,7 @@
 #include "hw/HWValue.h"
 #include "hw/IDs.h"
 #include "hw/LoadStore.h"
+#include "hw/Pointer.h"
 #include "hw/Register.h"
 #include "hw/Wire.h"
 #include "hw/analysis/BitAliasAnalysis.h"
@@ -138,6 +139,10 @@ private:
     auto &regNameInfo = ctx.getCtx<HWDialectContext>().regNameInfo;
     regNameInfo.copyNames(oldR, newR);
     oldR.replaceAllUsesWith(newR);
+  }
+  void replaceUses(PointerRef pointer, HWAddress newVal) {
+    pointer.replaceAllUsesWith(
+        newVal, [&](OperandRef ref) { currentReplaced.emplace_back(ref); });
   }
 #define replaceAllUsesWith static_assert(0, "use this->replaceUses")
 
@@ -1916,28 +1921,8 @@ private:
   }
 
   // todo: rewrite GEP specific (replace uses of ptr if constant)
-  template <typename RefT> PatBool simplifyAddressing(RefT instr) {
+  PatBool simplifyAddressing(GEPIRef instr) {
     HWInstrBuilder build{ctx, instr};
-    if (instr.getNumTerms() == 0) {
-      if (instr.hasBase() && instr.getBase() == 0) {
-        auto ib = build.buildInstrRaw(instr.getDialectOpcode(),
-                                      instr.getNumOperands() - 1);
-        for (auto def : instr.defs()) {
-          ib.addRef(def->fat());
-          // def.replace(FatDynObjRef{nullref});
-        }
-        ib.other();
-        for (auto use : instr.others()) {
-          if (use == instr.base()) {
-            continue;
-          }
-          ib.addRef(use->fat());
-        }
-        deleteMatchedInstr(instr);
-        return PAT_TRUE;
-      }
-      return false;
-    }
 
     bool change = false;
 
@@ -2001,14 +1986,19 @@ private:
       terms.emplace_back(term);
     }
 
+    if (terms.empty()) {
+      replaceUses(instr.def()->as<PointerRef>(),
+                  ConstantRef::fromU32(instr.getBase()));
+      deleteMatchedInstr(instr);
+      return PAT_TRUE;
+    }
+
     if (!change)
       return false;
 
     unsigned termDiff = instr.getNumTerms() - terms.size();
     unsigned numOperands = instr.getNumOperands() - termDiff * 3;
-    bool removeBaseOffs = terms.size() == 0 && baseOffs == 0;
-    if (removeBaseOffs)
-      numOperands--;
+
     auto ib = build.buildInstrRaw(instr.getDialectOpcode(), numOperands);
 
     for (auto def : instr.defs()) {
@@ -2020,8 +2010,7 @@ private:
                           instr.other_begin() + instr.addressGenBaseIndex()}) {
       ib.addRef(use->fat());
     }
-    if (!removeBaseOffs)
-      ib.addRef(ConstantRef::fromU32(baseOffs));
+    ib.addRef(ConstantRef::fromU32(baseOffs));
     for (auto term : terms)
       ib.addRef(term.getIdx())
           .addRef(ConstantRef::fromU32(term.getFact()))
