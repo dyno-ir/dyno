@@ -27,7 +27,7 @@ int main(int argc, char** argv) {
     const char* dynoFile = argc > 1 ? argv[1] : "design.dyno";
 
     dyno::ParseDynoPass parseDyno{ctx};
-    parseDyno.config.fileName = dynoFile;
+    parseDyno.config.path = dynoFile;
     parseDyno.run();
 
     auto top = std::make_unique<SimulationTop<ModInst____Top>>(ctx);
