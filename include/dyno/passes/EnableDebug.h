@@ -20,6 +20,7 @@ public:
   Config config;
 
   void run() {
+#if DYNO_ENABLE_DEBUG
     if (config.enable) {
       dbg_enable_all();
       dbg_disable_for_id(128); // known bits
@@ -44,6 +45,9 @@ public:
       ctx.getPassRegistry().setDebugEnForPasses(disablePasses, false);
       ctx.getPassRegistry().setDebugEnForPasses(enablePasses, true);
     }
+#else
+    std::cout << "EnableDebugPass: not a debug build, ignoring\n";
+#endif
   }
 
   static constexpr auto runFuncs = mk_tuple(&EnableDebugPass::run);

@@ -1,7 +1,9 @@
 #pragma once
 
 #include "dyno/Context.h"
+#include "dyno/Instr.h"
 #include "dyno/Obj.h"
+#include "dyno/ObjMap.h"
 #include "dyno/Pass.h"
 #include "hw/HWAbstraction.h"
 #include "hw/HWContext.h"
@@ -14,8 +16,15 @@
 #include "hw/analysis/WireVariable.h"
 #include "op/IDs.h"
 #include "op/StructuredControlFlow.h"
+#include "support/Bits.h"
 #include "support/Debug.h"
+#include "support/DenseMap.h"
+#include "support/DenseMultimap.h"
+#include "support/TemplateUtil.h"
+#include "support/TwoLevelSet.h"
 #include "support/Utility.h"
+#include <bit>
+#include <initializer_list>
 #include <type_traits>
 namespace dyno {
 
@@ -31,36 +40,132 @@ public:
   Config config;
 
 private:
-  static bool orderInstrs(InstrRef lhs, InstrRef rhs) {
-    if (lhs.getNumOthers() < rhs.getNumOthers())
+  struct PotentialMerge {
+    // real instr instance, s.t. we're API compatible w/ regular instructions.
+    // Not in CFG and no real defs though.
+    SmallVec<InstrRef, 2> sources;
+    InstrRef getCanon() const { return sources[0]; }
+
+    explicit PotentialMerge(ArrayRef<PotentialMerge> merges) {
+      for (auto &merge : merges)
+        sources.push_back_range(Range{merge.sources});
+    }
+    PotentialMerge() = default;
+    PotentialMerge(InstrRef instr) : sources{instr} {}
+
+    explicit operator bool() const { return !sources.empty(); }
+  };
+
+  static bool orderInstrs(const PotentialMerge &lhs,
+                          const PotentialMerge &rhs) {
+    if (lhs.getCanon().getNumOthers() < rhs.getCanon().getNumOthers())
       return true;
-    if (*lhs.def(0)->as<WireRef>().getNumBits() <
-        *rhs.def(0)->as<WireRef>().getNumBits())
+    if (*lhs.getCanon().def(0)->as<WireRef>().getNumBits() <
+        *rhs.getCanon().def(0)->as<WireRef>().getNumBits())
       return true;
     return false;
   }
-  template <typename T> bool orderInsertExtract(InstrRef lhs, InstrRef rhs) {
-    return lookThruRemaps(lhs.template as<T>().in()->template as<HWValue>())
-               .getObjID() <
-           lookThruRemaps(rhs.template as<T>().in()->template as<HWValue>())
-               .getObjID();
+
+  template <typename T>
+  bool spliceInsertMergeCompatible(const PotentialMerge &lhs,
+                                   const PotentialMerge &rhs) const {
+    auto lhsI = lhs.getCanon();
+    auto rhsI = rhs.getCanon();
+
+    auto base = lhsI.template as<T>();
+    auto baseIn = lookThruRemaps(base.in()->template as<HWValue>());
+
+    auto splice = rhsI.template as<T>();
+    auto spliceIn = lookThruRemaps(splice.in()->template as<HWValue>());
+    if (spliceIn != baseIn) {
+      return false;
+    }
+    if (splice.getNumTerms() != base.getNumTerms())
+      return false;
+    if (splice.getBase() != base.getBase())
+      return false;
+    if (splice.getLen() != base.getLen())
+      return false;
+
+    for (auto [a, b] : base.terms().zip(splice.terms())) {
+      if (a.getFact() != b.getFact())
+        return false;
+      if (a.getMax() != b.getMax())
+        return false;
+    }
+    return true;
+  }
+
+  bool mergeCompatible(PotentialMerge &lhs, PotentialMerge &rhs) {
+    auto lhsI = lhs.getCanon();
+    auto rhsI = rhs.getCanon();
+    assert(lhsI.getDialectOpcode() == rhsI.getDialectOpcode());
+    assert(lhsI.getDialectOpcode() == config.opToShare);
+
+    switch (*config.opToShare) {
+      // add/mul are always share compatible
+    case *OP_ADD:
+    case *OP_MUL:
+      return true;
+
+    case *HW_SPLICE:
+      return spliceInsertMergeCompatible<SpliceIRef>(lhs, rhs);
+
+    case *HW_INSERT:
+      return spliceInsertMergeCompatible<InsertIRef>(lhs, rhs);
+
+    default:
+      dyno_unreachable("unexpected opcode");
+    }
+  }
+
+  template <typename T> uint64_t spliceInsertMergeHash(PotentialMerge &lhs) {
+    // hash only used for splice/insert
+    assert(lhs.getCanon().isOpc(HW_SPLICE, HW_INSERT));
+
+    auto lhsI = lhs.getCanon();
+
+    auto base = lhsI.template as<T>();
+    auto baseIn = lookThruRemaps(base.in()->template as<HWValue>());
+
+    uint64_t hash = hash_u64(std::bit_cast<uint64_t>(baseIn));
+    hash = hash_combine64(hash, hash_u64(base.getBase()));
+    hash = hash_combine64(hash, hash_u32(base.getLen()));
+
+    for (auto t : base.terms()) {
+      hash = hash_combine64(hash, hash_u32(t.getFact()));
+      hash = hash_combine64(hash, hash_u32(t.getMax().value_or(~0ULL)));
+    }
+
+    return hash;
+  }
+
+  uint64_t mergeHash(PotentialMerge &merge) {
+    switch (*config.opToShare) {
+
+    case *HW_SPLICE:
+      return spliceInsertMergeHash<SpliceIRef>(merge);
+
+    case *HW_INSERT:
+      return spliceInsertMergeHash<InsertIRef>(merge);
+
+    default:
+      dyno_unreachable("unexpected opcode");
+    }
   }
 
   struct BlockResult {
-    SmallVec<InstrRef, 4> candidates;
-
-    void addCandidate(InstrRef instr) { candidates.emplace_back(instr); }
+    Vec<PotentialMerge, 4> candidates;
+    void addCandidate(PotentialMerge &&instr) {
+      candidates.emplace_back(std::move(instr));
+    }
+    void addCandidate(const PotentialMerge &instr) {
+      candidates.emplace_back(instr);
+    }
   };
+
   void sortBlockResult(BlockResult &res) {
-    if (config.opToShare == HW_INSERT)
-      Range{res.candidates}.stable_sort([&](auto lhs, auto rhs) {
-        return orderInsertExtract<InsertIRef>(lhs, rhs);
-      });
-    else if (config.opToShare == HW_SPLICE)
-      Range{res.candidates}.stable_sort([&](auto lhs, auto rhs) {
-        return orderInsertExtract<SpliceIRef>(lhs, rhs);
-      });
-    else
+    if (config.opToShare != Any{HW_INSERT, HW_SPLICE})
       Range{res.candidates}.stable_sort(orderInstrs);
   }
 
@@ -78,7 +183,7 @@ private:
     return true;
   }
 
-  InstrRef tryMergeCommOps(BlockRef parentBlock, ArrayRef<InstrRef> instrs) {
+  InstrRef doMergeCommOps(ArrayRef<InstrRef> instrs) {
     auto maxOps = instrs[0].getNumOthers();
     auto maxBits = *instrs[0].def(0)->as<WireRef>().getNumBits();
     for (auto instr : Range{instrs}.drop_front()) {
@@ -137,53 +242,96 @@ private:
   }
 
   SmallDenseMap<ObjRef<Wire>, ObjRef<Wire>> valueRemap;
-  ObjRef<Wire> lookThruRemaps(ObjRef<Wire> wire) {
+  ObjRef<Wire> lookThruRemaps(ObjRef<Wire> wire) const {
     while (auto it = valueRemap.find(wire))
       wire = it.val();
     return wire;
   }
-  DynObjRef lookThruRemaps(HWValue val) {
+  DynObjRef lookThruRemaps(HWValue val) const {
     if (val.is<WireRef>())
       return lookThruRemaps(val.as<WireRef>());
     return val;
   }
 
-  template <typename T = SpliceIRef>
-  InstrRef tryMergeSpliceInsert(BlockRef parentBlock,
-                                ArrayRef<InstrRef> instrs) {
-    auto base = instrs.front().as<T>();
-    auto baseIn = lookThruRemaps(base.in()->template as<HWValue>());
-    // todo: relax comparison. addressing does not have to be exactly equal,
-    // shared implementation just has to be beneficial.
-    for (auto instr : instrs.drop_front()) {
-      auto splice = instr.as<T>();
-      auto spliceIn = lookThruRemaps(splice.in()->template as<HWValue>());
-      if (spliceIn != baseIn) {
-        DYNO_DBG(if (baseIn.template is<WireRef>() &&
-                     spliceIn.template is<WireRef>()) {
-          dbgs() << "conflict:\n";
-          dumpInstr(ctx.resolve(baseIn).template as<WireRef>().getDefI(), ctx);
-          dumpInstr(ctx.resolve(spliceIn).template as<WireRef>().getDefI(),
-                    ctx);
-          dbgs() << "\n";
-        })
-        return nullref;
-      }
-      if (splice.getNumTerms() != base.getNumTerms())
-        return nullref;
-      if (splice.getBase() != base.getBase())
-        return nullref;
-      if (splice.getLen() != base.getLen())
-        return nullref;
+  // // ephemeral
+  ProcessIRef proc = nullref;
+  ModuleIRef mod = nullref;
 
-      for (auto [a, b] : base.terms().zip(splice.terms())) {
-        if (a.getFact() != b.getFact())
-          return nullref;
-        if (a.getMax() != b.getMax())
-          return nullref;
-      }
+  ObjMapVec<Register, bool> isShareReg;
+  RegisterRef getShareRegister(HWValue val, RegisterRef existing) {
+    auto defI = val.is<WireRef>() ? val.as<WireRef>().getDefI() : nullref;
+    if (!defI || !defI.isOpc(HW_LOAD) ||
+        !isShareReg.inRange(defI.as<LoadIRef>().reg()) ||
+        !isShareReg[defI.as<LoadIRef>().reg()]) {
+      if (existing)
+        return existing;
+      // create register in wire's process, defaulting to 'x
+      HWInstrBuilder build{ctx};
+      build.setInsertPoint(mod.regs_end());
+      auto reg = build.buildRegister(val.getNumBits());
+      build.setInsertPoint(proc.block().begin());
+      build.buildStore(reg, ConstantBuilder{ctx.getStore<Constant>()}
+                                .undef(*val.getNumBits())
+                                .get());
+      isShareReg.get_ensure(reg) = 1;
+      return reg;
+    }
+    auto load = defI.as<LoadIRef>();
+
+    if (existing) {
+      auto reg = load.reg();
+      reg.replaceAllUsesWith(existing);
+      return existing;
     }
 
+    assert(load.isFullReg());
+    return load.reg();
+  }
+
+  // template <typename T = SpliceIRef>
+  // std::optional<PotentialMerge>
+  // potentialMergeSpliceInsert(ArrayRef<PotentialMerge> instrs) {
+  //   auto base = instrs.front().getCanon().as<T>();
+  //   auto baseIn = lookThruRemaps(base.in()->template as<HWValue>());
+
+  //   // todo: relax comparison. addressing does not have to be exactly equal,
+  //   // shared implementation just has to be beneficial.
+  //   for (auto instr :
+  //        Range{instrs}.drop_front().tf([](auto &&e) { return e.getCanon();
+  //        })) {
+  //     auto splice = instr.template as<T>();
+  //     auto spliceIn = lookThruRemaps(splice.in()->template as<HWValue>());
+  //     if (spliceIn != baseIn) {
+  //       DYNO_DBG(if (baseIn.template is<WireRef>() &&
+  //                    spliceIn.template is<WireRef>()) {
+  //         dbgs() << "conflict:\n";
+  //         dumpInstr(ctx.resolve(baseIn).template as<WireRef>().getDefI(),
+  //         ctx); dumpInstr(ctx.resolve(spliceIn).template
+  //         as<WireRef>().getDefI(),
+  //                   ctx);
+  //         dbgs() << "\n";
+  //       })
+  //       return nullref;
+  //     }
+  //     if (splice.getNumTerms() != base.getNumTerms())
+  //       return nullref;
+  //     if (splice.getBase() != base.getBase())
+  //       return nullref;
+  //     if (splice.getLen() != base.getLen())
+  //       return nullref;
+
+  //     for (auto [a, b] : base.terms().zip(splice.terms())) {
+  //       if (a.getFact() != b.getFact())
+  //         return nullref;
+  //       if (a.getMax() != b.getMax())
+  //         return nullref;
+  //     }
+  //   }
+  // }
+
+  template <typename T = SpliceIRef>
+  InstrRef doMergeSpliceInsert(ArrayRef<InstrRef> instrs) {
+    auto base = instrs.front().as<T>();
     auto numTerms = base.getNumTerms();
     auto resultBits =
         std::is_same_v<T, SpliceIRef> ? base.getLen() : base.getMemoryLen();
@@ -264,11 +412,6 @@ private:
     build.buildStore(resultReg, val);
 
     DYNO_DBG({
-      std::print(dbgs(), "merged:\n");
-      for (auto instr : instrs) {
-        std::print(dbgs(), " ");
-        dumpInstr(instr, ctx);
-      }
       std::print(dbgs(), "into:\n");
       std::print(dbgs(), " ");
       if (auto asWire = val.dyn_as<WireRef>())
@@ -283,65 +426,96 @@ private:
     return val.as<WireRef>().getDefI();
   }
 
-  InstrRef tryMerge(BlockRef parentBlock, ArrayRef<InstrRef> instrs) {
+  PotentialMerge findPotentialMerge(MutArrayRef<PotentialMerge> instrs) {
+    bool compat = Range{instrs}.all_equal(
+        [&](auto &a, auto &b) { return mergeCompatible(a, b); });
+    if (compat)
+      return PotentialMerge(instrs);
+    return PotentialMerge();
+  }
+
+  InstrRef doMerge(ArrayRef<InstrRef> instrs) {
     if (config.opToShare.is(OP_ADD, OP_MUL))
-      return tryMergeCommOps(parentBlock, instrs);
+      return doMergeCommOps(instrs);
     if (config.opToShare.is(HW_SPLICE))
-      return tryMergeSpliceInsert<SpliceIRef>(parentBlock, instrs);
+      return doMergeSpliceInsert<SpliceIRef>(instrs);
     if (config.opToShare.is(HW_INSERT))
-      return tryMergeSpliceInsert<InsertIRef>(parentBlock, instrs);
+      return doMergeSpliceInsert<InsertIRef>(instrs);
     dyno_unreachable("merging unimplemented");
   }
 
-  auto findMergeCandidates(BlockRef parentBlock,
-                           SmallVecImpl<BlockResult> &results) {
-    // iterate, incrementing smallest one every iter.
-    // if tryMerge succeeds, replace all with nullref and increment all.
+  auto findMergeCandidates(SmallVecImpl<BlockResult> &results) {
 
     SmallVec<uint32_t, 4> idxs(results.size());
 
     SmallVec<uint32_t, 16> mergeCandidates;
     SmallVec<uint32_t, 4> mergeCandidatesStartIdxs;
 
-    SmallVec<InstrRef, 4> mergedInstrs;
+    SmallVec<PotentialMerge, 4> mergedInstrs;
 
-    auto hasMore = [&](size_t i) -> bool {
-      return idxs[i] < results[i].candidates.size();
-    };
-    if (config.checkAllPairs)
-      while (true) {
-        SmallVec<InstrRef, 4> curInstrs;
-        for (size_t i = 0; i < results.size(); ++i) {
-          if (!hasMore(i))
-            continue;
-          curInstrs.emplace_back(results[i].candidates[idxs[i]]);
+    if (config.checkAllPairs) {
+      // collect per-block candidates with same hash
+      SmallDenseMap<uint64_t, SmallVec<SmallVec<PotentialMerge, 4>, 4>> map;
+      for (auto [resIdx, result] : Range{results}.enumerate()) {
+        for (auto &candidate : result.candidates) {
+          auto hash = mergeHash(candidate);
+          auto &vec = map.findOrInsert(
+                             hash,
+                             [&]() -> SmallVec<SmallVec<PotentialMerge, 4>, 4> {
+                               return (results.size());
+                             })
+                          .second.val();
+          vec[resIdx].emplace_back(candidate);
         }
-        if (curInstrs.size() >= 2) {
-          if (auto mergedInstr = tryMerge(parentBlock, curInstrs)) {
-            for (size_t i = 0; i < results.size(); ++i) {
-              if (!hasMore(i))
-                continue;
-              results[i].candidates.erase(results[i].candidates.begin() +
-                                          idxs[i]);
-              idxs[i] = 0; // todo
-            }
-            mergedInstrs.emplace_back(mergedInstr);
-          }
-        }
-
-        for (size_t i = 0; i < results.size(); i++) {
-          // allow counting 1 OOB to exclude (todo: remap to lowest prio)
-          if (idxs[i] < results[i].candidates.size()) {
-            idxs[i]++;
-            goto cont_outer;
-          } else {
-            idxs[i] = 0;
-          }
-        }
-        break;
-      cont_outer:
       }
-    else {
+
+      // for each hash, try merging all possible combinations (larger first)
+      for (auto [hash, blocks] : map) {
+        SmallVec<uint32_t, 4> idxs(results.size());
+        auto hasMore = [&](size_t i) -> bool {
+          return idxs[i] < blocks[i].size();
+        };
+        while (true) {
+          SmallVec<PotentialMerge, 4> curInstrs;
+          for (size_t i = 0; i < results.size(); ++i) {
+            if (!hasMore(i))
+              continue;
+            curInstrs.emplace_back(results[i].candidates[idxs[i]]);
+          }
+          if (curInstrs.size() >= 2) {
+            if (auto mergedInstr = findPotentialMerge(curInstrs)) {
+              for (size_t i = 0; i < results.size(); ++i) {
+                if (!hasMore(i))
+                  continue;
+                results[i].candidates.erase(results[i].candidates.begin() +
+                                            idxs[i]);
+                idxs[i] = 0; // todo: depessimize idx counter
+              }
+              mergedInstrs.emplace_back(std::move(mergedInstr));
+            }
+          }
+
+          for (size_t i = 0; i < results.size(); i++) {
+            // allow counting 1 OOB to exclude (todo: remap to lowest prio)
+            if (idxs[i] < results[i].candidates.size()) {
+              idxs[i]++;
+              goto cont_outer;
+            } else {
+              idxs[i] = 0;
+            }
+          }
+          break;
+        cont_outer:
+        }
+      }
+
+    } else {
+      auto hasMore = [&](size_t i) -> bool {
+        return idxs[i] < results[i].candidates.size();
+      };
+      // iterate, incrementing smallest one every iter.
+      // if tryMerge succeeds, replace all with nullref and increment all.
+
       // To avoid quadratic runtime we sort instrs by number of operands
       // and bit size first and then only consider merging adjacent instrs.
       while (true) {
@@ -352,14 +526,14 @@ private:
           if (!hasMore(i))
             continue;
 
-          InstrRef cur = results[i].candidates[idxs[i]];
+          auto cur = results[i].candidates[idxs[i]].getCanon();
           if (!smallestInstr || orderInstrs(cur, smallestInstr)) {
             smallestInstr = cur;
             smallestIdx = i;
           }
         }
 
-        SmallVec<InstrRef, 4> curInstrs;
+        SmallVec<PotentialMerge, 4> curInstrs;
         for (size_t i = 0; i < results.size(); ++i) {
           if (!hasMore(i))
             continue;
@@ -368,11 +542,11 @@ private:
         if (curInstrs.size() < 2)
           break;
 
-        if (auto mergedInstr = tryMerge(parentBlock, curInstrs)) {
+        if (auto mergedInstr = findPotentialMerge(curInstrs)) {
           for (size_t i = 0; i < results.size(); ++i) {
             if (!hasMore(i))
               continue;
-            results[i].candidates[idxs[i]] = nullref;
+            results[i].candidates[idxs[i]] = PotentialMerge();
             ++idxs[i];
           }
           mergedInstrs.emplace_back(mergedInstr);
@@ -382,10 +556,10 @@ private:
       }
       for (auto &res : results) {
         uint64_t idx = 0;
-        for (auto cand : res.candidates) {
-          if (cand == nullref)
+        for (auto &cand : res.candidates) {
+          if (!cand)
             continue;
-          res.candidates[idx++] = cand;
+          res.candidates[idx++] = std::move(cand);
         }
         res.candidates.downsize(idx);
       }
@@ -394,8 +568,7 @@ private:
     return mergedInstrs;
   }
 
-  void handleMultiway(BlockRef parentBlock, BlockResult &curRes,
-                      ArrayRef<BlockRef> blocks) {
+  void handleMultiway(BlockResult &curRes, ArrayRef<BlockRef> blocks) {
     SmallVec<BlockResult, 4> results;
     results.reserve(blocks.size());
 
@@ -404,38 +577,19 @@ private:
       sortBlockResult(res);
     }
 
-    auto mergedInstrs = findMergeCandidates(parentBlock, results);
+    auto mergedInstrs = findMergeCandidates(results);
 
-    for (auto res : results) {
+    for (auto &res : results) {
       curRes.candidates.push_back_range(Range{res.candidates});
     }
 
     // also make sucessfully merged instrs candidates again.
     curRes.candidates.push_back_range(Range{mergedInstrs});
-
-    DYNO_DBG({
-      auto parent = blocks.front()->defUse.getSingleDef()->instr();
-      dbgs() << "multiway: ";
-      dumpInstr(parent, ctx, true, false);
-      dbgs() << "merges:\n";
-      for (auto merge : mergedInstrs) {
-        dbgs() << " ";
-        dumpInstr(merge, ctx);
-      }
-      dbgs() << "passthru:\n";
-      for (auto &res : results) {
-        for (auto instr : res.candidates) {
-          dbgs() << " ";
-          dumpInstr(instr, ctx);
-        }
-      }
-      dbgs() << "\n";
-    })
   }
 
   BlockResult runOnBlock(BlockRef block) {
     BlockResult res;
-    for (auto instr : block) {
+    for (auto &instr : block) {
       switch (*instr.getDialectOpcode()) {
       case *OP_IF: {
         auto asIf = instr.as<IfInstrRef>();
@@ -443,7 +597,7 @@ private:
           break;
         auto blocks =
             std::to_array({asIf.getTrueBlock(), asIf.getFalseBlock()});
-        handleMultiway(block, res, blocks);
+        handleMultiway(res, blocks);
         break;
       }
 
@@ -454,7 +608,7 @@ private:
         SmallVec<BlockRef, 4> blocks;
         blocks.reserve(asSwitch.getNumCases());
         blocks.push_back_range(asSwitch.caseBlocks());
-        handleMultiway(block, res, blocks);
+        handleMultiway(res, blocks);
         break;
       }
 
@@ -470,8 +624,20 @@ private:
   }
 
   void runOnProcess(ProcessIRef proc) {
-    runOnBlock(proc.block());
+    auto result = runOnBlock(proc.block());
     valueRemap.clear();
+    for (auto &merge : result.candidates) {
+      if (merge.sources.size() <= 1)
+        continue;
+      DYNO_DBG({
+        dbgs() << "shared:\n";
+        for (auto &src : merge.sources) {
+          dbgs() << "  ";
+          dumpInstr(src, ctx, true, false);
+        }
+      })
+      doMerge(merge.sources);
+    }
   }
 
   void runOnModule(ModuleIRef mod) {

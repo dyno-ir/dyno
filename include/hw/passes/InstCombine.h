@@ -2401,8 +2401,7 @@ private:
           dbgs() << "> ";
           dumpObj(currentReplaced[0]->fat());
           dbgs() << "\n";
-        } else
-          dbgs() << "<none>\n";
+        }
       }
       dbgs() << "\n";
     })

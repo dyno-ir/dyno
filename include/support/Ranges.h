@@ -1310,6 +1310,12 @@ public:
     return std::all_of(begin() + 1, end(),
                        [&](auto elem) { return elem == front(); });
   }
+  template <typename T> constexpr bool all_equal(T func) {
+    if (begin() == end())
+      return true;
+    return std::all_of(begin() + 1, end(),
+                       [&](auto elem) { return func(elem, front()); });
+  }
   template <typename T> constexpr bool any(T func) {
     return std::any_of(begin(), end(), func);
   }
