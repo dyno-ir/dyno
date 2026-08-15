@@ -53,7 +53,7 @@ FUNCTION_DEF %synthCanonicalize:func, :block {
   meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS map("differentBlocks": "1")
   meta.ORDER_INSTRS_PASS map("assertNoCircularDeps": "1", "moveStoresBeforeLoads": "0")
   meta.INST_COMBINE_PASS
-  meta.AGGRESSIVE_DEAD_CODE_ELIMINATION_PASS
+  meta.AGGRESSIVE_DEAD_CODE_ELIMINATION_PASS map("keepRegs": "NAMED")
 
   // lower arith to ADD
   meta.LOWER_OPS_PASS map(

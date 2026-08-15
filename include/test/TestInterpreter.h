@@ -77,8 +77,10 @@ public:
     for (auto instr : Range{pre}.drop_back()) {
       FatDynObjRef<> ref{instr};
       std::array<void *, 1> args = {reinterpret_cast<void *>(&ref)};
-      if (!pipeline.interpretPassPipeline(passes, args))
+      if (!pipeline.interpretPassPipeline(passes, args)) {
+        std::print(os, "failed test: \"{}\"\n", name);
         return false;
+      }
     }
 
     if (verbose)
@@ -92,6 +94,8 @@ public:
     StringRef name = instr.def(0)->as<StringObjRef>()->data;
     BlockRef expected = nullref;
     BlockRef passes;
+    Defer printFailed{[&]() { std::print(os, "failed test: \"{}\"\n", name); }};
+
     if (instr.getNumDefs() == 2) {
       passes = instr.def(1)->as<BlockRef>();
     } else if (instr.getNumDefs() == 3) {
@@ -137,6 +141,7 @@ public:
     if (verbose)
       print.printInstr(instr);
 
+    printFailed.clear();
     std::print(os, "passed test: \"{}\"\n", name);
     return {};
   }

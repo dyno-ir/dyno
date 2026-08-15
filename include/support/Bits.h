@@ -181,6 +181,51 @@ constexpr T bit_select(T val, unsigned i, unsigned n = 1) {
   return (bit_mask_ones<T>(n, pos) & val) >> pos;
 }
 
+// 4-state logic functions, aligned pairs of real bits correspond to four state
+// bits could specialize these with the fancy AVX512 LUT function
+constexpr uint32_t and_4state(uint32_t lhs, uint32_t rhs) {
+  uint32_t lhsSC = n_equal_mask<2>(lhs, repeatBits(0b00U, 2));
+  uint32_t rhsSC = n_equal_mask<2>(rhs, repeatBits(0b00U, 2));
+
+  lhsSC |= lhsSC >> 1;
+  rhsSC |= rhsSC >> 1;
+
+  uint32_t lhsX = (lhs & repeatBits(0b10U, 2));
+  lhsX |= lhsX >> 1;
+
+  uint32_t rhsX = (rhs & repeatBits(0b10U, 2));
+  rhsX |= rhsX >> 1;
+
+  return ((lhs & rhs) | lhsX | rhsX) & ~(lhsSC | rhsSC);
+}
+constexpr uint32_t xor_4state(uint32_t lhs, uint32_t rhs) {
+  uint32_t lhsX = (lhs & repeatBits(0b10U, 2));
+  lhsX |= lhsX >> 1;
+
+  uint32_t rhsX = (rhs & repeatBits(0b10U, 2));
+  rhsX |= rhsX >> 1;
+
+  return ((lhs ^ rhs) | lhsX | rhsX);
+}
+constexpr uint32_t xnor_4state(uint32_t lhs, uint32_t rhs) {
+  uint32_t val = xor_4state(lhs, rhs);
+  val ^= ((~val & repeatBits(0b10U, 2)) >> 1);
+  return val;
+}
+constexpr uint32_t or_4state(uint32_t lhs, uint32_t rhs) {
+  uint32_t lhsSC = n_equal_mask<2>(lhs, repeatBits(0b01U, 2));
+  uint32_t rhsSC = n_equal_mask<2>(rhs, repeatBits(0b01U, 2));
+
+  uint32_t lhsX = (lhs & repeatBits(0b10U, 2));
+  lhsX |= lhsX >> 1;
+
+  uint32_t rhsX = (rhs & repeatBits(0b10U, 2));
+  rhsX |= rhsX >> 1;
+
+  return (((lhs | rhs) | lhsX | rhsX) & ~(lhsSC | rhsSC)) | (lhsSC >> 1) |
+         (rhsSC >> 1);
+}
+
 // fixme: these should use a shared base but then template param deduction
 // fails.
 template <std::unsigned_integral NumT, unsigned N, unsigned Pos>
