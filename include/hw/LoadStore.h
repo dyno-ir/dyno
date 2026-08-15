@@ -229,8 +229,9 @@ public:
     auto pessimisticMax = self().getMemoryLen() - base;
 
     if (maxOffset)
-      return std::make_pair(0U, std::min(*maxOffset, pessimisticMax));
-    return std::make_pair(0U, pessimisticMax);
+      return std::make_pair(
+          getBase(), std::min(*maxOffset + self().getLen(), pessimisticMax));
+    return std::make_pair(getBase(), pessimisticMax);
   }
 
   GEPIRef gep() {

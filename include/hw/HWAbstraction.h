@@ -1105,10 +1105,6 @@ public:
       any_of<AddressGenTermOperand, AddressGenTermRef, AddressGenTerm>... Terms>
   HWAddress buildGEP(uint32_t base, Terms... terms) {
     if constexpr (sizeof...(terms) == 0) {
-      // for use with buildLoad/buildStore, these drop the addr operand if it's
-      // nullref
-      if (base == 0)
-        return nullref;
       return ConstantRef::fromU32(base);
     } else {
       return buildGEP(base, InitListRange{terms...});

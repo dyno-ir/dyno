@@ -1988,7 +1988,7 @@ private:
 
     if (terms.empty()) {
       replaceUses(instr.def()->as<PointerRef>(),
-                  ConstantRef::fromU32(instr.getBase()));
+                  ConstantRef::fromU32(baseOffs));
       deleteMatchedInstr(instr);
       return PAT_TRUE;
     }
@@ -2003,7 +2003,7 @@ private:
 
     for (auto def : instr.defs()) {
       ib.addRef(def->fat());
-      // def.replace(FatDynObjRef{nullref});
+      def.replace(FatDynObjRef{nullref});
     }
     ib.other();
     for (auto use : Range{instr.other_begin(),
