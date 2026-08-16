@@ -469,35 +469,36 @@ private:
         }
       }
 
+      results.clear();
+
       // for each hash, try merging all possible combinations (larger first)
       for (auto [hash, blocks] : map) {
-        SmallVec<uint32_t, 4> idxs(results.size());
+        SmallVec<uint32_t, 4> idxs(blocks.size());
         auto hasMore = [&](size_t i) -> bool {
           return idxs[i] < blocks[i].size();
         };
         while (true) {
           SmallVec<PotentialMerge, 4> curInstrs;
-          for (size_t i = 0; i < results.size(); ++i) {
+          for (size_t i = 0; i < blocks.size(); ++i) {
             if (!hasMore(i))
               continue;
-            curInstrs.emplace_back(results[i].candidates[idxs[i]]);
+            curInstrs.emplace_back(blocks[i][idxs[i]]);
           }
           if (curInstrs.size() >= 2) {
             if (auto mergedInstr = findPotentialMerge(curInstrs)) {
-              for (size_t i = 0; i < results.size(); ++i) {
+              for (size_t i = 0; i < blocks.size(); ++i) {
                 if (!hasMore(i))
                   continue;
-                results[i].candidates.erase(results[i].candidates.begin() +
-                                            idxs[i]);
+                blocks[i].erase(blocks[i].begin() + idxs[i]);
                 idxs[i] = 0; // todo: depessimize idx counter
               }
               mergedInstrs.emplace_back(std::move(mergedInstr));
             }
           }
 
-          for (size_t i = 0; i < results.size(); i++) {
+          for (size_t i = 0; i < blocks.size(); i++) {
             // allow counting 1 OOB to exclude (todo: remap to lowest prio)
-            if (idxs[i] < results[i].candidates.size()) {
+            if (idxs[i] < blocks[i].size()) {
               idxs[i]++;
               goto cont_outer;
             } else {
@@ -507,6 +508,10 @@ private:
           break;
         cont_outer:
         }
+
+        // pass remaining ones upwards
+        for (auto &cand : blocks)
+          results.emplace_back(std::move(cand));
       }
 
     } else {

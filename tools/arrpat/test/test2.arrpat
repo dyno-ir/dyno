@@ -19,6 +19,9 @@ macro constant_like_anyorder_obj $val, $other -> $rv [{
 macro wire_like $other -> $rv [{
   FatDynObjRef<> w = ctx.getStore<Wire>().create((*$other.begin())->as<HWValue>().getNumBits()); $rv = w;
 }]
+macro make_pointer $other -> $rv [{
+  FatDynObjRef<> pointer = ctx.getStore<Pointer>().create(); $rv = pointer;
+}]
 macro wire_like2 $other -> $rv [{
   FatDynObjRef<> w2 = ctx.getStore<Wire>().create((*$other.begin())->as<HWValue>().getNumBits()); $rv = w2;
 }]
@@ -250,10 +253,8 @@ with [{
     goto $fail;
 }]
 replace {
-  // pretty sure this leaks ptrB, emit unused instr for DCE
-  HW_GEP $ptrB, #32'd0
-  HW_GEP $ptrA, const_add($addrA, $addrB), $termsA..., $termsB...
-  HW_SPLICE $out, $in, $ptrA
+  HW_GEP $newPtr:make_pointer(), const_add($addrA, $addrB), $termsA..., $termsB...
+  HW_SPLICE $out, $in, $newPtr
 }
 
 match {
@@ -755,8 +756,8 @@ with [{
 }]
 replace {
   OP_TRUNC $temp, $in
-  HW_GEP $ptr, const_add($offs, $base), $terms...
-  HW_INSERT $temp2, $temp, $insval, $ptr
+  HW_GEP $new_ptr:make_pointer(), const_add($offs, $base), $terms...
+  HW_INSERT $temp2, $temp, $insval, $new_ptr
   HW_CONCAT $out, $pre..., $temp2, $post...
 }
 
@@ -778,8 +779,8 @@ with [{
 }]
 replace {
   OP_TRUNC $temp, $in
-  HW_GEP $ptr, const_add($offs, $base), $terms...
-  HW_INSERT $temp2, $temp, $insval, $base, $ptr
+  HW_GEP $new_ptr:make_pointer(), const_add($offs, $base), $terms...
+  HW_INSERT $temp2, $temp, $insval, $base, $new_ptr
   HW_CONCAT $out, /*$pre..., */$temp2, $post...
 }
 

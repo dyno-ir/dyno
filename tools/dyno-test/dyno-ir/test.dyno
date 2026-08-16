@@ -1322,14 +1322,14 @@ TEST_SCRIPT :string("early-share-insert"), :block {
       input logic[7:0] d,
       output logic[7:0] out
     );
-
       logic[7:0] mem;
 
       always_ff@(posedge clk) begin
         if (sel) begin
           if (sel2) mem[addr] <= a;
           else      mem[addr] <= b;
-        end else begin
+        end
+        else begin
           if (sel3) mem[addr] <= c;
           else      mem[addr] <= d;
         end
@@ -1378,7 +1378,8 @@ TEST_SCRIPT :string("early-share-insert-struct"), :block {
         if (sel) begin
           if (sel2) mem[idx].a <= a;
           else      mem[idx].a <= b;
-        end else begin
+        end
+        else begin
           if (sel3) mem[idx].b <= c;
           else      mem[idx].b <= d;
         end
@@ -1419,7 +1420,8 @@ TEST_SCRIPT :string("early-share-add"), :block {
         if (sel) begin
           if (sel2) out[7:0] <= a + b;
           else      out <= c + d;
-        end else begin
+        end
+        else begin
           if (sel3) out <= a + 42;
           else      out <= d - 1;
         end
@@ -1458,12 +1460,12 @@ TEST_SCRIPT :string("early-share-extract"), :block {
         if (sel) begin
           if (sel2) out <= mem[a];
           else      out <= {mem+'d1}[b]; // not shared, different content
-        end else begin
+        end
+        else begin
           if (sel3) out <= mem[c];
           else      out <= mem[d];
         end
       end
-
 
     endmodule
   }])
