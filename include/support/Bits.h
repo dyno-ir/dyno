@@ -226,6 +226,78 @@ constexpr uint32_t or_4state(uint32_t lhs, uint32_t rhs) {
          (rhsSC >> 1);
 }
 
+// known bits semantics, x is don't care, z is unknown
+constexpr uint32_t and_4state_kb(uint32_t lhs, uint32_t rhs) {
+  // short circuit highest priority
+  uint32_t lhsSC = n_equal_mask<2>(lhs, repeatBits(0b00U, 2));
+  uint32_t rhsSC = n_equal_mask<2>(rhs, repeatBits(0b00U, 2));
+
+  lhsSC |= lhsSC >> 1;
+  rhsSC |= rhsSC >> 1;
+
+  // z prop second highest
+  uint32_t lhsZ = n_equal_mask<2>(lhs, repeatBits(0b10U, 2));
+  uint32_t rhsZ = n_equal_mask<2>(rhs, repeatBits(0b10U, 2));
+
+  lhsZ >>= 1;
+  rhsZ >>= 1;
+
+  uint32_t lhsXZ = (lhs & repeatBits(0b10U, 2));
+  lhsXZ |= lhsXZ >> 1;
+
+  uint32_t rhsXZ = (rhs & repeatBits(0b10U, 2));
+  rhsXZ |= rhsXZ >> 1;
+
+  return ((((lhs & rhs) | (lhsXZ | rhsXZ))) & ~(lhsZ | rhsZ)) &
+         ~(lhsSC | rhsSC);
+}
+// known bits semantics, x is don't care, z is unknown
+constexpr uint32_t or_4state_kb(uint32_t lhs, uint32_t rhs) {
+  // short circuit highest priority
+  uint32_t lhsSC = n_equal_mask<2>(lhs, repeatBits(0b01U, 2));
+  uint32_t rhsSC = n_equal_mask<2>(rhs, repeatBits(0b01U, 2));
+
+  // z prop second highest
+  uint32_t lhsZ = n_equal_mask<2>(lhs, repeatBits(0b10U, 2));
+  uint32_t rhsZ = n_equal_mask<2>(rhs, repeatBits(0b10U, 2));
+
+  lhsZ >>= 1;
+  rhsZ >>= 1;
+
+  uint32_t lhsXZ = (lhs & repeatBits(0b10U, 2));
+  lhsXZ |= lhsXZ >> 1;
+
+  uint32_t rhsXZ = (rhs & repeatBits(0b10U, 2));
+  rhsXZ |= rhsXZ >> 1;
+
+  return (((((lhs | rhs) | (lhsXZ | rhsXZ))) & ~(lhsZ | rhsZ))
+          // unset high bits w/ short circuit
+          & ~(lhsSC | rhsSC))
+         // set low bits w/ short circuit
+         | ((lhsSC | rhsSC) >> 1);
+}
+// known bits semantics, x is don't care, z is unknown
+constexpr uint32_t xor_4state_kb(uint32_t lhs, uint32_t rhs) {
+  // x prop highest
+  uint32_t lhsX = n_equal_mask<2>(lhs, repeatBits(0b11U, 2));
+  uint32_t rhsX = n_equal_mask<2>(rhs, repeatBits(0b11U, 2));
+
+  // z prop second highest
+  uint32_t lhsXZ = (lhs & repeatBits(0b10U, 2));
+  uint32_t rhsXZ = (rhs & repeatBits(0b10U, 2));
+
+  return (((lhs ^ rhs)
+           // set high bits if X/Z
+           | (lhsXZ | rhsXZ)) &
+          // unset low bits if X/Z
+          ~((lhsXZ | rhsXZ) >> 1))
+         // set low bits if X
+         | ((lhsX | rhsX) >> 1);
+}
+constexpr uint32_t xnor_4state_kb(uint32_t lhs, uint32_t rhs) {
+  return xor_4state_kb(lhs, xor_4state_kb(rhs, repeatBits(0b01U, 2)));
+}
+
 // fixme: these should use a shared base but then template param deduction
 // fails.
 template <std::unsigned_integral NumT, unsigned N, unsigned Pos>

@@ -65,6 +65,7 @@ FUNCTION_DEF %synthCanonicalize:func, :block {
     "lowerMultiInputBitwise" : "0",
     "lowerEqualityICMP"      : "0",
     "lowerOrderingICMP"      : "1",
+    "lowerWildcardCaseICMP"  : "0",
     "lowerShift"             : "0",
     "lowerInsert"            : "0",
     "lowerExtract"           : "0",
@@ -81,12 +82,13 @@ FUNCTION_DEF %synthEarlyOpt:func, :block {
   meta.ORDER_INSTRS_PASS map("assertNoCircularDeps": "1", "moveStoresBeforeLoads": "0")
   meta.INST_COMBINE_PASS
   meta.EARLY_SHARE_PASS map("opToShare": "op.ADD")
-  meta.EARLY_SHARE_PASS map("opToShare": "hw.SPLICE")
-  meta.EARLY_SHARE_PASS map("opToShare": "hw.INSERT")
+  meta.EARLY_SHARE_PASS map("opToShare": "hw.SPLICE", "checkAllPairs": "1")
+
+  meta.EARLY_SHARE_PASS map("opToShare": "hw.INSERT", "checkAllPairs": "1")
   meta.INST_COMBINE_PASS
   meta.SSA_CONSTRUCT_PASS
   meta.INST_COMBINE_PASS
-  meta.AGGRESSIVE_DEAD_CODE_ELIMINATION_PASS
+  meta.AGGRESSIVE_DEAD_CODE_ELIMINATION_PASS map("keepRegs": "NAMED")
 
   // merge processes created during share
   meta.PROCESS_LINEARIZE_PASS map("retainIODeps": "0", "retainInnerDeps": "0")
@@ -96,7 +98,7 @@ FUNCTION_DEF %synthEarlyOpt:func, :block {
   meta.INST_COMBINE_PASS
   meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS
   meta.ORDER_INSTRS_PASS map("assertNoCircularDeps": "1", "moveStoresBeforeLoads": "1")
-  meta.AGGRESSIVE_DEAD_CODE_ELIMINATION_PASS
+  meta.AGGRESSIVE_DEAD_CODE_ELIMINATION_PASS map("keepRegs": "NAMED")
 }
 
 FUNCTION_DEF %synthLowerControlFlow:func, :block {
@@ -124,6 +126,8 @@ FUNCTION_DEF %synthLowerControlFlow:func, :block {
 FUNCTION_DEF %synthMemoryFFMuxHandling:func, :block {
   // memory inference
   meta.SIMPLE_MEMORY_INFERENCE_PASS
+  // todo: strict keep MEM_LOAD/MEM_STORE order
+  meta.ORDER_INSTRS_PASS map("assertNoCircularDeps": "1")
   meta.INST_COMBINE_PASS
   meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS
   meta.AGGRESSIVE_DEAD_CODE_ELIMINATION_PASS
@@ -145,6 +149,7 @@ FUNCTION_DEF %synthMemoryFFMuxHandling:func, :block {
     "lowerMultiInputBitwise" : "0",
     "lowerEqualityICMP"      : "1",
     "lowerOrderingICMP"      : "1",
+    "lowerWildcardCaseICMP"  : "0",
     "lowerShift"             : "1",
     "lowerInsert"            : "1",
     "lowerExtract"           : "1",
@@ -197,7 +202,7 @@ FUNCTION_DEF %synthLowerMemoryFF:func, :block {
   meta.INST_COMBINE_PASS map("muxToOneHotMux": "1")
   meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS
   meta.INST_COMBINE_PASS map("muxToOneHotMux": "1")
-  meta.AGGRESSIVE_DEAD_CODE_ELIMINATION_PASS
+  meta.AGGRESSIVE_DEAD_CODE_ELIMINATION_PASS map("keepRegs": "NAMED")
 
   // map flip flops
   meta.FLIP_FLOP_MAPPING_PASS
@@ -213,7 +218,7 @@ FUNCTION_DEF %synthLowerMemoryFF:func, :block {
   meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS
   meta.SSA_CONSTRUCT_PASS
   meta.INST_COMBINE_PASS map("muxToOneHotMux": "1")
-  meta.AGGRESSIVE_DEAD_CODE_ELIMINATION_PASS
+  meta.AGGRESSIVE_DEAD_CODE_ELIMINATION_PASS map("keepRegs": "NAMED")
 }
 
 FUNCTION_DEF %synthTechmap:func, :block {
@@ -227,6 +232,7 @@ FUNCTION_DEF %synthTechmap:func, :block {
     "lowerMultiInputBitwise" : "1",
     "lowerEqualityICMP"      : "1",
     "lowerOrderingICMP"      : "1",
+    "lowerWildcardCaseICMP"  : "1",
     "lowerShift"             : "1",
     "lowerInsert"            : "1",
     "lowerExtract"           : "1",
@@ -237,14 +243,13 @@ FUNCTION_DEF %synthTechmap:func, :block {
   meta.INST_COMBINE_PASS
     map("fuseCommutative": "0", "removeAssumes": "1", "boolExprSimplify": "0", "inferMuxs" : "0")
   meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS
-  meta.AGGRESSIVE_DEAD_CODE_ELIMINATION_PASS
+  meta.AGGRESSIVE_DEAD_CODE_ELIMINATION_PASS map("keepRegs": "NAMED")
 
   // AIG opt & techmap
   meta.AIG_CONSTRUCT_PASS
-  meta.AGGRESSIVE_DEAD_CODE_ELIMINATION_PASS
+  meta.AGGRESSIVE_DEAD_CODE_ELIMINATION_PASS map("keepRegs": "NAMED")
 
-  meta.ABC_PASS map("path": "sky130_fd_sc_hd__tt_025C_1v80.lib")
-  meta.AGGRESSIVE_DEAD_CODE_ELIMINATION_PASS
+  meta.AGGRESSIVE_DEAD_CODE_ELIMINATION_PASS map("keepRegs": "NAMED")
   meta.REMOVE_BUFFERS_PASS
 
   meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS
@@ -253,7 +258,7 @@ FUNCTION_DEF %synthTechmap:func, :block {
   meta.CONSTANT_MAPPING_PASS
   meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS
   meta.INST_COMBINE_PASS
-  meta.AGGRESSIVE_DEAD_CODE_ELIMINATION_PASS
+  meta.AGGRESSIVE_DEAD_CODE_ELIMINATION_PASS map("keepRegs": "NAMED")
 
   meta.ORDER_INSTRS_PASS map("assertNoCircularDeps": "false")
 }
