@@ -586,7 +586,7 @@ private:
       return;
     }
     }
-    assert(!mask || mask.getIs4S());
+    assert(!mask || mask->getIs4S());
 
     auto bitwiseNE = build.buildXor(instr.other(0)->as<HWValue>(),
                                     instr.other(1)->as<HWValue>());
