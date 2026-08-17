@@ -854,8 +854,7 @@ public:
     for (auto reg : ctx.getStore<Register>()) {
       if (regResetValues.inRange(reg) && regResetValues[reg]) {
         regVals[reg] = ctx.getStore<Constant>().resolve(regResetValues[reg]);
-      }
-      else if (reg.getNumBits())
+      } else if (reg.getNumBits())
         regVals[reg] =
             PatBigInt::fromFourState(FourState::S0, *reg.getNumBits());
     }

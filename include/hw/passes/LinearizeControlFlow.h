@@ -177,8 +177,7 @@ private:
       if (j == defaultIdx)
         continue;
 
-      // auto pred = BigInt::ICMP_CEQ;
-      auto pred = BigInt::ICMP_EQ; // fixme
+      auto pred = BigInt::ICMP_CEQ;
       if (caseInstr.isOpc(HW_CASE_Z))
         pred = BigInt::ICMP_CZEQ;
       else if (caseInstr.isOpc(HW_CASE_X))

@@ -779,8 +779,8 @@ with [{
 }]
 replace {
   OP_TRUNC $temp, $in
-  HW_GEP $new_ptr:make_pointer(), const_add($offs, $base), $terms...
-  HW_INSERT $temp2, $temp, $insval, $base, $new_ptr
+  HW_GEP $new_ptr:make_pointer(), $base, $terms...
+  HW_INSERT $temp2, $temp, $insval, $new_ptr
   HW_CONCAT $out, /*$pre..., */$temp2, $post...
 }
 

@@ -1948,10 +1948,24 @@ public:
                        std::max(lhs.getRawNumBits(), rhs.getRawNumBits()), 1);
       return;
     }
+
+    // if aliased with 2 state number first convert to 4 state
+    // (else we overwrite bits faster than we read)
     assert(lhs.getNumBits() == rhs.getNumBits());
+    auto bits = lhs.getNumBits();
+
+    if constexpr (std::is_same_v<BigIntBase, T0>)
+      if (&out == &lhs && !lhs.getIs4S())
+        out.conv2To4State();
+    if constexpr (std::is_same_v<BigIntBase, T1>)
+      if (&out == &rhs && !rhs.getIs4S())
+        out.conv2To4State();
+
+    out.numBits = std::max(lhs.getRawNumBits(), rhs.getRawNumBits());
+    out.expand();
 
     FourState carry = sub;
-    for (uint32_t i = 0; i < out.getNumBits(); i++) {
+    for (uint32_t i = 0; i < bits; i++) {
       auto lhsB = lhs.getBit(i);
       auto rhsB = rhs.getBit(i);
       if (sub)
@@ -1960,8 +1974,13 @@ public:
       FourState sum = lhsB ^ rhsB ^ carry;
       carry = (lhsB & rhsB) | (lhsB & carry) | (carry & rhsB);
 
-      out.setBit(i, sum);
+      uint32_t wordIdx = (2 * i) / WordBits;
+      DynBitField{out.getWords()[wordIdx], (2 * i) % 32, 2} = sum;
     }
+
+    out.setCustom(1);
+    out.normalize();
+    out.conv4To2StateIfPossible();
   }
   template <BigIntAPI T0, BigIntAPI T1>
   constexpr static void addOp4S(BigIntBase &out, const T0 &lhs, const T1 &rhs) {

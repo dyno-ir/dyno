@@ -870,7 +870,7 @@ public:
                                    const pairwise_iterator &b)
     requires(isRandom)
   {
-    return (b.it - a.it) / 2;
+    return (a.it - b.it) / 2;
   }
 
   reference operator[](difference_type n) const
