@@ -243,6 +243,35 @@ public:
       FOR_OP_ALL_COMPARE_OPS(LAMBDA)
 #undef LAMBDA
 
+    case *HW_ADD_CARRY: {
+      auto &val = wireVals[instr.def(0)->as<WireRef>()];
+      val = getValue(instr.other_end()[-1]->as<HWValue>());
+      BigInt::resizeOp4S(val, val, *instr.def()->as<WireRef>().getNumBits());
+      BigInt::reduce(
+          val,
+          instr.others().drop_back().transform([&](size_t, OperandRef ref) {
+            return getValue(ref->as<HWValue>());
+          }),
+          BigInt::addOp4S<BigInt, GenericBigIntRef>);
+      break;
+    }
+    case *HW_ADD_COMPRESS: {
+      auto &sum = wireVals[instr.def(0)->as<WireRef>()];
+      auto &carry = wireVals[instr.def(1)->as<WireRef>()];
+
+      auto a = getValue(instr.other(0)->as<HWValue>());
+      auto b = getValue(instr.other(1)->as<HWValue>());
+      auto c = getValue(instr.other(2)->as<HWValue>());
+
+      sum = a;
+      sum ^= b;
+      sum ^= c;
+
+      carry = ((a & b) | (b & c) | (a & c)) << 1;
+
+      break;
+    }
+
     case *HW_CONCAT: {
       bool first = true;
       auto &val = wireVals[instr.def(0)->as<WireRef>()];

@@ -1143,9 +1143,13 @@ private:
     while (outWire.getNumUses() == 1 &&
            outWire.getSingleUse()->instr().isOpc(HW_INSERT)) {
       auto other = outWire.getSingleUse()->instr().as<InsertIRef>();
-      // todo: doesn't actually have to be exactly equal. Constant offset is
-      // also fine.
-      if (insert.addr() != other.addr())
+
+      auto insGEP = insert.addr().dyn_as<PointerRef>();
+      auto othGEP = other.addr().dyn_as<PointerRef>();
+      if (!!insGEP != !!othGEP ||
+          (insGEP &&
+           !addressingFragsEqual(insGEP.getDef().instr().as<GEPIRef>(),
+                                 othGEP.getDef().instr().as<GEPIRef>())))
         return false;
 
       auto thisBase = insert.getBase();

@@ -175,8 +175,7 @@ public:
 };
 
 template <typename U, typename T>
-inline bool addressingFragsEqual(AddressGenMixin<T> &lhs,
-                                 AddressGenMixin<U> &rhs) {
+inline bool addressingFragsEqual(T &&lhs, U &&rhs) {
   if (lhs.getNumTerms() != rhs.getNumTerms())
     return false;
   for (auto [lhs, rhs] : lhs.terms().zip(rhs.terms())) {
