@@ -1255,6 +1255,12 @@ public:
     return ::Range{transform_iterator<It, decltype(lambda)>(beginIt, lambda),
                    transform_iterator<It, decltype(lambda)>(endIt)};
   }
+  template <typename T> constexpr auto dyn_as() {
+    auto lambda = [](size_t, auto &&src) { return src.template dyn_as<T>(); };
+    return ::Range{transform_iterator<It, decltype(lambda)>(beginIt, lambda),
+                   transform_iterator<It, decltype(lambda)>(endIt)}
+        .filter([](auto instr) { return !!instr; });
+  }
 
   template <typename T> constexpr auto resolve(T &resolver) {
     auto lambda = [&resolver](size_t, auto &&obj) {

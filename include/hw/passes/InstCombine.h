@@ -90,7 +90,8 @@ public:
   FIELD(bool, findFlipFlopEnables, false)                                      \
   FIELD(bool, findFlipFlopSyncResets, false)                                   \
   FIELD(bool, muxToOneHotMux, false)                                           \
-  FIELD(bool, inferMuxs, true)
+  FIELD(bool, inferMuxs, true)                                                 \
+  FIELD(bool, simplifyYieldValues, true)
   CONFIG_STRUCT(CONFIG_STRUCT_LAMBDA)
 #undef CONFIG_STRUCT_LAMBDA
   Config config;
@@ -1841,6 +1842,8 @@ private:
   }
 
   template <typename Ref> PatBool simplifyYieldValues(Ref instr) {
+    if (!config.simplifyYieldValues)
+      return false;
     if (instr.getNumYieldValues() == 0)
       return false;
     SmallVec<HWValue, 32> yieldValues;
@@ -2494,6 +2497,55 @@ public:
   }
   void runBlock(BlockRef block) {
     runWrapper([&]() { runOnBlock(block); });
+  }
+
+private:
+  void queueDeps(SmallVecImpl<InstrRef> &stack,
+                 SmallDenseSet<ObjRef<Instr>> &visited) {
+    while (!stack.empty()) {
+      auto elem = stack.pop_back_val();
+      for (auto use : elem.others().dyn_as<WireRef>()) {
+        auto [found, it] = visited.findOrInsert(use.getDefI());
+        if (!found)
+          stack.emplace_back(use.getDefI());
+      }
+    }
+    worklist = Range{visited}.resolve(ctx);
+  }
+
+public:
+  void runDeps(BlockRef block) {
+    runWrapper([&]() {
+      {
+        SmallVec<InstrRef, 16> stack(Range{block});
+        SmallDenseSet<ObjRef<Instr>> visited(Range{block});
+        queueDeps(stack, visited);
+      }
+
+      bitAlias.clearCache();
+      knownBits.clearCache();
+      while (!worklist.empty()) {
+        auto instr = worklist.pop_back_val();
+        runOnInstr(instr);
+      }
+    });
+  }
+  void runDeps(InstrRef instr) {
+    runWrapper([&]() {
+      {
+        SmallVec<InstrRef, 16> stack{instr};
+        SmallDenseSet<ObjRef<Instr>> visited;
+        visited.insert(instr);
+        queueDeps(stack, visited);
+      }
+
+      bitAlias.clearCache();
+      knownBits.clearCache();
+      while (!worklist.empty()) {
+        auto instr = worklist.pop_back_val();
+        runOnInstr(instr);
+      }
+    });
   }
 
   static constexpr auto runFuncs =

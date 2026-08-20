@@ -60,6 +60,21 @@ private:
     }
     return false;
   }
+  bool requeueNestedLoops(DeepCopier *self, InstrRef old,
+                          BlockRef_iterator<true> insert) {
+    // loops whose iteration depends on the iterator of a parent loop (e.g. for
+    // (j=0; j < i)) have not been handled yet. Re-queue these.
+    if (old.isOpc(OP_FOR, OP_WHILE, OP_DO_WHILE)) {
+      auto newI = self->copyInstr(
+          old, insert,
+          [&](DeepCopier *self, InstrRef old, BlockRef_iterator<true> insert) {
+            return requeueNestedLoops(self, old, insert);
+          });
+      worklist.emplace_back(newI);
+      return true;
+    }
+    return false;
+  }
 
   bool copyAndLinkLoopYields(DeepCopier *self, InstrRef old,
                              BlockRef_iterator<true> insert,
@@ -83,19 +98,7 @@ private:
       return true;
     }
 
-    // loops whose iteration depends on the iterator of a parent loop (e.g. for
-    // (j=0; j < i)) have not been handled yet. Re-queue these.
-    if (old.isOpc(OP_FOR, OP_WHILE, OP_DO_WHILE)) {
-      auto newI = self->copyInstr(
-          old, insert,
-          [&](DeepCopier *self, InstrRef old, BlockRef_iterator<true> insert) {
-            return copyAndLinkLoopYields(self, old, insert, iterVal, yields);
-          });
-      worklist.emplace_back(newI);
-      return true;
-    }
-
-    return false;
+    return requeueNestedLoops(self, old, insert);
   }
 
   void linearizeIf(IfInstrRef instr) {
@@ -288,22 +291,20 @@ private:
       case *OP_WHILE:
       case *OP_DO_WHILE: {
         if (!config.autoSimplifyLoops)
-          return;
+          continue;
         // run instcombine in and around the loop
-        instCombine.runBlock(HWInstrRef{instr}.parentBlock(ctx));
-        instCombine.runBlock(instr.def(0)->as<BlockRef>());
+        instCombine.runDeps(instr);
+        instCombine.runDeps(instr.def(0)->as<BlockRef>());
         if (instr.isOpc(OP_WHILE))
-          instCombine.runBlock(instr.def(1)->as<BlockRef>());
+          instCombine.runDeps(instr.def(1)->as<BlockRef>());
+
+        assert(ctx.getStore<Instr>().exists(instr) &&
+               instr.isOpc(OP_WHILE, OP_DO_WHILE) &&
+               "instcombine rewrote loop instr, disable loop patterns here");
         // we might be able to simplify loops now that we were unable to before.
         instr = loopSimplify.runOnLoop(instr);
-        if (!instr /*|| !instr.isOpc(OP_FOR)*/)
+        if (!instr || !instr.isOpc(OP_FOR))
           continue;
-        if (!instr.isOpc(OP_FOR)) {
-          std::stringstream str;
-          HWCtxPrinter print{ctx, str};
-          print.printInstr(instr, false, false);
-          report_fatal_error("failed to simplify loop: ", std::move(str).str());
-        }
       }
         [[fallthrough]];
       case *OP_FOR:

@@ -515,6 +515,8 @@ private:
   }
 
   void lowerWildcardCaseICMP(InstrRef instr) {
+    build.setInsertPoint(instr);
+
     std::optional<BigInt> mask = std::nullopt;
     bool invert = false;
     auto lhsConst = instr.other(0)->dyn_as<ConstantRef>();
@@ -586,7 +588,7 @@ private:
       return;
     }
     }
-    assert(!mask || mask->getIs4S());
+    assert(!mask || !mask->getIs4S());
 
     auto bitwiseNE = build.buildXor(instr.other(0)->as<HWValue>(),
                                     instr.other(1)->as<HWValue>());
@@ -603,8 +605,11 @@ private:
 
     if (invert) {
       orOperands.def() = instr.def()->fat();
-      instr.def().replace(FatDynObjRef{nullref});
-      build.buildOr(std::move(orOperands));
+      auto ref = build.buildOr(std::move(orOperands));
+      if (ref != instr.def()->fat())
+        instr.def()->as<WireRef>().replaceAllUsesWith(ref);
+      else
+        instr.def().replace(FatDynObjRef{nullref});
     } else {
       auto val = build.buildNot(build.buildOr(std::move(orOperands)));
       instr.def()->as<WireRef>().replaceAllUsesWith(val);

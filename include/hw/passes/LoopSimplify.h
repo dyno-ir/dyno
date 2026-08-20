@@ -277,7 +277,7 @@ inline InstrRef LoopSimplifer::runOnLoop(InstrRef loop) {
   }
 
   DYNO_DBG({
-    dumpInstr(loop, ctx);
+    dumpInstr(loop, ctx, true, false);
     dbgs() << "yield analysis results:\n";
     for (auto [i, val] : Range{yieldVals}.enumerate()) {
       dbgs() << "yield val #" << i << ": ";
@@ -329,8 +329,25 @@ inline InstrRef LoopSimplifer::runOnLoop(InstrRef loop) {
     auto forUpperC = forUpper.dyn_as<ConstantRef>();
     auto forStepC = forStep.dyn_as<ConstantRef>();
 
-    if (!forLowerC || !forUpperC || !forStepC)
+    if (!forLowerC || !forUpperC || !forStepC) {
+
+      DYNO_DBG({
+        if (!forLowerC) {
+          dbgs() << "lower: ";
+          dumpDeps(forLower.as<WireRef>().getDefI(), ctx, 3);
+        }
+        if (!forUpperC) {
+          dbgs() << "upper: ";
+          dumpDeps(forUpper.as<WireRef>().getDefI(), ctx, 3);
+        }
+        if (!forStepC) {
+          dbgs() << "step: ";
+          dumpDeps(forStep.as<WireRef>().getDefI(), ctx, 3);
+        }
+      })
+
       goto end;
+    }
 
     auto cmpPred = BigInt::ICmpPred(BigInt::ICMP_EQ +
                                     (result->comparison.opc - OP_ICMP_EQ.opc));

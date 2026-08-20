@@ -49,6 +49,16 @@ __attribute__((used)) void dumpDeps(InstrRef instr, Context &ctx,
   print.printDeps(instr, ctx, maxDepth);
 }
 
+__attribute__((used)) void dumpDeps(FatDynObjRef<> ref, Context &ctx) {
+  if (!Operand::isDefUseOperand(ref)) {
+    dumpObj(ref);
+    return;
+  }
+  print.reset();
+  print.printDeps(ref.as<FatDynObjRef<InstrDefUse>>()->getSingleDef()->instr(),
+                  ctx);
+}
+
 __attribute__((used)) void dumpInstrByID(uint32_t id, Context &ctx) {
   dumpInstr(ctx.getStore<Instr>().resolve(ObjRef<Instr>{ObjID{id}}), ctx);
 }
