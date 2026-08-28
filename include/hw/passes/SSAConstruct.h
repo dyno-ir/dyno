@@ -25,6 +25,7 @@ class SSAConstructPass : public Pass<SSAConstructPass> {
   Context &ctx;
   unsigned depth = 0;
   ObjMapVec<Instr, bool> isNewInstr;
+  ObjMapVec<Register, bool> isDynRegister;
   TempBindVal<AutoCopyDebugInfoStack> autoDebugInfo;
 
 public:
@@ -479,6 +480,9 @@ public:
           break;
 
         auto asStore = instr.as<StoreIRef>();
+        if (!config.lowerAllDynamic && isDynRegister[asStore.reg()])
+          break;
+        build.setInsertPoint(asStore.iter(ctx));
         auto &regState = regMap[asStore.reg()];
 
         TriggerID trigger = nullopt;
@@ -490,11 +494,7 @@ public:
         if (!asStore.isFullReg()) {
           if (asStore.getNumTerms() != 0) {
 
-            build.setInsertPoint(asStore.iter(ctx));
             auto &state = regState.getOrSetDefault(depth, asStore.reg());
-
-            if (state.untouched && !config.lowerAllDynamic)
-              break;
 
             auto [boundAddr, boundLen] = asStore.getConstAccessRange();
             uint32_t insertBase = 0;
@@ -530,16 +530,16 @@ public:
           break;
         }
         auto asLoad = instr.as<LoadIRef>();
+        if (!config.lowerAllDynamic && isDynRegister[asLoad.reg()])
+          break;
+        build.setInsertPoint(asLoad.iter(ctx));
         auto &regState = regMap[asLoad.reg()];
-
         auto &val = regState.getOrSetDefault(depth, asLoad.reg());
 
         uint32_t addr = 0;
         uint32_t len = *asLoad.reg()->numBits;
         if (!asLoad.isFullReg()) {
           if (asLoad.getNumTerms() != 0) {
-            if (val.untouched && !config.lowerAllDynamic)
-              break;
 
             auto [boundAddr, boundLen] = asLoad.getConstAccessRange();
             uint32_t spliceBase = 0;
@@ -550,7 +550,6 @@ public:
               spliceBase = asLoad.getBase();
             }
 
-            build.setInsertPoint(ctx.getCtx<CoreDialectContext>().cfg[asLoad]);
             auto matVal =
                 build.buildSplice(val.get(build, boundAddr, boundLen),
                                   asLoad.getLen(), spliceBase, asLoad.terms());
@@ -563,7 +562,6 @@ public:
           len = asLoad.getLen();
         }
 
-        build.setInsertPoint(asLoad.iter(ctx));
         auto newVal = val.get(build, addr, len);
         assert(newVal.getNumBits() == asLoad.defW().getNumBits());
         asLoad.defW().replaceAllUsesWith(newVal);
@@ -822,6 +820,11 @@ public:
     // or double indirection for mapping without eager allocation.
     regMap.clear();
     regMap.resize(ctx.getStore<Register>().numIDs());
+    isDynRegister.clear();
+    isDynRegister.resize(ctx.getStore<Register>().numIDs());
+
+    for (auto reg : mod.regs())
+      isDynRegister[reg.oref()] = reg.isDynAddressed();
 
     runOnBlock(proc, proc.block());
   }

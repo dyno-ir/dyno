@@ -3,6 +3,7 @@
 #include "dyno/Obj.h"
 #include "hw/HWContext.h"
 #include "support/Debug.h"
+#include <fstream>
 
 namespace dyno {
 
@@ -87,5 +88,10 @@ __attribute__((used)) void dumpBlock(BlockRef block, Context &ctx) {
   auto tok = print.bindCtx(ctx);
   print.printBlock(block);
 }
+
+__attribute__((used)) void dumpCtxToFile(Context &ctx, const char *path) {
+  std::ofstream str(path);
+  HWCtxPrinter{ctx, str}.printCtx();
+};
 
 }; // namespace dyno

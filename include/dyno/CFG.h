@@ -267,6 +267,11 @@ public:
     ptr->instrs.emplace_back(InstrRef{nullref}, IDImpl<uint32_t>{0},
                              IDImpl<uint32_t>{0});
   }
+  void clear() {
+    for (auto instr : unordered())
+      getCFG().map[instr] = CFG::Node{nullref, 0};
+    clear_unsafe();
+  }
 
   void reserve(size_t count) { (*this)->instrs.reserve(count + 1); }
 

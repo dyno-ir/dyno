@@ -48,6 +48,8 @@ class LoadCoalescePass : public Pass<LoadCoalescePass> {
 
   void runOnProcess(ModuleIRef mod, ProcessIRef proc) {
     for (auto reg : mod.regs()) {
+      if (reg.isDynAddressed())
+        continue;
       auto [loads, regions] = findLoadsAndRegions(reg, proc);
 
       bool lastActive = false;
@@ -101,8 +103,8 @@ public:
   }
 
   static constexpr auto runFuncs =
-      mk_tuple(&LoadCoalescePass::runProcess,
-                      &LoadCoalescePass::runModule, &LoadCoalescePass::run);
+      mk_tuple(&LoadCoalescePass::runProcess, &LoadCoalescePass::runModule,
+               &LoadCoalescePass::run);
 
   auto make(Context &ctx) { return LoadCoalescePass(ctx); }
   explicit LoadCoalescePass(Context &ctx) : ctx(ctx) {}

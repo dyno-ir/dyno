@@ -18,6 +18,7 @@
 #include "op/IDs.h"
 #include "op/StructuredControlFlow.h"
 #include "support/Debug.h"
+#include <algorithm>
 #include <cassert>
 #include <optional>
 
@@ -40,7 +41,30 @@ public:
   ObjMapVec<Wire, BigInt> wireVals;
   ObjMapVec<Register, BigInt> regVals;
   SmallDenseSet<ObjRef<Instr>, 16> evalSet;
-  SmallVec<ProcessIRef, 16> evalStack;
+  struct EvalStack {
+    SmallVec<ProcessIRef, 16> vec;
+    Context &ctx;
+    EvalStack(Context &ctx) : ctx(ctx) {}
+    static bool less(ProcessIRef a, ProcessIRef b, Context &ctx) {
+      return ctx.getCFG()[a].getPos() > ctx.getCFG()[b].getPos();
+    }
+    void push(ProcessIRef proc) {
+      vec.push_back(proc);
+      std::push_heap(vec.begin(), vec.end(), [&](ProcessIRef a, ProcessIRef b) {
+        return less(a, b, ctx);
+      });
+    }
+    ProcessIRef pop() {
+      std::pop_heap(vec.begin(), vec.end(), [&](ProcessIRef a, ProcessIRef b) {
+        return less(a, b, ctx);
+      });
+      auto proc = vec.back();
+      vec.pop_back();
+      return proc;
+    }
+    bool empty() const { return vec.empty(); }
+  };
+  EvalStack evalStack;
   struct DeferredStore {
     StoreIRef store;
     uint32_t addr;
@@ -117,16 +141,10 @@ private:
             });
 
     SmallVec<ProcessIRef, 64> usesVec(uses);
-    if (module.block().isSorted()) {
-      Range{usesVec}.sort([&](InstrRef lhs, InstrRef rhs) {
-        return ctx.getCFG()[lhs].getPos() > ctx.getCFG()[rhs].getPos();
-      });
-    }
-
     for (auto proc : usesVec) {
       auto [found, it] = evalSet.findOrInsert(proc);
       if (!found) {
-        evalStack.emplace_back(proc);
+        evalStack.push(proc);
       }
     }
   }
@@ -477,9 +495,14 @@ public:
 
         auto arg = getValue(argIt->as<HWValue>());
         switch (str[idx + 1]) {
-        case 'c':
-          std::print(os, "{}", (char)arg.getExactVal());
-          break;
+        case 'c': {
+          if (arg.getIs4S()) {
+            // being strict, verilog just treats x as 0
+            report_fatal_error("%%c: attempted to print unknown value: {}",
+                               arg);
+          }
+          std::print(os, "{}", arg.getExactVal());
+        } break;
         case 'x':
           BigInt::stream_hex_4s_vlog(os, arg);
           break;
@@ -750,10 +773,9 @@ public:
         print.printInstr(instr, true, false);
       }
 
-      bool debug =
-          false; // instr.getNumDefs() == 1 && instr.def()->is<WireRef>() &&
-                 // instr.def()->as<WireRef>().getObjID() ==
-                 //     Any{23756u, 19616u, 19614u, 19615u, 5458u};
+      bool debug = false;
+      // instr.getNumDefs() == 1 && instr.def()->is<WireRef>() &&
+      // instr.def()->as<WireRef>().getObjID() == Any{36511u};
       if (debug) {
         for (auto other : instr.others()) {
           if (!other->is<WireRef>())
@@ -814,7 +836,7 @@ public:
   void evalActive() {
     // active
     while (!evalStack.empty()) {
-      auto ref = evalStack.pop_back_val();
+      auto ref = evalStack.pop();
       evalSet.erase(evalSet.find(ref));
       evalProc(ref);
     }
@@ -853,7 +875,7 @@ public:
       if (!proc.isOpc(HW_COMB_PROCESS_DEF, HW_NETLIST_PROCESS_DEF))
         continue;
       evalSet.insert(proc);
-      evalStack.emplace_back(proc);
+      evalStack.push(proc);
     }
     eval();
   }
@@ -865,7 +887,7 @@ public:
       if (!proc.isOpc(HW_INIT_PROCESS_DEF))
         continue;
       evalSet.insert(proc);
-      evalStack.emplace_back(proc);
+      evalStack.push(proc);
     }
     eval();
     runState = RunState::MAIN;
@@ -1017,6 +1039,8 @@ public:
 public:
   HWInterpreter(Context &ctx, ModuleIRef module, std::ostream &os,
                 std::ostream &errs)
-      : ctx(ctx), module(module), os(os), errs(errs) {}
+      : ctx(ctx), module(module), os(os), errs(errs), evalStack(ctx) {
+    module.block().sort();
+  }
 }; // namespace dyno
 }; // namespace dyno

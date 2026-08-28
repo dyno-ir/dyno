@@ -35,10 +35,25 @@ void dumpDeps(InstrRef instr);
 void dumpDeps(InstrRef instr, Context &ctx);
 void dumpDeps(InstrRef instr, Context &ctx, unsigned depth);
 void dumpObj(FatDynObjRef<> obj);
-void dumpBlock(BlockRef block, Context& ctx);
+void dumpBlock(BlockRef block, Context &ctx);
 
 template <typename Derived> class HWPrinterImpl {
   auto &self() { return *reinterpret_cast<Derived *>(this); }
+
+protected:
+  void printCtx(Context &ctx, bool printStdCells = false) {
+    for (auto func : ctx.template getStore<Function>()) {
+      // only dump top level funcs manually
+      if (ctx.getCFG().contains(func.iref()))
+        continue;
+      self().PrinterBase::printInstr(func.iref());
+    }
+    for (auto mod : ctx.template getStore<Module>()) {
+      if (mod.iref().isOpc(HW_STDCELL_DEF) && !printStdCells)
+        continue;
+      self().PrinterBase::printInstr(mod.iref());
+    }
+  }
 
 public:
   auto &regNames() {
@@ -83,17 +98,7 @@ public:
   void printCtx(Context &ctx, bool printStdCells = false) {
     auto tok = bindCtx(ctx);
     this->ctx = &ctx;
-    for (auto func : ctx.getStore<Function>()) {
-      // only dump top level funcs manually
-      if (ctx.getCFG().contains(func.iref()))
-        continue;
-      PrinterBase::printInstr(func.iref());
-    }
-    for (auto mod : ctx.getStore<Module>()) {
-      if (mod.iref().isOpc(HW_STDCELL_DEF) && !printStdCells)
-        continue;
-      PrinterBase::printInstr(mod.iref());
-    }
+    HWPrinterImpl::printCtx(ctx, printStdCells);
     this->ctx = nullptr;
   }
   using PrinterWrapper::printInstr;
@@ -137,6 +142,9 @@ public:
     setDefaultDialects({DIALECT_CORE, DIALECT_OP, DIALECT_HW});
     sourceLocInfo.set(&ctx.getCtx<CoreDialectContext>().instrSourceLocInfo);
     regNames().set(&ctx.getCtx<HWDialectContext>().regNameInfo);
+  }
+  void printCtx(bool printStdCells = false) {
+    HWPrinterImpl::printCtx(*this->ctx, printStdCells);
   }
 };
 }; // namespace dyno

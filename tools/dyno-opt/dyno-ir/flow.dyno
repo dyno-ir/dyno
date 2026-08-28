@@ -22,11 +22,11 @@ FUNCTION_DEF %earlyCanonFlow:func, :block {
 
   // process fusion & ssa construction
   meta.SEQ_TO_COMB_PASS
-  meta.SSA_CONSTRUCT_PASS
+  meta.SSA_CONSTRUCT_PASS map("lowerAllDynamic": "0")
 
   meta.PROCESS_LINEARIZE_PASS map("retainIODeps": "1", "retainInnerDeps": "1")
-  meta.SSA_CONSTRUCT_PASS
-  meta.SSA_CONSTRUCT_PASS map("mode": "DEFERRED")
+  meta.SSA_CONSTRUCT_PASS map("lowerAllDynamic": "0")
+  meta.SSA_CONSTRUCT_PASS map("lowerAllDynamic": "0", "mode": "DEFERRED")
 
   meta.INST_COMBINE_PASS
   meta.LOAD_COALESCE_PASS
@@ -34,7 +34,7 @@ FUNCTION_DEF %earlyCanonFlow:func, :block {
 
   // canonicalize
   meta.AGGRESSIVE_DEAD_CODE_ELIMINATION_PASS map("keepRegs": "NAMED")
-  meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS map("differentBlocks": "1")
+  meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS map("differentBlocks": "1", "keepLoadStoreOrder": "1")
   meta.ORDER_INSTRS_PASS map("assertNoCircularDeps": "1", "moveStoresBeforeLoads": "0")
   meta.INST_COMBINE_PASS
   meta.AGGRESSIVE_DEAD_CODE_ELIMINATION_PASS map("keepRegs": "NAMED")
@@ -46,6 +46,14 @@ FUNCTION_DEF %earlyCanonFlow:func, :block {
 FUNCTION_DEF %synthCanonicalize:func, :block {
   // unroll loops, simplify
   meta.LINEARIZE_CONTROL_FLOW_PASS map("flattenLoops": "1", "flattenMultiway": "0")
+
+  // SSA construct dynamically accesses regs
+  // (do this after unrolling loops so we better know access bounds)
+  meta.INST_COMBINE_PASS
+  meta.CHECK_PASS map("noLoops": "1")
+  meta.SSA_CONSTRUCT_PASS
+  meta.SSA_CONSTRUCT_PASS map("mode": "DEFERRED")
+
   meta.PROCESS_LINEARIZE_PASS map("retainIODeps": "0", "retainInnerDeps": "0")
   meta.SSA_CONSTRUCT_PASS
   meta.LOAD_COALESCE_PASS
@@ -83,8 +91,9 @@ FUNCTION_DEF %synthEarlyOpt:func, :block {
   meta.INST_COMBINE_PASS
   meta.EARLY_SHARE_PASS map("opToShare": "op.ADD")
   meta.EARLY_SHARE_PASS map("opToShare": "hw.SPLICE", "checkAllPairs": "1")
-
   meta.EARLY_SHARE_PASS map("opToShare": "hw.INSERT", "checkAllPairs": "1")
+  meta.AGGRESSIVE_DEAD_CODE_ELIMINATION_PASS map("keepRegs": "NAMED")
+
   meta.INST_COMBINE_PASS
   meta.SSA_CONSTRUCT_PASS
   meta.INST_COMBINE_PASS
@@ -92,12 +101,12 @@ FUNCTION_DEF %synthEarlyOpt:func, :block {
 
   // merge processes created during share
   meta.PROCESS_LINEARIZE_PASS map("retainIODeps": "0", "retainInnerDeps": "0")
-  meta.ORDER_INSTRS_PASS map("assertNoCircularDeps": "1", "moveStoresBeforeLoads": "1")
+  meta.ORDER_INSTRS_PASS map("assertNoCircularDeps": "1", "moveStoresBeforeLoads": "0")
   meta.SSA_CONSTRUCT_PASS
   meta.LOAD_COALESCE_PASS
   meta.INST_COMBINE_PASS
   meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS
-  meta.ORDER_INSTRS_PASS map("assertNoCircularDeps": "1", "moveStoresBeforeLoads": "1")
+  meta.ORDER_INSTRS_PASS map("assertNoCircularDeps": "1", "moveStoresBeforeLoads": "0")
   meta.AGGRESSIVE_DEAD_CODE_ELIMINATION_PASS map("keepRegs": "NAMED")
 }
 
@@ -136,7 +145,7 @@ FUNCTION_DEF %synthMemoryFFMuxHandling:func, :block {
   meta.MUX_TREE_FLATTEN_PASS
   meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS
   meta.FUZZY_CSE_PASS map("minSharedBitsForMerge": "1", "maxSharedBitsForMerge": "1", "opToShare": "op.AND")
-  meta.ORDER_INSTRS_PASS map("assertNoCircularDeps": "1", "moveStoresBeforeLoads": "1")
+  meta.ORDER_INSTRS_PASS map("assertNoCircularDeps": "1")
   meta.INST_COMBINE_PASS
 
   // lower insert/extract
@@ -211,7 +220,7 @@ FUNCTION_DEF %synthLowerMemoryFF:func, :block {
   meta.TRIGGER_DEDUPE_PASS
   meta.INST_COMBINE_PASS map("muxToOneHotMux": "1")
 
-  meta.ORDER_INSTRS_PASS
+  meta.ORDER_INSTRS_PASS  map("moveStoresBeforeLoads": "1")
   meta.PROCESS_LINEARIZE_PASS map("retainIODeps": "0", "retainInnerDeps": "0")
 
   meta.INST_COMBINE_PASS map("muxToOneHotMux": "1")
@@ -249,18 +258,30 @@ FUNCTION_DEF %synthTechmap:func, :block {
   meta.AIG_CONSTRUCT_PASS
   meta.AGGRESSIVE_DEAD_CODE_ELIMINATION_PASS map("keepRegs": "NAMED")
 
+  meta.ABC_PASS map("abcCmd":
+    [{read_blif aig.blif; strash; &get -n; &fraig -x;
+      &put; scorr; dc2;
+      dretime; strash;
+      dch -f; if; mfs2; lutpack;
+      print_stats; write_blif
+      mapped.blif}],
+    "path": "sky130_fd_sc_hd__tt_025C_1v80.lib")
+
+
   meta.AGGRESSIVE_DEAD_CODE_ELIMINATION_PASS map("keepRegs": "NAMED")
   meta.REMOVE_BUFFERS_PASS
-
   meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS
-  meta.INST_COMBINE_PASS
 
+  meta.ORDER_INSTRS_PASS map("assertNoCircularDeps": "0")
+  meta.NETLIST_TO_PROC_PASS
+
+  meta.INST_COMBINE_PASS
   meta.CONSTANT_MAPPING_PASS
   meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS
   meta.INST_COMBINE_PASS
   meta.AGGRESSIVE_DEAD_CODE_ELIMINATION_PASS map("keepRegs": "NAMED")
 
-  meta.ORDER_INSTRS_PASS map("assertNoCircularDeps": "false")
+  meta.PROC_TO_NETLIST_PASS
 }
 
 

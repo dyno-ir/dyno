@@ -153,6 +153,7 @@ private:
       })
       return;
     }
+    assert(config.differentBlocks);
 
     auto block = controlFlowAnalysis.findSharedParentBlock(instrBl, otherBl);
 

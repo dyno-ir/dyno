@@ -76,6 +76,8 @@ public:
   auto memLoads() { return useInstrs(HW_MEM_LOAD); }
   auto memStores() { return useInstrs(HW_MEM_STORE); }
 
+  bool isDynAddressed();
+
   InstrRef getSingleStore() {
     InstrRef rv = nullref;
     for (auto use : oref().uses()) {

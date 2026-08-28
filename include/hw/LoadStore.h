@@ -479,4 +479,34 @@ public:
   bool isFullReg() { return getLen() == reg().getNumBits() && !addr(); }
 };
 
+inline bool RegisterIRef::isDynAddressed() {
+  for (auto use : oref().uses()) {
+    auto instr = use.instr();
+    HWAddress addr;
+    switch (*instr.getDialectOpcode()) {
+    case *HW_LOAD:
+      addr = instr.as<LoadIRef>().addr();
+      break;
+    case *HW_STORE_DEFER:
+    case *HW_STORE:
+      addr = instr.as<StoreIRef>().addr();
+      break;
+    case *HW_MEM_LOAD:
+      addr = instr.as<MemLoadIRef>().addr();
+      break;
+    case *HW_MEM_STORE:
+      addr = instr.as<MemStoreIRef>().addr();
+      break;
+    }
+    if (!addr)
+      continue;
+    if (auto ptr = addr.dyn_as<PointerRef>()) {
+      assert(ptr.getSingleDef()->instr().as<GEPIRef>().getNumTerms() != 0 &&
+             "expected canonicalized");
+      return true;
+    }
+  }
+  return false;
+}
+
 }; // namespace dyno
