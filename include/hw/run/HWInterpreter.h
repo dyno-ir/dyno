@@ -498,10 +498,9 @@ public:
         case 'c': {
           if (arg.getIs4S()) {
             // being strict, verilog just treats x as 0
-            report_fatal_error("%%c: attempted to print unknown value: {}",
-                               arg);
+            report_fatal_error("%c: attempted to print unknown value: {}", arg);
           }
-          std::print(os, "{}", arg.getExactVal());
+          std::print(os, "{}", (char)arg.getExactVal());
         } break;
         case 'x':
           BigInt::stream_hex_4s_vlog(os, arg);
