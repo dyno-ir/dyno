@@ -3214,7 +3214,7 @@ public:
 
     for (; it != map.end(); it = map.find_next(it)) {
       auto ref = store.resolve(it.val());
-      if (bigInt == ConstantRef{ref})
+      if (bigInt == ConstantRef{ref}) [[likely]]
         return ref;
     }
 

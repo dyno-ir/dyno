@@ -772,9 +772,7 @@ public:
         print.printInstr(instr, true, false);
       }
 
-      bool debug = false;
-      // instr.getNumDefs() == 1 && instr.def()->is<WireRef>() &&
-      // instr.def()->as<WireRef>().getObjID() == Any{36511u};
+      bool debug = 0;
       if (debug) {
         for (auto other : instr.others()) {
           if (!other->is<WireRef>())

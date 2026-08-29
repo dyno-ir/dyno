@@ -560,7 +560,13 @@ private:
     assert(given.getNumBits() == 1);
     auto contradict =
         !deriveBits.propKnownValueUp(given, BigInt::fromU64(1, 1));
-    assert(!contradict && "contradicting assume");
+    if (contradict) {
+      replaceUses(instr.def()->as<WireRef>(),
+                  cbuild.undef(*instr.def()->as<WireRef>().getNumBits()).get());
+      deleteMatchedInstr(instr);
+      deriveBits.clearCache();
+      return PAT_TRUE;
+    }
 
     auto rv = boolExprSimplifySub(instr.other(0));
     deriveBits.clearCache();

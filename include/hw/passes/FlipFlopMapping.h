@@ -22,6 +22,7 @@
 #include "support/Bits.h"
 #include "support/Debug.h"
 #include "support/ErrorRecovery.h"
+#include "support/Format.h"
 #include "support/PointerVariant.h"
 #include "support/SlabAllocator.h"
 #include "support/Utility.h"
@@ -131,6 +132,13 @@ class FlipFlopMappingPass : public Pass<FlipFlopMappingPass> {
     auto bits = *instr.q()->numBits;
     AbstractFF abstr;
     FFWires wires;
+
+    if (bits >= 0xFFFE) {
+      std::stringstream str;
+      HWCtxPrinter{ctx, str}.printInstr(instr, false);
+      report_fatal_error("too many bits ({}) in ff, meant to infer memory?: {}",
+                         bits, std::move(str).str());
+    }
 
     wires.qReg = regBuild.buildRegister(instr.q().getNumBits());
 

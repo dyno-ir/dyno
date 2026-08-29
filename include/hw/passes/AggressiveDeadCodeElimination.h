@@ -40,7 +40,7 @@ class AggressiveDeadCodeEliminationPass
   ObjMapVec<Wire, bool> wireMap;
   ObjMapVec<Constant, bool> constantMap;
 
-  SmallVec<InstrRef, 256> worklist;
+  Vec<InstrRef> worklist;
 
 public:
 #define CONFIG_STRUCT_LAMBDA(FIELD, ENUM) ENUM(keepRegs, NONE, NONE, NAMED, ALL)

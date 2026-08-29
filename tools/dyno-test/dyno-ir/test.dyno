@@ -122,10 +122,10 @@ TEST_CASE :string("fuzzy-cse-basic"), :block, :block, :block {
 
     COMB_PROCESS_DEF :process, :block {
       LOAD %a_v:wire(32), %in_a
-      LOAD %c_v:wire(32), %in_c
-      ADD %ac:wire(32), %a_v, %c_v
-
       LOAD %b_v:wire(32), %in_b
+      LOAD %c_v:wire(32), %in_c
+
+      ADD %ac:wire(32), %a_v, %c_v
       ADD %abc:wire(32), %b_v, %ac
 
       STORE %abc, %out_a

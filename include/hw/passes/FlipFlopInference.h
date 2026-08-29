@@ -177,8 +177,10 @@ private:
     build.setInsertPoint(module.regs_end());
 
     // assume ranges lowered
-    assert(storeI.isFullReg() && "range not lowered?");
-    assert(storeI.hasTrigger() && "no trigger?");
+    if (!storeI.isFullReg())
+      report_fatal_error("store range not lowered?");
+    if (!storeI.hasTrigger())
+      report_fatal_error("store has no trigger, did seqtocomb run?");
     auto trigger = storeI.trigger().oref();
     if (trigger->size() > 3)
       report_fatal_error("too many sensitivities on flip flop");
