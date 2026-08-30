@@ -61,9 +61,10 @@ class KnownBitsAnalysis : public CacheInvalidation<KnownBitsAnalysis> {
   SmallVec<Frame, 16> stack;
   KnownBitsVal retVal;
 
+public:
   static constexpr const char *debugName = "KnownBitsAnalysis";
   static constexpr uint32_t debugID = 128; // todo: analysis debug ID assignment
-
+private:
   void pushNextOrReturn(Frame &frame, InstrRef instr, bool inv = false) {
     auto n = instr.getNumOthers();
     if (frame.idx != instr.getNumOthers()) {

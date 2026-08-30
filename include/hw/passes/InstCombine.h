@@ -90,7 +90,8 @@ public:
   FIELD(bool, findFlipFlopEnables, false)                                      \
   FIELD(bool, findFlipFlopSyncResets, false)                                   \
   FIELD(bool, muxToOneHotMux, false)                                           \
-  FIELD(bool, inferMuxs, true)                                                 \
+  FIELD(bool, inferMuxs, false)                                                \
+  FIELD(bool, muxToBitwise, false)                                             \
   FIELD(bool, simplifyYieldValues, true)
   CONFIG_STRUCT(CONFIG_STRUCT_LAMBDA)
 #undef CONFIG_STRUCT_LAMBDA
@@ -165,7 +166,9 @@ private:
   }
 
   PatBool findFlipFlopEnables(FlipFlopIRef instr) {
-    if (!config.findFlipFlopEnables)
+    if (!config.findFlipFlopEnables ||
+        // todo: same as reset, depessimize
+        !instr.clkEnRaw().is<ConstantRef>())
       return false;
     auto use = instr.q().getSingleUse();
     if (!use || !use->instr().isOpc(HW_STORE))
@@ -222,7 +225,9 @@ private:
   PatBool findFlipFlopSyncResets(FlipFlopIRef instr) {
     if (!config.findFlipFlopSyncResets)
       return PAT_FALSE;
-    if (!instr.rsts().empty()) // fixme, to avoid looping
+    // fixme, to avoid looping. To relax this we need to prove an inferred reset
+    // actually optimizes out the reset logic via assume.
+    if (!instr.rsts().empty())
       return PAT_FALSE;
     // already has async resets
     if (instr.isOpc(HW_FLIP_FLOP) && !instr.rsts().empty())

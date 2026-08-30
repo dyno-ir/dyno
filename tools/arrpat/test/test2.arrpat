@@ -443,6 +443,27 @@ replace {
   $opc $out, $rhs, $lhs
 }
 
+// case equal is perfect bitwise equal including x/z, so different constants are not equal
+match {
+  OP_ICMP_CEQ $out, $lhs:CORE_CONSTANT, $rhs:CORE_CONSTANT
+}
+with [{
+  auto equal = $lhs.begin()->as<ConstantRef>() == $rhs.begin()->as<ConstantRef>();
+  FatDynObjRef<> ref = ConstantRef::fromBool(equal);
+  $const_out = ref;
+}]
+replace $out -> $const_out
+
+match {
+  OP_ICMP_CNE $out, $lhs:CORE_CONSTANT, $rhs:CORE_CONSTANT
+}
+with [{
+  auto nequal = $lhs.begin()->as<ConstantRef>() != $rhs.begin()->as<ConstantRef>();
+  FatDynObjRef<> ref = ConstantRef::fromBool(nequal);
+  $const_out = ref;
+}]
+replace $out -> $const_out
+
 // NOT Opt
 match {
   OP_NOT $inv, $x
@@ -554,6 +575,10 @@ replace {
 match {
   HW_MUX $out, $cond, #'1, $rhs:HW_WIRE
 }
+with [{
+  if (!config.muxToBitwise)
+    goto $fail;
+}]
 replace {
   HW_REPEAT $temp:wire_like($out), $cond
   OP_OR $out, $temp, $rhs
@@ -562,6 +587,10 @@ replace {
 match {
   HW_MUX $out, $cond, $rhs:HW_WIRE, #'1
 }
+with [{
+  if (!config.muxToBitwise)
+    goto $fail;
+}]
 replace {
   OP_NOT $conv_inv:wire_like($cond), $cond
   HW_REPEAT $temp:wire_like2($out), $conv_inv
@@ -571,6 +600,10 @@ replace {
 match {
   HW_MUX $out, $cond, $lhs:HW_WIRE, #'0
 }
+with [{
+  if (!config.muxToBitwise)
+    goto $fail;
+}]
 replace {
   HW_REPEAT $temp:wire_like($out), $cond
   OP_AND $out, $temp, $lhs
@@ -579,6 +612,10 @@ replace {
 match {
   HW_MUX $out, $cond, #'0, $lhs:HW_WIRE
 }
+with [{
+  if (!config.muxToBitwise)
+    goto $fail;
+}]
 replace {
   OP_NOT $conv_inv:wire_like($cond), $cond
   HW_REPEAT $temp:wire_like2($out), $conv_inv
@@ -590,6 +627,10 @@ replace {
 match {
   HW_MUX $out, $cond, #1'b1, $rhs:HW_WIRE
 }
+with [{
+  if (!config.muxToBitwise)
+    goto $fail;
+}]
 replace {
   OP_OR $out, $cond, $rhs
 }
@@ -597,6 +638,10 @@ replace {
 match {
   HW_MUX $out, $cond, $rhs:HW_WIRE, #1'b1
 }
+with [{
+  if (!config.muxToBitwise)
+    goto $fail;
+}]
 replace {
   OP_NOT $conv_inv:wire_like($cond), $cond
   OP_OR $out, $conv_inv, $rhs
@@ -605,6 +650,10 @@ replace {
 match {
   HW_MUX $out, $cond, $lhs:HW_WIRE, #1'b0
 }
+with [{
+  if (!config.muxToBitwise)
+    goto $fail;
+}]
 replace {
   OP_AND $out, $cond, $lhs
 }
@@ -612,6 +661,10 @@ replace {
 match {
   HW_MUX $out, $cond, #1'b0, $lhs:HW_WIRE
 }
+with [{
+  if (!config.muxToBitwise)
+    goto $fail;
+}]
 replace {
   OP_NOT $conv_inv:wire_like($cond), $cond
   OP_AND $out, $conv_inv, $lhs

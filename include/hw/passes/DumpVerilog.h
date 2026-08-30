@@ -41,7 +41,7 @@ class DumpVerilogPass : public Pass<DumpVerilogPass> {
 
 public:
 #define CONFIG_STRUCT_LAMBDA(FIELD, ENUM)                                      \
-  FIELD(bool, dumpWiresLast, true)                                             \
+  FIELD(bool, dumpWiresLast, false)                                             \
   FIELD(std::string, fileName, "dump.v")
   CONFIG_STRUCT(CONFIG_STRUCT_LAMBDA)
 #undef CONFIG_STRUCT_LAMBDA

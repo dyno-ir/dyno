@@ -82,17 +82,18 @@ FUNCTION_DEF %synthCanonicalize:func, :block {
   meta.INST_COMBINE_PASS
   meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS
   meta.ORDER_INSTRS_PASS map("assertNoCircularDeps": "1", "moveStoresBeforeLoads": "0")
+  meta.CHECK_PASS
 }
 
 FUNCTION_DEF %synthEarlyOpt:func, :block {
   // share
   meta.FUZZY_CSE_PASS
+  // todo: fuzzy CSE more ops
   meta.ORDER_INSTRS_PASS map("assertNoCircularDeps": "1", "moveStoresBeforeLoads": "0")
   meta.INST_COMBINE_PASS
   meta.EARLY_SHARE_PASS map("opToShare": "op.ADD")
   meta.EARLY_SHARE_PASS map("opToShare": "hw.SPLICE", "checkAllPairs": "1")
   meta.EARLY_SHARE_PASS map("opToShare": "hw.INSERT", "checkAllPairs": "1")
-  meta.AGGRESSIVE_DEAD_CODE_ELIMINATION_PASS map("keepRegs": "NAMED")
 
   meta.INST_COMBINE_PASS
   meta.SSA_CONSTRUCT_PASS
@@ -101,6 +102,7 @@ FUNCTION_DEF %synthEarlyOpt:func, :block {
 
   // merge processes created during share
   meta.PROCESS_LINEARIZE_PASS map("retainIODeps": "0", "retainInnerDeps": "0")
+  // disable moveStoresBeforeLoads again if causes problems
   meta.ORDER_INSTRS_PASS map("assertNoCircularDeps": "1", "moveStoresBeforeLoads": "0")
   meta.SSA_CONSTRUCT_PASS
   meta.LOAD_COALESCE_PASS
@@ -108,16 +110,19 @@ FUNCTION_DEF %synthEarlyOpt:func, :block {
   meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS
   meta.ORDER_INSTRS_PASS map("assertNoCircularDeps": "1", "moveStoresBeforeLoads": "0")
   meta.AGGRESSIVE_DEAD_CODE_ELIMINATION_PASS map("keepRegs": "NAMED")
+  meta.CHECK_PASS
+
 }
 
 FUNCTION_DEF %synthLowerControlFlow:func, :block {
   // flatten all remaining control flow
   meta.LINEARIZE_CONTROL_FLOW_PASS map("flattenLoops": "1", "flattenMultiway": "1")
+  meta.CHECK_PASS
   meta.SSA_CONSTRUCT_PASS
   meta.LOAD_COALESCE_PASS
   meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS
   meta.INST_COMBINE_PASS
-  meta.AGGRESSIVE_DEAD_CODE_ELIMINATION_PASS
+  meta.AGGRESSIVE_DEAD_CODE_ELIMINATION_PASS map("keepRegs": "NAMED")
 
   // optimize, share
   meta.INST_COMBINE_PASS
@@ -129,17 +134,19 @@ FUNCTION_DEF %synthLowerControlFlow:func, :block {
   meta.INST_COMBINE_PASS
   meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS
   meta.INST_COMBINE_PASS
-  meta.AGGRESSIVE_DEAD_CODE_ELIMINATION_PASS
+  meta.AGGRESSIVE_DEAD_CODE_ELIMINATION_PASS map("keepRegs": "NAMED")
 }
 
 FUNCTION_DEF %synthMemoryFFMuxHandling:func, :block {
   // memory inference
   meta.SIMPLE_MEMORY_INFERENCE_PASS
-  // todo: strict keep MEM_LOAD/MEM_STORE order
+  // now we care about load store order again
   meta.ORDER_INSTRS_PASS map("assertNoCircularDeps": "1")
+
   meta.INST_COMBINE_PASS
   meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS
-  meta.AGGRESSIVE_DEAD_CODE_ELIMINATION_PASS
+  meta.AGGRESSIVE_DEAD_CODE_ELIMINATION_PASS map("keepRegs": "NAMED")
+
 
   // flatten MUX trees
   meta.MUX_TREE_FLATTEN_PASS
@@ -175,7 +182,10 @@ FUNCTION_DEF %synthMemoryFFMuxHandling:func, :block {
   meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS
 
   meta.INST_COMBINE_PASS map("muxToOneHotMux": "1")
-  meta.AGGRESSIVE_DEAD_CODE_ELIMINATION_PASS
+  meta.AGGRESSIVE_DEAD_CODE_ELIMINATION_PASS map("keepRegs": "NAMED")
+
+  meta.REGISTER_PARTITION_PASS
+  meta.PROCESS_LINEARIZE_PASS map("retainIODeps": "0", "retainInnerDeps": "0")
 
   // flip flop inference
   meta.INST_COMBINE_PASS map("muxToOneHotMux": "1")
@@ -183,16 +193,16 @@ FUNCTION_DEF %synthMemoryFFMuxHandling:func, :block {
   meta.TRIGGER_DEDUPE_PASS
   meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS
   meta.INST_COMBINE_PASS map("muxToOneHotMux": "1")
-  meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS
-  meta.INST_COMBINE_PASS map("muxToOneHotMux": "1", "findFlipFlopEnables": "1", "findFlipFlopSyncResets": "1")
+  // meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS
+  // meta.INST_COMBINE_PASS map("muxToOneHotMux": "1", "findFlipFlopEnables": "1", "findFlipFlopSyncResets": "1")
 }
 
 FUNCTION_DEF %synthLowerMemoryFF:func, :block {
   // load pre-parsed liberty
 
-  meta.PARSE_DYNO_PASS map("path": /*"xilinx/flipflops.dyno"*/ "tools/dyno-opt/dyno-ir/sky130_fd_sc_hd.dyno", "newModulesActive": "0")
+  meta.PARSE_DYNO_PASS map("path": "xilinx/flipflops.dyno"/* "tools/dyno-opt/dyno-ir/sky130_fd_sc_hd.dyno"*/, "newModulesActive": "0")
   // load memories
-  meta.PARSE_DYNO_PASS map("path": /*"xilinx/memories.dyno"*/ "tools/dyno-opt/dyno-ir/example_memories.dyno", "newModulesActive": "0")
+  meta.PARSE_DYNO_PASS map("path": "xilinx/memories.dyno" /*"tools/dyno-opt/dyno-ir/example_memories.dyno"*/, "newModulesActive": "0")
   meta.POPULATE_INLINE_CACHES_PASS
 
   // map memories
@@ -200,37 +210,40 @@ FUNCTION_DEF %synthLowerMemoryFF:func, :block {
   // fix up possible wire forward references after mem map
   meta.NETLIST_TO_PROC_PASS
 
-  // lower unmapped memories back to load/store
+  // lower unmapped memories back to load/store (todo: lower before en)
   meta.LOWER_MEM_ACCESS_PASS
   // and map flip flops
-  meta.INST_COMBINE_PASS map("muxToOneHotMux": "1", "findFlipFlopEnables": "1", "findFlipFlopSyncResets": "1")
+  meta.INST_COMBINE_PASS map("muxToOneHotMux": "1", "findFlipFlopEnables": "0", "findFlipFlopSyncResets": "0")
   meta.FLIP_FLOP_INFERENCE_PASS
 
   meta.CHECK_PASS
 
-  meta.INST_COMBINE_PASS map("muxToOneHotMux": "1")
+  meta.INST_COMBINE_PASS map("muxToOneHotMux": "1", "muxToBitwise": "1")
   meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS
-  meta.INST_COMBINE_PASS map("muxToOneHotMux": "1")
-  meta.AGGRESSIVE_DEAD_CODE_ELIMINATION_PASS map("keepRegs": "NAMED")
+  meta.INST_COMBINE_PASS map("muxToOneHotMux": "1", "muxToBitwise": "1")
+  // can't keep named here, have to opt out unused FFs (todo: delete in FF inference)
+  meta.AGGRESSIVE_DEAD_CODE_ELIMINATION_PASS
 
   // map flip flops
   meta.FLIP_FLOP_MAPPING_PASS
 
   meta.MUX_TREE_FLATTEN_PASS // todo: instead gen one hot mux in flip flop mapping?
   meta.TRIGGER_DEDUPE_PASS
-  meta.INST_COMBINE_PASS map("muxToOneHotMux": "1")
+  meta.INST_COMBINE_PASS map("muxToOneHotMux": "1", "muxToBitwise": "1")
 
   meta.ORDER_INSTRS_PASS  map("moveStoresBeforeLoads": "1")
   meta.PROCESS_LINEARIZE_PASS map("retainIODeps": "0", "retainInnerDeps": "0")
 
-  meta.INST_COMBINE_PASS map("muxToOneHotMux": "1")
+  meta.INST_COMBINE_PASS map("muxToOneHotMux": "1", "muxToBitwise": "1")
   meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS
   meta.SSA_CONSTRUCT_PASS
-  meta.INST_COMBINE_PASS map("muxToOneHotMux": "1")
+  meta.INST_COMBINE_PASS map("muxToOneHotMux": "1", "muxToBitwise": "1")
   meta.AGGRESSIVE_DEAD_CODE_ELIMINATION_PASS map("keepRegs": "NAMED")
 }
 
 FUNCTION_DEF %synthTechmap:func, :block {
+  meta.CHECK_PASS
+
   // lower everything
   meta.LOWER_OPS_PASS map(
     "lowerMultiInputAdd"     : "1",
@@ -248,11 +261,15 @@ FUNCTION_DEF %synthTechmap:func, :block {
     "lowerOneHotMux"         : "1",
   )
 
+  meta.CHECK_PASS
+
   meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS
   meta.INST_COMBINE_PASS
-    map("fuseCommutative": "0", "removeAssumes": "1", "boolExprSimplify": "0", "inferMuxs" : "0")
+    map("fuseCommutative": "0", "removeAssumes": "1", "boolExprSimplify": "0", "inferMuxs": "0", "muxToBitwise": "0")
   meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS
   meta.AGGRESSIVE_DEAD_CODE_ELIMINATION_PASS map("keepRegs": "NAMED")
+
+  meta.CHECK_PASS
 
   // AIG opt & techmap
   meta.AIG_CONSTRUCT_PASS
@@ -276,12 +293,14 @@ FUNCTION_DEF %synthTechmap:func, :block {
   meta.NETLIST_TO_PROC_PASS
 
   meta.INST_COMBINE_PASS
+    map("fuseCommutative": "0", "removeAssumes": "1", "boolExprSimplify": "0", "inferMuxs": "0", "muxToBitwise": "0")
   meta.CONSTANT_MAPPING_PASS
   meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS
   meta.INST_COMBINE_PASS
+    map("fuseCommutative": "0", "removeAssumes": "1", "boolExprSimplify": "0", "inferMuxs": "0", "muxToBitwise": "0")
   meta.AGGRESSIVE_DEAD_CODE_ELIMINATION_PASS map("keepRegs": "NAMED")
 
-  meta.PROC_TO_NETLIST_PASS
+  meta.PROC_TO_NETLIST_PASS map("keepRegs": "1")
 }
 
 

@@ -3,6 +3,7 @@
 #include "dyno/Constant.h"
 #include "dyno/Context.h"
 #include "dyno/IDImpl.h"
+#include "hw/HWPrinter.h"
 #include "hw/HWValue.h"
 #include "hw/IDs.h"
 #include "hw/LoadStore.h"
@@ -127,9 +128,13 @@ class LoopbackAnalysis {
   }
 
 public:
+  static constexpr const char *debugName = "LoopbackPartitionAnalysis";
+  static constexpr uint32_t debugID = 130; // todo: analysis debug ID assignment
+
   LoopbackPartition get(HWValue value, HWValue loopback) {
     stack.emplace_back(value, 0);
     SmallDenseMap<ObjRef<Wire>, LoopbackPartition> map;
+    retVal = {};
 
     while (!stack.empty()) {
       auto &[val, idx, acc] = stack.back();
@@ -138,7 +143,8 @@ public:
       if (auto asConst = val.dyn_as<ConstantRef>()) {
         // use loopback=nullref as wildcard for any constant (used for finding
         // reset values).
-        if (loopback == nullref) // return always-on loopback
+        if (loopback == nullref && !asConst.getIs4S())
+          // return always-on loopback
           FRAME_RET(nullref, true);
 
         if (auto loopbackConst = loopback.dyn_as<ConstantRef>()) {
@@ -154,6 +160,25 @@ public:
 
       auto wire = val.as<WireRef>();
       auto instr = wire.getDefI();
+
+      DYNO_DBG({
+        // print last return value first.
+        auto dumpVal = [](LoopbackPartition &val) {
+          for (auto f : val.frags) {
+            std::print(dbgs(), "  [{}+:{}]: ", f.dstAddr, f.len);
+            for (auto [en, p] : Range{f.enable}.zip(f.polarity)) {
+              std::print(dbgs(), "{}w{}, ", p ? "!" : "0", en.getObjID().num);
+            }
+            std::print(dbgs(), "\n");
+          }
+        };
+        dumpVal(retVal);
+
+        dumpInstr(instr, ctx, true, false);
+        std::print(dbgs(), "acc:\n");
+        dumpVal(stack.back().acc);
+        std::print(dbgs(), "rv:\n");
+      });
 
       if (auto it = map.find(wire); it != map.end()) {
         retVal = it.val();
