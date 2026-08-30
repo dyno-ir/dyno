@@ -102,13 +102,12 @@ FUNCTION_DEF %synthEarlyOpt:func, :block {
 
   // merge processes created during share
   meta.PROCESS_LINEARIZE_PASS map("retainIODeps": "0", "retainInnerDeps": "0")
-  // disable moveStoresBeforeLoads again if causes problems
-  meta.ORDER_INSTRS_PASS map("assertNoCircularDeps": "1", "moveStoresBeforeLoads": "0")
+  meta.ORDER_INSTRS_PASS map("assertNoCircularDeps": "1", "moveStoresBeforeLoads": "1")
   meta.SSA_CONSTRUCT_PASS
   meta.LOAD_COALESCE_PASS
   meta.INST_COMBINE_PASS
   meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS
-  meta.ORDER_INSTRS_PASS map("assertNoCircularDeps": "1", "moveStoresBeforeLoads": "0")
+  meta.ORDER_INSTRS_PASS map("assertNoCircularDeps": "1", "moveStoresBeforeLoads": "1")
   meta.AGGRESSIVE_DEAD_CODE_ELIMINATION_PASS map("keepRegs": "NAMED")
   meta.CHECK_PASS
 
@@ -200,9 +199,9 @@ FUNCTION_DEF %synthMemoryFFMuxHandling:func, :block {
 FUNCTION_DEF %synthLowerMemoryFF:func, :block {
   // load pre-parsed liberty
 
-  meta.PARSE_DYNO_PASS map("path": "xilinx/flipflops.dyno"/* "tools/dyno-opt/dyno-ir/sky130_fd_sc_hd.dyno"*/, "newModulesActive": "0")
+  meta.PARSE_DYNO_PASS map("path": /*"xilinx/flipflops.dyno"*/"tools/dyno-opt/dyno-ir/sky130_fd_sc_hd.dyno", "newModulesActive": "0")
   // load memories
-  meta.PARSE_DYNO_PASS map("path": "xilinx/memories.dyno" /*"tools/dyno-opt/dyno-ir/example_memories.dyno"*/, "newModulesActive": "0")
+  meta.PARSE_DYNO_PASS map("path": /*"xilinx/memories.dyno"*/ "tools/dyno-opt/dyno-ir/example_memories.dyno", "newModulesActive": "0")
   meta.POPULATE_INLINE_CACHES_PASS
 
   // map memories
