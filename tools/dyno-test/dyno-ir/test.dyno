@@ -847,7 +847,7 @@ TEST_CASE :string("test-reg-split"), :block, :block, :block {
   }
 }{
   meta.LOWER_OPS_PASS
-  meta.INST_COMBINE_PASS map("muxToOneHotMux": "1")
+  meta.INST_COMBINE_PASS map("muxToOneHotMux": "1", "muxToBitwise": "1")
   meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS
 
   meta.FLIP_FLOP_INFERENCE_PASS
