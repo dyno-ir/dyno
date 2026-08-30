@@ -7,6 +7,7 @@
 #include "hw/HWInstr.h"
 #include "hw/HWPrinter.h"
 #include "hw/IDs.h"
+#include "hw/analysis/RegisterValue.h"
 #include "op/IDs.h"
 #include "support/Debug.h"
 #include "support/ErrorRecovery.h"
@@ -21,7 +22,8 @@ public:
   FIELD(bool, dominance, true)                                                 \
   FIELD(bool, operandsDefined, true)                                           \
   FIELD(bool, danglingBlocks, false)                                           \
-  FIELD(bool, noLoops, false)
+  FIELD(bool, noLoops, false)                                                  \
+  FIELD(bool, multiDriven, false)
   CONFIG_STRUCT(CONFIG_STRUCT_LAMBDA)
 #undef CONFIG_STRUCT_LAMBDA
   Config config;
@@ -78,6 +80,50 @@ public:
     ((dbgs() << ts), ...);
     dbgs() << "\n\n";
     hasError = true;
+  }
+
+  struct MultiDrivenFragment : public GenericFragment {
+    bool isWritten = false;
+    bool *error = nullptr;
+
+    MultiDrivenFragment() = default;
+    MultiDrivenFragment(uint32_t dstAddr, uint32_t len, bool isWritten,
+                        bool *error)
+        : GenericFragment{dstAddr, len}, isWritten(isWritten), error(error) {}
+
+    bool overwrites(MultiDrivenFragment &) { return true; }
+    bool fuses(MultiDrivenFragment &) { return false; }
+    bool intersects(MultiDrivenFragment &) { return true; }
+    bool abstractEquals(const MultiDrivenFragment &) const { return false; }
+    MultiDrivenFragment intersect(MultiDrivenFragment &other) {
+      if (other.isWritten && error)
+        *error = true;
+      isWritten = true;
+      return *this;
+    }
+  };
+
+  void checkMultiDriven(ModuleIRef mod) {
+    for (auto reg : mod.regs()) {
+      auto numBits = reg.getNumBits();
+      if (!numBits)
+        continue;
+      bool errorFlag = false;
+      GenericPartitions<MultiDrivenFragment, 4> part{*numBits, false,
+                                                     &errorFlag};
+      for (auto use : reg.oref().uses()) {
+        auto instr = use.instr();
+        if (!instr.isOpc(HW_STORE, HW_STORE_DEFER))
+          continue;
+        auto store = instr.as<StoreIRef>();
+        auto [addr, len] = store.getConstAccessRange();
+        part.writeSingle(addr, len, true, &errorFlag);
+        if (errorFlag) {
+          error(reg, "register has overlapping stores (multi-driven)");
+          break;
+        }
+      }
+    }
   }
 
   void checkOperands(ModuleIRef mod) {
@@ -155,11 +201,11 @@ public:
         error(block, "dangling block");
   }
 
-  void checkNoLoops() {
-    for (auto instr : ctx.getStore<Instr>())
-      if (instr.isOpc(OP_FOR, OP_WHILE, OP_DO_WHILE)) {
-        error(instr, "illegal loop");
-      }
+  void checkNoLoops(ModuleIRef mod) {
+    for (auto instr : HierBlockRange{mod.block()}) {
+      if (instr.isOpc(OP_FOR, OP_WHILE, OP_DO_WHILE))
+        error(instr, "illegal loop (failed to unroll)");
+    }
   }
 
   void runOnModule(ModuleIRef mod) {
@@ -168,6 +214,10 @@ public:
     if (config.dominance)
       for (auto proc : mod.procs())
         checkWireDominance(proc);
+    if (config.multiDriven)
+      checkMultiDriven(mod);
+    if (config.noLoops)
+      checkNoLoops(mod);
   }
 
 public:
@@ -179,8 +229,6 @@ public:
     }
     if (config.danglingBlocks)
       checkNoDanglingBlocks();
-    if (config.noLoops)
-      checkNoLoops();
     if (hasError) {
       {
         std::ofstream str{"dump_error.dyno"};
