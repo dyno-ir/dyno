@@ -852,6 +852,8 @@ public:
   HWValue buildInsert(HWValue src, HWValue val, uint32_t baseAddr,
                       Ts... terms) {
     if (baseAddr == 0 && sizeof...(terms) == 0) {
+      if (val.getNumBits() == src.getNumBits())
+        return val;
       auto rv = buildInstr(HW_INSERT, true, src, val).defW();
       rv->numBits = src.getNumBits();
       return rv;
@@ -866,6 +868,8 @@ public:
   HWValue buildInsert(HWValue src, HWValue val, uint32_t baseAddr,
                       IsRange auto terms) {
     if (baseAddr == 0 && terms.empty()) {
+      if (val.getNumBits() == src.getNumBits())
+        return val;
       auto rv = buildInstr(HW_INSERT, true, src, val).defW();
       rv->numBits = src.getNumBits();
       return rv;

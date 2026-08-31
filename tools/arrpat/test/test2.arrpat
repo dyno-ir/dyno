@@ -847,28 +847,36 @@ match {
   HW_FLIP_FLOP_SRST $q, $clk, #1'd0, #1'd1, $other_rsts..., $d, #1'd1, $init
 }
 replace {
-  HW_FLIP_FLOP $q, $clk, $d, #1'd1, $other_rsts..., $init
+  HW_FLIP_FLOP_SRST $q, $clk, $d, #1'd1, $other_rsts..., $init
 }
 match {
   HW_FLIP_FLOP_SRST $q, $clk, #1'd1, #1'd1, $other_rsts..., $d, #1'd0, $init
 }
 replace {
   OP_NOT $d_inv:wire_like($d)
-  HW_FLIP_FLOP $q, $clk, $d_inv, #1'd1, $other_rsts..., $init
+  HW_FLIP_FLOP_SRST $q, $clk, $d_inv, #1'd1, $other_rsts..., $init
 }
 
 match {
   HW_FLIP_FLOP_SRST $q, $clk, #1'd0, #1'd1, $other_rsts..., $d, #1'd1
 }
 replace {
-  HW_FLIP_FLOP $q, $clk, $d, #1'd1, $other_rsts...
+  HW_FLIP_FLOP_SRST $q, $clk, $d, #1'd1, $other_rsts...
 }
 match {
   HW_FLIP_FLOP_SRST $q, $clk, #1'd1, #1'd1, $other_rsts..., $d, #1'd0
 }
 replace {
   OP_NOT $d_inv:wire_like($d)
-  HW_FLIP_FLOP $q, $clk, $d_inv, #1'd1, $other_rsts...
+  HW_FLIP_FLOP_SRST $q, $clk, $d_inv, #1'd1, $other_rsts...
+}
+
+// no resets is canon'd to regular flip flop
+match {
+  HW_FLIP_FLOP_SRST $q, $clk, $d, $en
+}
+replace {
+  HW_FLIP_FLOP $q, $clk, $d, $en
 }
 
 /*

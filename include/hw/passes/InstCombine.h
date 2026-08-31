@@ -149,20 +149,44 @@ private:
 #define replaceAllUsesWith static_assert(0, "use this->replaceUses")
 
   void replaceUse(OperandRef ref, HWValue newVal) {
-    assert(newVal.getNumBits() == ref->as<WireRef>().getNumBits());
-    knownBits.replaceAt(ref->as<WireRef>(), newVal);
-    bitAlias.replaceAt(ref->as<WireRef>(), newVal);
 
+    assert(newVal.getNumBits() == ref->as<HWValue>().getNumBits());
+    if (auto asWire = ref->dyn_as<WireRef>()) {
+      knownBits.replaceAt(asWire, newVal);
+      bitAlias.replaceAt(asWire, newVal);
+    }
     ref.replace(newVal);
     currentReplaced.emplace_back(ref);
 
-    auto instr = currentReplaced.back().instr();
+    auto instr = ref.instr();
     for (auto def : instr.defs()) {
       if (!def->is<HWValue>())
         continue;
       knownBits.recomputeAt(def->as<HWValue>());
       bitAlias.recomputeAt(def->as<HWValue>());
     }
+  }
+
+  OperandRef getLoopbackVal(LoopbackFrag &frag) {
+    auto loopbackEn = ctx.resolve(frag.instr).operand(frag.operandIdx);
+    assert(loopbackEn.instr().isOpc(HW_ONEHOT_MUX));
+    auto loopbackVal = loopbackEn + 1;
+    return loopbackVal;
+  }
+
+  void makeLoopbackUseDontCare(LoopbackFrag &frag) {
+    // replace loopback value with dont care in loopback MUX
+    // loopback makes sure this MUX is exclusively used by us, so safe.
+    auto loopbackEn = ctx.resolve(frag.instr).operand(frag.operandIdx);
+    assert(loopbackEn.instr().isOpc(HW_ONEHOT_MUX));
+    auto loopbackVal = loopbackEn + 1;
+    HWInstrBuilder build{ctx, loopbackEn.instr()};
+    // set bits that we handle via ff en or rst to x
+    auto oldVal = loopbackVal->as<HWValue>();
+    assert(frag.operandBitOffs + frag.len <= *oldVal.getNumBits());
+    auto newVal = build.buildInsert(oldVal, cbuild.undef(frag.len).get(),
+                                    frag.operandBitOffs);
+    replaceUse(loopbackVal, newVal);
   }
 
   PatBool findFlipFlopEnables(FlipFlopIRef instr) {
@@ -199,12 +223,12 @@ private:
           // assuming no initval/rst behavior.
           en = ConstantRef::fromBool(false);
         } else {
-          auto newEn =
-              build.buildOr(Range{frag}.transform([&](size_t, auto pair) {
-                auto ref = ctx.resolve(pair.first);
-                return pair.second ? build.buildNot(ref) : ref;
-              }));
+          auto newEn = build.buildOr(Range{frag}.tf([&](auto pair) {
+            auto ref = ctx.resolve(pair.first);
+            return pair.second ? build.buildNot(ref) : ref;
+          }));
           en = build.buildAnd(InitListRange{en, newEn});
+          makeLoopbackUseDontCare(frag);
         }
       }
 
@@ -242,25 +266,21 @@ private:
             [](auto frag) { return !frag || frag.size() == 0; }))
       return PAT_FALSE;
 
-    HWInstrBuilder build{ctx, instr};
+    HWInstrBuilderStack build{ctx, instr};
     OperandVec<HWValue> concat(ctx, 1, part.frags.size());
     concat.emplace_back(instr.q());
 
+    // First pass to extract reset values
     for (auto &frag : part.frags) {
       HWValue d = build.buildSplice(instr.d(), frag.len, frag.dstAddr);
       SmallVec<std::tuple<HWValue, HWValue>, 4> rsts(instr.rsts());
 
       if (frag && frag.size() != 0 /*todo: allow empty*/) {
-        // Loopback analysis does not return the found constant value. Recompute
-        // it based on en signals with local known bits.
-        KnownBitsAnalysis knownBits{ctx};
-        SmallVec<std::pair<ObjRef<Wire>, BigInt>, 4> assignments{
-            Range{frag}.transform([&](size_t, auto ref) {
-              return std::make_pair(ctx.resolve(ref.first),
-                                    BigInt::fromU32(ref.second, 1));
-            })};
-        auto rstVal = knownBits.getKnownBitsWith(instr.d(), assignments);
-        BigInt::rangeSelectOp4S(rstVal, rstVal, frag.dstAddr, frag.len);
+        auto loopbackVal = getLoopbackVal(frag);
+        auto rstVal = knownBits.getKnownBits(loopbackVal->as<HWValue>());
+        BigInt::rangeSelectOp4S(rstVal, rstVal, frag.operandBitOffs, frag.len);
+        assert(!rstVal.getIs4S() && "find reset logic bug");
+
         rsts.emplace_back(
             frag.size() == 0
                 ? ConstantRef::fromBool(true)
@@ -275,6 +295,13 @@ private:
                                      Range{rsts}, true);
       concat.emplace_back(val);
     }
+
+    // Second pass to make reset value constants 'x. Same frag might get used
+    // twice, so do this after reading reset values.
+    for (auto &frag : part.frags)
+      if (frag && frag.size() != 0 /*todo: allow empty*/)
+        makeLoopbackUseDontCare(frag);
+
     concat.others().do_reverse();
 
     instr.def().replace(FatDynObjRef<>{nullref});

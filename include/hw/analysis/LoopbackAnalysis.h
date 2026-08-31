@@ -10,6 +10,7 @@
 #include "hw/Wire.h"
 #include "hw/analysis/RegisterValue.h"
 #include "op/IDs.h"
+#include "support/Bits.h"
 #include "support/DenseMap.h"
 #include "support/DynBitSet.h"
 #include "support/RTTI.h"
@@ -27,6 +28,10 @@ public:
   uint32_t len;
   SmallVec<ObjRef<Wire>, 4> enable{invalid};
   DynBitSet<SmallVec<uint64_t, 1>> polarity;
+  // specific offset in operand of instr that creates loopback
+  ObjRef<Instr> instr = nullref;
+  uint32_t operandIdx = 0;
+  uint32_t operandBitOffs = 0;
 
   LoopbackFrag() = default;
   LoopbackFrag(uint32_t dstAddr, uint32_t len) : dstAddr(dstAddr), len(len) {
@@ -79,13 +84,22 @@ public:
   LoopbackPartition(GenericPartitions &&o) : GenericPartitions(std::move(o)) {}
   LoopbackPartition(const GenericPartitions &o) : GenericPartitions(o) {}
 
-  bool addConditionToLoopbackFrags(HWValue val, bool polarity) {
+  bool addConditionToLoopbackFrags(OperandRef val, bool polarity) {
+    assert(getLen() == *val.instr().def()->as<WireRef>().getNumBits());
     if (val.is<ConstantRef>() && val.as<ConstantRef>().valueEquals(0))
       return false;
     if (val.is<WireRef>())
       for (auto &frag : frags) {
         if (!frag)
           continue;
+        if (frag.size() == 0) {
+          // save operand in first instr so we can remove it when making
+          // loopback explicit
+          frag.operandBitOffs = frag.dstAddr;
+          frag.operandIdx = val.getNum();
+          frag.instr = val.instr();
+          assert(frag.len <= *val.instr().def()->as<WireRef>().getNumBits());
+        }
         frag.push_back(val.as<WireRef>(), polarity);
       }
     return true;
@@ -105,10 +119,10 @@ class LoopbackAnalysis {
   };
   LoopbackPartition retVal;
   SmallVec<Frame, 64> stack;
-  uint32_t addr = 0;
 
 #define FRAME_RET(...)                                                         \
   {                                                                            \
+    uses /= curUses;                                                           \
     retVal = {*val.getNumBits(), __VA_ARGS__};                                 \
     stack.pop_back();                                                          \
     continue;                                                                  \
@@ -122,6 +136,7 @@ class LoopbackAnalysis {
 
 #define FRAME_RET_ACC                                                          \
   {                                                                            \
+    uses /= curUses;                                                           \
     retVal = std::move(acc);                                                   \
     stack.pop_back();                                                          \
     break;                                                                     \
@@ -136,9 +151,16 @@ public:
     SmallDenseMap<ObjRef<Wire>, LoopbackPartition> map;
     retVal = {};
 
+    uint32_t addr = 0;
+    // we have to explicity track uses: multiple uses for bit addressing
+    // instrs are OK, but not for computational (MUX), else we duplicate
+    // real logic.
+    uint32_t uses = 1;
+
     while (!stack.empty()) {
       auto &[val, idx, acc] = stack.back();
       addr = 0;
+      uint32_t curUses = 1;
 
       if (auto asConst = val.dyn_as<ConstantRef>()) {
         // use loopback=nullref as wildcard for any constant (used for finding
@@ -164,6 +186,8 @@ public:
       DYNO_DBG({
         // print last return value first.
         auto dumpVal = [](LoopbackPartition &val) {
+          if (!val.frags.data())
+            return; // moved from
           for (auto f : val.frags) {
             std::print(dbgs(), "  [{}+:{}]: ", f.dstAddr, f.len);
             for (auto [en, p] : Range{f.enable}.zip(f.polarity)) {
@@ -184,6 +208,15 @@ public:
         retVal = it.val();
         stack.pop_back();
         continue;
+      }
+
+      // Track uses
+      curUses = wire.getNumUses();
+      if (idx == 0) {
+        if (auto product = mul_overflow<uint64_t>(uses, curUses))
+          uses = *product;
+        else
+          FRAME_RET();
       }
 
       switch (*instr.getDialectOpcode()) {
@@ -223,7 +256,7 @@ public:
         auto patBits = *instr.def()->as<WireRef>().getNumBits() -
                        *instr.other(0)->as<HWValue>().getNumBits();
 
-        retVal.append(patBits);
+        retVal.append(patBits); // todo: sign bit extend for sext
         stack.pop_back();
         break;
       }
@@ -267,11 +300,14 @@ public:
       }
 
       case *HW_ONEHOT_MUX: {
+        // we don't want to duplicate logic, bail on multi used mux
+        if (uses != 1)
+          FRAME_RET();
         if (idx == 0) // reset acc unconditionally
           acc = {*val.getNumBits()};
         if (idx != 0 && retVal.hasAnyLoopback()) {
           // add condition to loopback frags
-          auto cond = instr.other((idx - 1) * 2)->as<HWValue>();
+          auto cond = instr.other((idx - 1) * 2);
           if (auto asConst = cond.dyn_as<ConstantRef>()) {
 
             // give up if undef select
@@ -303,62 +339,6 @@ public:
         FRAME_CALL(nextVal)
       }
 
-        // AND/OR are important for single bit MUXs, gets very tricky however.
-        // We can't enable this currently as boolean opt isn't powerful enough
-        // to actually prune the loopback or reset path even once we extract the
-        // control signal. Thus no guaranteed forward progress.
-
-        // case *OP_AND:
-        // case *OP_OR: {
-        //   if (loopback != nullref) {
-        //     if (idx == 0) // reset acc unconditionally
-        //       acc = {*val.getNumBits()};
-
-        //     // check last, include in acc
-        //     if (idx != 0 && retVal.hasAnyLoopback()) {
-        //       unsigned i = idx - 1;
-        //       for (unsigned j = 0; j < instr.getNumOthers(); j++) {
-        //         if (i == j)
-        //           continue;
-        //         retVal.addConditionToLoopbackFrags(
-        //             isBooleanValue(instr.other(j)->as<HWValue>()),
-        //             instr.isOpc(OP_AND));
-        //       }
-        //       acc.write(retVal, 0, 0, acc.getLen());
-        //     }
-
-        //     // find candidate
-        //     unsigned i = idx;
-        //     for (; i < instr.getNumOthers(); i++) {
-        //       // check that all others are boolean-compatible
-        //       for (unsigned j = 0; j < instr.getNumOthers(); j++) {
-        //         if (i == j)
-        //           continue;
-        //         auto val = isBooleanValue(instr.other(j)->as<HWValue>());
-        //         if (!val || val.is<ConstantRef>())
-        //           goto next;
-        //       }
-        //       goto found;
-        //     next:
-        //     }
-        //     FRAME_RET_ACC;
-        //   found:
-
-        //     idx = i + 1;
-        //     FRAME_CALL(instr.other(i)->as<HWValue>())
-
-        //   } else {
-        //     // if we're looking for constants, check for short circuit
-        //     auto it = instr.others().find_if([](OperandRef op) {
-        //       auto val = isBooleanValue(op->template as<HWValue>());
-        //       return val && val.template is<WireRef>();
-        //     });
-        //     if (it == instr.other_end())
-        //       FRAME_RET();
-        //     FRAME_RET(it->as<WireRef>(), instr.isOpc(OP_OR));
-        //   }
-        // }
-
       default: {
         if (wire == loopback) // return always-on loopback
           FRAME_RET(nullref, true);
@@ -366,9 +346,11 @@ public:
       }
       }
 
+      uses /= curUses;
       map.insert(wire, retVal);
     }
 
+    assert(uses == 1);
     return retVal;
   }
 

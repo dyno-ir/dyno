@@ -1007,8 +1007,7 @@ template <typename Frag, size_t NumInline = 4> struct GenericPartitions {
       if constexpr (hasSrcAddr)
         it->srcAddr = itO->srcAddr + (srcAddr - itO->dstAddr);
 
-      if constexpr (hasSrcAddr)
-        srcAddr += pieceLen;
+      srcAddr += pieceLen;
       dstAddr += pieceLen;
       len -= pieceLen;
 

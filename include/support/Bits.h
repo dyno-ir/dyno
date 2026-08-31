@@ -6,6 +6,7 @@
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <type_traits>
 
 template <std::unsigned_integral T>
@@ -74,12 +75,19 @@ template <typename T> constexpr T round_up_div(T dividend, T divisor) {
 void report_fatal_error(const char *reason) __attribute__((noreturn));
 
 template <typename T>
-constexpr T checked_mul(T multiplicand, T multiplier,
-                        const char *message = "checked multiply overflow") {
+constexpr std::optional<T> mul_overflow(T multiplicand, T multiplier) {
   T out;
   if (__builtin_mul_overflow(multiplicand, multiplier, &out)) [[unlikely]]
-    report_fatal_error(message);
+    return std::nullopt;
   return out;
+}
+
+template <typename T>
+constexpr T checked_mul(T multiplicand, T multiplier,
+                        const char *message = "checked multiply overflow") {
+  if (auto val = mul_overflow(multiplicand, multiplier)) [[likely]]
+    return *val;
+  report_fatal_error(message);
 }
 
 template <typename T> constexpr T ceil_to_pow2(T x) {

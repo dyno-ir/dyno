@@ -192,8 +192,8 @@ FUNCTION_DEF %synthMemoryFFMuxHandling:func, :block {
   meta.TRIGGER_DEDUPE_PASS
   meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS
   meta.INST_COMBINE_PASS map("muxToOneHotMux": "1")
-  // meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS
-  // meta.INST_COMBINE_PASS map("muxToOneHotMux": "1", "findFlipFlopEnables": "1", "findFlipFlopSyncResets": "1")
+  meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS
+  meta.INST_COMBINE_PASS map("muxToOneHotMux": "1", "findFlipFlopEnables": "1", "findFlipFlopSyncResets": "1")
 }
 
 FUNCTION_DEF %synthLowerMemoryFF:func, :block {
@@ -211,8 +211,25 @@ FUNCTION_DEF %synthLowerMemoryFF:func, :block {
 
   // lower unmapped memories back to load/store (todo: lower before en)
   meta.LOWER_MEM_ACCESS_PASS
+  // lower insert/extract
+  meta.LOWER_OPS_PASS map(
+    "lowerMultiInputAdd"     : "1",
+    "lowerAddCompress"       : "0",
+    "lowerSimpleAdd"         : "0",
+    "lowerSub"               : "1",
+    "lowerMul"               : "1",
+    "lowerMultiInputBitwise" : "0",
+    "lowerEqualityICMP"      : "1",
+    "lowerOrderingICMP"      : "1",
+    "lowerWildcardCaseICMP"  : "0",
+    "lowerShift"             : "1",
+    "lowerInsert"            : "1",
+    "lowerExtract"           : "1",
+    "lowerOneHotMux"         : "0",
+  )
+  meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS
   // and map flip flops
-  meta.INST_COMBINE_PASS map("muxToOneHotMux": "1", "findFlipFlopEnables": "0", "findFlipFlopSyncResets": "0")
+  meta.INST_COMBINE_PASS map("muxToOneHotMux": "1", "findFlipFlopEnables": "1", "findFlipFlopSyncResets": "1")
   meta.FLIP_FLOP_INFERENCE_PASS
 
   meta.CHECK_PASS
