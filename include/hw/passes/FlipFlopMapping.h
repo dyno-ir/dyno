@@ -87,7 +87,7 @@ class FlipFlopMappingPass : public Pass<FlipFlopMappingPass> {
     }
     constexpr static uint32_t numConfigs() {
       uint32_t rv = 0;
-      for (uint32_t i = 0; i < (1ull << NUM_INDICES); i++) {
+      for (uint32_t i = 0; i < (1ull << uint32_t(NUM_INDICES)); i++) {
         if (valid(AbstractFF{uint16_t(i)}))
           rv++;
       }
