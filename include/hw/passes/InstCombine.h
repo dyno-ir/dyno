@@ -183,9 +183,9 @@ private:
     HWInstrBuilder build{ctx, loopbackEn.instr()};
     // set bits that we handle via ff en or rst to x
     auto oldVal = loopbackVal->as<HWValue>();
-    assert(frag.operandBitOffs + frag.len <= *oldVal.getNumBits());
-    auto newVal = build.buildInsert(oldVal, cbuild.undef(frag.len).get(),
-                                    frag.operandBitOffs);
+    assert(frag.srcAddr + frag.len <= *oldVal.getNumBits());
+    auto newVal =
+        build.buildInsert(oldVal, cbuild.undef(frag.len).get(), frag.srcAddr);
     replaceUse(loopbackVal, newVal);
   }
 
@@ -204,7 +204,9 @@ private:
     if (!load || !load.as<LoadIRef>().isFullReg())
       return false;
 
-    auto part = loopbackAnalysis.get(instr.d(), load.as<LoadIRef>().value());
+    auto part = loopbackAnalysis.get(
+        instr.d(),
+        load.as<LoadIRef>().value()); // todo: look thru assume on value
     if (Range{part.frags}.all(
             [](auto frag) { return !frag || frag.size() == 0; }))
       return false;
@@ -214,6 +216,11 @@ private:
     concat.emplace_back(instr.q());
 
     for (auto &frag : part.frags) {
+      HWValue fragInit =
+          instr.initValue()
+              ? build.buildSplice(instr.initValue(), frag.len, frag.dstAddr)
+              : nullref;
+
       HWValue d = build.buildSplice(instr.d(), frag.len, frag.dstAddr);
       HWValue en = instr.clkEnRaw();
 
@@ -232,7 +239,8 @@ private:
         }
       }
 
-      auto val = build.buildFlipFlop(instr.clk(), d, en, instr.rsts());
+      auto val = build.buildFlipFlop(instr.clk(), d, en, instr.rsts(),
+                                     instr.isOpc(HW_FLIP_FLOP_SRST), fragInit);
       concat.emplace_back(val);
     }
     concat.others().do_reverse();
@@ -272,13 +280,18 @@ private:
 
     // First pass to extract reset values
     for (auto &frag : part.frags) {
+      HWValue fragInit =
+          instr.initValue()
+              ? build.buildSplice(instr.initValue(), frag.len, frag.dstAddr)
+              : nullref;
+
       HWValue d = build.buildSplice(instr.d(), frag.len, frag.dstAddr);
       SmallVec<std::tuple<HWValue, HWValue>, 4> rsts(instr.rsts());
 
       if (frag && frag.size() != 0 /*todo: allow empty*/) {
         auto loopbackVal = getLoopbackVal(frag);
         auto rstVal = knownBits.getKnownBits(loopbackVal->as<HWValue>());
-        BigInt::rangeSelectOp4S(rstVal, rstVal, frag.operandBitOffs, frag.len);
+        BigInt::rangeSelectOp4S(rstVal, rstVal, frag.srcAddr, frag.len);
         assert(!rstVal.getIs4S() && "find reset logic bug");
 
         rsts.emplace_back(
@@ -292,7 +305,7 @@ private:
       }
 
       auto val = build.buildFlipFlop(instr.clk(), d, instr.clkEnRaw(),
-                                     Range{rsts}, true);
+                                     Range{rsts}, true, fragInit);
       concat.emplace_back(val);
     }
 
@@ -335,9 +348,10 @@ private:
 
     HWInstrBuilder build{ctx, instr};
     auto rebuild = [&](MutArrayRef<std::tuple<HWValue, HWValue>> rstVals) {
-      auto ib = build.buildInstrRaw(instr.getDialectOpcode(),
-                                    1 + FlipFlopIRef::numBaseOperands +
-                                        rstVals.size() * 2);
+      auto ib =
+          build.buildInstrRaw(instr.getDialectOpcode(),
+                              1 + FlipFlopIRef::numBaseOperands +
+                                  rstVals.size() * 2 + !!instr.initValue());
       ib.addRef(instr.def()->fat()).other();
       instr.def().replace(FatDynObjRef{nullref});
       ib.addRefs(instr.others()
@@ -346,6 +360,8 @@ private:
       Range{rstVals}.sort(compare);
       for (auto [rstEn, rstVal] : rstVals)
         ib.addRef(rstEn).addRef(rstVal);
+      if (instr.initValue())
+        ib.addRef(instr.initValue());
       deleteMatchedInstr(instr);
     };
 
@@ -713,6 +729,7 @@ private:
   }
 
   PatBool optimizeOneHotMux(InstrRef instr) {
+    auto defW = instr.def()->as<WireRef>();
     // hash to find duplicates
     SmallDenseMap<DynObjRef, SmallVec<uint32_t, 2>, 16> map;
     for (auto [sel, val] : Range{instr.others()}.pairwise()) {
@@ -720,7 +737,7 @@ private:
       auto known = knownBits.getKnownBits(sel->as<HWValue>());
       if (known.valueEquals(1)) {
         // found a one entry, remove the instr
-        replaceUses(instr.def(0)->as<WireRef>(), val->as<HWValue>());
+        replaceUses(defW, val->as<HWValue>());
         deleteMatchedInstr(instr);
         return PAT_TRUE;
       } else if (known.valueEquals(0)) {
@@ -743,8 +760,14 @@ private:
       entries.emplace_back(mergedSel, ctx.resolve(val));
     }
 
+    if (entries.empty()) {
+      replaceUses(defW, cbuild.undef(*defW.getNumBits()).get());
+      deleteMatchedInstr(instr);
+      return PAT_TRUE;
+    }
+
     HWValue newVal = build.buildOneHotMux(entries);
-    replaceUses(instr.def(0)->as<WireRef>(), newVal);
+    replaceUses(defW, newVal);
     deleteMatchedInstr(instr);
     return PAT_TRUE;
   }

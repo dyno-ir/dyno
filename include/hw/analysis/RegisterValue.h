@@ -833,8 +833,8 @@ template <typename Frag, size_t NumInline = 4> struct GenericPartitions {
       it->len = diff;
       ++it;
 
-      if constexpr (requires() { copy.srcAddr; }) {
-        copy.srcAddr += diff;
+      if constexpr (requires() { it->srcAddr; }) {
+        it->srcAddr += diff;
       }
       copy.len -= diff;
       copy.dstAddr += diff;
@@ -844,10 +844,11 @@ template <typename Frag, size_t NumInline = 4> struct GenericPartitions {
     }
 
     Frag *lastEqual = nullptr;
+    Frag frag{dstAddr, len, std::forward<Args>(args)...};
+
     // fully covered frags
     while (len != 0 && len >= it->len) {
       assert(it->dstAddr == dstAddr);
-      Frag frag{dstAddr, len, std::forward<Args>(args)...};
 
       // intersects: result frag depends on both, determined via intersect
       if (frag.intersects(*it)) {
@@ -878,7 +879,7 @@ template <typename Frag, size_t NumInline = 4> struct GenericPartitions {
         *it = frag;
         it->len = temp;
         if constexpr (requires() { it->srcAddr; }) {
-          it->srcAddr = dstAddr - originalDstAddr;
+          it->srcAddr += dstAddr - originalDstAddr;
         }
         dstAddr += it->len;
         len -= it->len;
@@ -915,6 +916,7 @@ template <typename Frag, size_t NumInline = 4> struct GenericPartitions {
         it->len -= len;
         if constexpr (requires() { it->srcAddr; }) {
           it->srcAddr += len;
+          frag.srcAddr += dstAddr - originalDstAddr;
         }
 
         it = frags.insert(it, frag);
@@ -994,18 +996,20 @@ template <typename Frag, size_t NumInline = 4> struct GenericPartitions {
       }
 
       auto oldDstLen = std::make_pair(it->dstAddr, it->len);
-      if (it->intersects(*itO)) {
+      bool fuses = itO->fuses(*it);
+      if (itO->intersects(*it)) {
         *it = it->intersect(*itO);
-      } else if (it->fuses(*itO)) {
+      } else if (fuses) {
         ; // new fuses into old, keep old
       } else {
-        assert(it->overwrites(*itO));
+        assert(itO->overwrites(*it));
         *it = *itO;
       }
       std::tie(it->dstAddr, it->len) = oldDstLen;
 
       if constexpr (hasSrcAddr)
-        it->srcAddr = itO->srcAddr + (srcAddr - itO->dstAddr);
+        if (!fuses) // keep old when fusing
+          it->srcAddr = itO->srcAddr + (srcAddr - itO->dstAddr);
 
       srcAddr += pieceLen;
       dstAddr += pieceLen;

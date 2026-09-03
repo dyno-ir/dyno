@@ -226,17 +226,23 @@ protected:
       : SmallVecImpl(arr, cap) {
     (*this) = o;
   };
+
+public:
   SmallVecImpl &operator=(const SmallVecImpl &o) {
     this->resize_no_init(o.size());
     std::uninitialized_copy(o.begin(), o.end(), this->begin());
     return *this;
   };
 
+protected:
   SmallVecImpl(T *arr, size_type cap, SmallVecImpl &&o)
       : SmallVecImpl<T>(arr, cap) {
     (*this).operator=(std::move(o));
   }
+
+public:
   SmallVecImpl &operator=(SmallVecImpl &&o) {
+    // todo: specialize same size POD data to memcpy (plus maybe set data nullptr)
     if (&o == this)
       return *this;
 
@@ -265,6 +271,7 @@ protected:
     return *this;
   }
 
+protected:
   void try_to_inline(T *inlinePtr, size_t inlineSize) {
     if (this->sz <= inlineSize && arr != inlinePtr) {
       std::move(begin(), end(), inlinePtr);

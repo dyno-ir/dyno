@@ -496,11 +496,16 @@ public:
         auto arg = getValue(argIt->as<HWValue>());
         switch (str[idx + 1]) {
         case 'c': {
-          if (arg.getIs4S()) {
-            // being strict, verilog just treats x as 0
-            report_fatal_error("%c: attempted to print unknown value: {}", arg);
+          // if (arg.getIs4S()) {
+          //   // being strict, verilog just treats x as 0
+          //   report_fatal_error("%c: attempted to print unknown value: {}",
+          //   arg);
+          // }
+          if (!arg.getIs4S())
+            std::print(os, "{}", (char)(arg).getExactVal());
+          else {
+            assert(arg == (arg & ~BigInt::unknownMask(arg)));
           }
-          std::print(os, "{}", (char)arg.getExactVal());
         } break;
         case 'x':
           BigInt::stream_hex_4s_vlog(os, arg);
@@ -681,6 +686,8 @@ public:
     case *HW_ONEHOT_MUX: {
       auto &val = wireVals[instr.def(0)->as<WireRef>()];
       bool found = false;
+      bool anyX = false;
+      // todo: decide on specific 4 state semantics for onehot mux
       for (auto [sel, caseVal] : instr.others().as<HWValue>().pairwise()) {
         auto selV = getValue(sel);
         assert(selV.getNumBits() == 1);
@@ -689,12 +696,40 @@ public:
             report_fatal_error("more than one select active on one hot mux");
           val = getValue(caseVal);
           found = true;
+        } else if (selV.allBitsUndef()) {
+          anyX = true;
         }
       }
 
-      if (!found)
-        val = PatBigInt::undef(*instr.def(0)->as<WireRef>().getNumBits());
+      if (found && !anyX) {
+        assert(val.getNumBits() != 0);
+        break;
+      }
 
+      if (!found && !anyX) {
+        val = PatBigInt::undef(*instr.def(0)->as<WireRef>().getNumBits());
+        break;
+      }
+
+      BigInt acc;
+      for (auto [sel, caseVal] : instr.others().as<HWValue>().pairwise()) {
+        auto selV = getValue(sel);
+        if (selV.valueEquals(0))
+          continue;
+
+        auto cv = getValue(caseVal);
+        if (acc.getNumBits() == 0) {
+          acc = cv;
+          continue;
+        }
+
+        BigInt mask = BigInt::bitsExactEqual4S(acc, cv);
+        mask |= PatBigInt::undef(mask.getNumBits());
+        BigInt::xnorOp4S(acc, acc, mask);
+      }
+
+      val = acc;
+      assert(val.getNumBits() != 0);
       break;
     }
 

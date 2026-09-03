@@ -47,6 +47,21 @@ public:
     return elements[ref.getObjID()];
   }
 
+  V *find(ObjRef<K> ref) {
+    if (inRange(ref)) {
+      auto &elem = elements[ref.getObjID()];
+      if constexpr (requires { static_cast<bool>(elem); }) {
+        if (static_cast<bool>(elem))
+          return &elem;
+      } else {
+        return &elem;
+      }
+    }
+    return nullptr;
+  }
+
+  const V *find(ObjRef<K> ref) const { const_cast<ObjMap *>(this)->find(ref); }
+
   value_reference get_ensure(ObjRef<K> ref) {
     ensure(ref);
     return this->operator[](ref);
