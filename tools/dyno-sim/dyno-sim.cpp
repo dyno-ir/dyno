@@ -7,6 +7,10 @@
 #include "dyno/Obj.h"
 #include "hw/HWAbstraction.h"
 #include "hw/HWContext.h"
+#include "hw/HWTypeIDs.h"
+#include "meta/MetaContext.h"
+#include "op/OpContext.h"
+#include "aig/AIGContext.h"
 #include "hw/HWPrinter.h"
 #include "hw/IDs.h"
 #include "hw/Register.h"
@@ -157,6 +161,20 @@ InstrRef createTopInstance(Context &ctx, ModuleIRef topLevelModule) {
 
 int main(int argc, char **argv) {
   Context ctx;
+  HWDialectContext hwContext;
+  CoreDialectContext coreContext;
+  MetaDialectContext metaContext;
+  OpDialectContext opContext;
+  AIGDialectContext aigContext;
+  TypeDialectContext typeContext;
+  ctx.registerDialect(coreContext);
+  ctx.registerDialect(hwContext);
+  ctx.registerDialect(opContext);
+  ctx.registerDialect(aigContext);
+  ctx.registerDialect(metaContext);
+  ctx.registerDialect(typeContext);
+  ctx.getCtx<TypeDialectContext>().baseTypeNames.registerDialect(
+      DIALECT_HW, hw::hwTypeDialectTypeNames);
 
   if (argc != 3) {
     fprintf(stderr, "usage: %s <dyno file> <cocotb lib>\n", argv[0]);

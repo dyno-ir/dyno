@@ -938,8 +938,7 @@ public:
       if (regResetValues.inRange(reg) && regResetValues[reg]) {
         regVals[reg] = ctx.getStore<Constant>().resolve(regResetValues[reg]);
       } else if (reg.getNumBits())
-        regVals[reg] =
-            PatBigInt::fromFourState(FourState::S0, *reg.getNumBits());
+        regVals[reg] = PatBigInt::undef(*reg.getNumBits());
     }
 
     for (auto trigger : ctx.getStore<Trigger>()) {
@@ -1012,13 +1011,16 @@ public:
         continue;
       auto names = ctx.getCtx<HWDialectContext>().regNameInfo.getNames(reg);
       SmallVec<const char *, 16> namesVec(names);
-      std::string numericName = "r" + std::to_string(reg.getObjID());
-      namesVec.emplace_back(numericName.c_str());
+      std::string numericName;
+      if (namesVec.empty()) {
+        numericName = "r" + std::to_string(reg.getObjID());
+        namesVec.emplace_back(numericName.c_str());
+      }
 
       auto regType =
           ctx.getCtx<HWDialectContext>().regTypeInfo.getType(ctx, ref);
       fstWriter->createVar(reg, regType, RegWireFSTWriter::VarDir::INPUT,
-                           *reg.getNumBits(), namesVec.front());
+                           *reg.getNumBits(), Range{namesVec});
     }
 #ifdef DUMP_WIRES
     for (auto [ref, val] : wireVals) {
@@ -1030,7 +1032,7 @@ public:
         continue;
       auto name = std::string("w") + std::to_string(wire.getObjID().num);
       fstWriter->createVar(wire, nullref, RegWireFSTWriter::VarDir::INPUT,
-                           *wire.getNumBits(), name.c_str());
+                           *wire.getNumBits(), InitListRange{name.c_str()});
     }
 #endif
 
