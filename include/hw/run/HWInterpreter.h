@@ -1,4 +1,6 @@
 #pragma once
+#include "hw/Pointer.h"
+#include "hw/passes/DumpPass.h"
 #include "op/StringObj.h"
 #ifdef ENABLE_FST
 #include "../../../tools/dyno-sim/include/FST.h"
@@ -16,6 +18,7 @@
 #include "op/IDs.h"
 #include "op/StructuredControlFlow.h"
 #include "support/Debug.h"
+#include <algorithm>
 #include <cassert>
 #include <optional>
 
@@ -38,7 +41,30 @@ public:
   ObjMapVec<Wire, BigInt> wireVals;
   ObjMapVec<Register, BigInt> regVals;
   SmallDenseSet<ObjRef<Instr>, 16> evalSet;
-  SmallVec<ProcessIRef, 16> evalStack;
+  struct EvalStack {
+    SmallVec<ProcessIRef, 16> vec;
+    Context &ctx;
+    EvalStack(Context &ctx) : ctx(ctx) {}
+    static bool less(ProcessIRef a, ProcessIRef b, Context &ctx) {
+      return ctx.getCFG()[a].getPos() > ctx.getCFG()[b].getPos();
+    }
+    void push(ProcessIRef proc) {
+      vec.push_back(proc);
+      std::push_heap(vec.begin(), vec.end(), [&](ProcessIRef a, ProcessIRef b) {
+        return less(a, b, ctx);
+      });
+    }
+    ProcessIRef pop() {
+      std::pop_heap(vec.begin(), vec.end(), [&](ProcessIRef a, ProcessIRef b) {
+        return less(a, b, ctx);
+      });
+      auto proc = vec.back();
+      vec.pop_back();
+      return proc;
+    }
+    bool empty() const { return vec.empty(); }
+  };
+  EvalStack evalStack;
   struct DeferredStore {
     StoreIRef store;
     uint32_t addr;
@@ -115,16 +141,10 @@ private:
             });
 
     SmallVec<ProcessIRef, 64> usesVec(uses);
-    if (module.block().isSorted()) {
-      Range{usesVec}.sort([&](InstrRef lhs, InstrRef rhs) {
-        return ctx.getCFG()[lhs].getPos() > ctx.getCFG()[rhs].getPos();
-      });
-    }
-
     for (auto proc : usesVec) {
       auto [found, it] = evalSet.findOrInsert(proc);
       if (!found) {
-        evalStack.emplace_back(proc);
+        evalStack.push(proc);
       }
     }
   }
@@ -165,10 +185,14 @@ private:
         Func);
   }
 
-  std::optional<uint32_t> evalAddress(OperandRef op) {
-    if (op == op.instr().end())
+  std::optional<uint32_t> evalAddress(HWAddress hwAddr) {
+    if (!hwAddr)
       return 0;
-    auto base = op->as<ConstantRef>();
+    if (auto asConst = hwAddr.dyn_as<ConstantRef>())
+      return asConst.getExactVal();
+    auto instr = hwAddr.as<PointerRef>().getSingleDef()->instr();
+    auto op = *instr.other_begin();
+    auto base = op.as<ConstantRef>();
     uint32_t addr = base.getExactVal();
 
     while ((op + 1) != op.instr().end()) {
@@ -237,6 +261,35 @@ public:
       FOR_OP_ALL_COMPARE_OPS(LAMBDA)
 #undef LAMBDA
 
+    case *HW_ADD_CARRY: {
+      auto &val = wireVals[instr.def(0)->as<WireRef>()];
+      val = getValue(instr.other_end()[-1]->as<HWValue>());
+      BigInt::resizeOp4S(val, val, *instr.def()->as<WireRef>().getNumBits());
+      BigInt::reduce(
+          val,
+          instr.others().drop_back().transform([&](size_t, OperandRef ref) {
+            return getValue(ref->as<HWValue>());
+          }),
+          BigInt::addOp4S<BigInt, GenericBigIntRef>);
+      break;
+    }
+    case *HW_ADD_COMPRESS: {
+      auto &sum = wireVals[instr.def(0)->as<WireRef>()];
+      auto &carry = wireVals[instr.def(1)->as<WireRef>()];
+
+      auto a = getValue(instr.other(0)->as<HWValue>());
+      auto b = getValue(instr.other(1)->as<HWValue>());
+      auto c = getValue(instr.other(2)->as<HWValue>());
+
+      sum = a;
+      sum ^= b;
+      sum ^= c;
+
+      carry = ((a & b) | (b & c) | (a & c)) << 1;
+
+      break;
+    }
+
     case *HW_CONCAT: {
       bool first = true;
       auto &val = wireVals[instr.def(0)->as<WireRef>()];
@@ -254,7 +307,7 @@ public:
     case *HW_REPEAT: {
       auto &val = wireVals[instr.def(0)->as<WireRef>()];
       auto cnt = *instr.def(0)->as<WireRef>().getNumBits() /
-                 *instr.other(0)->as<WireRef>().getNumBits();
+                 *instr.other(0)->as<HWValue>().getNumBits();
       BigInt::repeatOp4S(val, getValue(instr.other(0)->as<HWValue>()), cnt);
       assert(val.getNumBits() == instr.def(0)->as<WireRef>().getNumBits());
       break;
@@ -265,7 +318,7 @@ public:
       auto outW = splice.out()->as<WireRef>();
       auto &out = wireVals[outW];
       auto in = getValue(splice.in()->as<HWValue>());
-      auto addr = evalAddress(splice.base());
+      auto addr = evalAddress(splice.addr());
       if (!addr)
         out = PatBigInt::undef(splice.getLen());
       else
@@ -279,7 +332,7 @@ public:
       auto base = getValue(insert.in()->as<HWValue>());
       auto val = getValue(insert.val()->as<HWValue>());
 
-      auto addr = evalAddress(insert.base());
+      auto addr = evalAddress(insert.addr());
 
       if (!addr) {
         if (!config.undefAddressInsertIsNOP)
@@ -322,7 +375,7 @@ public:
 
     case *HW_STORE_DEFER: {
       auto store = instr.as<StoreIRef>();
-      auto addr = evalAddress(store.base());
+      auto addr = evalAddress(store.addr());
 
       TriggerIRef trig = store.trigger();
       if (!trig) {
@@ -342,7 +395,7 @@ public:
     case *HW_STORE: {
       auto store = instr.as<StoreIRef>();
       auto val = getValue(store.value());
-      runStore(store.reg().iref(), val, *evalAddress(store.base()));
+      runStore(store.reg().iref(), val, *evalAddress(store.addr()));
       break;
     }
 
@@ -358,7 +411,7 @@ public:
 
         break;
       }
-      auto addr = evalAddress(load.base());
+      auto addr = evalAddress(load.addr());
       if (!addr) {
         val = PatBigInt::undef(load.getLen());
         break;
@@ -442,9 +495,18 @@ public:
 
         auto arg = getValue(argIt->as<HWValue>());
         switch (str[idx + 1]) {
-        case 'c':
-          std::print(os, "{}", (char)arg.getExactVal());
-          break;
+        case 'c': {
+          // if (arg.getIs4S()) {
+          //   // being strict, verilog just treats x as 0
+          //   report_fatal_error("%c: attempted to print unknown value: {}",
+          //   arg);
+          // }
+          if (!arg.getIs4S())
+            std::print(os, "{}", (char)(arg).getExactVal());
+          else {
+            assert(arg == (arg & ~BigInt::unknownMask(arg)));
+          }
+        } break;
         case 'x':
           BigInt::stream_hex_4s_vlog(os, arg);
           break;
@@ -624,6 +686,8 @@ public:
     case *HW_ONEHOT_MUX: {
       auto &val = wireVals[instr.def(0)->as<WireRef>()];
       bool found = false;
+      bool anyX = false;
+      // todo: decide on specific 4 state semantics for onehot mux
       for (auto [sel, caseVal] : instr.others().as<HWValue>().pairwise()) {
         auto selV = getValue(sel);
         assert(selV.getNumBits() == 1);
@@ -632,14 +696,82 @@ public:
             report_fatal_error("more than one select active on one hot mux");
           val = getValue(caseVal);
           found = true;
+        } else if (selV.allBitsUndef()) {
+          anyX = true;
         }
       }
 
-      if (!found)
-        val = PatBigInt::undef(*instr.def(0)->as<WireRef>().getNumBits());
+      if (found && !anyX) {
+        assert(val.getNumBits() != 0);
+        break;
+      }
 
+      if (!found && !anyX) {
+        val = PatBigInt::undef(*instr.def(0)->as<WireRef>().getNumBits());
+        break;
+      }
+
+      BigInt acc;
+      for (auto [sel, caseVal] : instr.others().as<HWValue>().pairwise()) {
+        auto selV = getValue(sel);
+        if (selV.valueEquals(0))
+          continue;
+
+        auto cv = getValue(caseVal);
+        if (acc.getNumBits() == 0) {
+          acc = cv;
+          continue;
+        }
+
+        BigInt mask = BigInt::bitsExactEqual4S(acc, cv);
+        mask |= PatBigInt::undef(mask.getNumBits());
+        BigInt::xnorOp4S(acc, acc, mask);
+      }
+
+      val = acc;
+      assert(val.getNumBits() != 0);
       break;
     }
+
+    case *HW_LUT: {
+      auto &out = wireVals[instr.def(0)->as<WireRef>()];
+      auto table = instr.other(0)->as<ConstantRef>();
+
+      uint32_t fixed = 0;
+      uint32_t free = 0;
+
+      for (auto [i, other] :
+           instr.others().drop_front().reverse().enumerate()) {
+        auto val = getValue(other->as<HWValue>());
+        if (val.valueEquals(1))
+          fixed |= 1ULL << i;
+        else if (val.allBitsUndef())
+          free |= 1ULL << i;
+      }
+
+      std::optional<FourState> val = std::nullopt;
+
+      uint32_t curFree = 0;
+      do {
+        uint32_t index = curFree | fixed;
+
+        auto entry = table.getBit(index);
+        if (val && *val != entry) {
+          val = FourState::SX;
+          break;
+        }
+        val = entry;
+
+        curFree = (curFree - free) & free;
+      } while (curFree != 0);
+
+      out = ConstantRef::fromFourState(*val);
+      break;
+    }
+
+    // todo: currently still executed in use instructions
+    case *HW_GEP:
+      break;
 
     default: {
       dumpInstr(instr);
@@ -648,13 +780,15 @@ public:
     }
 
 #ifdef ENABLE_FST
-    // if (fstWriter)
-    //   for (auto def : instr.defs()) {
-    //     if (def->is<WireRef>()) {
-    //       fstWriter->updateValue(def->as<WireRef>(),
-    //                              wireVals[def->as<WireRef>()]);
-    //     }
-    //   }
+#ifdef DUMP_WIRES
+    if (fstWriter)
+      for (auto def : instr.defs()) {
+        if (def->is<WireRef>()) {
+          fstWriter->updateValue(def->as<WireRef>(),
+                                 wireVals[def->as<WireRef>()]);
+        }
+      }
+#endif
 #endif
   }
 
@@ -673,7 +807,7 @@ public:
         print.printInstr(instr, true, false);
       }
 
-      bool debug = false;
+      bool debug = 0;
       if (debug) {
         for (auto other : instr.others()) {
           if (!other->is<WireRef>())
@@ -734,7 +868,7 @@ public:
   void evalActive() {
     // active
     while (!evalStack.empty()) {
-      auto ref = evalStack.pop_back_val();
+      auto ref = evalStack.pop();
       evalSet.erase(evalSet.find(ref));
       evalProc(ref);
     }
@@ -773,7 +907,7 @@ public:
       if (!proc.isOpc(HW_COMB_PROCESS_DEF, HW_NETLIST_PROCESS_DEF))
         continue;
       evalSet.insert(proc);
-      evalStack.emplace_back(proc);
+      evalStack.push(proc);
     }
     eval();
   }
@@ -785,7 +919,7 @@ public:
       if (!proc.isOpc(HW_INIT_PROCESS_DEF))
         continue;
       evalSet.insert(proc);
-      evalStack.emplace_back(proc);
+      evalStack.push(proc);
     }
     eval();
     runState = RunState::MAIN;
@@ -801,11 +935,10 @@ public:
     auto &regResetValues = ctx.getCtx<HWDialectContext>().regResetValue;
 
     for (auto reg : ctx.getStore<Register>()) {
-      if (regResetValues.inRange(reg) && regResetValues[reg])
+      if (regResetValues.inRange(reg) && regResetValues[reg]) {
         regVals[reg] = ctx.getStore<Constant>().resolve(regResetValues[reg]);
-      else if (reg.getNumBits())
-        regVals[reg] =
-            PatBigInt::fromFourState(FourState::SX, *reg.getNumBits());
+      } else if (reg.getNumBits())
+        regVals[reg] = PatBigInt::undef(*reg.getNumBits());
     }
 
     for (auto trigger : ctx.getStore<Trigger>()) {
@@ -878,26 +1011,30 @@ public:
         continue;
       auto names = ctx.getCtx<HWDialectContext>().regNameInfo.getNames(reg);
       SmallVec<const char *, 16> namesVec(names);
-      std::string numericName = "r" + std::to_string(reg.getObjID());
-      namesVec.emplace_back(numericName.c_str());
+      std::string numericName;
+      if (namesVec.empty()) {
+        numericName = "r" + std::to_string(reg.getObjID());
+        namesVec.emplace_back(numericName.c_str());
+      }
 
       auto regType =
           ctx.getCtx<HWDialectContext>().regTypeInfo.getType(ctx, ref);
       fstWriter->createVar(reg, regType, RegWireFSTWriter::VarDir::INPUT,
-                           *reg.getNumBits(), namesVec.front());
+                           *reg.getNumBits(), Range{namesVec});
     }
-
-    // for (auto [ref, val] : wireVals) {
-    //   if (!ctx.getStore<Wire>().exists(ref))
-    //     continue;
-    //   auto wire = ctx.getStore<Wire>().resolve(ref);
-    //   if (!wire.hasSingleDef() ||
-    //       HWInstrRef{wire.getDefI()}.parentMod(ctx) != module)
-    //     continue;
-    //   auto name = std::string("w") + std::to_string(wire.getObjID().num);
-    //   fstWriter->createVar(wire, nullref, RegWireFSTWriter::VarDir::INPUT,
-    //                        *wire.getNumBits(), name.c_str());
-    // }
+#ifdef DUMP_WIRES
+    for (auto [ref, val] : wireVals) {
+      if (!ctx.getStore<Wire>().exists(ref))
+        continue;
+      auto wire = ctx.getStore<Wire>().resolve(ref);
+      if (!wire.hasSingleDef() ||
+          HWInstrRef{wire.getDefI()}.parentMod(ctx) != module)
+        continue;
+      auto name = std::string("w") + std::to_string(wire.getObjID().num);
+      fstWriter->createVar(wire, nullref, RegWireFSTWriter::VarDir::INPUT,
+                           *wire.getNumBits(), InitListRange{name.c_str()});
+    }
+#endif
 
     fstWriter->endDefinitions();
 
@@ -910,17 +1047,19 @@ public:
         continue;
       fstWriter->updateValue(reg, regVals[reg]);
     }
-    // for (auto [ref, val] : wireVals) {
-    //   if (!ctx.getStore<Wire>().exists(ref))
-    //     continue;
-    //   auto wire = ctx.getStore<Wire>().resolve(ref);
-    //   if (!wire.hasSingleDef() ||
-    //       HWInstrRef{wire.getDefI()}.parentMod(ctx) != module)
-    //     continue;
-    //   fstWriter->updateValue(wire, wireVals[wire].getNumBits() == 0
-    //                                    ? PatBigInt::undef(*wire.getNumBits())
-    //                                    : wireVals[wire]);
-    // }
+#ifdef DUMP_WIRES
+    for (auto [ref, val] : wireVals) {
+      if (!ctx.getStore<Wire>().exists(ref))
+        continue;
+      auto wire = ctx.getStore<Wire>().resolve(ref);
+      if (!wire.hasSingleDef() ||
+          HWInstrRef{wire.getDefI()}.parentMod(ctx) != module)
+        continue;
+      fstWriter->updateValue(wire, wireVals[wire].getNumBits() == 0
+                                       ? PatBigInt::undef(*wire.getNumBits())
+                                       : wireVals[wire]);
+    }
+#endif
   }
 #endif
 
@@ -934,6 +1073,8 @@ public:
 public:
   HWInterpreter(Context &ctx, ModuleIRef module, std::ostream &os,
                 std::ostream &errs)
-      : ctx(ctx), module(module), os(os), errs(errs) {}
+      : ctx(ctx), module(module), os(os), errs(errs), evalStack(ctx) {
+    module.block().sort();
+  }
 }; // namespace dyno
 }; // namespace dyno

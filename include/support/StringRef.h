@@ -19,10 +19,10 @@ public:
   using pointer = const char *;
   using reference = const char &;
 
-  operator ArrayRef<char>() { return {self().data(), self().size()}; }
-  operator Range<const char *>() { return {self().begin(), self().end()}; }
-  operator std::string_view() { return {self().data(), self().size()}; }
-  operator std::string() { return {self().data(), self().size()}; }
+  operator ArrayRef<char>() const { return {cself().data(), cself().size()}; }
+  operator Range<const char *>() const { return {cself().begin(), cself().end()}; }
+  operator std::string_view() const { return {cself().data(), cself().size()}; }
+  operator std::string() const { return {cself().data(), cself().size()}; }
 
   constexpr Derived substr(size_t pos, size_t n) const {
     return Derived{cself().begin() + pos, cself().begin() + pos + n};

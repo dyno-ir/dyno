@@ -19,7 +19,8 @@ public:
   FIELD(bool, exhaustive, false)                                               \
   FIELD(bool, relaxXZ, false)                                                  \
   FIELD(bool, swapTestAndModel, false)                                         \
-  FIELD(bool, trace, false)
+  FIELD(bool, trace, false)                                                    \
+  FIELD(bool, inputXZ, false)
   CONFIG_STRUCT(CONFIG_STRUCT_LAMBDA)
 #undef CONFIG_STRUCT_LAMBDA
   Config config;
@@ -106,7 +107,10 @@ private:
           }
         } else {
           auto &val = modelInterp.getReg(modelIn);
-          val.randomize(rand);
+          if (config.inputXZ)
+            val.randomize4S(rand);
+          else
+            val.randomize(rand);
           if (config.trace) {
             val.toStream(dbgs());
             dbgs() << " -> ";

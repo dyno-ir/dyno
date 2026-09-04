@@ -125,7 +125,7 @@ private:
   }
   HWValue findClockEnable2(RegisterIRef q, StoreIRef store) {
     if (isQLoad(q, store.value().as<HWValue>()))
-      return ConstantRef::fromU32(1);
+      return ConstantRef::fromBool(true);
     if (store.value().is<ConstantRef>())
       return nullref;
     auto wire = store.value().as<WireRef>();
@@ -177,8 +177,10 @@ private:
     build.setInsertPoint(module.regs_end());
 
     // assume ranges lowered
-    assert(storeI.isFullReg() && "range not lowered?");
-    assert(storeI.hasTrigger() && "no trigger?");
+    if (!storeI.isFullReg())
+      report_fatal_error("store range not lowered?");
+    if (!storeI.hasTrigger())
+      report_fatal_error("store has no trigger, did seqtocomb run?");
     auto trigger = storeI.trigger().oref();
     if (trigger->size() > 3)
       report_fatal_error("too many sensitivities on flip flop");
@@ -201,6 +203,7 @@ private:
     };
 
     HWValue clkEnVal = findClockEnable2(storeI.reg().iref(), storeI);
+    assert(!clkEnVal || clkEnVal.getNumBits() == 1);
 
     build.pushInsertPoint(storeI);
     HWValue rstVal;
@@ -222,25 +225,22 @@ private:
       rstVal = build.buildLoad(rstReg.first);
       if (!rstReg.second)
         rstVal = build.buildNot(rstVal);
-
-      // dValue = build.buildAssume(dValue, rstValInv);
     } else
       clkReg = get(0);
-
-    // assume information is encoded in ff itself
-    // if (clkEnVal) {
-    //   if (hasReset)
-    //     clkEnVal = build.buildAssume(clkEnVal, rstValInv);
-    //   dValue = build.buildAssume(dValue, build.buildNot(clkEnVal));
-    // }
 
     HWValue clkVal = build.buildLoad(clkReg.first);
     if (!clkReg.second)
       clkVal = build.buildNot(clkVal);
 
+    auto &regResetValue = ctx.getCtx<HWDialectContext>().regResetValue;
+    HWValue initVal = nullref;
+    if (auto val = regResetValue.find(storeI.reg()))
+      initVal = ctx.resolve(*val);
+
     WireRef qWire = ctx.getStore<Wire>().create(dValue.getNumBits());
 
-    auto ib = build.buildInstrRaw(HW_FLIP_FLOP, 4 + hasReset * 2);
+    auto ib = build.buildInstrRaw(HW_FLIP_FLOP,
+                                  4 + hasReset * 2 + !!initVal);
     build.pushInsertPoint(ib.instr());
     ib.addRef(qWire).other().addRef(clkVal).addRef(dValue);
 
@@ -248,6 +248,9 @@ private:
 
     if (hasReset)
       ib.addRef(rstVal).addRef(resetValue);
+
+    if (initVal)
+      ib.addRef(initVal);
 
     build.popInsertPoint();
     build.buildStore(storeI.reg(), qWire);

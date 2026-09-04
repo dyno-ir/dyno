@@ -12,6 +12,7 @@
 #include <tuple>
 #include <type_traits>
 #include <utility>
+#include <variant>
 
 template <typename It> class Range;
 
@@ -32,9 +33,8 @@ private:
   derived &self() { return *static_cast<derived *>(this); }
   const derived &cself() const { return *static_cast<const derived *>(this); }
 
-  struct Empty {};
   using difference_type_safe =
-      std::conditional_t<isRandom, difference_type, Empty>;
+      std::conditional_t<isRandom, difference_type, std::monostate>;
 
 public:
   derived &operator++()
@@ -138,7 +138,7 @@ public:
   }
 
 private:
-  T it;
+  T it{};
 };
 
 inline auto make_earlyincr_range(std::ranges::forward_range auto &&rg) {
@@ -146,7 +146,7 @@ inline auto make_earlyincr_range(std::ranges::forward_range auto &&rg) {
 }
 
 template <typename T> class deref_iterator {
-  T it;
+  T it{};
 
 public:
   using iterator_category = std::forward_iterator_tag;
@@ -185,7 +185,7 @@ class no_deref_iterator
     : public base_iterator<no_deref_iterator<T>,
                            typename std::iterator_traits<T>::iterator_category,
                            typename std::iterator_traits<T>::difference_type> {
-  T it;
+  T it{};
 
 public:
   using iterator_category = typename std::iterator_traits<T>::iterator_category;
@@ -247,7 +247,7 @@ template <std::integral T>
 class integral_iterator : public base_iterator<integral_iterator<T>,
                                                std::random_access_iterator_tag,
                                                std::make_signed_t<T>> {
-  T it;
+  T it{};
 
 public:
   using iterator_category = std::random_access_iterator_tag;
@@ -282,7 +282,7 @@ class transform_iterator
     : public base_iterator<transform_iterator<T, TransformT>,
                            typename std::iterator_traits<T>::iterator_category,
                            typename std::iterator_traits<T>::difference_type> {
-  T it;
+  T it{};
   size_t i;
   TransformT transformF;
 
@@ -361,8 +361,88 @@ public:
   }
 };
 
+template <typename T, typename TransformT>
+class transform_iterator_noindex
+    : public base_iterator<transform_iterator_noindex<T, TransformT>,
+                           typename std::iterator_traits<T>::iterator_category,
+                           typename std::iterator_traits<T>::difference_type> {
+  T it{};
+  TransformT transformF;
+
+public:
+  using iterator_category = std::iterator_traits<T>::iterator_category;
+  using reference = decltype(transformF(*it));
+  using value_type = std::remove_cvref_t<reference>;
+  using pointer = value_type *;
+  using difference_type = std::iterator_traits<T>::difference_type;
+
+private:
+  static constexpr bool isRandom =
+      std::is_same_v<iterator_category, std::random_access_iterator_tag>;
+  static constexpr bool isBidir =
+      std::is_same_v<iterator_category, std::bidirectional_iterator_tag> ||
+      isRandom;
+
+public:
+  transform_iterator_noindex()
+    requires std::is_default_constructible_v<TransformT>
+  = default;
+
+  transform_iterator_noindex(T it)
+    requires std::is_default_constructible_v<TransformT>
+      : it(it) {}
+
+  transform_iterator_noindex(T it, TransformT transformF)
+      : it(it), transformF(transformF) {}
+
+  auto operator*() const { return transformF(*it); }
+  auto operator*() { return transformF(*it); }
+
+  transform_iterator_noindex &operator++() {
+    ++it;
+    return *this;
+  }
+  // for some reason the base_iterator version can't be resolved
+  transform_iterator_noindex operator++(int) {
+    transform_iterator_noindex tmp(*this);
+    ++(*this);
+    return tmp;
+  }
+
+  transform_iterator_noindex &operator--()
+    requires(isBidir)
+  {
+    --it;
+    return *this;
+  }
+  transform_iterator_noindex &
+  operator+=(std::conditional_t<isRandom, difference_type, int> n)
+    requires(isRandom)
+  {
+    it += n;
+    return *this;
+  }
+
+  difference_type operator-(const transform_iterator_noindex &o)
+    requires(isRandom)
+  {
+    return it - o.it;
+  }
+
+  friend bool operator==(const transform_iterator_noindex &a,
+                         const transform_iterator_noindex &b) {
+    return a.it == b.it;
+  }
+  friend auto operator<=>(const transform_iterator_noindex &a,
+                          const transform_iterator_noindex &b)
+    requires(isRandom)
+  {
+    return a.it <=> b.it;
+  }
+};
+
 template <typename T> class enumerate_iterator {
-  T it;
+  T it{};
   size_t i;
 
 public:
@@ -401,7 +481,7 @@ public:
 };
 
 template <typename T, typename U> class zip_iterator {
-  T it;
+  T it{};
   U it2;
 
 public:
@@ -411,41 +491,43 @@ public:
   using reference = value_type &;
   using difference_type = std::iterator_traits<T>::difference_type;
 
-  zip_iterator() = default;
-  zip_iterator(T it, U it2) : it(it), it2(it2) {}
+  constexpr zip_iterator() = default;
+  constexpr zip_iterator(T it, U it2) : it(it), it2(it2) {}
 
-  value_type operator*() const {
+  constexpr value_type operator*() const {
     return std::pair<decltype(*it), decltype(*it2)>(*it, *it2);
   }
-  value_type operator*() {
+  constexpr value_type operator*() {
     return std::pair<decltype(*it), decltype(*it2)>(*it, *it2);
   }
 
-  zip_iterator &operator++() {
+  constexpr zip_iterator &operator++() {
     ++it;
     ++it2;
     return *this;
   }
 
-  zip_iterator operator++(int) {
+  constexpr zip_iterator operator++(int) {
     zip_iterator tmp(*this);
     ++(*this);
     return tmp;
   }
 
-  friend bool operator==(const zip_iterator &a, const zip_iterator &b) {
+  constexpr friend bool operator==(const zip_iterator &a,
+                                   const zip_iterator &b) {
     auto rv = a.it == b.it;
     assert(rv == (a.it2 == b.it2));
     return rv;
   }
 
-  friend bool operator!=(const zip_iterator &a, const zip_iterator &b) {
+  constexpr friend bool operator!=(const zip_iterator &a,
+                                   const zip_iterator &b) {
     return !(a == b);
   }
 };
 
 template <typename T, typename U> class sorted_intersect_iterator {
-  T it;
+  T it{};
   U it2;
 
   T itEnd;
@@ -511,7 +593,7 @@ public:
 };
 
 template <typename T> class mark_back_iterator {
-  T it;
+  T it{};
   T end;
 
 public:
@@ -549,7 +631,7 @@ public:
 };
 
 template <typename T> class mark_front_iterator {
-  T it;
+  T it{};
   bool first;
 
 public:
@@ -588,7 +670,7 @@ public:
 };
 
 template <typename T, typename FilterT> class filter_iterator {
-  T it;
+  T it{};
   T itEnd;
   std::optional<FilterT> filterF;
 
@@ -636,7 +718,7 @@ public:
 };
 
 template <typename T> class discard_optional_iterator {
-  T it;
+  T it{};
   T itEnd;
 
   void prime() {
@@ -685,7 +767,7 @@ public:
 };
 
 template <typename T> class pairwise_iterator {
-  T it;
+  T it{};
 
 public:
   using iterator_category = std::iterator_traits<T>::iterator_category;
@@ -788,7 +870,7 @@ public:
                                    const pairwise_iterator &b)
     requires(isRandom)
   {
-    return (b.it - a.it) / 2;
+    return (a.it - b.it) / 2;
   }
 
   reference operator[](difference_type n) const
@@ -810,8 +892,8 @@ class step_iterator
     : public base_iterator<step_iterator<T>,
                            typename std::iterator_traits<T>::iterator_category,
                            typename std::iterator_traits<T>::difference_type> {
-  T it;
-  unsigned n;
+  T it{};
+  unsigned n = 1;
 
 public:
   using iterator_category = std::iterator_traits<T>::iterator_category;
@@ -845,11 +927,11 @@ public:
     return *this;
   }
 
-  difference_type operator-(step_iterator other)
+  friend difference_type operator-(step_iterator self, step_iterator other)
     requires(isRandom)
   {
-    assert(n == other.n);
-    return (it - other.it) / n;
+    assert(self.n == other.n);
+    return (self.it - other.it) / self.n;
   }
 
   friend bool operator==(const step_iterator &a, const step_iterator &b) {
@@ -869,7 +951,7 @@ class tuple_iterator
     : public base_iterator<tuple_iterator<N, T>,
                            typename std::iterator_traits<T>::iterator_category,
                            typename std::iterator_traits<T>::difference_type> {
-  T it;
+  T it{};
 
 public:
   using iterator_category = std::iterator_traits<T>::iterator_category;
@@ -916,10 +998,10 @@ public:
     return tmp;
   }
 
-  difference_type operator-(tuple_iterator other)
+  friend difference_type operator-(tuple_iterator a, tuple_iterator b)
     requires(isRandom)
   {
-    return (it - other.it) / N;
+    return (a.it - b.it) / N;
   }
 
   friend bool operator==(const tuple_iterator &a, const tuple_iterator &b) {
@@ -938,7 +1020,7 @@ class flatten_iterator
     : public base_iterator<flatten_iterator<T>,
                            typename std::iterator_traits<T>::iterator_category,
                            typename std::iterator_traits<T>::difference_type> {
-  T it;
+  T it{};
 
   template <typename U> static auto flatten_nested(U &&u) {
     if constexpr (is_pair_v<std::remove_cvref_t<U>>) {
@@ -1023,7 +1105,7 @@ public:
   using difference_type = int;
 
   bool curSymb() {
-    return Inv ^ DynBitField<WordT>{*word, symb & (WordBits - 1), 1};
+    return Inv ^ DynBitField<const WordT>{*word, symb & (WordBits - 1), 1};
   }
 
   auto getWord() { return Inv ? ~*word : *word; }
@@ -1083,7 +1165,8 @@ public:
   using iterator_category = std::iterator_traits<It>::iterator_category;
   using value_type = std::iterator_traits<It>::value_type;
 
-  template <typename U> constexpr Range(const U &u) : Range(u.begin(), u.end()) {}
+  template <typename U>
+  constexpr Range(const U &u) : Range(u.begin(), u.end()) {}
   template <typename U> constexpr Range(U &u) : Range(u.begin(), u.end()) {}
 
   constexpr Range(It beginIt, It endIt) : beginIt(beginIt), endIt(endIt) {}
@@ -1141,16 +1224,42 @@ public:
     return ::Range{mark_back_iterator{beginIt, endIt},
                    mark_back_iterator{endIt, endIt}};
   }
+  constexpr auto set_bits() {
+    return ::Range{
+        set_bits_iterator{beginIt, endIt, 0},
+        set_bits_iterator{endIt, endIt,
+                          size_t(endIt - beginIt) *
+                              bit_mask_sz<std::remove_cvref_t<value_type>>}};
+  }
+  constexpr auto unset_bits() {
+    return ::Range{set_bits_iterator<It, true>{beginIt, endIt, 0},
+                   set_bits_iterator<It, true>{
+                       endIt, endIt,
+                       size_t(endIt - beginIt) *
+                           bit_mask_sz<std::remove_cvref_t<value_type>>}};
+  }
 
-  template <typename TransformT> constexpr auto transform(TransformT transformF) {
+  template <typename TransformT>
+  constexpr auto transform(TransformT transformF) {
     return ::Range{transform_iterator<It, TransformT>(beginIt, transformF),
                    transform_iterator<It, TransformT>(endIt, transformF)};
+  }
+  template <typename TransformT> constexpr auto tf(TransformT transformF) {
+    return ::Range{
+        transform_iterator_noindex<It, TransformT>(beginIt, transformF),
+        transform_iterator_noindex<It, TransformT>(endIt, transformF)};
   }
 
   template <typename T> constexpr auto as() {
     auto lambda = [](size_t, auto &&src) { return src.template as<T>(); };
     return ::Range{transform_iterator<It, decltype(lambda)>(beginIt, lambda),
                    transform_iterator<It, decltype(lambda)>(endIt)};
+  }
+  template <typename T> constexpr auto dyn_as() {
+    auto lambda = [](size_t, auto &&src) { return src.template dyn_as<T>(); };
+    return ::Range{transform_iterator<It, decltype(lambda)>(beginIt, lambda),
+                   transform_iterator<It, decltype(lambda)>(endIt)}
+        .filter([](auto instr) { return !!instr; });
   }
 
   template <typename T> constexpr auto resolve(T &resolver) {
@@ -1174,7 +1283,9 @@ public:
 
   constexpr auto do_reverse() { return std::reverse(beginIt, endIt); }
 
-  template <typename T> constexpr void sort(T func) { std::sort(begin(), end(), func); }
+  template <typename T> constexpr void sort(T func) {
+    std::sort(begin(), end(), func);
+  }
   template <typename T> void stable_sort(T func) {
     std::stable_sort(begin(), end(), func);
   }
@@ -1198,6 +1309,18 @@ public:
   }
   template <typename T> constexpr bool all(T func) {
     return std::all_of(begin(), end(), func);
+  }
+  constexpr bool all_equal() {
+    if (begin() == end())
+      return true;
+    return std::all_of(begin() + 1, end(),
+                       [&](auto elem) { return elem == front(); });
+  }
+  template <typename T> constexpr bool all_equal(T func) {
+    if (begin() == end())
+      return true;
+    return std::all_of(begin() + 1, end(),
+                       [&](auto elem) { return func(elem, front()); });
   }
   template <typename T> constexpr bool any(T func) {
     return std::any_of(begin(), end(), func);
@@ -1249,7 +1372,8 @@ public:
     }
     return true;
   }
-  template <typename T, typename Comp> constexpr bool equals(Range<T> other, Comp comp) {
+  template <typename T, typename Comp>
+  constexpr bool equals(Range<T> other, Comp comp) {
     if constexpr (requires() {
                     this->size();
                     other.size();
@@ -1364,7 +1488,7 @@ template <typename T>
 class InitListRange
     : public Range<typename std::initializer_list<T>::iterator> {
 public:
-  InitListRange(std::initializer_list<T> ilist)
+  constexpr InitListRange(std::initializer_list<T> ilist)
       : Range<typename std::initializer_list<T>::iterator>(ilist.begin(),
                                                            ilist.end()) {}
 };

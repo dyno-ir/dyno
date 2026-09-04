@@ -758,76 +758,6 @@ struct RegisterRegions : public RegisterFrags<RegisterRegionsFragment> {
   explicit RegisterRegions(uint32_t len) : RegisterFrags({{{}, 0, len}}) {}
 };
 
-struct RegisterPartitionFragment {
-  uint32_t dstAddr;
-  uint32_t len;
-};
-// for finding atomically accessed regions.
-struct RegisterPartitions : public RegisterFrags<RegisterPartitionFragment, 4> {
-  using Fragment = RegisterPartitionFragment;
-
-  void addPartition(uint32_t dstAddr, uint32_t len) {
-    auto it = getInsertIt(dstAddr);
-
-    if (it == frags.end()) {
-      frags.emplace_back(dstAddr, len);
-      return;
-    }
-
-    // it subsumes us
-    if (it->dstAddr <= dstAddr && it->dstAddr + it->len >= dstAddr + len)
-      return;
-
-    auto centerLen = len;
-    auto centerAddr = dstAddr;
-
-    if (it->dstAddr < dstAddr) {
-      if (it->dstAddr + it->len <= dstAddr)
-        ++it;
-      else {
-        // it starts earlier but also ends earlier -> insert an intersection
-        // frag
-        auto pieceLen = dstAddr - it->dstAddr;
-        Fragment frag{it->dstAddr, pieceLen};
-        it = frags.insert(it, frag) + 1;
-
-        centerLen -= pieceLen;
-        centerAddr += pieceLen;
-        it->len -= pieceLen;
-        it->dstAddr += pieceLen;
-      }
-    }
-
-    auto insertPos = it - frags.begin();
-
-    while (len != 0 && it != frags.end()) {
-
-      uint32_t end = dstAddr + len;
-      uint32_t itEnd = it->dstAddr + it->len;
-
-      // it ends later
-      if (itEnd > end) {
-        Fragment frag{it->dstAddr, len};
-        it->len = itEnd - end;
-        it->dstAddr += len;
-        centerLen -= len;
-        it = frags.insert(it, frag);
-        break;
-      }
-
-      len -= it->len;
-      dstAddr += it->len;
-      it = frags.erase(it);
-    }
-
-    frags.insert(frags.begin() + insertPos, Fragment{centerAddr, centerLen});
-  }
-
-  uint32_t getLen() const {
-    return frags.empty() ? 0 : frags.back().dstAddr + frags.back().len;
-  }
-};
-
 // generic regions
 // store arbitrary value.
 // on overlap: overwrite, combine, intersect
@@ -895,13 +825,16 @@ template <typename Frag, size_t NumInline = 4> struct GenericPartitions {
 
       auto copy = *it;
       auto diff = dstAddr - it->dstAddr;
+      if (intersects) {
+        copy = frag.intersect(*it);
+        copy.len = it->len;
+        copy.dstAddr = it->dstAddr;
+      }
       it->len = diff;
-      if (intersects)
-        frag = frag.intersect(*it);
       ++it;
 
-      if constexpr (requires() { copy.srcAddr; }) {
-        copy.srcAddr += diff;
+      if constexpr (requires() { it->srcAddr; }) {
+        it->srcAddr += diff;
       }
       copy.len -= diff;
       copy.dstAddr += diff;
@@ -911,16 +844,19 @@ template <typename Frag, size_t NumInline = 4> struct GenericPartitions {
     }
 
     Frag *lastEqual = nullptr;
+    Frag frag{dstAddr, len, std::forward<Args>(args)...};
+
     // fully covered frags
     while (len != 0 && len >= it->len) {
       assert(it->dstAddr == dstAddr);
-      Frag frag{dstAddr, len, std::forward<Args>(args)...};
 
       // intersects: result frag depends on both, determined via intersect
       if (frag.intersects(*it)) {
-        auto temp = it->len;
+        auto oldLen = it->len;
+        auto oldAddr = it->dstAddr;
         *it = frag.intersect(*it);
-        it->len = temp;
+        it->dstAddr = oldAddr;
+        it->len = oldLen;
         dstAddr += it->len;
         len -= it->len;
         ++it;
@@ -943,7 +879,7 @@ template <typename Frag, size_t NumInline = 4> struct GenericPartitions {
         *it = frag;
         it->len = temp;
         if constexpr (requires() { it->srcAddr; }) {
-          it->srcAddr = dstAddr - originalDstAddr;
+          it->srcAddr += dstAddr - originalDstAddr;
         }
         dstAddr += it->len;
         len -= it->len;
@@ -970,13 +906,17 @@ template <typename Frag, size_t NumInline = 4> struct GenericPartitions {
       Frag frag{dstAddr, len, std::forward<Args>(args)...};
       bool intersects = frag.intersects(*it);
       if (intersects || frag.overwrites(*it)) {
-        if (intersects)
+        if (intersects) {
           frag = frag.intersect(*it);
+          frag.dstAddr = dstAddr;
+          frag.len = len;
+        }
 
         it->dstAddr += len;
         it->len -= len;
         if constexpr (requires() { it->srcAddr; }) {
           it->srcAddr += len;
+          frag.srcAddr += dstAddr - originalDstAddr;
         }
 
         it = frags.insert(it, frag);
@@ -1056,21 +996,22 @@ template <typename Frag, size_t NumInline = 4> struct GenericPartitions {
       }
 
       auto oldDstLen = std::make_pair(it->dstAddr, it->len);
-      if (it->intersects(*itO)) {
+      bool fuses = itO->fuses(*it);
+      if (itO->intersects(*it)) {
         *it = it->intersect(*itO);
-      } else if (it->fuses(*itO)) {
+      } else if (fuses) {
         ; // new fuses into old, keep old
       } else {
-        assert(it->overwrites(*itO));
+        assert(itO->overwrites(*it));
         *it = *itO;
       }
       std::tie(it->dstAddr, it->len) = oldDstLen;
 
       if constexpr (hasSrcAddr)
-        it->srcAddr = itO->srcAddr + (srcAddr - itO->dstAddr);
+        if (!fuses) // keep old when fusing
+          it->srcAddr = itO->srcAddr + (srcAddr - itO->dstAddr);
 
-      if constexpr (hasSrcAddr)
-        srcAddr += pieceLen;
+      srcAddr += pieceLen;
       dstAddr += pieceLen;
       len -= pieceLen;
 

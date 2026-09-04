@@ -21,28 +21,42 @@ class RegisterPartitionPass : public Pass<RegisterPartitionPass> {
   Context &ctx;
   BitAliasAnalysis bitAlias;
 
-  void getStoreRegions(RegisterPartitions &part, StoreIRef store) {
-    if (!store.isConstantOffs() || store.value().is<ConstantRef>()) {
-      auto addr = store.getBase();
-      Optional<uint64_t> len = store.getLen();
-      for (auto term : store.terms()) {
-        if (!term.getMax()) {
-          len = nullopt;
-          break;
-        }
-        *len += term.getFact() * *term.getMax();
-      }
+public:
+#define CONFIG_STRUCT_LAMBDA(FIELD, ENUM)                                      \
+  FIELD(bool, subPartWithBitAlias, false)
+  CONFIG_STRUCT(CONFIG_STRUCT_LAMBDA)
+#undef CONFIG_STRUCT_LAMBDA
+  Config config;
 
-      if (!len)
-        len = *store.reg().getNumBits() - addr;
-      part.addPartition(addr, *len);
+private:
+  struct PartitionFragment {
+    uint32_t dstAddr;
+    uint32_t len;
+
+    bool overwrites(PartitionFragment &other) { return false; }
+    bool fuses(PartitionFragment &other) { return false; }
+    bool intersects(PartitionFragment &other) { return true; }
+    bool abstractEquals(PartitionFragment &other) { return false; }
+
+    PartitionFragment intersect(PartitionFragment &other) {
+      return PartitionFragment{};
+    }
+  };
+
+  using RegisterPartitions = GenericPartitions<PartitionFragment, 4>;
+
+  void getStoreRegions(RegisterPartitions &part, StoreIRef store) {
+    if (!config.subPartWithBitAlias || !store.isConstantOffs() ||
+        store.value().is<ConstantRef>()) {
+      auto [addr, len] = store.getConstAccessRange();
+      part.writeSingle(addr, len);
       return;
     }
 
     auto wire = store.value().as<WireRef>();
     auto val = bitAlias.getReprAliases(wire);
     for (auto frag : val.frags) {
-      part.addPartition(frag.dstAddr + store.getBase(), frag.len);
+      part.writeSingle(frag.dstAddr + store.getBase(), frag.len);
     }
   }
 
@@ -88,25 +102,12 @@ class RegisterPartitionPass : public Pass<RegisterPartitionPass> {
   }
 
   void runOnRegister(RegisterIRef reg) {
-    RegisterPartitions part;
+    RegisterPartitions part{*reg.getNumBits()};
     for (auto use : reg.oref().uses()) {
       auto instr = use.instr();
       if (instr.isOpc(HW_STORE, HW_STORE_DEFER))
         getStoreRegions(part, instr.as<StoreIRef>());
     }
-
-    DYNO_DBG({
-      dumpInstr(reg, ctx);
-      dbgs() << "found store partitions:";
-      if (part.frags.empty())
-        dbgs() << " <none>\n";
-      for (auto [back, frag] : Range{part.frags}.mark_back()) {
-        dbgs() << "[" << frag.dstAddr << "+:" << frag.len << "]";
-        dbgs() << (back ? "\n" : ", ");
-      }
-
-      dbgs() << "\n";
-    });
 
     auto cbuild = ConstantBuilder{ctx.getStore<Constant>()};
 
@@ -116,8 +117,16 @@ class RegisterPartitionPass : public Pass<RegisterPartitionPass> {
     if (part.frags.size() <= 1)
       return;
 
-    if (part.getLen() != reg.getNumBits())
-      part.addPartition(part.getLen(), *reg.getNumBits() - part.getLen());
+    DYNO_DBG({
+      dumpInstr(reg, ctx);
+      if (part.frags.empty())
+        dbgs() << " <none>\n";
+      for (auto [back, frag] : Range{part.frags}.mark_back()) {
+        dbgs() << "[" << frag.dstAddr << "+:" << frag.len << "]";
+        dbgs() << (back ? "\n" : ", ");
+      }
+      dbgs() << "\n";
+    });
 
     SmallVec<RegisterRef, 4> regs;
     regs.reserve(part.frags.size());

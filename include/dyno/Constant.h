@@ -76,7 +76,16 @@ struct FourState {
 
   constexpr FourState operator!() { return isUnk() ? SX : !val; }
   constexpr FourState operator~() { return !*this; }
-  constexpr FourState() {}
+  constexpr FourState() = default;
+  constexpr friend FourState operator&(FourState a, FourState b) {
+    return FourState(and_4state(uint8_t(a), uint8_t(b)));
+  }
+  constexpr friend FourState operator|(FourState a, FourState b) {
+    return FourState(or_4state(uint8_t(a), uint8_t(b)));
+  }
+  constexpr friend FourState operator^(FourState a, FourState b) {
+    return FourState(xor_4state(uint8_t(a), uint8_t(b)));
+  }
 };
 
 template <typename Derived> class BigIntMixin {
@@ -109,7 +118,8 @@ protected:
       dyno_unreachable("out of bounds");
     return getWord(i, self().getNumWords());
   }
-  constexpr uint32_t __attribute__((always_inline)) getWordMasked(uint32_t i) const {
+  constexpr uint32_t __attribute__((always_inline))
+  getWordMasked(uint32_t i) const {
     if (i == self().getExtNumWords() - 1)
       return getWord(i) & modulo_mask<uint32_t>(self().getRawNumBits());
     return getWord(i);
@@ -581,8 +591,8 @@ public:
       for (auto &word : words) {
         word = rand();
       }
-      this->conv4To2StateIfPossible();
       normalize();
+      this->conv4To2StateIfPossible();
     } else {
       randomize(rand);
     }
@@ -1686,60 +1696,17 @@ public:
     }
   }
 
-  // 4 State
   static constexpr uint32_t REP00 = repeatBits(0b00U, 2);
   static constexpr uint32_t REP01 = repeatBits(0b01U, 2);
   static constexpr uint32_t REP10 = repeatBits(0b10U, 2);
   static constexpr uint32_t REP11 = repeatBits(0b11U, 2);
 
+  // 4 State
   static constexpr uint32_t EXT0_MASK = REP00;
   static constexpr uint32_t EXT1_MASK = REP01;
   static constexpr uint32_t EXTZ_MASK = REP10;
   static constexpr uint32_t EXTX_MASK = REP11;
 
-  // could specialize these with the fancy AVX512 LUT function
-  static constexpr uint32_t and_4state(uint32_t lhs, uint32_t rhs) {
-    uint32_t lhsSC = n_equal_mask<2>(lhs, REP00);
-    uint32_t rhsSC = n_equal_mask<2>(rhs, REP00);
-
-    lhsSC |= lhsSC >> 1;
-    rhsSC |= rhsSC >> 1;
-
-    uint32_t lhsX = (lhs & REP10);
-    lhsX |= lhsX >> 1;
-
-    uint32_t rhsX = (rhs & REP10);
-    rhsX |= rhsX >> 1;
-
-    return ((lhs & rhs) | lhsX | rhsX) & ~(lhsSC | rhsSC);
-  }
-  static constexpr uint32_t xor_4state(uint32_t lhs, uint32_t rhs) {
-    uint32_t lhsX = (lhs & REP10);
-    lhsX |= lhsX >> 1;
-
-    uint32_t rhsX = (rhs & REP10);
-    rhsX |= rhsX >> 1;
-
-    return ((lhs ^ rhs) | lhsX | rhsX);
-  }
-  static constexpr uint32_t xnor_4state(uint32_t lhs, uint32_t rhs) {
-    uint32_t val = xor_4state(lhs, rhs);
-    val ^= ((~val & REP10) >> 1);
-    return val;
-  }
-  static constexpr uint32_t or_4state(uint32_t lhs, uint32_t rhs) {
-    uint32_t lhsSC = n_equal_mask<2>(lhs, REP01);
-    uint32_t rhsSC = n_equal_mask<2>(rhs, REP01);
-
-    uint32_t lhsX = (lhs & REP10);
-    lhsX |= lhsX >> 1;
-
-    uint32_t rhsX = (rhs & REP10);
-    rhsX |= rhsX >> 1;
-
-    return (((lhs | rhs) | lhsX | rhsX) & ~(lhsSC | rhsSC)) | (lhsSC >> 1) |
-           (rhsSC >> 1);
-  }
   // static void test() {
   //   static_assert(BigIntBase::and_4state(0b00'00'01'01'00'10'10'11,
   //                                      0b00'01'00'01'10'00'01'01) ==
@@ -1966,19 +1933,63 @@ public:
     return out;
   }
 
-#define LINEAR_OP_4S(ident, func2s)                                            \
-  template <BigIntAPI T0, BigIntAPI T1>                                        \
-  constexpr static void ident(BigIntBase &out, const T0 &lhs, const T1 &rhs) { \
-    if (lhs.getIs4S() || rhs.getIs4S()) {                                      \
-      out.setRepeating(EXTX_MASK,                                              \
-                       std::max(lhs.getRawNumBits(), rhs.getRawNumBits()), 1); \
-      return;                                                                  \
-    }                                                                          \
-    func2s(out, lhs, rhs);                                                     \
-  }
+  template <bool sub, BigIntAPI T0, BigIntAPI T1>
+  constexpr static void addSubOp4S(BigIntBase &out, const T0 &lhs,
+                                   const T1 &rhs) {
+    if (!lhs.getIs4S() && !rhs.getIs4S()) {
+      if (sub)
+        subOp(out, lhs, rhs);
+      else
+        addOp(out, lhs, rhs);
+      return;
+    }
+    if (lhs.allBitsUndef() || rhs.allBitsUndef()) {
+      out.setRepeating(EXTX_MASK,
+                       std::max(lhs.getRawNumBits(), rhs.getRawNumBits()), 1);
+      return;
+    }
 
-  LINEAR_OP_4S(addOp4S, addOp)
-  LINEAR_OP_4S(subOp4S, subOp)
+    // if aliased with 2 state number first convert to 4 state
+    // (else we overwrite bits faster than we read)
+    assert(lhs.getNumBits() == rhs.getNumBits());
+    auto bits = lhs.getNumBits();
+
+    if constexpr (std::is_same_v<BigIntBase, T0>)
+      if (&out == &lhs && !lhs.getIs4S())
+        out.conv2To4State();
+    if constexpr (std::is_same_v<BigIntBase, T1>)
+      if (&out == &rhs && !rhs.getIs4S())
+        out.conv2To4State();
+
+    out.numBits = std::max(lhs.getRawNumBits(), rhs.getRawNumBits());
+    out.expand();
+
+    FourState carry = sub;
+    for (uint32_t i = 0; i < bits; i++) {
+      auto lhsB = lhs.getBit(i);
+      auto rhsB = rhs.getBit(i);
+      if (sub)
+        rhsB = !rhsB;
+
+      FourState sum = lhsB ^ rhsB ^ carry;
+      carry = (lhsB & rhsB) | (lhsB & carry) | (carry & rhsB);
+
+      uint32_t wordIdx = (2 * i) / WordBits;
+      DynBitField{out.getWords()[wordIdx], (2 * i) % 32, 2} = sum;
+    }
+
+    out.setCustom(1);
+    out.normalize();
+    out.conv4To2StateIfPossible();
+  }
+  template <BigIntAPI T0, BigIntAPI T1>
+  constexpr static void addOp4S(BigIntBase &out, const T0 &lhs, const T1 &rhs) {
+    addSubOp4S<false>(out, lhs, rhs);
+  }
+  template <BigIntAPI T0, BigIntAPI T1>
+  constexpr static void subOp4S(BigIntBase &out, const T0 &lhs, const T1 &rhs) {
+    addSubOp4S<true>(out, lhs, rhs);
+  }
 
   template <BigIntAPI T0>
   constexpr static void shlOp4S(BigIntBase &out, const T0 &lhs, unsigned rhs) {
@@ -3203,13 +3214,8 @@ public:
 
     for (; it != map.end(); it = map.find_next(it)) {
       auto ref = store.resolve(it.val());
-      if (bigInt == ConstantRef{ref})
+      if (bigInt == ConstantRef{ref}) [[likely]]
         return ref;
-    }
-
-    for (auto [k, v] : map) {
-      auto ref = store.resolve(v);
-      assert(bigInt != ConstantRef{ref});
     }
 
     auto ref = store.create(bigInt.getNumWords(), bigInt);

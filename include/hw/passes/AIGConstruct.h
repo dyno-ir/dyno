@@ -3,6 +3,7 @@
 #include "aig/AIG.h"
 #include "aig/AIGContext.h"
 #include "aig/IDs.h"
+#include "dyno/Constant.h"
 #include "dyno/Context.h"
 #include "dyno/Instr.h"
 #include "dyno/NewDeleteObjStore.h"
@@ -53,7 +54,8 @@ public:
       return resolved[bit];
     } else if (auto asConst = val.dyn_as<ConstantRef>())
       // todo: what do we want to do with unknown values?
-      return asConst.getBit(bit).val ? aig.getOne() : aig.getZero();
+      return (asConst.getBit(bit) == FourState::S1) ? aig.getOne()
+                                                    : aig.getZero();
     dyno_unreachable("unknown type");
   }
 

@@ -54,6 +54,44 @@ TEST_CASE :string("instcombine-repeat-not"), :block, :block, :block {
   meta.INST_COMBINE_PASS
 }
 
+TEST_CASE :string("loop-unroll"), :block, :block, :block {
+  MODULE_DEF :module("mod"), :block {
+    OUTPUT_REGISTER_DEF %out_a:register(32)
+    REGISTER_DEF %i_reg:register(32)
+    hw.COMB_PROCESS_DEF :process, :block {
+      STORE #32'd0, %out_a
+      STORE #32'd0, %i_reg
+      WHILE :block, :block {
+        LOAD %cmpval:wire(32), %i_reg
+        ICMP_ULT %cont:wire(1), %cmpval, #32'd10
+        YIELD %cont
+      }{
+        LOAD %val:wire(32), %i_reg
+        LOAD %val_a:wire(32), %out_a
+        ADD %incr:wire(32), %val_a, %val
+        STORE %incr, %out_a
+
+        ADD %incr2:wire(32), %val, #32'd1
+        STORE %incr2, %i_reg
+      }
+    }
+  }
+}{
+  hw.MODULE_DEF %mod:module("mod"), %b1:core.block {
+    hw.OUTPUT_REGISTER_DEF %r0:register(32)
+    hw.COMB_PROCESS_DEF %0:process, %b2:core.block {
+      hw.STORE #32'd45, %r0
+    }
+  }
+}{
+  meta.SSA_CONSTRUCT_PASS
+  meta.INST_COMBINE_PASS
+  meta.LOOP_SIMPLIFY_PASS
+  meta.LINEARIZE_CONTROL_FLOW_PASS map("flattenLoops": "1")
+  meta.INST_COMBINE_PASS
+}
+
+
 TEST_CASE :string("fuzzy-cse-basic"), :block, :block, :block {
   MODULE_DEF :module("mod"), :block {
     INPUT_REGISTER_DEF %in_a:register(32)
@@ -84,10 +122,10 @@ TEST_CASE :string("fuzzy-cse-basic"), :block, :block, :block {
 
     COMB_PROCESS_DEF :process, :block {
       LOAD %a_v:wire(32), %in_a
-      LOAD %c_v:wire(32), %in_c
-      ADD %ac:wire(32), %a_v, %c_v
-
       LOAD %b_v:wire(32), %in_b
+      LOAD %c_v:wire(32), %in_c
+
+      ADD %ac:wire(32), %a_v, %c_v
       ADD %abc:wire(32), %b_v, %ac
 
       STORE %abc, %out_a
@@ -602,7 +640,8 @@ TEST_CASE :string("test-extract"), :block, :block, :block {
 
       LOAD %data_v:wire(4), %data
 
-      SPLICE %out_v:wire(1), %data_v, #32'd0, %addr32, #32'd1, #32'd4
+      GEP %ptr:ptr, #32'd0, %addr32, #32'd1, #32'd4
+      SPLICE %out_v:wire(1), %data_v, %ptr
 
       STORE %out_v, %out
     }
@@ -639,6 +678,98 @@ TEST_CASE :string("test-extract"), :block, :block, :block {
   meta.INST_COMBINE_PASS
 }
 
+TEST_EQUIVALENCE :string("lowerops-sub"), :block, :block {
+  MODULE_DEF :module("mod"), :block {
+    INPUT_REGISTER_DEF %in_a:register(32)
+    OUTPUT_REGISTER_DEF %out_a:register(32)
+    hw.COMB_PROCESS_DEF :process, :block {
+      LOAD %a:wire(32), %in_a
+      SUB %d:wire(32), #32'd4, %a
+      STORE %d, %out_a
+    }
+  }
+}{
+  meta.LOWER_OPS_PASS map(
+    "lowerMultiInputAdd"     : "0",
+    "lowerAddCompress"       : "0",
+    "lowerSimpleAdd"         : "0",
+    "lowerSub"               : "1",
+    "lowerMul"               : "0",
+    "lowerMultiInputBitwise" : "0",
+    "lowerEqualityICMP"      : "0",
+    "lowerOrderingICMP"      : "0",
+    "lowerShift"             : "0",
+    "lowerInsert"            : "0",
+    "lowerExtract"           : "0",
+    "lowerOneHotMux"         : "0",
+  )
+  meta.RANDOM_EQUIVALENCE_CHECK_PASS map("cycles": "20")
+}
+
+TEST_EQUIVALENCE :string("instcombine-mod"), :block, :block {
+  MODULE_DEF :module("mod"), :block {
+    INPUT_REGISTER_DEF %in_a:register(26)
+    OUTPUT_REGISTER_DEF %out_a:register(26)
+    hw.COMB_PROCESS_DEF :process, :block {
+      LOAD %a:wire(26), %in_a
+      UMOD %d:wire(26), %a, #26'd2
+      STORE %d, %out_a
+    }
+  }
+}{
+  meta.INST_COMBINE_PASS
+  meta.RANDOM_EQUIVALENCE_CHECK_PASS map("cycles": "20")
+}
+
+TEST_SCRIPT :string("strict-verilog-xz-semantics"), :block {
+  PARSE_VERILOG_PASS map("strictXZ": "1", "code":[{
+    module Test (
+      input logic a,
+      input logic b,
+      output logic x,
+      output logic y
+    );
+
+    always_comb x = a && b;
+    always_comb y = a || b;
+
+    endmodule
+  }])
+  meta.INACTIVE_COPY_PASS
+  // make sure inst combine does not destroy semantics (i.e. frontend adds necessary extra instructions for verilog semantics)
+  meta.INST_COMBINE_PASS
+
+  meta.RANDOM_EQUIVALENCE_CHECK_PASS map("cycles": "100", "relaxXZ": "0", "inputXZ": "1")
+}
+
+TEST_SCRIPT :string("strict-verilog-xz-semantics2"), :block {
+  PARSE_VERILOG_PASS map("strictXZ": "1", "code":[{
+    module Test (
+      input logic a,
+      input logic b,
+      input logic c,
+      output logic x,
+      output logic y
+    );
+
+    // unlike ?: this returns b if c is unknown
+    always_comb
+      if (c) x = a; else x = b;
+
+    always_comb
+      y = c ? a : b;
+
+    endmodule
+  }])
+  meta.INACTIVE_COPY_PASS
+  meta.SSA_CONSTRUCT_PASS
+  // make sure inst combine does not destroy semantics (i.e. frontend adds necessary extra instructions for verilog semantics)
+  meta.INST_COMBINE_PASS
+  meta.LINEARIZE_CONTROL_FLOW_PASS
+
+  meta.RANDOM_EQUIVALENCE_CHECK_PASS map("cycles": "100", "relaxXZ": "0", "inputXZ": "1")
+}
+
 TEST_CASE :string("test-reg-split"), :block, :block, :block {
   MODULE_DEF :module("Test"), :block {
     INPUT_REGISTER_DEF %clk:register(1)
@@ -655,7 +786,8 @@ TEST_CASE :string("test-reg-split"), :block, :block, :block {
       LOAD %addr_v:wire(2), %addr
       ZEXT %addr32:wire(32), %addr_v
 
-      SPLICE %bit_v:wire(1), %state_v, #32'd0, %addr32, #32'd1, #32'd4
+      GEP %ptr:ptr, #32'd0, %addr32, #32'd1, #32'd4
+      SPLICE %bit_v:wire(1), %state_v, %ptr
 
       STORE %bit_v, %out_a
 
@@ -663,7 +795,7 @@ TEST_CASE :string("test-reg-split"), :block, :block, :block {
       NOT %bit_v_inv:wire(1), %bit_v
       MUX %bit_v_out:wire(1), %in_op_v, #1'b0, %bit_v_inv
 
-      INSERT %res_v:wire(4), %state_v, %bit_v_out, #32'd0, %addr32, #32'd1, #32'd4
+      INSERT %res_v:wire(4), %state_v, %bit_v_out, %ptr
 
       STORE_DEFER %res_v, %state, %trig
     }
@@ -715,7 +847,7 @@ TEST_CASE :string("test-reg-split"), :block, :block, :block {
   }
 }{
   meta.LOWER_OPS_PASS
-  meta.INST_COMBINE_PASS map("muxToOneHotMux": "1")
+  meta.INST_COMBINE_PASS map("muxToOneHotMux": "1", "muxToBitwise": "1")
   meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS
 
   meta.FLIP_FLOP_INFERENCE_PASS
@@ -780,6 +912,8 @@ FUNCTION_DEF %memoryTestLift:func, :block {
   meta.LOWER_MEM_ACCESS_PASS
 
   meta.LIFT_FLIP_FLOPS_PASS
+  meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS
+  meta.INST_COMBINE_PASS
   meta.TRIGGER_DEDUPE_PASS
 
   meta.PROCESS_LINEARIZE_PASS map("retainIODeps": "0", "retainInnerDeps": "0")
@@ -832,7 +966,6 @@ TEST_SCRIPT :string("test-memory-different-port-widths"), :block {
   CALL %memoryTestSynth
   meta.ASSERT_EXISTS_PASS map("regex": "STDCELL_INSTANCE.+%FakeMem_3r1w_1x16.+#4'd0, #4'd0", "num": "16")
   CALL %memoryTestLift
-
   meta.RANDOM_EQUIVALENCE_CHECK_PASS map("cycles": "10000", "clockMode": "CLOCK")
 }
 
@@ -1106,200 +1239,244 @@ TEST_SCRIPT :string("test-memory-byte-write-sync-read-en"), :block {
   meta.RANDOM_EQUIVALENCE_CHECK_PASS map("cycles": "10000", "clockMode": "CLOCK")
 }
 
+TEST_SCRIPT :string("test-memory-tdp"), :block {
+  PARSE_VERILOG_PASS map("code":[{
+  module Test
+  #(
+      parameter WORD_SIZE=32*4*2,
+      parameter NUM_WORDS=128,
+      parameter WRITE_SIZE=8
+  )
+  (
+      input wire clk,
 
-/*
-TEST_CASE :string("test-mem-map"), :block, :block, :block, {
-  // 2 bit async read sync write memory
+      input wire IN_nce,
+      input wire IN_nwe,
+      input wire[$clog2(NUM_WORDS)-1:0] IN_addr,
+      input wire[WORD_SIZE-1:0] IN_data,
+      input wire[(WORD_SIZE/WRITE_SIZE)-1:0] IN_wm,
+      output reg[WORD_SIZE-1:0] OUT_data,
 
-  STDCELL_DEF %Test:module("ram_mod"), %8:block {
-    INPUT_REGISTER_DEF %clk:register(1)
-    INPUT_REGISTER_DEF %IN_waddr:register(4)
-    INPUT_REGISTER_DEF %IN_wdata:register(16)
-    INPUT_REGISTER_DEF %IN_wmask:register(1)
-    INPUT_REGISTER_DEF %IN_raddr:register(4)
-    OUTPUT_REGISTER_DEF %OUT_rdata:register(16)
-    REGISTER_DEF %r7:register(256)
-    TRIGGER_DEF %9:trigger(pos), %clk
-    COMB_PROCESS_DEF %10:process, %11:block {
-      LOAD %w9:wire(4), %IN_raddr  ["test/tools/dyno-sv/testMemSmol.sv:19:15-28"]
-      ZEXT %w6:wire(32), %w9  ["test/tools/dyno-sv/testMemSmol.sv:19:15-28"]
-      GEP %12:ptr, #32'd0, %w6, #32'd16, #32'd16
-      MEM_LOAD %w13:wire(16), %13:mem_port(0), %r7, %12
-      LOAD %w5:wire(1), %IN_wmask  ["test/tools/dyno-sv/testMemSmol.sv:15.3-16.31"]
-      LOAD %w12:wire(4), %IN_waddr  ["test/tools/dyno-sv/testMemSmol.sv:16:5-18"]
-      ZEXT %w7:wire(32), %w12  ["test/tools/dyno-sv/testMemSmol.sv:16:5-18"]
-      LOAD %w0:wire(16), %IN_wdata  ["test/tools/dyno-sv/testMemSmol.sv:16:5-30"]
-      GEP %14:ptr, #32'd0, %w7, #32'd16, #32'd16
-      MEM_STORE %15:mem_port(1), %w0, %r7, %w5, %9, %14
-      STORE %w13, %OUT_rdata
-    }
-  }
+      input wire IN_nce1,
+      input wire[$clog2(NUM_WORDS)-1:0] IN_addr1,
+      output reg[WORD_SIZE-1:0] OUT_data1
+  );
 
-  MODULE_DEF %Test:module("Test"), %0:block {
-    INPUT_REGISTER_DEF %clk:register(1)
-    INPUT_REGISTER_DEF %IN_waddr:register(32)
-    INPUT_REGISTER_DEF %IN_wdata:register(8)
-    INPUT_REGISTER_DEF %IN_raddr:register(32)
-    OUTPUT_REGISTER_DEF %OUT_rdata:register(8)
-    REGISTER_DEF %r7:register(128)
-    TRIGGER_DEF %1:trigger(pos), %clk
-    COMB_PROCESS_DEF %2:process, %3:block {
-      LOAD %w9:wire(4), %IN_waddr  ["test/tools/dyno-sv/testMem.sv:20:3-23"]
-      ZEXT %w3:wire(32), %w9  ["test/tools/dyno-sv/testMem.sv:20:3-23"]
-      LOAD %w10:wire(8), %IN_wdata  ["test/tools/dyno-sv/testMem.sv:20:3-34"]
-      GEP %4:ptr, #32'd0, %w3, #32'd8, #32'd16
-      MEM_STORE %5:mem_port(1), %w10, %r7, %1, %4
-      LOAD %w5:wire(4), %IN_raddr  ["test/tools/dyno-sv/testMem.sv:24:16-36"]
-      ZEXT %w7:wire(32), %w5  ["test/tools/dyno-sv/testMem.sv:24:16-36"]
-      GEP %6:ptr, #32'd0, %w7, #32'd8, #32'd16
-      MEM_LOAD %w1:wire(8), %7:mem_port(0), %r7, %6
-      STORE_DEFER %w1, %OUT_rdata, %1
-    }
-  }
-}{
+  reg[WORD_SIZE-1:0] mem[NUM_WORDS-1:0] /* verilator public */;
 
-}{
-  meta.MEMORY_MAPPING_PASS
+  reg ce_reg = 1;
+  reg ce1_reg = 1;
+  reg we_reg;
+  reg[$clog2(NUM_WORDS)-1:0] addr_reg;
+  reg[$clog2(NUM_WORDS)-1:0] addr1_reg;
+  reg[WORD_SIZE-1:0] data_reg;
+  reg[(WORD_SIZE/WRITE_SIZE)-1:0] wm_reg;
+
+  always@(posedge clk) begin
+      ce_reg <= IN_nce;
+      ce1_reg <= IN_nce1;
+      we_reg <= IN_nwe;
+      addr_reg <= IN_addr;
+      addr1_reg <= IN_addr1;
+      data_reg <= IN_data;
+      wm_reg <= IN_wm;
+
+      if (!ce_reg) begin
+          if (!we_reg) begin
+              for (integer i = 0; i < WORD_SIZE/WRITE_SIZE; i=i+1) begin
+                  if (wm_reg[i])
+                      mem[addr_reg][(WRITE_SIZE*i)+:WRITE_SIZE] <= data_reg[(WRITE_SIZE*i)+:WRITE_SIZE];
+              end
+          end
+          else begin
+              OUT_data <= mem[addr_reg];
+          end
+      end
+
+      if (!ce1_reg) begin
+          OUT_data1 <= mem[addr1_reg];
+      end
+  end
+
+  endmodule
+  }])
+  CALL %memoryTestSynth
+  meta.ASSERT_EXISTS_PASS map("regex":
+    "STDCELL_INSTANCE.+%RAMB18_TDP",
+    "num": "16")
+  CALL %memoryTestLift
+  meta.RANDOM_EQUIVALENCE_CHECK_PASS map("cycles": "10000", "clockMode": "CLOCK")
 }
 
-TEST_CASE :string("test-mem-map-2bit-wr-8bit-rd"), :block, :block, :block, {
-  // 2 bit async read sync write memory
+TEST_SCRIPT :string("early-share-insert"), :block {
+  PARSE_VERILOG_PASS map("code":[{
+    module Test (
+      input logic clk,
+      input logic sel,
+      input logic sel2,
+      input logic sel3,
+      input logic[2:0] addr,
+      input logic[7:0] a,
+      input logic[7:0] b,
+      input logic[7:0] c,
+      input logic[7:0] d,
+      output logic[7:0] out
+    );
+      logic[7:0] mem;
 
-  STDCELL_DEF %Test:module("ram_mod"), %0:block {
-    INPUT_REGISTER_DEF %clk:register(1)
-    INPUT_REGISTER_DEF %IN_waddr:register(4)
-    INPUT_REGISTER_DEF %IN_wdata:register(2)
-    INPUT_REGISTER_DEF %IN_wmask:register(1)
-    INPUT_REGISTER_DEF %IN_raddr:register(4)
-    OUTPUT_REGISTER_DEF %OUT_rdata:register(2)
-    INPUT_REGISTER_DEF %IN_raddr2:register(4)
-    OUTPUT_REGISTER_DEF %OUT_rdata2:register(2)
-    INPUT_REGISTER_DEF %IN_raddr3:register(4)
-    OUTPUT_REGISTER_DEF %OUT_rdata3:register(2)
-    REGISTER_DEF %r11:register(32)
-    TRIGGER_DEF %1:trigger(pos), %clk
-    COMB_PROCESS_DEF %2:process, %3:block {
-      LOAD %w15:wire(4), %IN_raddr  ["test/tools/dyno-sv/testMemSmol3R.sv:23:25-38"]
-      ZEXT %w12:wire(32), %w15  ["test/tools/dyno-sv/testMemSmol3R.sv:23:25-38"]
-      GEP %4:ptr, #32'd0, %w12, #32'd2, #32'd16
-      MEM_LOAD %w21:wire(2), %5:mem_port(0), %r11, %4
-      LOAD %w11:wire(4), %IN_raddr2  ["test/tools/dyno-sv/testMemSmol3R.sv:24:26-40"]
-      ZEXT %w5:wire(32), %w11  ["test/tools/dyno-sv/testMemSmol3R.sv:24:26-40"]
-      GEP %6:ptr, #32'd0, %w5, #32'd2, #32'd16
-      MEM_LOAD %w2:wire(2), %7:mem_port(0), %r11, %6
-      LOAD %w9:wire(4), %IN_raddr3  ["test/tools/dyno-sv/testMemSmol3R.sv:25:26-40"]
-      ZEXT %w8:wire(32), %w9  ["test/tools/dyno-sv/testMemSmol3R.sv:25:26-40"]
-      GEP %8:ptr, #32'd0, %w8, #32'd2, #32'd16
-      MEM_LOAD %w22:wire(2), %9:mem_port(0), %r11, %8
-      LOAD %w6:wire(1), %IN_wmask  ["test/tools/dyno-sv/testMemSmol3R.sv:20.3-21.31"]
-      LOAD %w1:wire(4), %IN_waddr  ["test/tools/dyno-sv/testMemSmol3R.sv:21:5-18"]
-      ZEXT %w13:wire(32), %w1  ["test/tools/dyno-sv/testMemSmol3R.sv:21:5-18"]
-      LOAD %w4:wire(2), %IN_wdata  ["test/tools/dyno-sv/testMemSmol3R.sv:21:5-30"]
-      GEP %10:ptr, #32'd0, %w13, #32'd2, #32'd16
-      MEM_STORE %11:mem_port(1), %w4, %r11, %w6, %1, %10
-      STORE %w21, %OUT_rdata
-      STORE %w2, %OUT_rdata2
-      STORE %w22, %OUT_rdata3
-    }
-  }
+      always_ff@(posedge clk) begin
+        if (sel) begin
+          if (sel2) mem[addr] <= a;
+          else      mem[addr] <= b;
+        end
+        else begin
+          if (sel3) mem[addr] <= c;
+          else      mem[addr] <= d;
+        end
+      end
 
-  MODULE_DEF %Test:module("Test"), %0:block {
-    INPUT_REGISTER_DEF %clk:register(1)
-    INPUT_REGISTER_DEF %IN_waddr:register(32)
-    INPUT_REGISTER_DEF %IN_wdata:register(2)
-    INPUT_REGISTER_DEF %IN_raddr:register(32)
-    OUTPUT_REGISTER_DEF %OUT_rdata:register(8)
-    INPUT_REGISTER_DEF %IN_raddr2:register(32)
-    OUTPUT_REGISTER_DEF %OUT_rdata2:register(2)
-    REGISTER_DEF %r7:register(128)
-    TRIGGER_DEF %1:trigger(pos), %clk
-    COMB_PROCESS_DEF %2:process, %3:block {
-      LOAD %w9:wire(4), %IN_waddr  ["test/tools/dyno-sv/testMem.sv:20:3-23"]
-      ZEXT %w3:wire(32), %w9  ["test/tools/dyno-sv/testMem.sv:20:3-23"]
-      LOAD %w10:wire(2), %IN_wdata  ["test/tools/dyno-sv/testMem.sv:20:3-34"]
-      GEP %4:ptr, #32'd0, %w3, #32'd2, #32'd64
-      MEM_STORE %5:mem_port(1), %w10, %r7, %1, %4
-      LOAD %w5:wire(4), %IN_raddr  ["test/tools/dyno-sv/testMem.sv:24:16-36"]
-      LOAD %ww5:wire(6), %IN_raddr2  ["test/tools/dyno-sv/testMem.sv:24:16-36"]
-      ZEXT %w7:wire(32), %w5  ["test/tools/dyno-sv/testMem.sv:24:16-36"]
-      ZEXT %ww7:wire(32), %ww5  ["test/tools/dyno-sv/testMem.sv:24:16-36"]
-      GEP %6:ptr, #32'd0, %w7, #32'd8, #32'd16
-      GEP %pp6:ptr, #32'd0, %ww7, #32'd2, #32'd64
-      MEM_LOAD %w1:wire(8), %7:mem_port(0), %r7, %6
-      STORE_DEFER %w1, %OUT_rdata, %1
-      MEM_LOAD %ww1:wire(2), %mm7:mem_port(0), %r7, %pp6
-      STORE_DEFER %ww1, %OUT_rdata2, %1
-    }
-  }
-}{
+      assign out = mem;
 
-}{
-  meta.MEMORY_MAPPING_PASS
-  meta.INST_COMBINE_PASS
-  meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS
-  meta.INST_COMBINE_PASS
-  meta.AGGRESSIVE_DEAD_CODE_ELIMINATION_PASS
+    endmodule
+  }])
+  CALL symbol("flow_earlyCanonFlow")
+  CALL symbol("flow_synthCanonicalize")
+  meta.INACTIVE_COPY_PASS
+  CALL symbol("flow_synthEarlyOpt")
+
+  meta.ASSERT_EXISTS_PASS map("regex":
+    // one indexed insert
+    "INSERT ([^,]*\,){3} %",
+    "excludeRegex": "[\s\S]*__inactive[\s\S]*",
+    "num": "1")
+  meta.RANDOM_EQUIVALENCE_CHECK_PASS map("cycles": "100", "clockMode": "CLOCK")
 }
 
-TEST_CASE :string("test-mem-map-2w"), :block, :block, :block, {
-  // 2 bit async read, 2x sync write memory
-  STDCELL_DEF %Test:module("Test"), %0:block {
-    INPUT_REGISTER_DEF %clk:register(1)
-    INPUT_REGISTER_DEF %IN_waddr:register(4)
-    INPUT_REGISTER_DEF %IN_wdata:register(2)
-    INPUT_REGISTER_DEF %IN_waddr2:register(4)
-    INPUT_REGISTER_DEF %IN_wdata2:register(2)
-    INPUT_REGISTER_DEF %IN_wmask:register(2)
-    INPUT_REGISTER_DEF %IN_raddr:register(4)
-    OUTPUT_REGISTER_DEF %OUT_rdata:register(2)
-    REGISTER_DEF %r9:register(32)
-    TRIGGER_DEF %1:trigger(pos), %clk
-    COMB_PROCESS_DEF %2:process, %3:block {
-      LOAD %w12:wire(4), %IN_raddr  ["test/tools/dyno-sv/testMemSmol2W.sv:26:15-28"]
-      ZEXT %w1:wire(32), %w12  ["test/tools/dyno-sv/testMemSmol2W.sv:26:15-28"]
-      GEP %4:ptr, #32'd0, %w1, #32'd2, #32'd16
-      MEM_LOAD %w5:wire(2), %5:mem_port(0, (0, 0)), %r9, %4, %6:?mem_port(1)
-      LOAD %w13:wire(2), %IN_wmask
-      TRUNC %w19:wire(1), %w13
-      SPLICE %w20:wire(1), %w13, #32'd1
-      LOAD %w10:wire(4), %IN_waddr  ["test/tools/dyno-sv/testMemSmol2W.sv:19:5-18"]
-      ZEXT %w14:wire(32), %w10  ["test/tools/dyno-sv/testMemSmol2W.sv:19:5-18"]
-      LOAD %w7:wire(2), %IN_wdata  ["test/tools/dyno-sv/testMemSmol2W.sv:19:5-30"]
-      GEP %7:ptr, #32'd0, %w14, #32'd2, #32'd16
-      MEM_STORE %6:mem_port(1), %w7, %r9, %w19, %1, %7
-      LOAD %w21:wire(4), %IN_waddr2  ["test/tools/dyno-sv/testMemSmol2W.sv:23:5-19"]
-      ZEXT %w9:wire(32), %w21  ["test/tools/dyno-sv/testMemSmol2W.sv:23:5-19"]
-      LOAD %w18:wire(2), %IN_wdata2  ["test/tools/dyno-sv/testMemSmol2W.sv:23:5-32"]
-      GEP %8:ptr, #32'd0, %w9, #32'd2, #32'd16
-      MEM_STORE %9:mem_port(1), %w18, %r9, %w20, %1, %8
-      STORE %w5, %OUT_rdata
-    }
-  }
+TEST_SCRIPT :string("early-share-insert-struct"), :block {
+  PARSE_VERILOG_PASS map("code":[{
+    typedef struct packed {
+      logic[7:0] a;
+      logic[7:0] b;
+    } my_struct;
 
-  MODULE_DEF %Test:module("Test"), %0:block {
-    INPUT_REGISTER_DEF %clk:register(1)
-    INPUT_REGISTER_DEF %IN_waddr:register(32)
-    INPUT_REGISTER_DEF %IN_wdata:register(8)
-    INPUT_REGISTER_DEF %IN_raddr:register(32)
-    OUTPUT_REGISTER_DEF %OUT_rdata:register(8)
-    REGISTER_DEF %r7:register(128)
-    TRIGGER_DEF %1:trigger(pos), %clk
-    COMB_PROCESS_DEF %2:process, %3:block {
-      LOAD %w9:wire(4), %IN_waddr  ["test/tools/dyno-sv/testMem.sv:20:3-23"]
-      ZEXT %w3:wire(32), %w9  ["test/tools/dyno-sv/testMem.sv:20:3-23"]
-      LOAD %w10:wire(8), %IN_wdata  ["test/tools/dyno-sv/testMem.sv:20:3-34"]
-      GEP %4:ptr, #32'd0, %w3, #32'd8, #32'd16
-      MEM_STORE %5:mem_port(1), %w10, %r7, %1, %4
-      LOAD %w5:wire(4), %IN_raddr  ["test/tools/dyno-sv/testMem.sv:24:16-36"]
-      ZEXT %w7:wire(32), %w5  ["test/tools/dyno-sv/testMem.sv:24:16-36"]
-      GEP %6:ptr, #32'd0, %w7, #32'd8, #32'd16
-      MEM_LOAD %w1:wire(8), %7:mem_port(0), %r7, %6
-      STORE_DEFER %w1, %OUT_rdata, %1
-    }
-  }
-}{
+    module Test (
+      input logic clk,
+      input logic sel,
+      input logic sel2,
+      input logic sel3,
+      input logic[2:0] idx,
+      input logic[7:0] a,
+      input logic[7:0] b,
+      input logic[7:0] c,
+      input logic[7:0] d,
+      output my_struct out
+    );
 
-}{
-  meta.MEMORY_MAPPING_PASS
+      my_struct mem[7:0];
+
+      always_ff@(posedge clk) begin
+        if (sel) begin
+          if (sel2) mem[idx].a <= a;
+          else      mem[idx].a <= b;
+        end
+        else begin
+          if (sel3) mem[idx].b <= c;
+          else      mem[idx].b <= d;
+        end
+      end
+
+      assign out = mem[0];
+
+    endmodule
+  }])
+  CALL symbol("flow_earlyCanonFlow")
+  CALL symbol("flow_synthCanonicalize")
+  meta.INACTIVE_COPY_PASS
+  CALL symbol("flow_synthEarlyOpt")
+  meta.ASSERT_EXISTS_PASS map("regex":
+    // two indexed inserts
+    "INSERT ([^,]*\,){3} %",
+    "excludeRegex": "[\s\S]*__inactive[\s\S]*",
+    "num": "2")
+  meta.RANDOM_EQUIVALENCE_CHECK_PASS map("cycles": "100", "clockMode": "CLOCK")
 }
-*/
+
+TEST_SCRIPT :string("early-share-add"), :block {
+  PARSE_VERILOG_PASS map("code":[{
+    module Test (
+      input logic clk,
+      input logic sel,
+      input logic sel2,
+      input logic sel3,
+      input logic[1:0] addr,
+      input logic[7:0] a,
+      input logic[7:0] b,
+      input logic[7:0] c,
+      input logic[7:0] d,
+      output logic[31:0] out
+    );
+
+      always_ff@(posedge clk) begin
+        if (sel) begin
+          if (sel2) out[7:0] <= a + b;
+          else      out <= c + d;
+        end
+        else begin
+          if (sel3) out <= a + 42;
+          else      out <= d - 1;
+        end
+      end
+
+    endmodule
+  }])
+  CALL symbol("flow_earlyCanonFlow")
+  CALL symbol("flow_synthCanonicalize")
+  meta.INACTIVE_COPY_PASS
+  CALL symbol("flow_synthEarlyOpt")
+
+  meta.ASSERT_EXISTS_PASS map("regex":
+    "ADD",
+    "excludeRegex": "[\s\S]*__inactive[\s\S]*",
+    "num": "1")
+  meta.RANDOM_EQUIVALENCE_CHECK_PASS map("cycles": "100", "clockMode": "CLOCK")
+}
+
+TEST_SCRIPT :string("early-share-extract"), :block {
+  PARSE_VERILOG_PASS map("code":[{
+    module Test (
+      input logic clk,
+      input logic sel,
+      input logic sel2,
+      input logic sel3,
+      input logic[255:0] mem,
+      input logic[7:0] a,
+      input logic[7:0] b,
+      input logic[7:0] c,
+      input logic[7:0] d,
+      output logic[0:0] out
+    );
+
+      always_ff@(posedge clk) begin
+        if (sel) begin
+          if (sel2) out <= mem[a];
+          else      out <= {mem+'d1}[b]; // not shared, different content
+        end
+        else begin
+          if (sel3) out <= mem[c];
+          else      out <= mem[d];
+        end
+      end
+
+    endmodule
+  }])
+  CALL symbol("flow_earlyCanonFlow")
+  CALL symbol("flow_synthCanonicalize")
+  meta.INACTIVE_COPY_PASS
+  CALL symbol("flow_synthEarlyOpt")
+
+  meta.ASSERT_EXISTS_PASS map("regex":
+    "SPLICE ([^,]*\,){2} %",
+    "excludeRegex": "[\s\S]*__inactive[\s\S]*",
+    "num": "2")
+  meta.RANDOM_EQUIVALENCE_CHECK_PASS map("cycles": "100", "clockMode": "CLOCK")
+}

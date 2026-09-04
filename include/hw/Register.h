@@ -26,6 +26,8 @@ public:
 
   Register(DynObjRef, Optional<uint32_t> numBits = nullopt)
       : numBits(numBits) {}
+  // todo: pass context into copier s.t. we can copy reg name and init value
+  // (side tables) as well
   Register(DynObjRef, FatObjRef<Register> other) : numBits(other->numBits) {}
 };
 
@@ -61,17 +63,20 @@ public:
     return false;
   }
 
-  auto useInstrs(DialectOpcode opc) {
+  auto useInstrs(auto... opcs) {
     return oref()
         .uses()
-        .filter([opc](auto use) { return use.instr().isOpc(opc); })
+        .filter([opcs...](auto use) { return use.instr().isOpc(opcs...); })
         .transform([](size_t, auto op) { return op.instr(); });
   }
   auto loads() { return useInstrs(HW_LOAD); }
   auto stores() { return useInstrs(HW_STORE); }
   auto storeDefers() { return useInstrs(HW_STORE_DEFER); }
+  auto storeOrStoreDefers() { return useInstrs(HW_STORE_DEFER, HW_STORE); }
   auto memLoads() { return useInstrs(HW_MEM_LOAD); }
   auto memStores() { return useInstrs(HW_MEM_STORE); }
+
+  bool isDynAddressed();
 
   InstrRef getSingleStore() {
     InstrRef rv = nullref;

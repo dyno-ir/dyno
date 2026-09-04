@@ -20,6 +20,7 @@
 #include "hw/HWValue.h"
 #include "hw/IDs.h"
 #include "hw/LoadStore.h"
+#include "hw/Pointer.h"
 #include "hw/Register.h"
 #include "hw/Wire.h"
 #include "hw/analysis/BitAliasAnalysis.h"
@@ -89,7 +90,9 @@ public:
   FIELD(bool, findFlipFlopEnables, false)                                      \
   FIELD(bool, findFlipFlopSyncResets, false)                                   \
   FIELD(bool, muxToOneHotMux, false)                                           \
-  FIELD(bool, inferMuxs, true)
+  FIELD(bool, inferMuxs, false)                                                \
+  FIELD(bool, muxToBitwise, false)                                             \
+  FIELD(bool, simplifyYieldValues, true)
   CONFIG_STRUCT(CONFIG_STRUCT_LAMBDA)
 #undef CONFIG_STRUCT_LAMBDA
   Config config;
@@ -139,17 +142,23 @@ private:
     regNameInfo.copyNames(oldR, newR);
     oldR.replaceAllUsesWith(newR);
   }
+  void replaceUses(PointerRef pointer, HWAddress newVal) {
+    pointer.replaceAllUsesWith(
+        newVal, [&](OperandRef ref) { currentReplaced.emplace_back(ref); });
+  }
 #define replaceAllUsesWith static_assert(0, "use this->replaceUses")
 
   void replaceUse(OperandRef ref, HWValue newVal) {
-    assert(newVal.getNumBits() == ref->as<WireRef>().getNumBits());
-    knownBits.replaceAt(ref->as<WireRef>(), newVal);
-    bitAlias.replaceAt(ref->as<WireRef>(), newVal);
 
+    assert(newVal.getNumBits() == ref->as<HWValue>().getNumBits());
+    if (auto asWire = ref->dyn_as<WireRef>()) {
+      knownBits.replaceAt(asWire, newVal);
+      bitAlias.replaceAt(asWire, newVal);
+    }
     ref.replace(newVal);
     currentReplaced.emplace_back(ref);
 
-    auto instr = currentReplaced.back().instr();
+    auto instr = ref.instr();
     for (auto def : instr.defs()) {
       if (!def->is<HWValue>())
         continue;
@@ -158,8 +167,32 @@ private:
     }
   }
 
+  OperandRef getLoopbackVal(LoopbackFrag &frag) {
+    auto loopbackEn = ctx.resolve(frag.instr).operand(frag.operandIdx);
+    assert(loopbackEn.instr().isOpc(HW_ONEHOT_MUX));
+    auto loopbackVal = loopbackEn + 1;
+    return loopbackVal;
+  }
+
+  void makeLoopbackUseDontCare(LoopbackFrag &frag) {
+    // replace loopback value with dont care in loopback MUX
+    // loopback makes sure this MUX is exclusively used by us, so safe.
+    auto loopbackEn = ctx.resolve(frag.instr).operand(frag.operandIdx);
+    assert(loopbackEn.instr().isOpc(HW_ONEHOT_MUX));
+    auto loopbackVal = loopbackEn + 1;
+    HWInstrBuilder build{ctx, loopbackEn.instr()};
+    // set bits that we handle via ff en or rst to x
+    auto oldVal = loopbackVal->as<HWValue>();
+    assert(frag.srcAddr + frag.len <= *oldVal.getNumBits());
+    auto newVal =
+        build.buildInsert(oldVal, cbuild.undef(frag.len).get(), frag.srcAddr);
+    replaceUse(loopbackVal, newVal);
+  }
+
   PatBool findFlipFlopEnables(FlipFlopIRef instr) {
-    if (!config.findFlipFlopEnables)
+    if (!config.findFlipFlopEnables ||
+        // todo: same as reset, depessimize
+        !instr.clkEnRaw().is<ConstantRef>())
       return false;
     auto use = instr.q().getSingleUse();
     if (!use || !use->instr().isOpc(HW_STORE))
@@ -171,10 +204,11 @@ private:
     if (!load || !load.as<LoadIRef>().isFullReg())
       return false;
 
-    // todo: netlist version of this (and findResets) where we just use q wire
-    // directly.
-    auto part = loopbackAnalysis.get(instr.d(), load.as<LoadIRef>().value());
-    if (Range{part.frags}.all([](auto frag) { return !frag; }))
+    auto part = loopbackAnalysis.get(
+        instr.d(),
+        load.as<LoadIRef>().value()); // todo: look thru assume on value
+    if (Range{part.frags}.all(
+            [](auto frag) { return !frag || frag.size() == 0; }))
       return false;
 
     HWInstrBuilder build{ctx, instr};
@@ -182,6 +216,11 @@ private:
     concat.emplace_back(instr.q());
 
     for (auto &frag : part.frags) {
+      HWValue fragInit =
+          instr.initValue()
+              ? build.buildSplice(instr.initValue(), frag.len, frag.dstAddr)
+              : nullref;
+
       HWValue d = build.buildSplice(instr.d(), frag.len, frag.dstAddr);
       HWValue en = instr.clkEnRaw();
 
@@ -191,16 +230,17 @@ private:
           // assuming no initval/rst behavior.
           en = ConstantRef::fromBool(false);
         } else {
-          auto newEn =
-              build.buildOr(Range{frag}.transform([&](size_t, auto pair) {
-                auto ref = ctx.resolve(pair.first);
-                return pair.second ? build.buildNot(ref) : ref;
-              }));
+          auto newEn = build.buildOr(Range{frag}.tf([&](auto pair) {
+            auto ref = ctx.resolve(pair.first);
+            return pair.second ? build.buildNot(ref) : ref;
+          }));
           en = build.buildAnd(InitListRange{en, newEn});
+          makeLoopbackUseDontCare(frag);
         }
       }
 
-      auto val = build.buildFlipFlop(instr.clk(), d, en, instr.rsts());
+      auto val = build.buildFlipFlop(instr.clk(), d, en, instr.rsts(),
+                                     instr.isOpc(HW_FLIP_FLOP_SRST), fragInit);
       concat.emplace_back(val);
     }
     concat.others().do_reverse();
@@ -216,7 +256,11 @@ private:
 
   PatBool findFlipFlopSyncResets(FlipFlopIRef instr) {
     if (!config.findFlipFlopSyncResets)
-      return false;
+      return PAT_FALSE;
+    // fixme, to avoid looping. To relax this we need to prove an inferred reset
+    // actually optimizes out the reset logic via assume.
+    if (!instr.rsts().empty())
+      return PAT_FALSE;
     // already has async resets
     if (instr.isOpc(HW_FLIP_FLOP) && !instr.rsts().empty())
       return PAT_FALSE;
@@ -230,25 +274,26 @@ private:
             [](auto frag) { return !frag || frag.size() == 0; }))
       return PAT_FALSE;
 
-    HWInstrBuilder build{ctx, instr};
+    HWInstrBuilderStack build{ctx, instr};
     OperandVec<HWValue> concat(ctx, 1, part.frags.size());
     concat.emplace_back(instr.q());
 
+    // First pass to extract reset values
     for (auto &frag : part.frags) {
+      HWValue fragInit =
+          instr.initValue()
+              ? build.buildSplice(instr.initValue(), frag.len, frag.dstAddr)
+              : nullref;
+
       HWValue d = build.buildSplice(instr.d(), frag.len, frag.dstAddr);
       SmallVec<std::tuple<HWValue, HWValue>, 4> rsts(instr.rsts());
 
       if (frag && frag.size() != 0 /*todo: allow empty*/) {
-        // Loopback analysis does not return the found constant value. Recompute
-        // it based on en signals with local known bits.
-        KnownBitsAnalysis knownBits{ctx};
-        SmallVec<std::pair<ObjRef<Wire>, BigInt>, 4> assignments{
-            Range{frag}.transform([&](size_t, auto ref) {
-              return std::make_pair(ctx.resolve(ref.first),
-                                    BigInt::fromU32(ref.second, 1));
-            })};
-        auto rstVal = knownBits.getKnownBitsWith(instr.d(), assignments);
-        BigInt::rangeSelectOp4S(rstVal, rstVal, frag.dstAddr, frag.len);
+        auto loopbackVal = getLoopbackVal(frag);
+        auto rstVal = knownBits.getKnownBits(loopbackVal->as<HWValue>());
+        BigInt::rangeSelectOp4S(rstVal, rstVal, frag.srcAddr, frag.len);
+        assert(!rstVal.getIs4S() && "find reset logic bug");
+
         rsts.emplace_back(
             frag.size() == 0
                 ? ConstantRef::fromBool(true)
@@ -260,9 +305,16 @@ private:
       }
 
       auto val = build.buildFlipFlop(instr.clk(), d, instr.clkEnRaw(),
-                                     Range{rsts}, true);
+                                     Range{rsts}, true, fragInit);
       concat.emplace_back(val);
     }
+
+    // Second pass to make reset value constants 'x. Same frag might get used
+    // twice, so do this after reading reset values.
+    for (auto &frag : part.frags)
+      if (frag && frag.size() != 0 /*todo: allow empty*/)
+        makeLoopbackUseDontCare(frag);
+
     concat.others().do_reverse();
 
     instr.def().replace(FatDynObjRef<>{nullref});
@@ -296,9 +348,10 @@ private:
 
     HWInstrBuilder build{ctx, instr};
     auto rebuild = [&](MutArrayRef<std::tuple<HWValue, HWValue>> rstVals) {
-      auto ib = build.buildInstrRaw(instr.getDialectOpcode(),
-                                    1 + FlipFlopIRef::numBaseOperands +
-                                        rstVals.size() * 2);
+      auto ib =
+          build.buildInstrRaw(instr.getDialectOpcode(),
+                              1 + FlipFlopIRef::numBaseOperands +
+                                  rstVals.size() * 2 + !!instr.initValue());
       ib.addRef(instr.def()->fat()).other();
       instr.def().replace(FatDynObjRef{nullref});
       ib.addRefs(instr.others()
@@ -307,6 +360,8 @@ private:
       Range{rstVals}.sort(compare);
       for (auto [rstEn, rstVal] : rstVals)
         ib.addRef(rstEn).addRef(rstVal);
+      if (instr.initValue())
+        ib.addRef(instr.initValue());
       deleteMatchedInstr(instr);
     };
 
@@ -358,10 +413,9 @@ private:
 
     HWInstrBuilder build{ctx, instr};
     auto rebuildWithEn = [&](HWValue newEn) {
+      assert(newEn.getNumBits() == 1);
       newEn = build.buildAnd(newEn, instr.clkEnRaw());
       auto d = instr.d();
-      // todo: ff en as implicit assume rather than explicit
-      d = build.buildAssume(d, newEn);
 
       auto ib =
           build.buildInstrRaw(instr.getDialectOpcode(), instr.getNumOperands());
@@ -447,16 +501,25 @@ private:
       auto known = deriveBits.knownBits.get(wire);
       assert(known.getNumBits() == wire.getNumBits());
       if (!known.getIs4S()) {
+        DYNO_DBG({
+          dbgs() << "boolExprSimplifySub:\nreplacing ";
+          dumpObj(ref->fat());
+          dbgs() << " in ";
+          dumpInstr(ref.instr(), ctx);
+        })
         replaceUse(ref, ConstantBuilder{ctx.getStore<Constant>()}
                             .val(std::move(known))
                             .get());
         change = true;
       }
 
-      if (!singleUse)
+      auto instr = wire.getDefI();
+      if (!singleUse || instr.getNumDefs() != 1 ||
+          // todo: instr type bits
+          instr.isOpc(OP_IF, OP_SWITCH, OP_WHILE, OP_FOR, OP_DO_WHILE, OP_CALL,
+                      HW_INSTANCE))
         continue;
 
-      auto instr = wire.getDefI();
       for (auto op : instr.others()) {
         if (op->is<WireRef>()) {
           assert(op->as<WireRef>().getNumDefs() == 1);
@@ -479,10 +542,14 @@ private:
 
     if (instr.getNumOperands() > 16)
       return false;
+    if (!instr.others().all([](auto o) { return o.template is<WireRef>(); }))
+      return false;
 
     auto trueV = instr.isOpc(OP_AND) ? true : false;
 
     bool change = false;
+
+    assert(deriveBits.knownBits.cache.raw().empty());
 
     for (auto op : instr.others()) {
       bool contradiction = false;
@@ -496,13 +563,18 @@ private:
       }
 
       auto known = deriveBits.knownBits.getKnownBits(op->as<HWValue>());
+      Defer defer{[&]() { deriveBits.clearCache(); }};
+
       // contradiction setting all other operands, or operand is known and short
       // circuits -> whole instr is known
       if (contradiction || known.valueEquals(!trueV)) {
+        DYNO_DBG({
+          auto num = op - op.instr().other_begin();
+          std::print(dbgs(), "boolExprSimplify: contradict={}, num={}\n",
+                     contradiction, num);
+        })
         replaceUses(instr.def(0)->as<WireRef>(), ConstantRef::fromBool(!trueV));
         deleteMatchedInstr(instr);
-        std::destroy_at(&deriveBits);
-        std::construct_at(&deriveBits, ctx);
         return PAT_TRUE;
       } //  operand is known but not short circuit -> delete
       else if (known.valueEquals(trueV)) {
@@ -514,15 +586,10 @@ private:
                 .as<HWValue>());
         replaceUses(instr.def(0)->as<WireRef>(), newV);
         deleteMatchedInstr(instr);
-        std::destroy_at(&deriveBits);
-        std::construct_at(&deriveBits, ctx);
         return PAT_TRUE;
       } else {
         change |= boolExprSimplifySub(op);
       }
-
-      std::destroy_at(&deriveBits);
-      std::construct_at(&deriveBits, ctx);
     }
     currentMatched.emplace_back(instr);
     return PAT_BOOL(change);
@@ -541,7 +608,13 @@ private:
     assert(given.getNumBits() == 1);
     auto contradict =
         !deriveBits.propKnownValueUp(given, BigInt::fromU64(1, 1));
-    assert(!contradict && "contradicting assume");
+    if (contradict) {
+      replaceUses(instr.def()->as<WireRef>(),
+                  cbuild.undef(*instr.def()->as<WireRef>().getNumBits()).get());
+      deleteMatchedInstr(instr);
+      deriveBits.clearCache();
+      return PAT_TRUE;
+    }
 
     auto rv = boolExprSimplifySub(instr.other(0));
     deriveBits.clearCache();
@@ -656,6 +729,7 @@ private:
   }
 
   PatBool optimizeOneHotMux(InstrRef instr) {
+    auto defW = instr.def()->as<WireRef>();
     // hash to find duplicates
     SmallDenseMap<DynObjRef, SmallVec<uint32_t, 2>, 16> map;
     for (auto [sel, val] : Range{instr.others()}.pairwise()) {
@@ -663,7 +737,7 @@ private:
       auto known = knownBits.getKnownBits(sel->as<HWValue>());
       if (known.valueEquals(1)) {
         // found a one entry, remove the instr
-        replaceUses(instr.def(0)->as<WireRef>(), val->as<HWValue>());
+        replaceUses(defW, val->as<HWValue>());
         deleteMatchedInstr(instr);
         return PAT_TRUE;
       } else if (known.valueEquals(0)) {
@@ -686,8 +760,14 @@ private:
       entries.emplace_back(mergedSel, ctx.resolve(val));
     }
 
+    if (entries.empty()) {
+      replaceUses(defW, cbuild.undef(*defW.getNumBits()).get());
+      deleteMatchedInstr(instr);
+      return PAT_TRUE;
+    }
+
     HWValue newVal = build.buildOneHotMux(entries);
-    replaceUses(instr.def(0)->as<WireRef>(), newVal);
+    replaceUses(defW, newVal);
     deleteMatchedInstr(instr);
     return PAT_TRUE;
   }
@@ -1121,14 +1201,17 @@ private:
   }
 
   PatBool fuseInserts(InsertIRef insert) {
-    // todo: directly fuse all in chain instead of just two
-    auto inWire = insert.in()->dyn_as<WireRef>();
-    while (inWire && inWire.getNumUses() == 1 &&
-           inWire.getDefI().isOpc(HW_INSERT)) {
-      auto other = inWire.getDefI().as<InsertIRef>();
-      // todo: doesn't actually have to be exactly equal. Constant offset is
-      // also fine.
-      if (!addressingFragsEqual(insert, other))
+    auto outWire = insert.out()->as<WireRef>();
+    while (outWire.getNumUses() == 1 &&
+           outWire.getSingleUse()->instr().isOpc(HW_INSERT)) {
+      auto other = outWire.getSingleUse()->instr().as<InsertIRef>();
+
+      auto insGEP = insert.addr().dyn_as<PointerRef>();
+      auto othGEP = other.addr().dyn_as<PointerRef>();
+      if (!!insGEP != !!othGEP ||
+          (insGEP &&
+           !addressingFragsEqual(insGEP.getDef().instr().as<GEPIRef>(),
+                                 othGEP.getDef().instr().as<GEPIRef>())))
         return false;
 
       auto thisBase = insert.getBase();
@@ -1137,10 +1220,10 @@ private:
       auto otherBase = other.getBase();
       auto otherLen = other.getLen();
 
-      // no intersect or touching
+      // no intersect or touching -> continue walking the chain
       if (std::max(thisBase, otherBase) >
           std::min(thisBase + thisLen, otherBase + otherLen)) {
-        inWire = other.in()->dyn_as<WireRef>();
+        outWire = other.out().as<WireRef>();
         continue;
       }
 
@@ -1148,19 +1231,18 @@ private:
       auto high = std::max(thisBase + thisLen, otherBase + otherLen);
       auto len = high - low;
 
-      HWInstrBuilder build{ctx, insert};
+      HWInstrBuilder build{ctx, other};
 
       // use RegisterValue for easy merging
       RegisterValue val{nullref, len, 0, false, nullopt};
-      val.overwrite(other.val()->as<HWValue>(), 0, otherBase - low, otherLen);
       val.overwrite(insert.val()->as<HWValue>(), 0, thisBase - low, thisLen);
+      val.overwrite(other.val()->as<HWValue>(), 0, otherBase - low, otherLen);
 
-      auto outWire =
-          build.buildInsert(insert.in()->as<HWValue>(), val.get(build, false),
-                            low, insert.terms());
-      replaceUses(insert.out()->as<WireRef>(), outWire);
-      // skip inserting other
-      replaceUses(other.out()->as<WireRef>(), other.in()->as<HWValue>());
+      auto outWire = build.buildInsert(
+          other.in()->as<HWValue>(), val.get(build, false), low, other.terms());
+      replaceUses(other.out()->as<WireRef>(), outWire);
+      // skip inserting, fused version handles instead
+      replaceUses(insert.out()->as<WireRef>(), insert.in()->as<HWValue>());
       deleteMatchedInstr(other);
       deleteMatchedInstr(insert);
       return PAT_TRUE;
@@ -1246,7 +1328,17 @@ private:
       auto repl = operandEqualsFrag(defW, frag);
       if (!repl)
         return false;
-      replaceUses(defW, repl);
+      // keep old wire to avoid sorting all uses
+      // todo: do this properly with builder def arg
+      if (repl.is<WireRef>() && repl.as<WireRef>().getNumUses() == 0) {
+        instr.def(0).replace(FatDynObjRef{nullref});
+        repl.as<WireRef>().getSingleDef()->replace(defW);
+        knownBits.recomputeAt(defW);
+        bitAlias.recomputeAt(defW);
+        ctx.getStore<Wire>().destroy(repl.as<WireRef>());
+      } else {
+        replaceUses(defW, repl);
+      }
       deleteMatchedInstr(instr);
       return PAT_TRUE;
     }
@@ -1811,6 +1903,8 @@ private:
   }
 
   template <typename Ref> PatBool simplifyYieldValues(Ref instr) {
+    if (!config.simplifyYieldValues)
+      return false;
     if (instr.getNumYieldValues() == 0)
       return false;
     SmallVec<HWValue, 32> yieldValues;
@@ -1894,28 +1988,9 @@ private:
     return PAT_TRUE;
   }
 
-  template <typename RefT> PatBool simplifyAddressing(RefT instr) {
+  // todo: rewrite GEP specific (replace uses of ptr if constant)
+  PatBool simplifyAddressing(GEPIRef instr) {
     HWInstrBuilder build{ctx, instr};
-    if (instr.getNumTerms() == 0) {
-      if (instr.hasBase() && instr.getBase() == 0) {
-        auto ib = build.buildInstrRaw(instr.getDialectOpcode(),
-                                      instr.getNumOperands() - 1);
-        for (auto def : instr.defs()) {
-          ib.addRef(def->fat());
-          // def.replace(FatDynObjRef{nullref});
-        }
-        ib.other();
-        for (auto use : instr.others()) {
-          if (use == instr.base()) {
-            continue;
-          }
-          ib.addRef(use->fat());
-        }
-        deleteMatchedInstr(instr);
-        return PAT_TRUE;
-      }
-      return false;
-    }
 
     bool change = false;
 
@@ -1926,7 +2001,8 @@ private:
     uint32_t baseOffs = instr.getBase();
     SmallVec<AddressGenTerm, 4> terms;
     for (auto term : instr.terms()) {
-      if (auto asConst = term.getIdx().template dyn_as<ConstantRef>()) {
+      if (auto asConst = term.getIdx().template dyn_as<ConstantRef>();
+          asConst && !asConst.getIs4S()) {
         baseOffs += checkedMul(asConst.getExactVal(), term.getFact());
         change = true;
         continue;
@@ -1978,27 +2054,31 @@ private:
       terms.emplace_back(term);
     }
 
+    if (terms.empty()) {
+      replaceUses(instr.def()->as<PointerRef>(),
+                  ConstantRef::fromU32(baseOffs));
+      deleteMatchedInstr(instr);
+      return PAT_TRUE;
+    }
+
     if (!change)
       return false;
 
     unsigned termDiff = instr.getNumTerms() - terms.size();
     unsigned numOperands = instr.getNumOperands() - termDiff * 3;
-    bool removeBaseOffs = terms.size() == 0 && baseOffs == 0;
-    if (removeBaseOffs)
-      numOperands--;
+
     auto ib = build.buildInstrRaw(instr.getDialectOpcode(), numOperands);
 
     for (auto def : instr.defs()) {
       ib.addRef(def->fat());
-      // def.replace(FatDynObjRef{nullref});
+      def.replace(FatDynObjRef{nullref});
     }
     ib.other();
     for (auto use : Range{instr.other_begin(),
                           instr.other_begin() + instr.addressGenBaseIndex()}) {
       ib.addRef(use->fat());
     }
-    if (!removeBaseOffs)
-      ib.addRef(ConstantRef::fromU32(baseOffs));
+    ib.addRef(ConstantRef::fromU32(baseOffs));
     for (auto term : terms)
       ib.addRef(term.getIdx())
           .addRef(ConstantRef::fromU32(term.getFact()))
@@ -2032,13 +2112,14 @@ private:
         cCond && !cCond.getIs4S()) {
       auto activeBlock =
           cCond.valueEquals(1) ? instr.getTrueBlock() : instr.getFalseBlock();
-      replaceMultiwayWithBlock(instr, activeBlock);
+      if (activeBlock) // if w/o else may not have false block
+        replaceMultiwayWithBlock(instr, activeBlock);
       deleteMatchedInstr(instr);
       return PAT_TRUE;
     }
 
     if (!instr.yieldValues().empty() && instr.getTrueBlock().size() == 1 &&
-        instr.getFalseBlock().size() == 1) {
+        instr.getFalseBlock() && instr.getFalseBlock().size() == 1) {
 
       HWInstrBuilder build{ctx, instr};
       for (auto [outW, trueV, falseV] :
@@ -2090,18 +2171,6 @@ private:
       if (auto trueV = knownBitsConstProp(instr))
         return trueV;
 
-    if (instr.isOpc(HW_SPLICE))
-      if (auto trueV = simplifyAddressing(instr.as<SpliceIRef>()))
-        return trueV;
-    if (instr.isOpc(HW_INSERT))
-      if (auto trueV = simplifyAddressing(instr.as<InsertIRef>()))
-        return trueV;
-    if (instr.isOpc(HW_LOAD))
-      if (auto trueV = simplifyAddressing(instr.as<LoadIRef>()))
-        return trueV;
-    if (instr.isOpc(HW_STORE, HW_STORE_DEFER))
-      if (auto trueV = simplifyAddressing(instr.as<StoreIRef>()))
-        return trueV;
     if (instr.isOpc(HW_GEP))
       if (auto trueV = simplifyAddressing(instr.as<GEPIRef>()))
         return trueV;
@@ -2252,13 +2321,16 @@ private:
   }
 
   PatBool matchPatternsOnInstr(InstrRef instr) {
+    knownBits.clearCache();
+    deriveBits.clearCache();
+    bitAlias.clearCache();
+
     currentMatched.clear();
     currentReplaced.clear();
 
     if (instr.getNumDefs() == 1) {
-      if (!instr.def(0)->is<WireRef>())
-        return false;
-      if (instr.def(0)->as<WireRef>().getNumUses() == 0) {
+      if (instr.def(0)->thin().getType() == Any{HW_WIRE, HW_POINTER} &&
+          instr.def(0)->as<FatDynObjRef<InstrDefUse>>()->getNumUses() == 0) {
         // DCE unused instruction
         deleteMatchedInstr(instr);
         return PatBool{"deleteDeadInstr"};
@@ -2271,8 +2343,6 @@ private:
     currentMatched.clear();
     currentReplaced.clear();
 
-    if (instr.getNumDefs() > 1)
-      return false;
     return PAT_BOOL(
         generated(ctx, config, currentMatched, currentReplaced, instr));
   }
@@ -2325,11 +2395,21 @@ private:
             auto defI = asWire.getDefI();
             if (!TaggedIRef{defI}.get() && defI.getNumDefs() == 1)
               deleteMatchedInstr(defI);
+          } else if (auto asPtr = op->dyn_as<PointerRef>();
+                     asPtr && asPtr.hasSingleUse() && asPtr.hasSingleDef()) {
+            auto defI = asPtr.getSingleDef()->instr();
+            if (!TaggedIRef{defI}.get() && defI.getNumDefs() == 1)
+              deleteMatchedInstr(defI);
           }
+          op.replace(FatDynObjRef<>{nullref});
         }
 
-        // todo: delete
-        op.replace(FatDynObjRef<>{nullref});
+        if (op.isDef() && Operand::isDefUseOperand(op->thin())) {
+          if (op->as<FatDynObjRef<InstrDefUse>>()->getNumDefs() != 1)
+            // else we keep and let it be destroyed with the instr
+            op.replace(FatDynObjRef<>{nullref});
+        } else
+          op.replace(FatDynObjRef<>{nullref});
       }
     } else {
       // if not explicitly ok to delete, re-inspect
@@ -2362,21 +2442,23 @@ private:
 
     DYNO_DBG({
       HWCtxPrinter print(ctx, dbgs());
-      dbgs() << "initial instructions (" << result.function << "):\n";
+      dbgs() << result.function << ":\n";
 
-      for (auto instr : currentMatched)
-        print.printInstr(instr);
+      for (auto instr : currentMatched) {
+        dbgs() << (TaggedIRef{instr}.get() ? "< " : "  ");
+        print.printInstr(instr, true, false);
+      }
 
-      dbgs() << "replaced with:\n";
-
-      for (size_t i = lastWorklistSize, sz = worklist.size(); i < sz; i++)
+      for (size_t i = lastWorklistSize, sz = worklist.size(); i < sz; i++) {
+        dbgs() << "> ";
         print.printInstr(worklist[i], true, false);
+      }
       if (lastWorklistSize == worklist.size()) {
         if (!currentReplaced.empty()) {
+          dbgs() << "> ";
           dumpObj(currentReplaced[0]->fat());
           dbgs() << "\n";
-        } else
-          dbgs() << "<none>\n";
+        }
       }
       dbgs() << "\n";
     })
@@ -2476,6 +2558,55 @@ public:
   }
   void runBlock(BlockRef block) {
     runWrapper([&]() { runOnBlock(block); });
+  }
+
+private:
+  void queueDeps(SmallVecImpl<InstrRef> &stack,
+                 SmallDenseSet<ObjRef<Instr>> &visited) {
+    while (!stack.empty()) {
+      auto elem = stack.pop_back_val();
+      for (auto use : elem.others().dyn_as<WireRef>()) {
+        auto [found, it] = visited.findOrInsert(use.getDefI());
+        if (!found)
+          stack.emplace_back(use.getDefI());
+      }
+    }
+    worklist = Range{visited}.resolve(ctx);
+  }
+
+public:
+  void runDeps(BlockRef block) {
+    runWrapper([&]() {
+      {
+        SmallVec<InstrRef, 16> stack(Range{block});
+        SmallDenseSet<ObjRef<Instr>> visited(Range{block});
+        queueDeps(stack, visited);
+      }
+
+      bitAlias.clearCache();
+      knownBits.clearCache();
+      while (!worklist.empty()) {
+        auto instr = worklist.pop_back_val();
+        runOnInstr(instr);
+      }
+    });
+  }
+  void runDeps(InstrRef instr) {
+    runWrapper([&]() {
+      {
+        SmallVec<InstrRef, 16> stack{instr};
+        SmallDenseSet<ObjRef<Instr>> visited;
+        visited.insert(instr);
+        queueDeps(stack, visited);
+      }
+
+      bitAlias.clearCache();
+      knownBits.clearCache();
+      while (!worklist.empty()) {
+        auto instr = worklist.pop_back_val();
+        runOnInstr(instr);
+      }
+    });
   }
 
   static constexpr auto runFuncs =

@@ -6,6 +6,7 @@
 #include "dyno/MutInstr.h"
 #include "dyno/Obj.h"
 #include "dyno/Pass.h"
+#include "hw/AutoDebugInfo.h"
 #include "hw/FlipFlop.h"
 #include "hw/HWAbstraction.h"
 #include "hw/HWContext.h"
@@ -15,6 +16,8 @@
 #include "hw/IDs.h"
 #include "hw/LoadStore.h"
 #include "hw/Module.h"
+#include "hw/Wire.h"
+#include "hw/analysis/KnownBits.h"
 #include "hw/analysis/PipelineAnalysis.h"
 #include "hw/analysis/RegisterValue.h"
 #include "hw/analysis/WireVariable.h"
@@ -52,7 +55,9 @@ public:
   FIELD(bool, virtualWidePorts, false)                                         \
   /* 1 / this is maximum bits or bandwidth wasted, whatever is more limiting   \
    */                                                                          \
-  FIELD(uint32_t, maxRepeatCountFactor, 8)
+  FIELD(uint32_t, maxRepeatCountFactor, 8)                                     \
+  /* Mostly for performance (todo: bump when matching no longer quadratic) */  \
+  FIELD(uint32_t, maxInitRepeatCount, 100)
   CONFIG_STRUCT(CONFIG_STRUCT_LAMBDA)
 #undef CONFIG_STRUCT_LAMBDA
   Config config;
@@ -145,7 +150,7 @@ private:
 
   struct BoundPort {
     ObjRef<Pointer> addr = nullref;
-    uint32_t idxOffs = 0;
+    uint32_t idxOffs = 0; // only used for virtual wide ports
   };
   struct MemoryMapping {
     // metadata attached to model ports (small vec forrepeatCount duplicated
@@ -208,7 +213,98 @@ private:
     // here is easy to recompute (done in constructor).
     MemoryMapping mapping;
 
-    MemoryMapper(Config &config, RegisterIRef actual, RegisterIRef model)
+    // (i*numPorts+:numPorts) is bit field of ports mutually exclusive with port
+    // i
+    UnsizedBitSet<SmallVec<uint64_t, 1>> modExclMatrix;
+    UnsizedBitSet<SmallVec<uint64_t, 1>> actExclMatrix;
+
+    static UnsizedBitSet<SmallVec<uint64_t, 1>>
+    computeExclusionMatrix(Context &ctx, ArrayRef<MemLoadIRef> loads,
+                           ArrayRef<MemStoreIRef> stores) {
+      unsigned totalPorts = loads.size() + stores.size();
+      UnsizedBitSet<SmallVec<uint64_t, 1>> mat(totalPorts * totalPorts);
+      DeriveBitsAnalysis deriveBits{ctx};
+
+      // check for implicit load enables. instead of these could also prop
+      // FF/MUXs enable in instcombine, requires disabling assume opt
+      // transiently tho.
+      auto getLoadImplicitEn = [](MemLoadIRef load) -> WireRef {
+        // todo: multiple uses but same/common enable?
+        auto data = load.def()->as<WireRef>();
+        auto use = data.getSingleUse();
+        if (!use)
+          return nullref;
+        auto instr = use->instr();
+        switch (*instr.getDialectOpcode()) {
+        case *HW_ONEHOT_MUX: {
+          auto idx = *use - instr.other_begin();
+          if ((idx & 1) != 1) // must be mux data, not sel
+            return nullref;
+          return instr.other(idx & ~1ULL).dyn_as<WireRef>();
+        }
+        case *HW_FLIP_FLOP:
+        case *HW_FLIP_FLOP_SRST: {
+          auto asFF = instr.as<FlipFlopIRef>();
+          if (asFF.classifyUse(*use) != FlipFlopIRef::D)
+            return nullref;
+          return asFF.clkEnRaw().dyn_as<WireRef>();
+        }
+        case *HW_ASSUME: {
+          if (*use != instr.other_begin())
+            return nullref;
+          return instr.other(1)->as<WireRef>();
+        }
+        }
+        return nullref;
+      };
+
+      auto markDependant = [&](unsigned enabledPort) {
+        for (auto [i, port] : Range{loads}.enumerate()) {
+          if (i == enabledPort)
+            continue;
+          auto en = port.en();
+          if (!en && !(en = getLoadImplicitEn(port)))
+            continue;
+          auto val = deriveBits.knownBits.getKnownBits(en);
+          if (val.valueEquals(0))
+            mat[enabledPort * totalPorts + i] = 1;
+        }
+        for (auto [i_st, port] : Range{stores}.enumerate()) {
+          auto i = i_st + loads.size();
+          if (i == enabledPort)
+            continue;
+          auto en = port.en();
+          if (!en)
+            continue;
+          auto val = deriveBits.knownBits.getKnownBits(en);
+          if (val.valueEquals(0))
+            mat[enabledPort * totalPorts + i] = 1;
+        }
+      };
+
+      for (auto [i, port] : Range{loads}.enumerate()) {
+        auto en = port.en();
+        if (!en && !(en = getLoadImplicitEn(port)))
+          continue;
+        deriveBits.propKnownValueUp(en, BigInt::fromU32(true, 1));
+        markDependant(i);
+        deriveBits.clearCache();
+      }
+      for (auto [i_st, port] : Range{stores}.enumerate()) {
+        auto i = i_st + loads.size();
+        auto en = port.en().dyn_as<WireRef>();
+        if (!en)
+          continue;
+        deriveBits.propKnownValueUp(en, BigInt::fromU32(true, 1));
+        markDependant(i);
+        deriveBits.clearCache();
+      }
+
+      return mat;
+    }
+
+    MemoryMapper(Context &ctx, Config &config, RegisterIRef actual,
+                 RegisterIRef model)
         : config(config), actual(actual), model(model),
           actualStores(
               actual.oref().uses().filter(filterStore).transform(getInstr)),
@@ -220,6 +316,37 @@ private:
               model.oref().uses().filter(filterLoad).transform(getInstr)),
           mapping{{}, {}, (actualStores.size()), (actualLoads.size()), {}, 0,
                   0,  0} {
+      // sort by actual position in parent block
+      auto sort = [&](auto range) {
+        range.sort([&](auto a, auto b) {
+          return a.iter(ctx).getPos() < b.iter(ctx).getPos();
+        });
+      };
+      auto sortLoadStoresByPriority = [&](auto &loads, auto &stores) {
+        assert(loads.empty() || stores.empty() ||
+               loads.front().parentBlock(ctx) ==
+                   stores.front().parentBlock(ctx));
+        assert(Range{stores}
+                   .tf([&](auto st) { return st.parentBlock(ctx); })
+                   .all_equal());
+        assert(Range{loads}
+                   .tf([&](auto ld) { return ld.parentBlock(ctx); })
+                   .all_equal());
+
+        // sort the block to make pos comparable
+        if (!loads.empty())
+          loads.front().parentBlock(ctx).sort();
+        else if (!stores.empty())
+          stores.front().parentBlock(ctx).sort();
+
+        if (!loads.empty())
+          sort(Range{loads});
+        if (!stores.empty())
+          sort(Range{stores});
+      };
+      sortLoadStoresByPriority(modelLoads, modelStores);
+      sortLoadStoresByPriority(actualLoads, actualStores);
+
       modelPortWidth = *getMinFact(modelStores[0]);
       assert(Range{modelStores}.all(
           [&](auto st) { return *getMinFact(st) == modelPortWidth; }));
@@ -269,6 +396,9 @@ private:
               round_up_div(actualLoadsWidth, modelLoadsWidth),
               round_up_div(*actual.getNumBits(), *model.getNumBits())}
                .max();
+
+      modExclMatrix = computeExclusionMatrix(ctx, modelLoads, modelStores);
+      actExclMatrix = computeExclusionMatrix(ctx, actualLoads, actualStores);
     }
 
     // if true & newly mapped also returns functor to undo the mapping
@@ -369,8 +499,63 @@ private:
       std::print(os, "{}\n", enableRow);
     }
 
-    template <typename RefT>
+    auto findMutuallyExclusive(uint32_t portIdx, uint32_t numPorts,
+                               UnsizedBitSet<SmallVec<uint64_t, 1>> &mat)
+        -> Optional<uint32_t> {
+      auto rng = IntRange(portIdx * numPorts, (portIdx + 1) * numPorts);
+      for (auto i : rng) {
+        if (!mat[i])
+          continue;
+        return i % numPorts;
+      }
+      return nullopt;
+    }
 
+    template <typename RefT>
+    // todo: check with reverse priority on the two mutex ports.
+    auto checkExclusivity(uint32_t actPortIdx, uint32_t modPortIdx) {
+      unsigned numModLoadsStores = modelLoads.size() + modelStores.size();
+      unsigned numActLoadsStores = actualLoads.size() + actualStores.size();
+
+      // check exclusivity: if model port is only available when certain
+      // others disabled we need the same restriction in actual to proceed
+      auto depIdx = findMutuallyExclusive(
+          modPortIdx +
+              (std::is_same_v<RefT, MemStoreIRef> ? modelLoads.size() : 0),
+          numModLoadsStores, modExclMatrix);
+      if (!depIdx)
+        return true;
+
+      // actually needs to consider all possible deps, not just greedy first
+      auto actDepIdx = findMutuallyExclusive(
+          actPortIdx +
+              (std::is_same_v<RefT, MemStoreIRef> ? actualLoads.size() : 0),
+          numActLoadsStores, actExclMatrix);
+      if (!actDepIdx)
+        return false; // act port can't cover model port's dep
+      if (!(*actDepIdx >= modelLoads.size()))
+        return false; // load/load deps don't help (model has only load/store)
+      auto actDepStIdx = *actDepIdx - modelLoads.size();
+
+      // in act port we're trying to map,
+      // check mapping for dependant port
+      auto exclPortIdx = *depIdx;
+      if (!(exclPortIdx >= modelLoads.size()))
+        report_fatal_error(
+            "load/load exclusivity in model memory not supported");
+      exclPortIdx -= modelLoads.size();
+
+      auto &frags = mapping.storePartitions[actDepStIdx].frags;
+      auto it = Range{frags}.find_if(
+          [&](auto &frag) { return frag.mapping == actDepStIdx; });
+      if (it == frags.end())
+        return false;
+      // todo: check that's actually in right spot? can also add as req for
+      // model memories.
+      return true;
+    }
+
+    template <typename RefT>
     bool mapPorts(SmallVecImpl<PortPartition> &partitions,
                   SmallVecImpl<RefT> &actualPorts,
                   SmallVecImpl<RefT> &modelPorts) {
@@ -389,7 +574,6 @@ private:
 
         // not enough bits -> downsize stripe count
         if (mapping.getAdjModelWidth() < mapping.tgtAdjModelWidth) {
-          // todo: fail if can't fulfill bandwidth or depth requirements.
           mapping.tgtAdjModelWidth =
               (mapping.getAdjModelWidth() / actualPortsLCM) * actualPortsLCM;
           // if depth too small, fail
@@ -425,6 +609,10 @@ private:
         // every port needs access to the full memory array. If a port is too
         // narrow, artifically widen it - we then later add MUXs to reduce it.
         assert(mapping.tgtAdjModelWidth % actSt.getLen() == 0);
+        if (mapping.tgtAdjModelWidth % *actFact != 0) {
+          // todo: canonicalize strided accesses early, then no need for this
+          return false;
+        }
         assert(mapping.tgtAdjModelWidth % *actFact == 0);
         if (adjActPortLen < mapping.tgtAdjModelWidth) {
           adjActPortLen = mapping.tgtAdjModelWidth;
@@ -447,8 +635,13 @@ private:
         for (const auto globIdx : usedModelPort.unsetBitIdxs()) {
           uint32_t modStIdx = globIdx % modelPorts.size();
           auto &modSt = modelPorts[modStIdx];
-
           uint32_t repIdx = globIdx / modelPorts.size();
+
+          if (std::is_same_v<RefT, MemLoadIRef>) {
+            if (!checkExclusivity<MemLoadIRef>(actStIdx, modStIdx))
+              continue;
+          }
+
           auto adjModPortLen = mapping.modelRangeEnable.getNumCoveredBits(
               repIdx * modelPortWidth + modSt.base(), modSt.getLen());
 
@@ -477,7 +670,7 @@ private:
 
           // sub instance stores may not cross the striping boundaries
           if constexpr (std::is_same_v<RefT, MemStoreIRef>) {
-            // todo: relax this rule for known-fused stores (e.g. capacity
+            // todo: relax this rule for known-fused stores (e.g. bandwidth
             // increasing repeats)
             auto lowIdx = baseAddr / subPortBoundary;
             auto highIdx = (baseAddr + adjModPortLen - 1) / subPortBoundary;
@@ -496,8 +689,9 @@ private:
 
           // constant stuff - we can probably just define no const addr for
           // model mems
-          assert(!modSt.addr().template is<ConstantRef>() &&
-                 !actSt.addr().template is<ConstantRef>());
+          if (modSt.addr().template is<ConstantRef>() ||
+              actSt.addr().template is<ConstantRef>())
+            report_fatal_error("expected non-constant address");
 
           auto fragAccessLen = std::min(part.getLen() - adjAddr, adjModPortLen);
           // If already covered attempt to move forward and cover more via idx
@@ -528,14 +722,29 @@ private:
             triggerMapping = std::move(pair.second);
           }
 
-          auto &modelPortMeta =
+          auto &boundPorts =
               mapping.boundPorts
                   .findOrInsert(modPtr,
                                 SmallVec<BoundPort, 4>(mapping.repeatCount))
-                  .second.val()[repIdx];
+                  .second.val();
+          auto &modelPortMeta = boundPorts[repIdx];
           // address object is already bound to something else.
           if (modelPortMeta.addr != Any{actPtr, nullref}) {
+            if (std::is_same_v<RefT, MemLoadIRef>) {
+              auto dim = modelLoads.size() + modelStores.size();
+              // mutually exclusive store bound to load's addr is OK
+              for (size_t i = modStIdx * dim + modelLoads.size();
+                   i < modStIdx * dim + dim; i++) {
+                auto idx = i - modStIdx * dim;
+                if (modExclMatrix[i]) {
+                  auto store = modelStores[idx - modelLoads.size()];
+                  if (store.addr().as<ObjRef<Pointer>>() == modPtr)
+                    goto is_mut_excl_stores_addr;
+                }
+              }
+            }
             continue;
+          is_mut_excl_stores_addr:
           }
           modelPortMeta.addr = actPtr;
 
@@ -555,13 +764,52 @@ private:
       }
 
       if constexpr (std::is_same_v<RefT, MemStoreIRef>) {
-        // Mask off unused ports
-        for (const auto globIdx : usedModelPort.unsetBitIdxs()) {
+        auto getModelPortPriorities = [&](size_t s) {
+          return Range{partitions[s].frags}.tf(
+              [](PortFrag frag) { return *frag.mapping; });
+        };
+        // for multiple stores, check that priority matches what's specified in
+        // model. We greedily match in correct order, so if possible it should.
+        // Thus just catch late here and fail if not.
+        bool storePrioOK =
+            IntRange{actualPorts.size()}.is_sorted([&](size_t lhs, size_t rhs) {
+              // lowest prio model port of higher prio actual port
+              // always has higher prio than
+              // highest prio model port of lower prio actual port
+              unsigned lowestPrioModPortOfHigherPrioActPort =
+                  *getModelPortPriorities(lhs).max();
+              unsigned highestPrioModPortOfLowerPrioActPort =
+                  *getModelPortPriorities(rhs).min();
+              return lowestPrioModPortOfHigherPrioActPort <
+                     highestPrioModPortOfLowerPrioActPort;
+            });
+        if (!storePrioOK)
+          return false;
+
+        // Mask off unused ports: regenerate modelRangeEnable, mark only
+        // actually used ports.
+        PortPartition mask(mapping.repeatCount * modelPortWidth);
+        // Also find totally unused model stores
+        DynBitSet<SmallVec<uint64_t, 1>> modelStoreUsed(modelPorts.size());
+        for (const auto globIdx : usedModelPort.setBitIdxs()) {
           uint32_t modStIdx = globIdx % modelPorts.size();
           auto &modSt = modelPorts[modStIdx];
           uint32_t repIdx = globIdx / modelPorts.size();
-          mapping.modelRangeEnable.writeSingle(
+
+          auto adjModPortLen = mapping.modelRangeEnable.getNumCoveredBits(
               repIdx * modelPortWidth + modSt.base(), modSt.getLen());
+          auto unadjAddr = repIdx * modelPortWidth + modSt.base();
+
+          mask.writeSingle(unadjAddr, adjModPortLen, 1u);
+          modelStoreUsed[modStIdx] = 1;
+        }
+        mapping.modelRangeEnable = std::move(mask);
+        // Remove dependencies on totally unused store ports
+        for (auto idx : modelStoreUsed.unsetBitIdxs()) {
+          // clear matrix column
+          auto dim = modelLoads.size() + modelStores.size();
+          for (size_t i = idx + modelLoads.size(); i < (dim * dim); i += dim)
+            modExclMatrix[i] = 0;
         }
       }
       return true;
@@ -601,8 +849,8 @@ private:
     template <typename RefT>
     void applyPort(Context &ctx, uint32_t actLoadIdx, RefT actLoad,
                    PortPartition &part, uint32_t factor, auto &&connect,
-                   auto &&connectReverse, OperandVec<HWValue> *outWires,
-                   HWValue &outSubIdx) {
+                   auto &&connectReverse, auto &&getConnection,
+                   OperandVec<HWValue> *outWires, HWValue &outSubIdx) {
       HWInstrBuilder build{ctx, actLoad};
 
       HWValue subIdx = nullref;
@@ -621,6 +869,7 @@ private:
         uint32_t repIdx;
         RefT modLoad;
         uint32_t modLoadIdx;
+        HWValue portAddressInputEnable = nullref;
 
         if constexpr (std::is_same_v<RefT, MemLoadIRef>) {
           repIdx = idx / modelLoads.size();
@@ -658,8 +907,9 @@ private:
                                                     ConstantRef::fromU32(idx),
                                                     BigInt::ICMP_EQ));
           }
-
-          connect(en, modLoad.en(), repIdx);
+          if (en != ConstantRef::fromBool(true))
+            portAddressInputEnable = en;
+          connect(en, modLoad.en().template as<WireRef>(), repIdx);
         }
 
         HWValue adjAddr = addr;
@@ -677,9 +927,6 @@ private:
           adjAddr =
               build.buildAdd(adjAddr, ConstantRef::fromU32(binding.idxOffs));
         }
-        connect(adjAddr,
-                modLoad.terms().front().getIdx().template as<WireRef>(),
-                repIdx);
 
         if constexpr (std::is_same_v<RefT, MemLoadIRef>) {
           const auto &modPipe = modLoadPipelines[modLoadIdx];
@@ -707,6 +954,14 @@ private:
             connect(actualVal, modW, repIdx);
           }
 
+          // // Extract load enable
+          // if (!modLoadPipelines[modLoadIdx].stages.empty()) {
+          //   auto ff = modLoadPipelines[modLoadIdx].stages.front().ff;
+          //   auto val = ff.clkEnRaw();
+          //   if (val != ConstantRef::fromBool(true))
+          //     portAddressInputEnable = val;
+          // }
+
           auto ldValPostPipe = ctx.resolve(modPipe.slice.wire);
           assert(modPipe.slice.addr == 0 &&
                  modPipe.slice.len == ldValPostPipe.getNumBits() && "todo");
@@ -731,8 +986,24 @@ private:
           // todo: remove assert
           assert(!wrval.is<ConstantRef>() ||
                  !wrval.as<ConstantRef>().allBitsUndef());
-          connect(wrval, modLoad.value(), repIdx);
+          connect(wrval, modLoad.value().template as<WireRef>(), repIdx);
         }
+
+        // Connected address, possibly MUX'd by port enable if shared
+        auto existingConn = getConnection(
+            modLoad.terms().front().getIdx().template as<WireRef>(), repIdx);
+        if (existingConn) {
+          if (!portAddressInputEnable)
+            report_fatal_error(
+                "not supported: shared address on non-shared port");
+          assert(!portAddressInputEnable.is<ConstantRef>());
+          adjAddr =
+              build.buildMux(portAddressInputEnable, adjAddr, existingConn);
+        }
+        connect(adjAddr,
+                modLoad.terms().front().getIdx().template as<WireRef>(),
+                repIdx);
+
         adjFragAddr += frag.len;
       }
 
@@ -743,6 +1014,11 @@ private:
       HWInstrBuilder build{ctx};
       auto cell = HWInstrRef{model}.parentMod(ctx);
       assert(cell.isOpc(HW_STDCELL_DEF));
+
+      AutoDebugInfoStack autoDbgInfo{ctx};
+      for (auto nm :
+           ctx.getCtx<HWDialectContext>().regNameInfo.getNames(actual.oref()))
+        autoDbgInfo.addDebugInfo(false, std::string_view(nm));
 
       uint32_t numPorts = 0, numOutputs = 0;
       for (auto p : cell.ports()) {
@@ -840,6 +1116,18 @@ private:
         instances[repIdx].defs()[idx] = w;
         return w;
       };
+      auto getConnection = [&](WireRef mod, unsigned repIdx) -> HWValue {
+        auto port = WireVariable::checkIsInputLookthru(mod);
+        if (!port)
+          report_fatal_error("expected port");
+        auto idx = inputIdxMap.find(port->reg.oref()).val();
+        auto &inp = instanceInputs[repIdx * numInputs + idx];
+        auto it = inp.getInsertIt(port->addr);
+        if (it->dstAddr == port->addr && it->len == port->len &&
+            it->srcAddr == 0)
+          return ctx.resolve(it->ref);
+        return nullref;
+      };
 
       for (auto [actLoadIdx, part, actLoad] :
            Range{mapping.loadPartitions}.zip(actualLoads).enumerate().flat()) {
@@ -852,7 +1140,7 @@ private:
 
         HWValue subIdx;
         applyPort(ctx, actLoadIdx, actLoad, part, factor, connect,
-                  connectReverse, &wires, subIdx);
+                  connectReverse, getConnection, &wires, subIdx);
 
         wires.others().do_reverse();
         auto val = build.buildConcat(std::move(wires));
@@ -894,7 +1182,7 @@ private:
 
         HWValue subIdx;
         applyPort(ctx, actStoreIdx, actStore, part, factor, connect,
-                  connectReverse, nullptr, subIdx);
+                  connectReverse, getConnection, nullptr, subIdx);
       }
 
       // Flatten inputs
@@ -950,6 +1238,13 @@ private:
         auto instr = inst.build();
         block.end().insertPrev(instr);
       }
+
+      // Destroy manually
+      for (auto store : actualStores)
+        build.destroyInstr(store);
+      for (auto load : actualLoads)
+        build.destroyInstr(load);
+      build.destroyInstr(actual);
     }
   };
 
@@ -971,12 +1266,14 @@ private:
     mapper.mapping.modelRangeEnable = PortPartition(canonicalModelWidth, 1u);
 
     if (!mapper.mapPorts(mapper.mapping.storePartitions, mapper.actualStores,
-                         mapper.modelStores))
+                         mapper.modelStores)) {
       return false;
+    }
 
     if (!mapper.mapPorts(mapper.mapping.loadPartitions, mapper.actualLoads,
-                         mapper.modelLoads))
+                         mapper.modelLoads)) {
       return false;
+    }
 
     mapper.computeMappingCost();
     return true;
@@ -986,9 +1283,41 @@ private:
     std::optional<std::pair<ObjRef<Register>, MemoryMapping>> best =
         std::nullopt;
 
+    auto printExclMatrix = [&](UnsizedBitSet<SmallVec<uint64_t, 1>> &mat,
+                               uint32_t numRead, uint32_t numWrite) {
+      DYNO_DBG({
+        auto dim = numRead + numWrite;
+        for (uint32_t i = 0; i < dim; i++) {
+          std::print(dbgs(),
+                     "{:c} port {:02d} excludes: ", (i < numRead ? 'r' : 'w'),
+                     i);
+          for (uint32_t j = 0; j < dim; j++) {
+            if (i == j)
+              dbgs() << '\\';
+            else
+              dbgs() << char(mat[i * dim + j] + '0');
+          }
+          dbgs() << "\n";
+        }
+      })
+    };
+
+    auto vis = [&](MemoryMapper &mapper) {
+      DYNO_DBG({
+        dumpInstr(actual, ctx);
+        std::print(dbgs(), "mapping {}x {}, cost = {}\n",
+                   mapper.mapping.repeatCount,
+                   HWInstrRef{mapper.model}.parentMod(ctx).mod()->name,
+                   mapper.mapping.cost);
+        mapper.visualize(dbgs());
+        std::print(dbgs(), "\n");
+      })
+    };
+
     // todo: prune search space based on score
-    for (auto modelCand : Range{memStdCells}.resolve(ctx)) {
-      MemoryMapper mapper{config, actual, modelCand.iref()};
+    for (auto [front, modelCand] :
+         Range{memStdCells}.resolve(ctx).mark_front()) {
+      MemoryMapper mapper{ctx, config, actual, modelCand.iref()};
 
       if (mapper.actualPortsLCM == 0) {
         DYNO_DBG(dumpInstr(actual, ctx);
@@ -996,24 +1325,26 @@ private:
         return false;
       }
 
-      auto vis = [&]() {
-        DYNO_DBG({
-          dumpInstr(actual, ctx);
-          std::print(dbgs(), "possible mapping {}x {}, cost = {}\n",
-                     mapper.mapping.repeatCount,
-                     HWInstrRef{modelCand.iref()}.parentMod(ctx).mod()->name,
-                     mapper.mapping.cost);
-          mapper.visualize(dbgs());
-          std::print(dbgs(), "\n");
-        })
-      };
+      // if (front) {
+      //   DYNO_DBG(std::print(dbgs(), "actual mem exclusion matrix\n"));
+      //   printExclMatrix(mapper.actExclMatrix, mapper.actualLoads.size(),
+      //                   mapper.actualStores.size());
+      // }
+
+      // DYNO_DBG(
+      //     std::print(dbgs(), "candidate \"{}\" exclusion matrix\n",
+      //                HWInstrRef{modelCand.iref()}.parentMod(ctx).mod()->name));
+      // printExclMatrix(mapper.modExclMatrix, mapper.modelLoads.size(),
+      //                 mapper.modelStores.size());
 
       uint32_t repCount = mapper.mapping.repeatCount;
+      if (repCount > config.maxInitRepeatCount)
+        continue;
       uint32_t maxRepCount = repCount * config.maxRepeatCountFactor;
 
       // fast path if heuristic repeat count correct
       if (tryMap(mapper, repCount)) {
-        vis();
+        // vis();
         if (!best || mapper.mapping.cost < best->second.cost) {
           best.emplace(modelCand, std::move(mapper.mapping));
         }
@@ -1037,17 +1368,34 @@ private:
           continue;
       }
 
-      vis();
+      // vis();
       if (!best || mapper.mapping.cost < best->second.cost) {
         best.emplace(modelCand, std::move(mapper.mapping));
       }
     }
 
-    if (!best)
+    if (!best) {
+      DYNO_DBG({
+        std::print(dbgs(), "failed to map memory:\n");
+        dumpInstr(actual, ctx);
+        std::print(dbgs(), " loads:\n");
+        for (auto memLoad : actual.memLoads()) {
+          std::print(dbgs(), "  ");
+          dumpInstr(memLoad, ctx);
+        }
+        std::print(dbgs(), " stores:\n");
+        for (auto memStore : actual.memStores()) {
+          std::print(dbgs(), "  ");
+          dumpInstr(memStore, ctx);
+        }
+        std::print(dbgs(), "\n\n");
+      })
       return false;
+    }
 
-    MemoryMapper mapper{config, actual, ctx.resolve(best->first).iref()};
+    MemoryMapper mapper{ctx, config, actual, ctx.resolve(best->first).iref()};
     mapper.mapping = std::move(best->second);
+    vis(mapper);
     mapper.apply(ctx);
 
     return true;
@@ -1059,7 +1407,7 @@ public:
   void runOnModule(ModuleIRef mod) {
     if (mod.isOpc(HW_STDCELL_DEF))
       return;
-    for (auto reg : mod.regs()) {
+    for (auto reg : Vec<RegisterIRef>{mod.regs()}) {
       auto uses = reg.oref().uses();
       if (uses.empty())
         continue;

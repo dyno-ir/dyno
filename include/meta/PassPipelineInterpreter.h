@@ -47,6 +47,22 @@ class MetaPassPipelineInterpreter {
     for (auto instr : block) {
       if (instr.isOpc(OP_FUNCTION_DEF, CORE_EXPORT))
         continue;
+
+      auto errorCB = [&]() {
+        auto locs =
+            ctx.getCtx<CoreDialectContext>().instrSourceLocInfo.getSourceLocs(
+                instr);
+        if (!locs.empty())
+          std::print(std::cerr, "{}: ", locs.front());
+        std::print(
+            std::cerr, "note: in {}\n",
+            ContextPrinterWrapper<CoreDialectPrinter, OpDialectPrinter,
+                                  MetaDialectPrinter>{ctx, OStreamWrapper{}}
+                .toString(instr));
+      };
+      push_fatal_error_callback(errorCB);
+      Defer _{[] { pop_fatal_error_callback(); }};
+
       if (instr.isOpc(OP_CALL)) {
         auto asCall = instr.as<CallInstrRef>();
         if (!interpretPassPipelineImpl(*asCall.func()->defContext,
@@ -57,20 +73,6 @@ class MetaPassPipelineInterpreter {
       }
       if (instr.getDialect() != DIALECT_META)
         report_fatal_error("expected meta dialect instruction");
-
-      auto errorCB = [&]() {
-        auto locs =
-            ctx.getCtx<CoreDialectContext>().instrSourceLocInfo.getSourceLocs(
-                instr);
-        if (!locs.empty())
-          std::print(std::cerr, "{}: ", locs.front());
-        std::print(
-            std::cerr, "note: in pass {}\n",
-            ContextPrinterWrapper<CoreDialectPrinter, OpDialectPrinter,
-                                  MetaDialectPrinter>{ctx, OStreamWrapper{}}
-                .toString(instr));
-      };
-      push_fatal_error_callback(errorCB);
 
       auto opc = instr.getDialectOpcode();
       auto &pass = passes.findOrCreate(opc, passCtorArgs);
@@ -89,7 +91,6 @@ class MetaPassPipelineInterpreter {
       pass.config(cfg ? cfg->data : empty, lexer);
 
       bool res = pass.run(passRunArgs);
-      pop_fatal_error_callback();
       if (!res) {
         errorCB();
         std::print(std::cerr, "error: failed to run pass (returned false)\n");

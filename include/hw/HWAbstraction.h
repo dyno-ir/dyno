@@ -34,6 +34,8 @@
 #include "support/StringRef.h"
 #include "support/Utility.h"
 #include <algorithm>
+#include <array>
+#include <concepts>
 #include <dyno/NewDeleteObjStore.h>
 #include <iterator>
 #include <type_traits>
@@ -128,14 +130,14 @@ public:
   }
 
   // does not place in CFG
-  ModuleIRef buildModule(std::string_view name,
-                         DialectOpcode defOpc = HW_MODULE_DEF) {
+  ModuleRef buildModule(std::string_view name,
+                        DialectOpcode defOpc = HW_MODULE_DEF) {
     auto moduleRef = ctx.getStore<Module>().create(std::string(name));
     auto moduleInstr = ctx.getStore<Instr>().create(2, defOpc);
 
     InstrBuilder{moduleInstr}.addRef(moduleRef).addRef(
         ctx.getCtx<CoreDialectContext>().createBlock());
-    return moduleInstr;
+    return moduleRef;
   }
   ModuleIRef buildStdCell(std::string_view name, StdCellInfoRef info,
                           DialectOpcode defOpc = HW_STDCELL_DEF) {
@@ -201,12 +203,22 @@ public:
         ([&] { build.constFunc(rest.template as<ConstantRef>()); }(), ...);    \
         return build.get();                                                    \
       }                                                                        \
-    auto rv = buildInstr(opcode, true, first, rest...).defW();                 \
-    rv->numBits = first.getNumBits();                                          \
-    return rv;                                                                 \
+    OtherVec<HWValue> operands{ctx, 1, getNumOperands(first, rest...)};        \
+    operands.push_back(first);                                                 \
+    (operands.push_back(rest), ...);                                           \
+    return ident(std::move(operands));                                         \
   }                                                                            \
   /*note: Destroys the operands array!*/                                       \
   HWValue ident(MutArrayRef<HWValue> operands) {                               \
+    if (operands.empty()) {                                                    \
+      /* support empty operands for and/or (and assume boolean) as it occurs   \
+       * commonly */                                                           \
+      if constexpr (opcode == OP_AND)                                          \
+        return ConstantRef::fromBool(true);                                    \
+      if constexpr (opcode == OP_OR)                                           \
+        return ConstantRef::fromBool(false);                                   \
+      dyno_unreachable("empty operands");                                      \
+    }                                                                          \
     Range{operands}.sort(commutativeOpOperandOrder);                           \
     bool multipleConstants = operands.size() >= 2 &&                           \
                              operands.end()[-1].is<ConstantRef>() &&           \
@@ -299,7 +311,7 @@ public:
 
       unsigned cnt = 0;
       for (auto val : templ.others().reverse()) {
-        auto constant = val.as<ConstantRef>();
+        auto constant = val.dyn_as<ConstantRef>();
         if (!constant)
           break;
         switch (*templ.getDialectOpcode()) {
@@ -321,11 +333,23 @@ public:
         }
         cnt++;
       }
-      templ.resize(templ.size() - cnt);
+      templ.resize(templ.size() - cnt + 1);
+      templ.other_end()[-1] = cbuild.get();
     }
 
     if (templ.getNumOthers() == 1)
       return templ.other(0);
+
+    if (auto asConst = templ.other_end()[-1].dyn_as<ConstantRef>()) {
+      if ((asConst.valueEqualsS(-1) &&
+           templ.getDialectOpcode() == Any{OP_AND}) ||
+          (asConst.valueEquals(0) &&
+           templ.getDialectOpcode() == Any{OP_ADD, OP_OR, OP_XOR})) {
+        templ.resize(templ.size() - 1);
+        if (templ.getNumOthers() == 1)
+          return templ.other(0);
+      }
+    }
 
     if (!templ.def())
       templ.def() = ctx.getStore<Wire>().create(bits);
@@ -639,7 +663,8 @@ private:
   }
 
 public:
-  template <typename... Ts>
+  template <
+      any_of<AddressGenTermOperand, AddressGenTermRef, AddressGenTerm>... Ts>
   HWValue buildSplice(HWValue src, uint32_t numBits, uint32_t baseAddr,
                       Ts... terms) {
     if (sizeof...(terms) == 0 && baseAddr == 0)
@@ -671,23 +696,25 @@ public:
       return instr.defW();
     }
 
-    auto instr = buildInstr(HW_SPLICE, true, src,
-                            ConstantRef::fromU32(baseAddr), terms...);
+    SpliceIRef instr =
+        buildInstr(HW_SPLICE, true, src, buildGEP(baseAddr, terms...));
+
     instr.defW()->numBits = numBits;
     return instr.defW();
   }
 
+  template <typename T>
   HWValue buildSplice(HWValue src, uint32_t numBits, uint32_t baseAddr,
-                      IsRange auto terms) {
+                      Range<T> terms) {
     if (terms.empty())
       return buildSplice(src, numBits, baseAddr);
+    auto ptr = buildGEP(baseAddr, terms);
     auto len = std::distance(terms.begin(), terms.end());
-    auto ib = buildInstrRaw(HW_SPLICE, 1 + 2 + 3 * len);
+    auto ib = buildInstrRaw(HW_SPLICE, 1 + 2);
     auto defW = ctx.getStore<Wire>().create(numBits);
     ib.addRef(defW).other();
     ib.addRef(src);
-    ib.addRef(ConstantRef::fromU32(baseAddr));
-    addSpecialRef(ib, terms);
+    ib.addRef(ptr);
     return defW;
   }
 
@@ -820,17 +847,35 @@ public:
     return rv;
   }
 
-  template <typename... Ts>
+  template <
+      any_of<AddressGenTermOperand, AddressGenTermRef, AddressGenTerm>... Ts>
   HWValue buildInsert(HWValue src, HWValue val, uint32_t baseAddr,
                       Ts... terms) {
     if (baseAddr == 0 && sizeof...(terms) == 0) {
+      if (val.getNumBits() == src.getNumBits())
+        return val;
       auto rv = buildInstr(HW_INSERT, true, src, val).defW();
       rv->numBits = src.getNumBits();
       return rv;
     }
-    auto rv = buildInstr(HW_INSERT, true, src, val,
-                         ConstantRef::fromU32(baseAddr), terms...)
-                  .defW();
+    auto rv =
+        buildInstr(HW_INSERT, true, src, val, buildGEP(baseAddr, terms...))
+            .defW();
+    rv->numBits = src.getNumBits();
+    return rv;
+  }
+
+  HWValue buildInsert(HWValue src, HWValue val, uint32_t baseAddr,
+                      IsRange auto terms) {
+    if (baseAddr == 0 && terms.empty()) {
+      if (val.getNumBits() == src.getNumBits())
+        return val;
+      auto rv = buildInstr(HW_INSERT, true, src, val).defW();
+      rv->numBits = src.getNumBits();
+      return rv;
+    }
+    auto rv =
+        buildInstr(HW_INSERT, true, src, val, buildGEP(baseAddr, terms)).defW();
     rv->numBits = src.getNumBits();
     return rv;
   }
@@ -998,13 +1043,12 @@ public:
 
   template <typename... Ts>
   WireRef buildLoad(RegisterRef reg, uint32_t numBits, uint32_t baseAddr = 0,
-                    Ts... addressGenTerms) {
+                    Ts... terms) {
     HWInstrRef ref;
-    if (baseAddr == 0 && getNumOperands<Ts...>(addressGenTerms...) == 0)
+    if (baseAddr == 0 && getNumOperands<Ts...>(terms...) == 0)
       ref = buildInstr(HW_LOAD, true, reg);
     else
-      ref = buildInstr(HW_LOAD, true, reg, ConstantRef::fromU32(baseAddr),
-                       addressGenTerms...);
+      ref = buildInstr(HW_LOAD, true, reg, buildGEP(baseAddr, terms...));
     ref.defW()->numBits = numBits;
     return ref.defW();
   }
@@ -1061,6 +1105,16 @@ public:
     return instr;
   }
 
+  template <
+      any_of<AddressGenTermOperand, AddressGenTermRef, AddressGenTerm>... Terms>
+  HWAddress buildGEP(uint32_t base, Terms... terms) {
+    if constexpr (sizeof...(terms) == 0) {
+      return ConstantRef::fromU32(base);
+    } else {
+      return buildGEP(base, InitListRange{terms...});
+    }
+  }
+
   template <typename T> HWAddress buildGEP(uint32_t base, Range<T> terms) {
     if (terms.empty()) {
       // for use with buildLoad/buildStore, these drop the addr operand if it's
@@ -1070,7 +1124,8 @@ public:
       return ConstantRef::fromU32(base);
     }
 
-    MutInstr<FatDynObjRef<>> instr{ctx, HW_GEP, 2U + terms.size()};
+    MutInstr<FatDynObjRef<>> instr{ctx, HW_GEP,
+                                   uint32_t(2U + 3 * terms.size())};
     instr.emplace_back(ctx.getStore<Pointer>().create());
     instr.defsDone();
 
@@ -1083,10 +1138,16 @@ public:
           ConstantRef::fromU32(term.getMax() ? *term.getMax() : 0));
     }
 
-    instr.others().drop_front().tuple<3>().sort([](auto &&a, auto &&b) {
-      return addressGenTermOperandOrder(AddressGenTermRef{&std::get<0>(a)},
-                                        AddressGenTermRef{&std::get<0>(b)});
-    });
+    instr.others().drop_front().tuple<3>().stable_sort(
+        [](std::tuple<FatDynObjRef<>, FatDynObjRef<>, FatDynObjRef<>> a,
+           std::tuple<FatDynObjRef<>, FatDynObjRef<>, FatDynObjRef<>> b) {
+          auto aArr =
+              std::to_array({std::get<0>(a), std::get<1>(a), std::get<2>(a)});
+          auto bArr =
+              std::to_array({std::get<0>(b), std::get<1>(b), std::get<2>(b)});
+          return addressGenTermOperandOrder(AddressGenTermRef{aArr.data()},
+                                            AddressGenTermRef{bArr.data()});
+        });
 
     auto ref = instr.build();
     insertInstr(ref);
@@ -1097,16 +1158,15 @@ public:
   template <typename... Ts>
   StoreIRef buildStore(RegisterRef reg, HWValue value, bool defer = false,
                        TriggerIRef trigger = nullref, uint32_t baseAddr = 0,
-                       Ts... addressGenTerms) {
+                       Ts... terms) {
     assert(!(!defer && trigger) && "trigger on non-deferred store");
     auto opc = defer ? HW_STORE_DEFER : HW_STORE;
-    if (getNumOperands<Ts...>(addressGenTerms...) > 0 || baseAddr != 0) {
+    if (getNumOperands<Ts...>(terms...) > 0 || baseAddr != 0) {
+      auto gep = buildGEP(baseAddr, terms...);
       if (trigger) {
-        return buildInstr(opc, false, value, reg, trigger.oref(),
-                          ConstantRef::fromU32(baseAddr), addressGenTerms...);
+        return buildInstr(opc, false, value, reg, trigger.oref(), gep);
       }
-      return buildInstr(opc, false, value, reg, ConstantRef::fromU32(baseAddr),
-                        addressGenTerms...);
+      return buildInstr(opc, false, value, reg, gep);
     } else {
       if (trigger) {
         return buildInstr(opc, false, value, reg, trigger.oref());
@@ -1116,28 +1176,34 @@ public:
   }
 
   WireRef buildFlipFlop(HWValue clk, HWValue d,
-                        HWValue en = ConstantRef::fromBool(1), auto... resets) {
+                        HWValue en = ConstantRef::fromBool(1),
+                        HWValue initValue = nullref, auto... resets) {
     auto defW = ctx.getStore<Wire>().create(d.getNumBits());
-    auto ib = buildInstrRaw(HW_FLIP_FLOP, 4 + sizeof...(resets) * 2);
+    auto ib =
+        buildInstrRaw(HW_FLIP_FLOP, 4 + sizeof...(resets) * 2 + !!initValue);
     ib.addRef(defW).other().addRef(clk).addRef(d).addRef(en);
     if constexpr (sizeof...(resets) != 0)
       for (auto [rst, rstval] : InitListRange{resets...}.pairwise()) {
         ib.addRef(rst).addRef(rstval);
       }
+    if (initValue)
+      ib.addRef(initValue);
     return defW;
   }
   template <typename T>
   WireRef buildFlipFlop(HWValue clk, HWValue d,
                         HWValue en = ConstantRef::fromBool(1),
                         Range<T> resets = Range<T>::emptyRange(),
-                        bool syncReset = false) {
+                        bool syncReset = false, HWValue initValue = nullref) {
     auto defW = ctx.getStore<Wire>().create(d.getNumBits());
     auto ib = buildInstrRaw(syncReset ? HW_FLIP_FLOP_SRST : HW_FLIP_FLOP,
-                            4 + 2 * resets.size());
+                            4 + 2 * resets.size() + !!initValue);
     ib.addRef(defW).other().addRef(clk).addRef(d).addRef(en);
     for (auto [rst, rstval] : resets) {
       ib.addRef(rst).addRef(rstval);
     }
+    if (initValue)
+      ib.addRef(initValue);
     return defW;
   }
 

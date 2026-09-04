@@ -154,6 +154,14 @@ private:
     }
 
     HWInstrBuilder build{ctx};
+    // Destroy all in module funcs
+    for (auto func : mod.funcs()) {
+      auto ref = func.func();
+      build.destroyInstr(func);
+      if (auto it = funcs.find(ref))
+        funcs.erase(it);
+    }
+    // Destroy now unused out of module funcs
     for (auto func : Range{funcs}.resolve(ctx)) {
       if (func.getNumUses() == 0)
         build.destroyInstr(func.iref());

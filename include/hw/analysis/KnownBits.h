@@ -61,9 +61,10 @@ class KnownBitsAnalysis : public CacheInvalidation<KnownBitsAnalysis> {
   SmallVec<Frame, 16> stack;
   KnownBitsVal retVal;
 
+public:
   static constexpr const char *debugName = "KnownBitsAnalysis";
   static constexpr uint32_t debugID = 128; // todo: analysis debug ID assignment
-
+private:
   void pushNextOrReturn(Frame &frame, InstrRef instr, bool inv = false) {
     auto n = instr.getNumOthers();
     if (frame.idx != instr.getNumOthers()) {
@@ -98,6 +99,23 @@ class KnownBitsAnalysis : public CacheInvalidation<KnownBitsAnalysis> {
     else {
       frame.acc.val = ConstantRef::fromFourState(
           BigInt::icmpOp4S(frame.acc.val, retVal.val, pred));
+    }
+    pushNextOrReturn(frame, instr);
+  }
+
+  void getICMPKnownBits4S(Frame &frame, InstrRef instr, BigInt::ICmpPred pred) {
+    if (frame.idx == 0)
+      ;
+    else if (frame.idx == 1)
+      frame.acc = retVal;
+    else {
+      // x in knownbits has a different meaning vs for these comparison
+      // functions
+      if (frame.acc.val.getIs4S() || retVal.val.getIs4S())
+        frame.acc.val = ConstantRef::fromFourState(FourState::SX);
+      else
+        frame.acc.val = ConstantRef::fromFourState(
+            BigInt::icmpOp4S(frame.acc.val, retVal.val, pred));
     }
     pushNextOrReturn(frame, instr);
   }
@@ -148,7 +166,13 @@ public:
   case *opc:                                                                   \
     getICMPKnownBits(frame, instr, pred);                                      \
     break;
-        FOR_OP_ALL_COMPARE_OPS(LAMBDA)
+        FOR_OP_COMPARE_OPS(LAMBDA)
+#undef LAMBDA
+#define LAMBDA(opc, pred)                                                      \
+  case *opc:                                                                   \
+    getICMPKnownBits4S(frame, instr, pred);                                    \
+    break;
+        FOR_OP_SPECIAL_COMPARE_OPS(LAMBDA)
 #undef LAMBDA
 
       case *HW_CONCAT: {
@@ -387,8 +411,13 @@ public:
         for (auto op : instr.others()) {
           if (auto asConst = op->dyn_as<ConstantRef>()) {
             // contradiction
-            if ((asConst & oneBits) != oneBits)
-              return false;
+            if (instr.getDialectOpcode().is(OP_AND)) {
+              if ((asConst & oneBits) != oneBits)
+                return false;
+            } else {
+              if ((asConst | oneBits) != oneBits)
+                return false;
+            }
             continue;
           }
           auto asWire = op->as<WireRef>();

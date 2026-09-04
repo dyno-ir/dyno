@@ -20,7 +20,8 @@ class DumpSimHeaderPass : public Pass<DumpSimHeaderPass> {
 
 public:
 #define CONFIG_STRUCT_LAMBDA(FIELD, ENUM)                                      \
-  FIELD(std::string, path, "sim_header.h")
+  FIELD(std::string, path, "sim_header.h")                                     \
+  FIELD(std::string, topName, "Top")
   CONFIG_STRUCT(CONFIG_STRUCT_LAMBDA)
 #undef CONFIG_STRUCT_LAMBDA
   Config config;
@@ -119,14 +120,15 @@ private:
 
 public:
   void runOnModule(ModuleIRef mod) {
-    nodes.emplace_back("Top");
+    nodes.emplace_back(config.topName);
 
     // Build Tree
     for (auto reg : mod.regs())
       runOnRegister(reg);
 
     std::ofstream of(config.path);
-    std::print(of, "#pragma once\n#include \"hw/SimHeader.h\"\n#include <tuple>\n\n");
+    std::print(
+        of, "#pragma once\n#include \"hw/SimHeader.h\"\n#include <tuple>\n\n");
     dumpNode(of, &nodes[0]);
 
     nodes.clear();

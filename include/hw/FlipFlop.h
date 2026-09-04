@@ -16,6 +16,7 @@ private:
 public:
   constexpr static unsigned numBaseOperands = 3;
   constexpr static unsigned numRstOperands = 2;
+  constexpr static unsigned numInitOperands = 1; // trailing
   HWValue clkRaw() const { return other(0)->as<HWValue>(); }
 
   std::pair<HWValue, bool> clkAndPol() const {
@@ -32,7 +33,11 @@ public:
 
   WireRef q() const { return def(0)->as<WireRef>(); }
 
-  HWValue clkEnRaw() const { return other(2)->as<HWValue>(); }
+  HWValue clkEnRaw() const {
+    auto rv = other(2)->as<HWValue>();
+    assert(rv.getNumBits() == 1);
+    return rv;
+  }
   OperandRef clkEnRawOp() const { return other(2); }
   bool hasClkEn() const {
     return !(clkEnRaw().is<ConstantRef>() &&
@@ -49,7 +54,14 @@ public:
   bool clkEnPolarity() const { return clkEnAndPol().second; }
 
   unsigned numRsts() const {
-    return ((getNumOperands() - numBaseOperands) / numRstOperands);
+    return ((getNumOperands() - numBaseOperands - numInitOperands) /
+            numRstOperands);
+  }
+
+  HWValue initValue() {
+    if ((getNumOthers() & 1) == (numBaseOperands & 1))
+      return nullref;
+    return other_end()[-1]->as<HWValue>();
   }
 
 private:
@@ -74,7 +86,7 @@ public:
   }
 
   auto rsts() {
-    return Range{other_begin() + rstBase(), other_end()}
+    return Range{other_begin() + rstBase(), other_end() - !!initValue()}
         .as<HWValue>()
         .tuple<2>();
   }
@@ -90,6 +102,7 @@ public:
     D,
     Q,
     ENABLE,
+    INIT_VAL,
     RESET_BEGIN,
     RESET_0 = RESET_BEGIN,
     RESET_1 = RESET_BEGIN + numRstOperands,
@@ -109,6 +122,8 @@ public:
       return D;
     if (idx == 2)
       return ENABLE;
+    if (idx == getNumOthers() - 1)
+      return INIT_VAL;
     if (numRsts() > 0 && (idx - rstBase()) % numRstOperands == 0)
       return UseType(RESET_BEGIN + ((idx - rstBase()) / numRstOperands));
     dyno_unreachable("invalid operand");

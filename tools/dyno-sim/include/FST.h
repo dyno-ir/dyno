@@ -5,6 +5,7 @@
 #include "dyno/DialectInfo.h"
 #include "dyno/Interface.h"
 #include "fstapi.h"
+#include "hw/HWContext.h"
 #include "hw/HWTypeIDs.h"
 #include "hw/Register.h"
 #include "hw/Wire.h"
@@ -13,6 +14,7 @@
 #include "type/TypeContext.h"
 #include "type/TypeInfo.h"
 #include <sstream>
+#include <type_traits>
 // #include <spanstream>
 //  RAII wrapper around fst writer API
 template <typename... ValueTypes> class FSTWriter {
@@ -41,8 +43,6 @@ public:
     if (frags.empty())
       return;
     for (auto [handle, bits] : Range{frags}.reverse()) {
-      SmallVec<char, 2048> buf(bits);
-      // std::ospanstream str{buf};
       std::stringstream str;
 
       dyno::BigInt temp;
@@ -51,7 +51,6 @@ public:
 
       dyno::BigInt::stream_bin_4s_vlog(str, temp, false);
       fstWriterEmitValueChange(writer, handle, std::move(str).str().c_str());
-      // reinterpret_cast<const void *>(buf.data()));
     }
   }
 
@@ -79,12 +78,13 @@ public:
 
   template <typename T>
   void createStruct(T ref, dyno::StructTypeRef type, VarDir dir,
-                    const char *name) {
+                    const char *name, uint32_t *aliasIdx) {
     fstWriterSetScope(writer, fstScopeType::FST_ST_VCD_STRUCT, name, nullptr);
     for (auto &elem : type->elemns) {
       createVarRecursive(
           ref, ctx.resolve(elem.type), dir,
-          ctx.getCtx<dyno::TypeDialectContext>().strings.get(elem.ident));
+          ctx.getCtx<dyno::TypeDialectContext>().strings.get(elem.ident),
+          aliasIdx);
     }
     fstWriterSetUpscope(writer);
   }
@@ -100,33 +100,43 @@ public:
   }
 
   template <typename T>
-  void createBase(T ref, dyno::BaseTypeRef type, VarDir dir, const char *name) {
-    map[ref].emplace_back(fstWriterCreateVar(writer, baseTypeToFstType(type),
-                                             (fstVarDir)dir, 1, name,
-                                             (fstHandle)0),
-                          1);
+  void createBase(T ref, dyno::BaseTypeRef type, VarDir dir, const char *name,
+                  uint32_t *aliasIdx) {
+    fstHandle aliasHandle = aliasIdx ? map[ref][(*aliasIdx)++].handle : 0;
+    fstHandle h = fstWriterCreateVar(writer, baseTypeToFstType(type),
+                                     (fstVarDir)dir, 1, name, aliasHandle);
+    if (!aliasIdx)
+      map[ref].emplace_back(h, 1);
   }
 
   template <typename T>
-  void createArray(T ref, dyno::ArrayTypeRef type, VarDir dir,
-                   const char *name) {
+  void createArray(T ref, dyno::ArrayTypeRef type, VarDir dir, const char *name,
+                   uint32_t *aliasIdx) {
     uint32_t cnt = type->len.as<dyno::ConstantRef>().getExactVal();
     if (auto asBase = type->element.dyn_as<dyno::BaseTypeRef>()) {
-      map[ref].emplace_back(
-          fstWriterCreateVar(writer, baseTypeToFstType(asBase), (fstVarDir)dir,
-                             cnt, name, (fstHandle)0),
-          cnt);
+      fstHandle aliasHandle =
+          aliasIdx ? map[ref][(*aliasIdx)++].handle : (fstHandle)0;
+      fstHandle h = fstWriterCreateVar(writer, baseTypeToFstType(asBase),
+                                       (fstVarDir)dir, cnt, name, aliasHandle);
+      if (!aliasIdx)
+        map[ref].emplace_back(h, cnt);
     } else {
-
       for (uint32_t i = cnt; i-- > 0;) {
         std::string nm = std::string(name) + "[" + std::to_string(i) + "]";
-        createVarRecursive(ref, ctx.resolve(type->element), dir, nm.c_str());
+        createVarRecursive(ref, ctx.resolve(type->element), dir, nm.c_str(),
+                           aliasIdx);
       }
     }
   }
 
   template <typename T>
-  void createEnum(T ref, dyno::EnumTypeRef type, VarDir dir, const char *name) {
+  void createEnum(T ref, dyno::EnumTypeRef type, VarDir dir, const char *name,
+                  uint32_t *aliasIdx) {
+    if (aliasIdx) {
+      // enum table already exists
+      createVarRecursive(ref, type->underlying, dir, name, aliasIdx);
+      return;
+    }
     uint32_t elem_count = type->elemns.size();
     SmallVec<const char *, 16> literalPtrs;
     SmallVec<std::string, 16> valueStrings;
@@ -156,36 +166,48 @@ public:
                 ->element.is<dyno::BaseTypeRef>()) &&
                "enum underlying must be simple type");
 
-    createVarRecursive(ref, type->underlying, dir, name);
+    createVarRecursive(ref, type->underlying, dir, name, aliasIdx);
     fstWriterEmitEnumTableRef(writer, enumHandle);
   }
 
   template <typename T>
   void createVarRecursive(T ref, dyno::FatTypeRef type, VarDir dir,
-                          const char *name) {
+                          const char *name, uint32_t *aliasIdx = nullptr) {
     if (auto asStruct = type.dyn_as<dyno::StructTypeRef>())
-      return createStruct(ref, asStruct, dir, name);
+      return createStruct(ref, asStruct, dir, name, aliasIdx);
     if (auto asBase = type.dyn_as<dyno::BaseTypeRef>())
-      return createBase(ref, asBase, dir, name);
+      return createBase(ref, asBase, dir, name, aliasIdx);
     if (auto asArray = type.dyn_as<dyno::ArrayTypeRef>())
-      return createArray(ref, asArray, dir, name);
+      return createArray(ref, asArray, dir, name, aliasIdx);
     if (auto asEnum = type.dyn_as<dyno::EnumTypeRef>())
-      return createEnum(ref, asEnum, dir, name);
+      return createEnum(ref, asEnum, dir, name, aliasIdx);
   }
 
   template <typename T>
   void createVar(T ref, dyno::FatTypeRef type, VarDir dir, uint32_t numBits,
-                 const char *name) {
+                 IsRange auto names) {
+    createVarImpl(ref, type, dir, numBits, names.front(), nullptr);
+    for (auto name : names.drop_front()) {
+      uint32_t aliasIdx = 0;
+      createVarImpl(ref, type, dir, numBits, name, &aliasIdx);
+    }
+  }
+
+  template <typename T>
+  void createVarImpl(T ref, dyno::FatTypeRef type, VarDir dir, uint32_t numBits,
+                     const char *name, uint32_t *aliasIdx) {
     map.get_ensure(ref);
     if (numBits > 4096)
       return;
     if (type)
-      createVarRecursive(ref, type, dir, name);
+      createVarRecursive(ref, type, dir, name, aliasIdx);
     else {
-      map[ref].emplace_back(fstWriterCreateVar(writer, FST_VT_SV_LOGIC,
-                                               (fstVarDir)dir, numBits, name,
-                                               (fstHandle)0),
-                            numBits);
+      fstHandle aliasHandle =
+          aliasIdx ? map[ref][(*aliasIdx)++].handle : (fstHandle)0;
+      fstHandle h = fstWriterCreateVar(writer, FST_VT_SV_LOGIC, (fstVarDir)dir,
+                                       numBits, name, aliasHandle);
+      if (!aliasIdx)
+        map[ref].emplace_back(h, numBits);
     }
   }
 

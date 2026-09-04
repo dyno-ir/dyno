@@ -1,6 +1,7 @@
 #pragma once
 
 #include <memory>
+#include <optional>
 
 template <typename T> class [[nodiscard]] RAIIToken {
   T *parent;
@@ -75,4 +76,17 @@ public:
   using T::T;
   constexpr Init(const T &t) : T(t) {}
   constexpr Init() : T(InitFunc()) {}
+};
+
+template <typename T> class Defer {
+  std::optional<T> func;
+
+public:
+  Defer(T &&func) : func(std::forward<decltype(func)>(func)) {}
+  void clear() { func.reset(); }
+  ~Defer() {
+    if (!func)
+      return;
+    func.value()();
+  }
 };

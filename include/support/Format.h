@@ -95,3 +95,15 @@ public:
     }
   }
 };
+
+class LazyFormat {
+  std::function<void(std::ostream &str)> callback;
+
+public:
+  explicit LazyFormat(std::function<void(std::ostream &)> callback)
+      : callback(std::move(callback)) {}
+  friend std::ostream &operator<<(std::ostream &os, const LazyFormat &fmt) {
+    fmt.callback(os);
+    return os;
+  }
+};

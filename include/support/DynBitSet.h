@@ -176,15 +176,19 @@ public:
     using difference_type = ptrdiff_t;
 
     iterator &operator+=(ssize_t val) {
-      symb += val;
-      auto incr = symb / Base::WordSymbs;
-      symb %= Base::WordSymbs;
+      ssize_t incr = (ssize_t(symb) + val) / ssize_t(Base::WordSymbs);
+      ssize_t mod = (ssize_t(symb) + val) % ssize_t(Base::WordSymbs);
+      if (mod < 0) {
+        incr -= 1;
+        mod += Base::WordSymbs;
+      }
+      symb = mod;
       word += incr;
       return *this;
     }
     iterator &operator-=(ssize_t val) { *this += -val; }
 
-    iterator operator+(ssize_t val) {
+    iterator operator+(ssize_t val) const {
       auto copy{*this};
       copy += val;
       return copy;
@@ -327,6 +331,33 @@ public:
   }
   void setRange(size_t i, size_t len) { modifyRange(i, len, ~word_t(0)); }
   void clearRange(size_t i, size_t len) { modifyRange(i, len, word_t(0)); }
+  uint64_t countRange(size_t i, size_t len) const {
+    if (len == 0) [[unlikely]]
+      return 0;
+
+    uint64_t lowerIdx = i / WordBits;
+    uint64_t upperIdx = (i + len - 1) / WordBits;
+
+    uint64_t lowerOffs = (i % WordBits);
+    uint64_t upperOffs = ((i + len - 1) % WordBits);
+
+    if (lowerIdx == upperIdx) {
+      word_t mask =
+          bit_mask_ones<word_t>((upperOffs + 1) - lowerOffs, lowerOffs);
+      return std::popcount(storage[lowerIdx] & mask);
+    }
+
+    uint64_t acc = 0;
+
+    acc += storage[lowerIdx] & bit_mask_zeros<word_t>(lowerOffs);
+
+    for (size_t i = lowerIdx + 1; i != upperIdx; i++)
+      acc += std::popcount(storage[i]);
+
+    acc += storage[upperIdx] & bit_mask_ones<word_t>(upperOffs + 1);
+
+    return acc;
+  }
 
   void resizeBits(size_t i) { this->resizeSymbs(i); }
   void ensureBits(size_t i) { this->ensureSymbs(i); }
