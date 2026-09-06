@@ -969,7 +969,7 @@ public:
     trace = oldTrace;
   }
 
-  void setReg(uint i, BigInt b) {
+  void setReg(unsigned i, BigInt b) {
     auto it = module.block().begin();
     std::advance(it, i);
     auto reg = it->as<RegisterIRef>();

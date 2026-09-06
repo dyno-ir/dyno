@@ -622,7 +622,7 @@ private:
           // if the port doesn't actually access the whole factor size (e.g.
           // byte enable) mask off.
           uint32_t undefModelInst = usedModelPort.size();
-          for (uint i = 0; i < (adjActPortLen / *actFact); i++) {
+          for (unsigned i = 0; i < (adjActPortLen / *actFact); i++) {
             auto baseIdx = *actFact * i;
             part.writeSingle(baseIdx + 0, actSt.base(), undefModelInst);
             auto idx = actSt.base() + actSt.getLen();

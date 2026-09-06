@@ -517,10 +517,10 @@ private:
   uint32_t sz = 0;
 
 public:
-  constexpr iterator begin() { return arr.begin(); }
-  constexpr iterator end() { return arr.begin() + sz; }
-  constexpr const_iterator begin() const { return arr.begin(); }
-  constexpr const_iterator end() const { return arr.begin() + sz; }
+  constexpr iterator begin() { return arr.data(); }
+  constexpr iterator end() { return arr.data() + sz; }
+  constexpr const_iterator begin() const { return arr.data(); }
+  constexpr const_iterator end() const { return arr.data() + sz; }
 
   constexpr T &back() {
     assert(!empty());
@@ -588,11 +588,11 @@ private:
   size_type sz = 0;
 
 public:
-  constexpr iterator data() { return arr.begin(); }
-  constexpr iterator begin() { return arr.begin(); }
-  constexpr iterator end() { return arr.begin() + sz; }
-  constexpr const_iterator begin() const { return arr.begin(); }
-  constexpr const_iterator end() const { return arr.begin() + sz; }
+  constexpr iterator data() { return arr.data(); }
+  constexpr iterator begin() { return arr.data(); }
+  constexpr iterator end() { return arr.data() + sz; }
+  constexpr const_iterator begin() const { return arr.data(); }
+  constexpr const_iterator end() const { return arr.data() + sz; }
 
   constexpr T &back() {
     assert(!empty());

@@ -1137,7 +1137,7 @@ public:
 
   template <typename T0, typename T1>
   static auto udivmodOp(const T0 &lhs, const T1 &rhs) {
-    const uint64_t base = 1UL << 32;
+    const uint64_t base = 1ull << 32;
 
     BigIntBase quot = BigIntBase::ofLen(lhs.getRawNumBits());
     BigIntBase rem = BigIntBase::ofLen(rhs.getRawNumBits());

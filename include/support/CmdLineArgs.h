@@ -230,7 +230,7 @@ public:
     // short
 
     CmdLineArgBase *c;
-    uint offset = 1;
+    unsigned offset = 1;
 
     // loop for multiple flags. terminate when flag has required arg or
     // next isn't valid flag.

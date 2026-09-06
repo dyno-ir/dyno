@@ -249,7 +249,7 @@ public:
              reinterpret_cast<U *>(ptr)};
   }
 };
-static_assert(sizeof(FatObjRef<int>) == 16);
+static_assert(sizeof(FatObjRef<int>) == (sizeof(void*) == 8 ? 16 : 12));
 
 /// Note: Can be uninitialized!
 template <typename T>

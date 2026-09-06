@@ -145,7 +145,10 @@ public:
         }
 
         dumpInstr(instr, ctx, false, false);
-        std::print(dbgs(), ": #{} acc {}\n", frame.idx, frame.acc.val);
+        if (frame.acc.val.getWords().data())
+          std::print(dbgs(), ": #{} acc {}\n", frame.idx, frame.acc.val);
+        else
+          std::print(dbgs(), ": #{} acc <moved-from>\n", frame.idx);
       });
 
       if (auto val = cache.find(wire.as<WireRef>())) {

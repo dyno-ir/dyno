@@ -48,23 +48,6 @@ public:
   Config config;
 
 private:
-  // Adapter for printer's regular IntroducedName, only overrides str()
-  struct VerilogIntroducedName : public IntroducedName {
-    using IntroducedName::IntroducedName;
-    VerilogIntroducedName(IntroducedName base) : IntroducedName(base) {}
-    std::string str() const {
-      switch (type()) {
-      case NUMERIC: {
-        auto len = strnlen(this->storage.numeric.prefix.data(), 4);
-        auto str = StringRef{this->storage.numeric.prefix.data(), len};
-        return "_r" + std::format("{}{}", str, this->storage.numeric.num) + "_";
-      }
-      case STRING:
-        return this->storage.string;
-      }
-      dyno_unreachable("unknown type");
-    }
-  };
 
   std::string getRegName(RegisterRef reg) {
     auto &regNameInfo = ctx.getCtx<HWDialectContext>().regNameInfo;
@@ -259,6 +242,15 @@ private:
       break;
     }
     case *HW_NETLIST_PROCESS_DEF: {
+      dumpNetlistProcess(instr);
+      break;
+    }
+    // flow.dyno's %synthTechmap leaves the techmapped netlist as a
+    // COMB_PROCESS_DEF whose body is already netlist-level (LOAD/STORE/
+    // SPLICE/CONCAT/STDCELL_INSTANCE/...), so it dumps exactly like a
+    // NETLIST_PROCESS_DEF. DUMP_VERILOG only makes sense past techmap/ABC,
+    // where everything inside the process is a netlist instruction.
+    case *HW_COMB_PROCESS_DEF: {
       dumpNetlistProcess(instr);
       break;
     }

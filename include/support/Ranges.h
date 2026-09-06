@@ -987,6 +987,19 @@ public:
     return *this;
   }
 
+  // write these 2 explicitly to work around compiler problems
+  tuple_iterator &operator-=(difference_type d)
+    requires(isRandom)
+  {
+    it -= N * d;
+    return *this;
+  }
+
+  tuple_iterator &operator--() {
+    it -= N;
+    return *this;
+  }
+
   tuple_iterator &operator++() {
     std::advance(it, N);
     return *this;
