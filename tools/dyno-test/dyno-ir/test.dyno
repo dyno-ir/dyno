@@ -572,6 +572,7 @@ TEST_EQUIVALENCE :string("test-arith-lower"), :block, :block {
     }
   }
 }{
+  meta.INACTIVE_COPY_PASS
   meta.LOWER_OPS_PASS
   meta.INST_COMBINE_PASS
   meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS
@@ -622,6 +623,7 @@ TEST_EQUIVALENCE :string("test-icmp-lower"), :block, :block {
     }
   }
 }{
+  meta.INACTIVE_COPY_PASS
   meta.LOWER_OPS_PASS
   meta.INST_COMBINE_PASS
   meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS
@@ -689,6 +691,7 @@ TEST_EQUIVALENCE :string("lowerops-sub"), :block, :block {
     }
   }
 }{
+  meta.INACTIVE_COPY_PASS
   meta.LOWER_OPS_PASS map(
     "lowerMultiInputAdd"     : "0",
     "lowerAddCompress"       : "0",
@@ -717,6 +720,7 @@ TEST_EQUIVALENCE :string("instcombine-mod"), :block, :block {
     }
   }
 }{
+  meta.INACTIVE_COPY_PASS
   meta.INST_COMBINE_PASS
   meta.RANDOM_EQUIVALENCE_CHECK_PASS map("cycles": "20")
 }

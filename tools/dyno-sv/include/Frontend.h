@@ -2,6 +2,7 @@
 #include "dyno/CFG.h"
 #include "dyno/Constant.h"
 #include "dyno/Context.h"
+#include "dyno/Obj.h"
 #include "hw/AutoDebugInfo.h"
 #include "hw/HWAbstraction.h"
 #include "hw/HWContext.h"
@@ -735,7 +736,8 @@ public:
     return it;
   }
 
-  RegisterRef makeReg(const slang::ast::Symbol &symb) {
+  RegisterRef makeReg(const slang::ast::Symbol &symb,
+                      DialectOpcode opc = HW_REGISTER_DEF) {
     BlockRef_iterator<true> insertPt;
 
     bool inFuncVar = false;
@@ -759,7 +761,7 @@ public:
     auto name =
         buf[0] == '.' ? std::string_view(buf).substr(1) : std::string_view(buf);
     build.pushInsertPoint(insertPt);
-    auto reg = build.buildRegister();
+    auto reg = build.buildRegisterOrPort(opc);
     if (!inFuncVar)
       regsBackIt = build.insert.pred();
     uint32_t numBits = symb.getDeclaredType()->getType().getBitstreamWidth();
@@ -772,8 +774,9 @@ public:
     return reg;
   }
 
-  RegisterRef makeOrFindReg(const slang::ast::Symbol &symb) {
-    auto reg = vars.findOrInsert(&symb, [&] { return makeReg(symb); })
+  RegisterRef makeOrFindReg(const slang::ast::Symbol &symb,
+                            DialectOpcode opc = HW_REGISTER_DEF) {
+    auto reg = vars.findOrInsert(&symb, [&] { return makeReg(symb, opc); })
                    .second.val()
                    .as<RegisterRef>();
     return reg;
@@ -1436,33 +1439,35 @@ public:
 
   std::unique_ptr<Value>
   handleNamedValueRef(const slang::ast::ValueSymbol &symbol) {
+    RegisterOrConstantRef sig;
     if (auto modport = symbol.as_if<slang::ast::ModportPortSymbol>();
         modport && modport->internalSymbol) {
       return handleNamedValueRef(
           modport->internalSymbol->as<slang::ast::ValueSymbol>());
+    } else if (auto param = symbol.as_if<slang::ast::ParameterSymbol>()) {
+      if (param->getValue().bad())
+        sig = makeOrFindReg(symbol, HW_INPUT_REGISTER_DEF);
+      else {
+        auto lambda = [&] {
+          return RegisterOrConstantRef{toDynoConstant(param->getValue())};
+        };
+        sig = vars.findOrInsert(&symbol, lambda).second.val();
+      }
+    } else if (auto enumMember = symbol.as_if<slang::ast::EnumValueSymbol>()) {
+      auto lambda = [&] {
+        return RegisterOrConstantRef{toDynoConstant(enumMember->getValue())};
+      };
+      sig = vars.findOrInsert(&symbol, lambda).second.val();
+    }
+    else {
+      auto lambda = [&] { return RegisterOrConstantRef{makeReg(symbol)}; };
+      sig = vars.findOrInsert(&symbol, lambda).second.val();
     }
 
-    auto [found, sig] = vars.findOrInsert(&symbol, [&] {
-      // when the enum is used in a structs, enum values aren't propagated to
-      // nval.getConstant()
-      if (auto enumMember = symbol.as_if<slang::ast::EnumValueSymbol>())
-        return RegisterOrConstantRef{toDynoConstant(enumMember->getValue())};
-      if (auto param = symbol.as_if<slang::ast::ParameterSymbol>()) {
-        auto &value = param->getValue();
-        return RegisterOrConstantRef{toDynoConstant(value)};
-      }
-
-      // if (nval.getConstant())
-      //   return RegisterOrConstantRef{toDynoConstant(*nval.getConstant())};
-
-      return RegisterOrConstantRef{makeReg(symbol)};
-    });
-
-    if (auto reg = sig.val().dyn_as<RegisterRef>())
+    if (auto reg = sig.dyn_as<RegisterRef>())
       return std::make_unique<RegLValue>(reg, &symbol.getType());
     else
-      return std::make_unique<RValue>(sig.val().as<ConstantRef>(),
-                                      &symbol.getType());
+      return std::make_unique<RValue>(sig.as<ConstantRef>(), &symbol.getType());
   }
 
   FatTypeRef toDynoType(const slang::ast::Type *type) {

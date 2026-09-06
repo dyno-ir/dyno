@@ -1215,6 +1215,21 @@ public:
     return regRef;
   }
 
+  RegisterRef buildRegisterOrPort(DialectOpcode opc,
+                                  Optional<uint32_t> bitSize = nullopt) {
+    auto regRef = RegisterRef{ctx.getStore<Register>().create(bitSize)};
+    auto regInstr = InstrRef{ctx.getStore<Instr>().create(1, opc)};
+
+    InstrBuilder{regInstr}.addRef(regRef);
+    insertInstr(regInstr);
+
+    if (opc != HW_REGISTER_DEF) {
+      HWInstrRef{regInstr}.parentMod(ctx).mod()->ports.emplace_back(
+          Module::Port{regRef, opc});
+    }
+    return regRef;
+  }
+
   RegisterRef buildPort(ModuleIRef module, HWOpcode opcode,
                         Optional<uint32_t> bitSize = nullopt) {
     auto regRef = RegisterRef{ctx.getStore<Register>().create(bitSize)};

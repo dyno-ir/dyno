@@ -41,7 +41,7 @@ class DumpVerilogPass : public Pass<DumpVerilogPass> {
 
 public:
 #define CONFIG_STRUCT_LAMBDA(FIELD, ENUM)                                      \
-  FIELD(bool, dumpWiresLast, false)                                             \
+  FIELD(bool, dumpWiresLast, false)                                            \
   FIELD(std::string, fileName, "dump.v")
   CONFIG_STRUCT(CONFIG_STRUCT_LAMBDA)
 #undef CONFIG_STRUCT_LAMBDA
@@ -66,6 +66,14 @@ private:
     }
   };
 
+  std::string getRegName(RegisterRef reg) {
+    auto &regNameInfo = ctx.getCtx<HWDialectContext>().regNameInfo;
+    auto names = regNameInfo.getNames(reg);
+    if (names.empty())
+      return "_r" + std::to_string(reg.getObjID().num) + "_";
+    return std::string(" \\") + names.front() + std::string(" ");
+  }
+
   void dumpNetlistProcess(ProcessIRef proc) {
     ObjMapVec<Wire, Optional<uint32_t>> wireMap;
     wireMap.resize(ctx.getStore<Wire>().numIDs());
@@ -79,11 +87,8 @@ private:
     };
 
     auto dumpWires = [&]() {
-      for (auto [obj, id] : wireMap) {
-        if (!id || !ctx.getStore<Wire>().exists(obj))
-          continue;
-        auto wire = ctx.getStore<Wire>().resolve(obj);
-        std::print(os, "wire[{}:0] _w{}_;\n", *wire.getNumBits() - 1, *id);
+      for (auto wire : ctx.getStore<Wire>()) {
+        std::print(os, "wire[{}:0] _w{}_;\n", *wire.getNumBits() - 1, wireToID(wire));
       }
     };
     if (!config.dumpWiresLast)
@@ -95,10 +100,8 @@ private:
       switch (*instr.getDialectOpcode()) {
       case *HW_LOAD: {
         auto asLoad = instr.as<LoadIRef>();
-        std::print(
-            os, "assign _w{}_ = {}", wireToID(asLoad.value()),
-            VerilogIntroducedName{print.introduceNameFor(asLoad.reg()).second}
-                .str());
+        std::print(os, "assign _w{}_ = {}", wireToID(asLoad.value()),
+                   getRegName(asLoad.reg()));
         if (!asLoad.isFullReg()) {
           assert(asLoad.isConstantOffs());
           auto addr = asLoad.getBase();
@@ -111,10 +114,7 @@ private:
       case *HW_STORE: {
         auto asStore = instr.as<StoreIRef>();
         // fixme: what about constant stores?
-        std::print(
-            os, "assign {}",
-            VerilogIntroducedName{print.introduceNameFor(asStore.reg()).second}
-                .str());
+        std::print(os, "assign {}", getRegName(asStore.reg()));
         if (!asStore.isFullReg()) {
           assert(asStore.isConstantOffs());
           auto addr = asStore.getBase();
@@ -255,10 +255,7 @@ private:
       std::print(os, "reg");
       if (asReg.getNumBits() != 1)
         std::print(os, " [{}:0]", *asReg.getNumBits() - 1);
-      std::print(
-          os, " {};\n",
-          VerilogIntroducedName{print.introduceNameFor(asReg.oref()).second}
-              .str());
+      std::print(os, " {};\n", getRegName(asReg.oref()));
       break;
     }
     case *HW_NETLIST_PROCESS_DEF: {
@@ -295,9 +292,8 @@ private:
       if (*port.getNumBits() != 1) {
         std::print(os, " [{}:0]", *port.getNumBits() - 1);
       }
-      VerilogIntroducedName name = print.introduceNameFor(port.oref()).second;
 
-      std::print(os, " {}", name.str());
+      std::print(os, " {}", getRegName(port.oref()));
       if (!last)
         os << ",";
       os << "\n";
