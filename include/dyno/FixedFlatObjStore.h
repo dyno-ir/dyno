@@ -10,7 +10,7 @@
 #include <optional>
 #include <type_traits>
 namespace dyno {
-#if __POINTER_WIDTH__ > 4
+#if __SIZEOF_POINTER__ > 4
 template <typename T> class FixedFlatObjStore {
 private:
   using Traits = ObjTraits<T>;
