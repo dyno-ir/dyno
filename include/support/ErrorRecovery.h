@@ -12,3 +12,5 @@ report_fatal_error(std::format_string<Args...> fmt, Args &&...args) {
 
 void push_fatal_error_callback(CallableRef<void()>);
 void pop_fatal_error_callback();
+
+const char* last_fatal_error_reason();

@@ -58,23 +58,23 @@ public:
   PLI_INT32 (*func)(struct t_cb_data *);
   char *user_data;
   uint64_t time;
-  uint reason;
-  uint idx;
+  unsigned reason;
+  unsigned idx;
 };
 
 class Callbacks {
 public:
   std::vector<SmallVec<Callback *, 4>> callbacks;
 
-  void ensure(uint idx) {
+  void ensure(unsigned idx) {
     if (idx >= callbacks.size())
       callbacks.resize(idx + 1);
   }
-  SmallVecImpl<Callback *> &get(uint reason) {
+  SmallVecImpl<Callback *> &get(unsigned reason) {
     ensure(reason);
     return callbacks[reason];
   }
-  void deleteAll(uint reason) {
+  void deleteAll(unsigned reason) {
     while (!callbacks[reason].empty())
       remove(callbacks[reason].back());
   }
@@ -570,7 +570,7 @@ vpiHandle vpi_register_cb(p_cb_data cb_data_p) {
 
     return (vpiHandle)handler->callbacks.insert(
         Callback{cb_data_p->cb_rtn, cb_data_p->user_data, ~0UL,
-                 uint(cb_data_p->reason), 0});
+                 unsigned(cb_data_p->reason), 0});
   }
   case cbAfterDelay: {
     if (cb_data_p->time->type != vpiSimTime)
@@ -579,7 +579,7 @@ vpiHandle vpi_register_cb(p_cb_data cb_data_p) {
     // t += handler->time;
     return (vpiHandle)handler->callbacks.insert(
         Callback{cb_data_p->cb_rtn, cb_data_p->user_data, t,
-                 uint(cb_data_p->reason), 0});
+                 unsigned(cb_data_p->reason), 0});
   }
   default:
     abort();

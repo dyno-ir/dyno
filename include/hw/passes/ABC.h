@@ -24,6 +24,11 @@
 #include <regex>
 #include <type_traits>
 
+#ifdef DYNO_USE_ABC
+#include "misc/util/abc_global.h"
+#include "base/main/abcapis.h"
+#endif
+
 namespace dyno {
 
 class BLIF_Printer {
@@ -419,6 +424,15 @@ class ABCPass : public Pass<ABCPass> {
   Context &ctx;
   DestroyMap<Instr> destroyMap;
 
+#ifdef DYNO_USE_ABC
+  static int runAbcInProcess(const std::string &cmd) {
+    auto *pAbc = abc::Abc_FrameGetGlobalFrame();
+    int status = abc::Cmd_CommandExecute(pAbc, cmd.c_str());
+    abc::Abc_Stop();
+    return status;
+  }
+#endif
+
   void runOnAIG(InstrRef aigInstr) {
     auto aigRef = aigInstr.def(0)->as<AIGObjRef>();
     // auto &aig = aigRef->aig;
@@ -435,7 +449,14 @@ class ABCPass : public Pass<ABCPass> {
     auto cmd = std::regex_replace(
         config.abcCmd, std::regex("\\$\\{liberty-path\\}"), config.path);
 
+#ifdef DYNO_USE_ABC
+    if (int abcStatus = runAbcInProcess(cmd); abcStatus != 0)
+      report_fatal_error(
+          ("ABC command failed with status " + std::to_string(abcStatus))
+              .c_str());
+#else
     system(("yosys-abc -q \"" + cmd + "\"").c_str());
+#endif
 
     // system(("yosys-abc -q \"read_blif aig.blif; read_lib -X "
     //         "sky130_fd_sc_hd__lpflow_inputiso1p_1 -X "

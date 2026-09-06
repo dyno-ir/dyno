@@ -36,7 +36,7 @@ __attribute__((used)) void dumpDeps(InstrRef instr) {
   print.reset();
   print.printDeps(instr);
 }
-__attribute__((used)) void dumpDeps(InstrRef instr, uint maxDepth) {
+__attribute__((used)) void dumpDeps(InstrRef instr, unsigned maxDepth) {
   print.reset();
   print.printDeps(instr, maxDepth);
 }
@@ -45,7 +45,7 @@ __attribute__((used)) void dumpDeps(InstrRef instr, Context &ctx) {
   print.printDeps(instr, ctx);
 }
 __attribute__((used)) void dumpDeps(InstrRef instr, Context &ctx,
-                                    uint maxDepth) {
+                                    unsigned maxDepth) {
   print.reset();
   print.printDeps(instr, ctx, maxDepth);
 }
@@ -64,7 +64,7 @@ __attribute__((used)) void dumpInstrByID(uint32_t id, Context &ctx) {
   dumpInstr(ctx.getStore<Instr>().resolve(ObjRef<Instr>{ObjID{id}}), ctx);
 }
 __attribute__((used)) void dumpDepsByID(uint32_t id, Context &ctx,
-                                        uint maxDepth) {
+                                        unsigned maxDepth) {
   dumpDeps(ctx.getStore<Instr>().resolve(ObjRef<Instr>{ObjID{id}}), ctx,
            maxDepth);
 }

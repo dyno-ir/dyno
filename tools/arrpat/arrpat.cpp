@@ -111,7 +111,7 @@ struct MatchAnyorder : public Object {
 };
 
 struct MatchMacro : public Object {
-  uint nameID;
+  unsigned nameID;
   dyno::Optional<uint32_t> bindName = dyno::nullopt;
   SmallVec<Object *, 4> objects;
 
@@ -615,7 +615,7 @@ struct CodeGen {
   Lexer &lexer;
   std::ostream &os;
   std::vector<BytecodeOp> ops;
-  uint replaceMacroInsertIdx;
+  unsigned replaceMacroInsertIdx;
   MatchPattern *curPattern;
   SmallDenseSet<Object *, 1> visitedInstrs;
 
@@ -673,7 +673,7 @@ struct CodeGen {
     return regTypes.size() - 1;
   }
 
-  uint32_t makeImm(uint n) { return n; }
+  uint32_t makeImm(unsigned n) { return n; }
   uint32_t nextOperand(uint32_t a) {
     auto reg = makeOperandRef();
     ops.emplace_back(
@@ -801,7 +801,7 @@ struct CodeGen {
   uint32_t checkAnyorder(uint32_t opIdx, uint32_t opEnd,
                          MatchAnyorder *anyorder) {
     uint32_t listsBase = regTypes.size();
-    for (uint i = 0; i < anyorder->objects.size(); i++)
+    for (unsigned i = 0; i < anyorder->objects.size(); i++)
       makeListRef();
 
     auto iter = makeOperandRef();
@@ -820,11 +820,11 @@ struct CodeGen {
 
       if (!pack) {
         ops.push_back(BytecodeOp{.opcode = BytecodeOp::CHECK_SIZE_LE,
-                                 .checkSizeLess = {uint(listsBase + i), 0}});
+                                 .checkSizeLess = {unsigned(listsBase + i), 0}});
       } else if (pack->max) {
         ops.push_back(
             BytecodeOp{.opcode = BytecodeOp::CHECK_SIZE_LE,
-                       .checkSizeLess = {uint(listsBase + i), *pack->max}});
+                       .checkSizeLess = {unsigned(listsBase + i), *pack->max}});
       }
       if (auto *asOperand = obj->dyn_as<MatchOperand>();
           asOperand && asOperand->nameID)
@@ -835,7 +835,7 @@ struct CodeGen {
       checkSimple(iter, pack ? pack->objects[0] : obj);
 
       ops.push_back(BytecodeOp{.opcode = BytecodeOp::APPEND_COPY,
-                               .appendCopy = {(uint)(listsBase + i), iter}});
+                               .appendCopy = {(unsigned)(listsBase + i), iter}});
 
       ops.push_back(BytecodeOp{.opcode = BytecodeOp::CONTINUE, .empty{}});
       ops[pushContIdx].pushContinue.len = ops.size() - pushContIdx - 1;
@@ -843,7 +843,7 @@ struct CodeGen {
 
     ops[scanFwdIdx].scanForward.bodyLen = ops.size() - scanFwdIdx - 1;
 
-    for (uint i = 0; i < anyorder->objects.size(); i++) {
+    for (unsigned i = 0; i < anyorder->objects.size(); i++) {
       dyno::Optional<uint32_t> min;
       if (auto pack = anyorder->objects[i]->dyn_as<MatchPack>())
         min = pack->min;
@@ -853,16 +853,16 @@ struct CodeGen {
       if (!min)
         continue;
       ops.push_back(BytecodeOp{.opcode = BytecodeOp::CHECK_SIZE_GE,
-                               .checkSizeLess = {uint(listsBase + i), *min}});
+                               .checkSizeLess = {unsigned(listsBase + i), *min}});
     }
 
     for (auto [i, obj] : Range{anyorder->objects}.enumerate()) {
       auto beginReg = makeListIter();
       ops.emplace_back(BytecodeOp{.opcode = BytecodeOp::GET_BEGIN,
-                                  .getBegin = {beginReg, uint(listsBase + i)}});
+                                  .getBegin = {beginReg, unsigned(listsBase + i)}});
       auto endReg = makeListIter();
       ops.emplace_back(BytecodeOp{.opcode = BytecodeOp::GET_END,
-                                  .getEnd = {endReg, uint(listsBase + i)}});
+                                  .getEnd = {endReg, unsigned(listsBase + i)}});
 
       registerOrCheckNameOfSimple(obj, beginReg, endReg);
     }
@@ -924,7 +924,7 @@ struct CodeGen {
       auto arr = stack.pop_back_val();
       for (auto op : arr) {
         if (auto pack = op->dyn_as<MatchPack>()) {
-          uint multiple = pack->objects.size();
+          unsigned multiple = pack->objects.size();
           auto packMax = pack->max;
           if (packMax)
             *packMax *= multiple;
@@ -968,7 +968,7 @@ struct CodeGen {
       ops.emplace_back(
           BytecodeOp::makeCheckOpcode(instrReg, instr->opcodeIDs.front()));
     else if (instr->opcodeIDs.size() > 1) {
-      uint len = (instr->opcodeIDs.size() - 1) * 3 + 1;
+      unsigned len = (instr->opcodeIDs.size() - 1) * 3 + 1;
       for (auto [back, opc] : Range{instr->opcodeIDs}.mark_back()) {
         if (!back)
           ops.emplace_back(BytecodeOp{.opcode = BytecodeOp::PUSH_CONTINUE,
@@ -1049,7 +1049,7 @@ struct CodeGen {
     curPattern = nullptr;
   }
 
-  void replaceVarInMacro(std::string &input, uint nameID,
+  void replaceVarInMacro(std::string &input, unsigned nameID,
                          const std::string &replWith) {
     std::string_view paramName = lexer.GetIdent(nameID);
     std::string param = "\\$" + std::string(paramName);
@@ -1057,7 +1057,7 @@ struct CodeGen {
     input = std::regex_replace(input, paramRegex, replWith);
   }
 
-  void replaceConstantInMacro(std::string &input, uint nameID,
+  void replaceConstantInMacro(std::string &input, unsigned nameID,
                               MatchConstant *constant) {
     std::stringstream str;
     str << "\"";
@@ -1090,7 +1090,7 @@ struct CodeGen {
     }
   }
 
-  void generateReplaceMacro(MatchMacro *call, uint dstInstr) {
+  void generateReplaceMacro(MatchMacro *call, unsigned dstInstr) {
     // eval macro objects.
     // replace strings in macro with evald objects.
     // replace rv string with newly allocated rv list
@@ -1107,8 +1107,8 @@ struct CodeGen {
     replaceParamsInMacro(call, macro.params, code);
 
     for (auto retval : Range{macro.retvals}) {
-      uint begin = makeListIter();
-      uint end = makeListIter();
+      unsigned begin = makeListIter();
+      unsigned end = makeListIter();
 
       if (auto name = call->bindName) {
         assert(macro.retvals.size() == 1 &&
@@ -1135,7 +1135,7 @@ struct CodeGen {
     auto dstInstr = makeReplInstr();
 
     // todo: configurable #defs
-    uint numDefOperands = instr->defOperands;
+    unsigned numDefOperands = instr->defOperands;
     if (instr->opcodeIDs.size() == 1) {
       ops.emplace_back(
           BytecodeOp{.opcode = BytecodeOp::CREATE_INSTR,
@@ -1277,11 +1277,11 @@ struct CodeGen {
   void dump() {
     std::stringstream str;
 
-    SmallVec<uint, 4> indentStack;
+    SmallVec<unsigned, 4> indentStack;
 
     for (auto [i, op] : Range{ops}.enumerate()) {
 
-      uint *it;
+      unsigned *it;
       while (!indentStack.empty() &&
              (it = std::find(indentStack.begin(), indentStack.end(), i)) !=
                  indentStack.end())
@@ -1474,7 +1474,7 @@ struct CPPBackend {
   Lexer &lexer;
   std::ostream &os;
   CodeGen &code;
-  uint patternIdx;
+  unsigned patternIdx;
 
   std::stringstream macroExpandInlineCode(std::string_view inlineCode,
                                           std::string failLabel) {
@@ -1504,7 +1504,7 @@ struct CPPBackend {
     return copy;
   }
 
-  const char *typeStr(uint i) {
+  const char *typeStr(unsigned i) {
     static constexpr auto arr =
         std::to_array({"InstrRef::iterator", "InstrRef", "BlockRef",
                        "SmallVec<FatDynObjRef<>, 4>", "FatDynObjRef<>*",
@@ -1554,8 +1554,8 @@ struct CPPBackend {
     dumpVars();
 
     struct Loop {
-      uint endIdx;
-      uint id;
+      unsigned endIdx;
+      unsigned id;
     };
     SmallVec<Loop, 4> loopStack;
 
@@ -1571,9 +1571,9 @@ struct CPPBackend {
     };
     SmallVec<Goto, 4> gotoStack;
 
-    uint loopIdCnt = 0;
-    uint contIdCnt = 0;
-    uint gotoIdCnt = 0;
+    unsigned loopIdCnt = 0;
+    unsigned contIdCnt = 0;
+    unsigned gotoIdCnt = 0;
 
     auto getFailLabel = [&]() {
       std::stringstream str;
@@ -1650,7 +1650,7 @@ struct CPPBackend {
         break;
 
       case BytecodeOp::CHECK_EQUAL: {
-        auto getObjRef = [this](uint i) {
+        auto getObjRef = [this](unsigned i) {
           switch (this->code.regTypes[i]) {
           case CodeGen::RegType::OPERAND:
             return "(*r" + std::to_string(i) + ")->fat()";
@@ -1862,7 +1862,7 @@ int main(int argc, char **argv) {
   }
   Lexer lexer{readFileIntoStr(argv[1]), argv[1], Operators, Keywords};
 
-  uint patternIdx = 0;
+  unsigned patternIdx = 0;
 
   std::ofstream ofile(argv[2]);
   while (!lexer.popIf(Token::NONE)) {
