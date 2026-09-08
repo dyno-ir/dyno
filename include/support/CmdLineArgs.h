@@ -69,7 +69,8 @@ template <typename T> class CmdLineArg : public CmdLineArgBase {
 public:
   CmdLineArg(std::optional<char> shortName, StringRef longName,
              StringRef description, uint32_t flags)
-      : CmdLineArgBase{shortName, longName, description, flags, parse} {}
+      : CmdLineArgBase{shortName, longName, description, flags, parse},
+        value{} {}
   CmdLineArg(std::optional<char> shortName, StringRef longName,
              StringRef description, uint32_t flags, const T &initialValue)
       : CmdLineArgBase{shortName, longName, description, flags, parse},

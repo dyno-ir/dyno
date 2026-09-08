@@ -13,8 +13,10 @@
 #include "hw/IDs.h"
 #include "hw/LUT.h"
 #include "hw/Process.h"
+#include "support/Debug.h"
 #include "support/DynBitSet.h"
 #include "support/ErrorRecovery.h"
+#include "support/MMap.h"
 #include "support/SmallVec.h"
 #include "support/TemplateUtil.h"
 #include "support/Tokenizer.h"
@@ -90,7 +92,7 @@ public:
 
 class BLIF_Parser {
   Context &ctx;
-  std::istream &is;
+  StringRef raw;
 
   template <char Delim = ' '> class SplitIterator {
     const char *ptr;
@@ -131,14 +133,14 @@ class BLIF_Parser {
     std::string_view operator*() const { return std::string_view{ptr, len}; }
   };
 
-  auto split(const std::string &str) {
-    auto begin = SplitIterator<' '>{str.begin().base()};
-    auto end = SplitIterator<' '>{str.end().base()};
+  auto split(std::string_view str) {
+    auto begin = SplitIterator<' '>{str.begin()};
+    auto end = SplitIterator<' '>{str.end()};
     return Range{begin, end};
   }
 
 public:
-  BLIF_Parser(Context &ctx, std::istream &is) : ctx(ctx), is(is) {}
+  BLIF_Parser(Context &ctx, StringRef raw) : ctx(ctx), raw(raw) {}
 
   /*
     Imports techmapped BLIF. Each gate turns into a standard cell instance.
@@ -148,7 +150,7 @@ public:
     and ideal solution though.
   */
   void parse(AIGObjRef aigObj) {
-    std::string line;
+    std::string_view line;
     TwoLevelMap<SSOStringRef, HWValue> names;
     TwoLevelMap<SSOStringRef, ModuleRef> modules;
 
@@ -158,16 +160,25 @@ public:
 
     HWInstrBuilder build{ctx};
 
-    while (std::getline(is, line), !line.empty()) {
+    Tokenizer tok{raw, "\n\0"};
+    auto tokIt = tok.begin();
+    auto getLine = [&]() -> std::string_view {
+      if (tokIt == tok.end())
+        return std::string_view();
+      return *tokIt++;
+    };
+
+    while (line = getLine(), !line.empty()) {
       while (line.ends_with('\\')) {
-        std::string rem;
-        std::getline(is, rem);
-        line = line.substr(0, line.size() - 1) + rem;
+        auto next = getLine();
+        line =
+            std::string_view{line.begin(), uint32_t(next.end() - line.begin())};
       }
       if (line.empty() || line.starts_with("#") || line.starts_with(".end"))
         continue;
       if (line.starts_with(".inputs")) {
-        for (auto [i, tok] : split(line).drop_front().enumerate()) {
+        auto lineTok = Tokenizer{line, " \n\\\t"};
+        for (auto [i, tok] : Range{lineTok}.drop_front().enumerate()) {
           auto def = *aigObj->aig.inputs[i]->defUse.getSingleDef();
           auto defI = def.instr();
           build.setInsertPoint(defI);
@@ -193,8 +204,8 @@ public:
           lastDefI.def(0)->as<WireRef>().replaceAllUsesWith(newVal);
           outputBitArr.clear();
         };
-
-        for (auto [i, tok] : split(line).drop_front().enumerate()) {
+        auto lineTok = Tokenizer{line, " \n\\\t"};
+        for (auto [i, tok] : Range{lineTok}.drop_front().enumerate()) {
           auto def = *aigObj->aig.outputs[i]->defUse.getSingleDef();
           auto defI = def.instr();
           if (lastDefI != defI) {
@@ -223,7 +234,8 @@ public:
 
         ModuleRef mod = nullref;
         Optional<unsigned> constVal = nullopt;
-        for (auto [i, tok] : split(line).drop_front().enumerate()) {
+        auto lineTok = Tokenizer{line, " \n\\\t"};
+        for (auto [i, tok] : Range{lineTok}.drop_front().enumerate()) {
           if (i == 0) {
             if (tok == "_const0_")
               constVal = 0;
@@ -275,7 +287,7 @@ public:
         }
       }
       if (line.starts_with(".names")) {
-        auto iosRange = Tokenizer{line, " \t"};
+        auto iosRange = Tokenizer{line, " \t\n\\"};
         SmallVec<std::string_view, 2> ios(Range{iosRange}.drop_front());
 
         auto inputIdents = Range{ios}.subrange(0, ios.size() - 1);
@@ -287,22 +299,24 @@ public:
 
         // Constant assignment
         if (inputIdents.size() == 0) {
-          std::getline(is, line);
-          auto lineRange = Tokenizer{line, " \t"};
+          line = getLine();
+          auto lineRange = Tokenizer{line, " \t\n\\"};
           SmallVec<std::string_view, 1> parts(Range{lineRange});
           if (parts.size() != 1 || parts.front() != Any{"0", "1"})
             report_fatal_error("BLIF format");
           auto val = ConstantRef::fromBool(parts.front() == "1");
           auto [found, it] =
               names.findOrInsert(outputIdent, [&]() { return val; });
-          if (found)
+          if (found) {
             it.val().as<WireRef>().replaceAllUsesWith(val);
+            it.val() = val;
+          }
           continue;
         }
 
-        while (is.peek() == Any{'0', '1', '-'}) {
-          std::getline(is, line);
-          auto lineRange = Tokenizer{line, " \t"};
+        while (tokIt != tok.end() && (*tokIt).front() == Any{'0', '1', '-'}) {
+          line = getLine();
+          auto lineRange = Tokenizer{line, " \t\n\\"};
           SmallVec<std::string_view, 2> parts(Range{lineRange});
           if (parts.size() < 2)
             report_fatal_error("BLIF format");
@@ -365,6 +379,24 @@ public:
         build.buildLUT(std::move(lutInstr));
       }
     }
+
+    DYNO_DBG_RUN({
+      bool bad = false;
+      for (auto [k, v] : names) {
+        if (auto ref = v.dyn_as<ObjRef<Wire>>()) {
+          auto wire = ctx.resolve(ref);
+          if (wire.getNumDefs() == 0) {
+            std::print(dbgs(), "zero def: \"{}\"\n", k);
+            bad = true;
+          } else if (wire.getNumDefs() > 1) {
+            std::print(dbgs(), "multi def: \"{}\"\n", k);
+            bad = true;
+          }
+        }
+      }
+      if (bad)
+        report_fatal_error("bad blif file");
+    })
   }
 };
 
@@ -483,8 +515,8 @@ class ABCPass : public Pass<ABCPass> {
     //        "print_stats; write_blif "
     //        "mapped_gen.blif\"");
 
-    std::ifstream mappedFile{"mapped.blif"};
-    BLIF_Parser parse{ctx, mappedFile};
+    MMap mappedFile{"mapped.blif"};
+    BLIF_Parser parse{ctx, StringRef{mappedFile.data(), mappedFile.size()}};
     parse.parse(aigRef);
   }
 
