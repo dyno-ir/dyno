@@ -412,8 +412,7 @@ public:
 
   StringRef GetIdent(unsigned identIdx) { return rvStrings[identIdx]; }
 
-  static std::string_view extractEnclosingLine(std::string_view input,
-                                               size_t i) {
+  static StringRef extractEnclosingLine(StringRef input, size_t i) {
     const char *start = input.begin() + i;
     while (start != input.begin() && *start != '\n')
       --start;
@@ -425,14 +424,14 @@ public:
     if (start != end && start != input.begin())
       ++start;
 
-    return std::string_view(start, end);
+    return StringRef(start, end);
   }
 
-  static std::string_view trimLeadingSpace(std::string_view input) {
+  static StringRef trimLeadingSpace(StringRef input) {
     auto start = input.begin();
     while (isspace(*start))
       ++start;
-    return std::string_view{start, input.end()};
+    return StringRef(start, input.end());
   }
 
   template <typename... Ts> Token popEnsure(Ts... types) {
@@ -456,7 +455,7 @@ public:
   }
 
   void printError(const ParseError &error) {
-    auto line = extractEnclosingLine(std::string_view{src}, error.start);
+    auto line = extractEnclosingLine(StringRef{src}, error.start);
     unsigned col = &src[error.start] - line.begin() + 1;
     line = trimLeadingSpace(line);
 
@@ -465,7 +464,7 @@ public:
     fprintf(stderr, "\n");
     unsigned pos;
     fprintf(stderr, "%s:%u:%u: %n", path.c_str(), error.lineNumber, col, &pos);
-    std::cerr << line << "\n";
+    std::cerr << std::string_view(line) << "\n";
     pos += &src[error.start] - line.begin();
     for (unsigned i = 0; i < pos; i++)
       putc(' ', stderr);

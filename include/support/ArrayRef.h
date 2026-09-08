@@ -63,11 +63,7 @@ public:
 
   static constexpr ArrayRef emptyRef() { return ArrayRef(nullptr, size_t(0)); }
   template <typename U>
-  constexpr ArrayRef(const U &u) : ArrayRef(u.begin(), u.end()) {}
-
-  template <typename U,
-            typename = std::enable_if_t<!std::is_same_v<U, bool>, void>>
-  constexpr ArrayRef(const Vec<U> &u) : ArrayRef(u.data(), u.size()) {}
+  constexpr ArrayRef(const U &u) : ArrayRef(u.data(), u.size()) {}
 
   template <typename U, size_t N>
   constexpr ArrayRef(const U (&c_arr)[N]) : ArrayRef(c_arr, c_arr + N) {}

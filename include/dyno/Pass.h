@@ -87,7 +87,7 @@ CONFIG_STRUCT_TYPES(LAMBDA)
 struct ConfigParser {
   DynoLexer &lexer;
   inline bool parseConfigType(void *ptr, ConfigStructType ty,
-                              std::string_view data) {
+                              StringRef data) {
     switch (ty) {
     case ConfigStructType::BOOL: {
       if (data == "true" || data == "1")

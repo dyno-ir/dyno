@@ -236,7 +236,7 @@ public:
           auto eqIdx = tok.find('=');
           if (eqIdx == std::string_view::npos)
             report_fatal_error("BLIF format");
-          auto tokStr = StringRef(tok.begin() + eqIdx + 1, tok.end());
+          auto tokStr = StringRef(tok.data() + eqIdx + 1, tok.data() + tok.size());
           auto wire = names.find(tokStr);
 
           if (constVal) {
