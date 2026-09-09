@@ -94,51 +94,6 @@ class BLIF_Parser {
   Context &ctx;
   StringRef raw;
 
-  template <char Delim = ' '> class SplitIterator {
-    const char *ptr;
-    size_t len;
-
-    void prime() {
-      while (ptr[len] != Delim && ptr[len] != '\0')
-        len++;
-    }
-
-  public:
-    SplitIterator(const char *ptr) : ptr(ptr), len(0) { prime(); }
-
-    SplitIterator &operator++() {
-      if (ptr[len] == '\0')
-        ptr += len;
-      else {
-        ptr += len + 1;
-        while (*ptr == Delim)
-          ++ptr;
-      }
-      len = 0;
-      prime();
-
-      return *this;
-    }
-
-    SplitIterator operator++(int) {
-      auto tmp{*this};
-      ++*this;
-      return tmp;
-    }
-
-    friend bool operator==(SplitIterator lhs, SplitIterator rhs) {
-      return lhs.ptr == rhs.ptr;
-    }
-
-    std::string_view operator*() const { return std::string_view{ptr, len}; }
-  };
-
-  auto split(std::string_view str) {
-    auto begin = SplitIterator<' '>{str.begin()};
-    auto end = SplitIterator<' '>{str.end()};
-    return Range{begin, end};
-  }
-
 public:
   BLIF_Parser(Context &ctx, StringRef raw) : ctx(ctx), raw(raw) {}
 
@@ -172,7 +127,7 @@ public:
       while (line.ends_with('\\')) {
         auto next = getLine();
         line =
-            std::string_view{line.begin(), uint32_t(next.end() - line.begin())};
+            std::string_view{line.data(), uint32_t(next.end() - line.begin())};
       }
       if (line.empty() || line.starts_with("#") || line.starts_with(".end"))
         continue;
