@@ -271,12 +271,18 @@ private:
     Vec<InstrRef> instrs;
     for (auto block : blocks) {
       auto range = Range<StableBlockIterator>{block};
-      for (auto instr : range.earlyincr()) {
+      for (auto instr : range) {
+        // handle switch block edge case (only contains cases)
+        if (instr.isOpc(OP_SWITCH))
+          for (auto caseI : instr.as<SwitchInstrRef>().caseInstrs())
+            map[caseI].at(MARK) = 1;
+
         if (instr.isOpc(OP_IF, OP_SWITCH, OP_FOR, OP_WHILE, OP_DO_WHILE,
                         OP_UNYIELD, OP_YIELD, HW_LOAD, HW_STORE, HW_STORE_DEFER,
                         HW_MEM_STORE, HW_MEM_LOAD, HW_ASSERT_DEFER,
-                        HW_PRINT_DEFER, HW_PRINT, OP_ASSERT, OP_CASE,
-                        OP_CASE_DEFAULT)) {
+                        HW_PRINT_DEFER, HW_PRINT, OP_ASSERT, OP_CASE, HW_CASE_X,
+                        HW_CASE_Z, OP_CASE_DEFAULT)) {
+          assert(ctx.getCFG().contains(instr));
           map[instr].at(MARK) = 1;
           continue;
         }
