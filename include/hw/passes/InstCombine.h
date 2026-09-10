@@ -190,9 +190,7 @@ private:
   }
 
   PatBool findFlipFlopEnables(FlipFlopIRef instr) {
-    if (!config.findFlipFlopEnables ||
-        // todo: same as reset, depessimize
-        !instr.clkEnRaw().is<ConstantRef>())
+    if (!config.findFlipFlopEnables)
       return false;
     auto use = instr.q().getSingleUse();
     if (!use || !use->instr().isOpc(HW_STORE))
