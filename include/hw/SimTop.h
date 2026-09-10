@@ -69,7 +69,7 @@ public:
     }
     std::print(dyno::dbgs(), "linked {} of {} regs\n", linked, map.size());
   }
-  SimulationTop(dyno::Context &ctx)
+  SimulationTop(dyno::Context &ctx, const char* wavesFile = nullptr)
       : ctx(ctx), top(std::make_unique<Top>()),
         interp(ctx, (*ctx.getStore<dyno::Module>().begin()).iref(), std::cout,
                std::cerr) {
@@ -79,8 +79,10 @@ public:
     interp.setup();
 
 #ifdef ENABLE_FST
-    interp.fstWriter.emplace(ctx, "out.fst");
-    interp.fstInitHierarchy();
+    if (wavesFile) {
+      interp.fstWriter.emplace(ctx, wavesFile);
+      interp.fstInitHierarchy();
+    }
 #endif
 
     interp.initialEval();

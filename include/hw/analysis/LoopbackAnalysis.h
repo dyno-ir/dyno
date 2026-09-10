@@ -3,16 +3,20 @@
 #include "dyno/Constant.h"
 #include "dyno/Context.h"
 #include "dyno/IDImpl.h"
+#include "hw/HWPrinter.h"
 #include "hw/HWValue.h"
 #include "hw/IDs.h"
 #include "hw/LoadStore.h"
 #include "hw/Wire.h"
 #include "hw/analysis/RegisterValue.h"
 #include "op/IDs.h"
+#include "support/Bits.h"
 #include "support/DenseMap.h"
+#include "support/DynBitSet.h"
 #include "support/RTTI.h"
 #include "support/Ranges.h"
 #include "support/SmallVec.h"
+#include "support/Utility.h"
 #include <limits>
 namespace dyno {
 
@@ -23,58 +27,60 @@ class LoopbackFrag {
 public:
   uint32_t dstAddr;
   uint32_t len;
-  std::array<ObjRef<Wire>, 4> enable{invalid, nullref, nullref, nullref};
-  std::array<bool, 4> polarity;
+  SmallVec<ObjRef<Wire>, 4> enable{invalid};
+  DynBitSet<SmallVec<uint64_t, 1>> polarity;
+  // specific offset in operand of instr that creates loopback
+  ObjRef<Instr> instr = nullref;
+  uint32_t operandIdx = 0;
+  uint32_t srcAddr = 0;
+  uint32_t operandBitOffs = 0;
 
   LoopbackFrag() = default;
-  LoopbackFrag(uint32_t dstAddr, uint32_t len) : dstAddr(dstAddr), len(len) {}
+  LoopbackFrag(uint32_t dstAddr, uint32_t len) : dstAddr(dstAddr), len(len) {
+    this->polarity.push_back(1);
+  }
   LoopbackFrag(uint32_t dstAddr, uint32_t len, ObjRef<Wire> en, bool polarity)
       : dstAddr(dstAddr), len(len) {
+
     this->enable[0] = en;
-    this->polarity[0] = polarity;
+    this->polarity.push_back(polarity);
+    if (!en) {
+      enable.pop_back();
+      this->polarity.pop_back();
+    }
   }
   LoopbackFrag(uint32_t dstAddr, uint32_t len, const LoopbackFrag &frag)
-      : dstAddr(dstAddr), len(len), enable(frag.enable) {}
+      : dstAddr(dstAddr), len(len), enable(frag.enable) {
+    this->polarity.push_back(1);
+  }
 
-  bool push_back(ObjRef<Wire> en, bool polarity) {
+  void push_back(ObjRef<Wire> en, bool polarity) {
     if (!*this)
-      return true; // nothing to do
-    for (unsigned i = 0; i < enable.size(); i++) {
-      if (enable[i])
-        continue;
-      enable[i] = en;
-      this->polarity[i] = polarity;
-      return true;
-    }
-    assert(0);
-    // return false;
+      return; // nothing to do
+    enable.push_back(en);
+    this->polarity.push_back(polarity);
   }
-  uint32_t size() const {
-    if (!*this)
-      return 0;
-    for (unsigned i = 0; i < enable.size(); i++) {
-      if (!enable[i])
-        return i;
-    }
-    return enable.size();
-  }
+  uint32_t size() const { return bool(*this) ? enable.size() : 0; }
   auto begin() { return zip_iterator{enable.begin(), polarity.begin()}; }
-  auto end() {
-    return zip_iterator{enable.begin() + size(), polarity.begin() + size()};
+  auto end() { return zip_iterator{enable.end(), polarity.end()}; }
+
+  explicit operator bool() const {
+    return enable.size() != 1 || enable[0] != invalid;
   }
 
-  explicit operator bool() const { return enable[0] != invalid; }
-
-  bool overwrites(LoopbackFrag &other) { return false; }
-  bool fuses(LoopbackFrag &other) { return false; }
-  bool intersects(LoopbackFrag &other) { return true; }
-
-  LoopbackFrag intersect(LoopbackFrag &o) {
-    if (*this)
-      return *this;
-    return o;
+  bool overwrites(LoopbackFrag &other) {
+    if (!*this)
+      return false;
+    if (!other)
+      return true;
+    // fewer terms prioritized
+    return (*this).size() < other.size();
   }
-  bool abstractEquals(LoopbackFrag &) const { return false; }
+  bool fuses(LoopbackFrag &other) { return !overwrites(other); }
+  bool intersects(LoopbackFrag &other) { return false; }
+
+  LoopbackFrag intersect(LoopbackFrag &o) { dyno_unreachable("bad"); }
+  bool abstractEquals(LoopbackFrag &o) const { return !*this && !o; }
 };
 
 class LoopbackPartition : public GenericPartitions<LoopbackFrag> {
@@ -83,13 +89,24 @@ public:
   LoopbackPartition(GenericPartitions &&o) : GenericPartitions(std::move(o)) {}
   LoopbackPartition(const GenericPartitions &o) : GenericPartitions(o) {}
 
-  bool addConditionToLoopbackFrags(HWValue val, bool polarity) {
+  bool addConditionToLoopbackFrags(OperandRef val, bool polarity) {
+    assert(getLen() == *val.instr().def()->as<WireRef>().getNumBits());
     if (val.is<ConstantRef>() && val.as<ConstantRef>().valueEquals(0))
       return false;
     if (val.is<WireRef>())
       for (auto &frag : frags) {
         if (!frag)
           continue;
+        if (frag.size() == 0) {
+          // save operand in first instr so we can remove it when making
+          // loopback explicit
+          frag.srcAddr = frag.dstAddr;
+          frag.operandBitOffs = frag.dstAddr;
+          frag.operandIdx = val.getNum();
+          frag.instr = val.instr();
+          assert(frag.srcAddr + frag.len <=
+                 *val.instr().def()->as<WireRef>().getNumBits());
+        }
         frag.push_back(val.as<WireRef>(), polarity);
       }
     return true;
@@ -109,10 +126,10 @@ class LoopbackAnalysis {
   };
   LoopbackPartition retVal;
   SmallVec<Frame, 64> stack;
-  uint32_t addr = 0;
 
 #define FRAME_RET(...)                                                         \
   {                                                                            \
+    uses /= curUses;                                                           \
     retVal = {*val.getNumBits(), __VA_ARGS__};                                 \
     stack.pop_back();                                                          \
     continue;                                                                  \
@@ -126,24 +143,36 @@ class LoopbackAnalysis {
 
 #define FRAME_RET_ACC                                                          \
   {                                                                            \
+    uses /= curUses;                                                           \
     retVal = std::move(acc);                                                   \
     stack.pop_back();                                                          \
     break;                                                                     \
   }
 
 public:
+  static constexpr const char *debugName = "LoopbackPartitionAnalysis";
+  static constexpr uint32_t debugID = 130; // todo: analysis debug ID assignment
+
   LoopbackPartition get(HWValue value, HWValue loopback) {
     stack.emplace_back(value, 0);
     SmallDenseMap<ObjRef<Wire>, LoopbackPartition> map;
+    retVal = {};
+
+    int64_t addr = 0;
+    // we have to explicity track uses: multiple uses for bit addressing
+    // instrs are OK, but not for computational (MUX), else we duplicate
+    // real logic.
+    uint32_t uses = 1;
 
     while (!stack.empty()) {
       auto &[val, idx, acc] = stack.back();
-      addr = 0;
+      uint32_t curUses = 1;
 
       if (auto asConst = val.dyn_as<ConstantRef>()) {
         // use loopback=nullref as wildcard for any constant (used for finding
         // reset values).
-        if (loopback == nullref) // return always-on loopback
+        if (loopback == nullref && !asConst.getIs4S())
+          // return always-on loopback
           FRAME_RET(nullref, true);
 
         if (auto loopbackConst = loopback.dyn_as<ConstantRef>()) {
@@ -160,24 +189,55 @@ public:
       auto wire = val.as<WireRef>();
       auto instr = wire.getDefI();
 
+      DYNO_DBG({
+        // print last return value first.
+        auto dumpVal = [](LoopbackPartition &val) {
+          if (!val.frags.data())
+            return; // moved from
+          for (auto f : val.frags) {
+            std::print(dbgs(), "  [{}+:{} ({} vs {})]: ", f.dstAddr, f.len,
+                       f.srcAddr, f.operandBitOffs);
+            for (auto [en, p] : Range{f.enable}.zip(f.polarity)) {
+              std::print(dbgs(), "{}w{}, ", p ? "!" : "0", en.getObjID().num);
+            }
+            std::print(dbgs(), "\n");
+          }
+        };
+        dumpVal(retVal);
+
+        std::print(dbgs(), "({}): ", addr);
+        dumpInstr(instr, ctx, true, false);
+        std::print(dbgs(), "acc:\n");
+        dumpVal(stack.back().acc);
+        std::print(dbgs(), "rv:\n");
+      });
+
       if (auto it = map.find(wire); it != map.end()) {
         retVal = it.val();
         stack.pop_back();
         continue;
       }
 
+      // Track uses
+      curUses = wire.getNumUses();
+      if (idx == 0) {
+        if (auto product = mul_overflow<uint64_t>(uses, curUses))
+          uses = *product;
+        else
+          FRAME_RET();
+      }
+
       switch (*instr.getDialectOpcode()) {
       case *HW_SPLICE: {
         auto asSplice = instr.as<SpliceIRef>();
-        assert(asSplice.isConstantOffs());
         if (idx == 0) {
           if (!asSplice.isConstantOffs())
             FRAME_RET();
           idx++;
-          addr += asSplice.getBase();
+          addr -= asSplice.getBase();
           FRAME_CALL(asSplice.in()->as<HWValue>());
         }
-        addr -= asSplice.getBase();
+        addr += asSplice.getBase();
         retVal = retVal.getRange(asSplice.getBase(), asSplice.getLen());
         stack.pop_back();
         break;
@@ -204,7 +264,7 @@ public:
         auto patBits = *instr.def()->as<WireRef>().getNumBits() -
                        *instr.other(0)->as<HWValue>().getNumBits();
 
-        retVal.append(patBits);
+        retVal.append(patBits); // todo: sign bit extend for sext
         stack.pop_back();
         break;
       }
@@ -212,6 +272,7 @@ public:
       case *HW_CONCAT: {
         if (idx != 0) {
           acc.append(retVal);
+          addr += retVal.getLen();
         }
 
         if (idx == instr.getNumOthers()) {
@@ -223,18 +284,20 @@ public:
         auto nextVal =
             instr.other(instr.getNumOthers() - idx - 1)->as<HWValue>();
         ++idx;
-        addr += *nextVal.getNumBits();
         FRAME_CALL(nextVal)
       }
 
       case *HW_INSERT: {
         auto asInsert = instr.as<InsertIRef>();
-        assert(asInsert.isConstantOffs());
         if (idx == 0) {
+          if (!asInsert.isConstantOffs())
+            FRAME_RET();
+          addr += asInsert.getBase();
           idx++;
           FRAME_CALL(asInsert.val()->as<HWValue>());
         }
         if (idx == 1) {
+          addr -= asInsert.getBase();
           ++idx;
           acc = std::move(retVal);
           FRAME_CALL(asInsert.in()->as<HWValue>());
@@ -242,18 +305,32 @@ public:
 
         assert(acc.getLen() == asInsert.val()->as<HWValue>().getNumBits());
         retVal.write(acc, 0, asInsert.getBase(), acc.getLen());
+        for (auto frag : retVal.frags) {
+          if (frag.instr)
+            assert(frag.srcAddr + frag.len <= *ctx.resolve(frag.instr)
+                                                   .operand(frag.operandIdx + 1)
+                                                   ->as<HWValue>()
+                                                   .getNumBits());
+        }
         stack.pop_back();
         break;
       }
 
       case *HW_ONEHOT_MUX: {
+        // we don't want to duplicate logic, bail on multi used mux
+        if (uses != 1)
+          FRAME_RET();
         if (idx == 0) // reset acc unconditionally
           acc = {*val.getNumBits()};
         if (idx != 0 && retVal.hasAnyLoopback()) {
           // add condition to loopback frags
-          auto val = instr.other((idx - 1) * 2)->as<HWValue>();
-          if (auto asConst = val.dyn_as<ConstantRef>()) {
-            assert(!asConst.allBitsUndef());
+          auto cond = instr.other((idx - 1) * 2);
+          if (auto asConst = cond.dyn_as<ConstantRef>()) {
+
+            // give up if undef select
+            if (asConst.allBitsUndef())
+              FRAME_RET();
+
             // select is zero i.e. unreachable
             if (asConst.valueEquals(0)) {
               // return if last
@@ -267,8 +344,17 @@ public:
               continue;
             }
           }
-          retVal.addConditionToLoopbackFrags(val, true);
+          retVal.addConditionToLoopbackFrags(cond, true);
           acc.write(retVal, 0, 0, acc.getLen());
+          for (auto frag : retVal.frags) {
+            if (frag.instr) {
+              auto finstr = ctx.resolve(frag.instr);
+              assert(frag.srcAddr + frag.len <=
+                     *finstr.operand(frag.operandIdx + 1)
+                          ->as<HWValue>()
+                          .getNumBits());
+            }
+          }
         }
 
         if (idx == instr.getNumOthers() / 2)
@@ -279,70 +365,19 @@ public:
         FRAME_CALL(nextVal)
       }
 
-        // todo: support AND (to find zero resets), OR (to find one resets).
-        // Doing it properly would also require tackling negative polarity
-        // support.
-
-      // case *OP_AND:
-      // case *OP_OR: {
-      //   if (loopback != nullref) {
-      //     if (idx == 0) // reset acc unconditionally
-      //       acc = {*val.getNumBits()};
-
-      //     // check last, include in acc
-      //     if (idx != 0 && retVal.hasAnyLoopback()) {
-      //       unsigned i = idx - 1;
-      //       for (unsigned j = 0; j < instr.getNumOthers(); j++) {
-      //         if (i == j)
-      //           continue;
-      //         retVal.addConditionToLoopbackFrags(
-      //             isBooleanValue(instr.other(j)->as<HWValue>()), instr.isOpc(OP_AND));
-      //       }
-      //       acc.write(retVal, 0, 0, acc.getLen());
-      //     }
-
-      //     // find candidate
-      //     unsigned i = idx;
-      //     for (; i < instr.getNumOthers(); i++) {
-      //       // check that all others are boolean-compatible
-      //       for (unsigned j = 0; j < instr.getNumOthers(); j++) {
-      //         if (i == j)
-      //           continue;
-      //         auto val = isBooleanValue(instr.other(j)->as<HWValue>());
-      //         if (!val || val.is<ConstantRef>())
-      //           goto next;
-      //       }
-      //       goto found;
-      //     next:
-      //     }
-      //     FRAME_RET_ACC;
-      //   found:
-
-      //     idx = i + 1;
-      //     FRAME_CALL(instr.other(i)->as<HWValue>())
-
-      //   } else {
-      //     // if we're looking for constants, check for short circuit
-      //     auto it = instr.others().find_if([](OperandRef op) {
-      //       auto val = isBooleanValue(op->template as<HWValue>());
-      //       return val && val.template is<WireRef>();
-      //     });
-      //     if (it == instr.other_end())
-      //       FRAME_RET();
-      //     FRAME_RET(it->as<WireRef>(), instr.isOpc(OP_OR));
-      //   }
-      // }
-
       default: {
-        if (wire == loopback) // return always-on loopback
+        if (wire == loopback && addr == 0) // return always-on loopback
           FRAME_RET(nullref, true);
         FRAME_RET();
       }
       }
 
+      uses /= curUses;
       map.insert(wire, retVal);
     }
 
+    assert(addr == 0);
+    assert(uses == 1);
     return retVal;
   }
 

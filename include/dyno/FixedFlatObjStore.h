@@ -10,7 +10,7 @@
 #include <optional>
 #include <type_traits>
 namespace dyno {
-
+#if __SIZEOF_POINTER__ > 4
 template <typename T> class FixedFlatObjStore {
 private:
   using Traits = ObjTraits<T>;
@@ -108,4 +108,5 @@ public:
   FatRefT resolve(ObjRef<T> ref) { return FatRefT{ref, space[ref.getObjID()]}; }
 };
 
+#endif
 }; // namespace dyno

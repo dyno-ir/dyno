@@ -17,6 +17,8 @@ class NetlistToProcPass : public Pass<NetlistToProcPass> {
   HWInstrBuilder regBuild;
 
   void runOnProcess(ProcessIRef proc) {
+    if (!proc.isOpc(HW_COMB_PROCESS_DEF, HW_NETLIST_PROCESS_DEF))
+      return;
     ObjMapVec<Wire, bool> seen;
     seen.resize(ctx.getStore<Wire>().numIDs());
     SmallDenseMap<ObjRef<Wire>, ObjRef<Register>, 64> map;

@@ -87,6 +87,8 @@ public:
 template <> class Optional<bool> : public Optional<uint8_t> {
 public:
   using Optional<uint8_t>::Optional;
+  constexpr Optional(const bool &val) : Optional<uint8_t>::Optional(val) {};
+  constexpr Optional(bool &&val) : Optional<uint8_t>::Optional(val) {};
 };
 
 }; // namespace dyno

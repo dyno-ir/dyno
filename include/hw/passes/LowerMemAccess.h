@@ -21,12 +21,12 @@ class LowerMemAccessPass : public Pass<LowerMemAccessPass> {
                                                // make latch memory (final
                                                // memFlat store is not deferred)
 
-    WireRef en = st.en();
+    HWValue en = st.en();
     // we can't store a pointer currently, if we add that make this store a
     // single ptr rather than all indexes.
     SmallVec<ObjRef<Wire>, 4> addrIdxs(st.terms().transform(
         [](size_t, auto t) { return t.getIdx().template as<WireRef>(); }));
-    WireRef value = st.value();
+    HWValue value = st.value();
 
     struct DelayStage {
       ObjRef<Register> en;

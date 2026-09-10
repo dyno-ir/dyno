@@ -20,7 +20,7 @@ public:
   using iterator_category = std::bidirectional_iterator_tag;
   using value_type = InstrRef;
   using pointer = value_type *;
-  using reference = value_type &;
+  using reference = value_type;
   using difference_type = ptrdiff_t;
 
   StableBlockIterator &operator++() {
@@ -67,6 +67,11 @@ template <typename BlockIt> class HierBlockRangeIterBase {
   uint32_t depth = 0;
 
 public:
+  using iterator_category = std::forward_iterator_tag;
+  using reference = InstrRef;
+  using value_type = InstrRef;
+  using difference_type = int;
+
   HierBlockRangeIterBase(BlockIt it) : it(it) {}
 
   HierBlockRangeIterBase &operator++() {
@@ -118,6 +123,7 @@ public:
   }
 
   bool isEnd() { return depth == 0 && it.isEnd(); }
+  uint32_t getDepth() const { return depth; }
 };
 
 using HierBlockRangeIter = HierBlockRangeIterBase<BlockRef_iterator<true>>;

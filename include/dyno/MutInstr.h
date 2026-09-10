@@ -116,8 +116,8 @@ public:
     ++sz;
     return ref;
   }
-  T &push_back(const T &t) { emplace_back(t); }
-  T &push_back(T &&t) { emplace_back(std::forward<T>(t)); }
+  T &push_back(const T &t) { return emplace_back(t); }
+  T &push_back(T &&t) { return emplace_back(std::forward<T>(t)); }
   template <typename It> void push_back_range(Range<It> range) {
     if constexpr (requires { range.size(); })
       reserve(size() + range.size());

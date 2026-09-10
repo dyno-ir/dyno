@@ -15,7 +15,7 @@ struct Lexer {
   const std::string src;
   size_t i = 0;
   size_t lastI = 0;
-  uint lineNumber = 1;
+  unsigned lineNumber = 1;
 
   SlabAllocator<dyno::BigInt> bigIntLiterals;
 
@@ -218,11 +218,11 @@ public:
     if (!((t.type == types) || ...)) {
       fprintf(stderr, "%s:%u: unexpected token\n", path.c_str(), lineNumber);
       auto line = extractEnclosingLine(std::string_view{src}, lastI);
-      uint pos;
+      unsigned pos;
       fprintf(stderr, "%s:%u:%n", path.c_str(), lineNumber, &pos);
       std::cerr << line << "\n";
       pos += &src[lastI] - line.begin();
-      for (uint i = 0; i < pos; i++)
+      for (unsigned i = 0; i < pos; i++)
         putc(' ', stderr);
       fprintf(stderr, "^\n");
       exit(-1);

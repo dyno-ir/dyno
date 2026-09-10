@@ -309,3 +309,60 @@ STDCELL_DEF %Test:module("fakemem_16x18_1r1w_async_read"), %0:block {
   }
 }
 */
+
+STDCELL_DEF %RAMB18_TDP:module("RAMB18_TDP"), %b21:block {
+  INPUT_REGISTER_DEF %r123:register(1, "clk", type.base(logic))
+  INPUT_REGISTER_DEF %r124:register(10, "addra", array(logic[#32'd10]))
+  INPUT_REGISTER_DEF %r125:register(18, "dina", array(logic[#32'd18]))
+  INPUT_REGISTER_DEF %r126:register(2, "wea", array(logic[#32'd2]))
+  INPUT_REGISTER_DEF %r127:register(1, "rea", type.base(logic))
+  OUTPUT_REGISTER_DEF %r128:register(18, "douta", array(logic[#32'd18]))
+  INPUT_REGISTER_DEF %r129:register(10, "addrb", array(logic[#32'd10]))
+  INPUT_REGISTER_DEF %r130:register(18, "dinb", array(logic[#32'd18]))
+  INPUT_REGISTER_DEF %r131:register(2, "web", array(logic[#32'd2]))
+  INPUT_REGISTER_DEF %r132:register(1, "reb", type.base(logic))
+  OUTPUT_REGISTER_DEF %r133:register(18, "doutb", array(logic[#32'd18]))
+  REGISTER_DEF %r177:register(18432, "mem", array(logic[#32'd18][#32'h00000400]))
+  TRIGGER_DEF %124:trigger(pos), %r123
+  COMB_PROCESS_DEF %125:process, %b88:block {
+    LOAD %w351:wire(10), %r129
+    ZEXT %w190:wire(32), %w351  ["XilinxMemories.sv:20:34-44", "XilinxMemories.sv:23:17-27", "XilinxMemories.sv:24:17-27"]
+    LOAD %w123:wire(10), %r124
+    ZEXT %w182:wire(32), %w123  ["XilinxMemories.sv:19:34-44", "XilinxMemories.sv:21:17-27", "XilinxMemories.sv:22:17-27"]
+    LOAD %w115:wire(18), %r130
+    TRUNC %w369:wire(9), %w115
+    SPLICE %w370:wire(9), %w115, #32'd9
+    LOAD %w44:wire(18), %r125
+    TRUNC %w365:wire(9), %w44
+    SPLICE %w366:wire(9), %w44, #32'd9
+    LOAD %w159:wire(2), %r126  ["XilinxMemories.sv:19:11-15"]
+    TRUNC %w341:wire(1), %w159  ["XilinxMemories.sv:19:11-15", "XilinxMemories.sv:21:5-48"]
+    SPLICE %w337:wire(1), %w159, #32'd1  ["XilinxMemories.sv:19:11-15", "XilinxMemories.sv:22:5-48"]
+    OR %w177:wire(1), %w337, %w341  ["XilinxMemories.sv:19:11-15"]
+    LOAD %w165:wire(1), %r127  ["XilinxMemories.sv:19:9-23"]
+    NOT %w353:wire(1), %w177  ["XilinxMemories.sv:19:9-23", "XilinxMemories.sv:19:9-16"]
+    AND %w180:wire(1), %w353, %w165  ["XilinxMemories.sv:19:9-23", "XilinxMemories.sv:19:9-16"]
+    GEP %126:ptr, #32'd0, %w182, #32'd18, #32'h00000400
+    MEM_LOAD %w263:wire(18), %127:mem_port(0), %r177, %126
+    LOAD %w137:wire(2), %r131  ["XilinxMemories.sv:20:11-15"]
+    TRUNC %w347:wire(1), %w137  ["XilinxMemories.sv:20:11-15", "XilinxMemories.sv:23:5-48"]
+    SPLICE %w345:wire(1), %w137, #32'd1  ["XilinxMemories.sv:20:11-15", "XilinxMemories.sv:24:5-48"]
+    OR %w185:wire(1), %w345, %w347  ["XilinxMemories.sv:20:11-15"]
+    LOAD %w43:wire(1), %r132  ["XilinxMemories.sv:20:9-23"]
+    NOT %w143:wire(1), %w185  ["XilinxMemories.sv:20:9-23", "XilinxMemories.sv:20:9-16"]
+    AND %w188:wire(1), %w43, %w143  ["XilinxMemories.sv:20:9-23", "XilinxMemories.sv:20:9-16"]
+    GEP %128:ptr, #32'd0, %w190, #32'd18, #32'h00000400
+    MEM_LOAD %w261:wire(18), %129:mem_port(0), %r177, %128
+    MEM_STORE %130:mem_port(1), %w365, %r177, %w341, %126, %124
+    GEP %131:ptr, #32'd9, %w182, #32'd18, #32'h00000400
+    MEM_STORE %132:mem_port(1), %w366, %r177, %w337, %131, %124
+    MEM_STORE %133:mem_port(1), %w369, %r177, %w347, %128, %124
+    GEP %134:ptr, #32'd9, %w190, #32'd18, #32'h00000400
+    MEM_STORE %135:mem_port(1), %w370, %r177, %w345, %134, %124
+    LOAD %w325:wire(1), %r123
+    FLIP_FLOP %w323:wire(18), %w325, %w263, %w180
+    STORE %w323, %r128
+    FLIP_FLOP %w320:wire(18), %w325, %w261, %w188
+    STORE %w320, %r133
+  }
+}

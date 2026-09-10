@@ -44,7 +44,7 @@ class Operand : public ByValueRTTIUtilMixin<Operand>, ByValueRTTITag2 {
   friend class GenericOperand;
 
   DynObjRef ref;
-  InlineStorage<8> custom;
+  InlineStorage<sizeof(void *)> custom;
   template <typename T = void> FatDynObjRef<T> customFat() const {
     auto ptr = custom.as<T *>();
     return {ref, *ptr};
@@ -139,7 +139,7 @@ public:
       : opc(old.opc), dialect(old.dialect), _unused(old._unused),
         numOperands(numOperands), numDefs(old.numDefs),
         customStorage(old.customStorage) {
-    assert(numOperands <= 0x1000);
+    assert(numOperands < 0x10000);
   }
 
 private:

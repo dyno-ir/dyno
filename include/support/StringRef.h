@@ -19,10 +19,16 @@ public:
   using pointer = const char *;
   using reference = const char &;
 
-  operator ArrayRef<char>() { return {self().data(), self().size()}; }
-  operator Range<const char *>() { return {self().begin(), self().end()}; }
-  operator std::string_view() { return {self().data(), self().size()}; }
-  operator std::string() { return {self().data(), self().size()}; }
+  constexpr operator ArrayRef<char>() const {
+    return {cself().data(), cself().size()};
+  }
+  constexpr operator Range<const char *>() const {
+    return {cself().begin(), cself().end()};
+  }
+  constexpr operator std::string_view() const {
+    return {cself().data(), cself().size()};
+  }
+  operator std::string() const { return {cself().data(), cself().size()}; }
 
   constexpr Derived substr(size_t pos, size_t n) const {
     return Derived{cself().begin() + pos, cself().begin() + pos + n};
@@ -62,13 +68,15 @@ public:
   using ArrayRef::ArrayRef;
 
   template <typename T>
-  constexpr StringRef(T &&t) : StringRef(t.begin(), t.end()) {}
+  constexpr StringRef(T &&t) : StringRef(t.data(), t.data() + t.size()) {}
   constexpr StringRef(std::basic_string<char> &str)
       : StringRef(str.data(), str.size()) {}
   constexpr StringRef(const std::basic_string<char> &str)
       : StringRef(str.data(), str.size()) {}
-  constexpr StringRef(char *data) : StringRef(data, strlen(data)) {}
-  constexpr StringRef(const char *data) : StringRef(data, strlen(data)) {}
+  constexpr StringRef(char *data)
+      : StringRef(data, std::char_traits<char>::length(data)) {}
+  constexpr StringRef(const char *data)
+      : StringRef(data, std::char_traits<char>::length(data)) {}
 };
 
 class MutStringRef : public MutArrayRef<char>,
@@ -77,8 +85,9 @@ public:
   using MutArrayRef::MutArrayRef;
 
   template <typename T>
-  constexpr MutStringRef(T &&t) : MutStringRef(t.begin(), t.end()) {}
-  constexpr MutStringRef(char *data) : MutStringRef(data, strlen(data)) {}
+  constexpr MutStringRef(T &&t) : MutStringRef(t.data(), t.data() + t.size()) {}
+  constexpr MutStringRef(char *data)
+      : MutStringRef(data, std::char_traits<char>::length(data)) {}
 };
 
 // 4+ GiB string, 8 inline chars
@@ -186,7 +195,7 @@ public:
   constexpr SSOStringRef(const std::basic_string<char> &str)
       : SSOStringRef(str.data(), str.size()) {}
   template <typename T>
-  SSOStringRef(T &&t) : SSOStringRef(t.begin(), t.end()) {}
+  SSOStringRef(T &&t) : SSOStringRef(t.data(), t.data() + t.size()) {}
   SSOStringRef(const char *data)
       : SSOStringRef(data,
                      strnlen(data, std::numeric_limits<uint32_t>::max())) {}

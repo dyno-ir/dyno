@@ -2,8 +2,13 @@
 
 #include "dyno/Constant.h"
 #include "dyno/Context.h"
+#include "dyno/DeepCopy.h"
+#include "dyno/FatContext.h"
+#include "dyno/HierBlockIterator.h"
 #include "dyno/Instr.h"
+#include "dyno/MutInstr.h"
 #include "dyno/Pass.h"
+#include "hw/AutoDebugInfo.h"
 #include "hw/HWAbstraction.h"
 #include "hw/HWContext.h"
 #include "hw/HWInstr.h"
@@ -15,7 +20,13 @@
 #include "hw/MemoryPort.h"
 #include "hw/Register.h"
 #include "hw/SensList.h"
+#include "op/OpContext.h"
 #include "support/Any.h"
+#include "support/BoolExpr.h"
+#include "support/DynBitSet.h"
+#include "support/ErrorRecovery.h"
+#include "support/Format.h"
+#include "support/SmallVec.h"
 #include <cstdint>
 namespace dyno {
 
@@ -271,10 +282,11 @@ class SimpleMemoryInferencePass : public Pass<SimpleMemoryInferencePass> {
   //   } else
   //     return std::unexpected("expected insert");
   // }
+  using BoolExpr = TypedSmallBoolExprDNF<HWValue>;
 
   struct WritePort2 {
     InstrRef instr; // insert/concat
-    SmallVec<std::pair<HWValue, bool>, 2> enables;
+    HWValue enables;
     uint32_t dly;
     TriggerIRef trigger;
   };
@@ -291,116 +303,191 @@ class SimpleMemoryInferencePass : public Pass<SimpleMemoryInferencePass> {
     SmallVec<WritePort2, 4> writes;
   };
 
-  std::expected<Memory, std::string> walkTree(LoadIRef load) {
+  Result<Memory, Format> walkTree3(LoadIRef load) {
+
+    auto stores = load.reg().iref().storeOrStoreDefers();
+    StoreIRef store = stores.empty() ? nullref : stores.front();
+    if (!stores.empty() && std::next(stores.begin()) != stores.end())
+      return Format{"multiple stores to memory:\n{}",
+                    LazyFormat{[this, load](std::ostream &str) {
+                      HWCtxPrinter print{ctx, str};
+                      for (auto st : LoadIRef{load}.reg().iref().stores()) {
+                        str << "  ";
+                        print.printInstr(st, true, false);
+                      }
+                    }}};
+    if (store && !store.isFullReg())
+      return Format{"expected full reg store"};
+
     Memory memory;
-    auto val = load.value().as<WireRef>();
-    WireRef nextVal = nullref;
-    bool end = false;
 
-    while (true) {
-      SmallDenseSet<ObjRef<Instr>, 8> coveredMUXs;
-      auto flipMux = [&coveredMUXs](InstrRef instr) {
-        if (auto [found, it] = coveredMUXs.findOrInsert(instr); found)
-          coveredMUXs.erase(it);
-      };
+    struct Frame {
+      ObjRef<Wire> ref;
+      uint32_t idx = 0;
+      HWValue acc = ConstantRef::fromBool(false);
+    };
+    SmallVec<Frame, 32> stack{{load.value()}};
 
-      for (auto op : val.uses()) {
-        auto instr = op.instr();
-        switch (*instr.getDialectOpcode()) {
+    HWValue rv;
+    bool rvValid = false;
 
-        case *HW_STORE_DEFER:
-          for (auto &st : memory.writes) {
-            st.dly = 1;
-            st.trigger = instr.as<StoreIRef>().trigger();
-          }
-          [[fallthrough]];
-        case *HW_STORE: {
-          auto asStore = instr.as<StoreIRef>();
-          if (!asStore.isFullReg())
-            return std::unexpected("expected full reg store");
+    // every MUX must be visited exactly twice (via both inputs)
+    SmallDenseSet<ObjRef<Instr>> coveredMUXs;
+    auto flipMux = [&coveredMUXs](InstrRef instr) {
+      if (auto [found, it] = coveredMUXs.findOrInsert(instr); found)
+        coveredMUXs.erase(it);
+    };
 
-          end = true;
-          break;
+    int unaccountedInserts = 0;
+    bool sawStore = false;
+
+    SmallDenseMap<ObjRef<Instr>, HWValue> muxMemo;
+    BlockRef scratchBlock = ctx.getCFG().createBlock();
+
+    Defer destroyScratchBlock([&]() {
+      for (auto instr : scratchBlock.unordered().reverse())
+        ctx.destroyInstr(instr);
+      ctx.destroy(scratchBlock);
+    });
+
+    HWInstrBuilder scratchBuild{ctx, scratchBlock.end()};
+
+    while (!stack.empty()) {
+      auto wire = ctx.resolve(stack.back().ref);
+      if (stack.back().idx == wire.getNumUses()) {
+
+        // combine final retval with acc
+        if (rvValid) {
+          stack.back().acc = scratchBuild.buildOr(stack.back().acc, rv);
+        }
+        rvValid = true;
+        rv = stack.pop_back_val().acc;
+
+        if (wire.getDefI().isOpc(HW_INSERT)) {
+          unaccountedInserts--;
+          memory.writes.emplace_back(
+              WritePort2{wire.getDefI(), rv, store && store.trigger(),
+                         store ? store.trigger() : nullref});
+        } else if (wire.getDefI().isOpc(HW_MUX)) {
+          muxMemo.findOrInsert(wire.getDefI(), rv);
+          auto use = ctx.resolve(stack.back().ref).uses()[stack.back().idx - 1];
+          assert(use.instr() == wire.getDefI());
+          bool polarity = use.getNum() == 2;
+          auto sel = wire.getDefI().other(0)->as<HWValue>();
+          rv = scratchBuild.buildAnd(rv, polarity ? sel
+                                                  : scratchBuild.buildNot(sel));
         }
 
-        case *HW_SPLICE: {
-          auto asSplice = instr.as<SpliceIRef>();
-          if (op != asSplice.in())
-            return std::unexpected("expected splice in");
-          memory.reads.emplace_back(
-              ReadPort2{instr,
-                        {Range{memory.writes}.transform(
-                            [](size_t i, auto) { return i; })},
-                        0});
-          break;
-        }
-
-        case *OP_TRUNC: {
-          memory.reads.emplace_back(
-              ReadPort2{instr,
-                        {Range{memory.writes}.transform(
-                            [](size_t i, auto) { return i; })},
-                        0});
-          break;
-        }
-
-        case *HW_INSERT: {
-          auto asInsert = instr.as<InsertIRef>();
-          if (nextVal)
-            return std::unexpected("parallel inserts, not implemented");
-          nextVal = asInsert.out().as<WireRef>();
-
-          if (op != asInsert.in())
-            return std::unexpected("expected insert in");
-
-          if (auto use = nextVal.getSingleUse();
-              use && use->instr().isOpc(HW_MUX)) {
-            auto mux = use->instr();
-            if (*use == mux.other(0))
-              return std::unexpected("expected mux val not select");
-            auto otherUse = mux.operand(use->getNum() == 2 ? 3 : 2);
-
-            if (otherUse->as<HWValue>() != val)
-              return std::unexpected("expected bypass mux");
-
-            nextVal = mux.def(0)->as<WireRef>();
-            auto sel = mux.other(0)->as<HWValue>();
-            bool selPol = use->getNum() == 2;
-
-            memory.writes.emplace_back(
-                WritePort2{instr, {{sel, selPol}}, 0, nullref});
-            flipMux(mux);
-          } else {
-            nextVal = asInsert.out()->as<WireRef>();
-            memory.writes.emplace_back(WritePort2{instr, {}, 0, nullref});
-          }
-          break;
-        }
-
-        case *HW_MUX: {
-          flipMux(instr);
-          break;
-        }
-
-        default:
-          return std::unexpected(
-              "unexpected instr: " +
-              ContextPrinterWrapper<>{ctx}.toString(instr.getDialectOpcode()));
-        }
+        continue;
+      } else if (stack.back().idx != 0 && rvValid) {
+        // or RV into expression
+        stack.back().acc = scratchBuild.buildOr(stack.back().acc, rv);
+        rvValid = false;
       }
 
-      if (coveredMUXs.size() != 0)
-        return std::unexpected("incorrect MUX covering");
+      auto use = wire.uses()[stack.back().idx++];
+      auto instr = use.instr();
 
-      if (end != !nextVal)
-        return std::unexpected("end/next val mismatch");
+      switch (*instr.getDialectOpcode()) {
 
-      if (end)
+      case *HW_STORE_DEFER:
+      case *HW_STORE: {
+        auto asStore = instr.as<StoreIRef>();
+        if (asStore != store)
+          return Format{"saw store to wrong register"};
+
+        rv = ConstantRef::fromBool(true);
+        rvValid = true;
+        sawStore = true;
         break;
+      }
 
-      val = std::exchange(nextVal, nullref);
+      case *HW_SPLICE: {
+        auto asSplice = instr.as<SpliceIRef>();
+        if (use != asSplice.in())
+          return Format{"expected splice in"};
+        if (stack.size() != 1)
+          return Format{"not implemented: store forwarding load (todo)"};
+        memory.reads.emplace_back(
+            ReadPort2{instr,
+                      {}, //{Range{memory.writes}.transform([](size_t
+                          // i, auto) { return i; })},
+                      0});
+        break;
+      }
+      case *HW_ASSUME: {
+        if (use != instr.other(0))
+          return Format{"expected assume in"};
+        stack.emplace_back(instr.def()->as<WireRef>());
+        break;
+      }
+      // case *OP_TRUNC: {
+      //   if (stack.size() != 1)
+      //     return Format{"not implemented: store forwarding load (todo)"};
+      //   memory.reads.emplace_back(ReadPort2{
+      //       instr,
+      //       {Range{memory.writes}.transform([](size_t i, auto) { return i;
+      //       })}, 0});
+      //   break;
+      // }
+      case *HW_INSERT: {
+        unaccountedInserts++;
+        auto asInsert = instr.as<InsertIRef>();
+        if (use != asInsert.in())
+          return Format{"expected insert in"};
+
+        auto nextVal = asInsert.out().as<WireRef>();
+        stack.emplace_back(nextVal);
+
+        // actual port creation happens later during backtrace
+        // (once we know MUX path to enable this insert)
+        break;
+      }
+      case *HW_MUX: {
+        flipMux(instr);
+        // MUXs have two inputs, so we encounter them twice (exactly twice in
+        // fact, otherwise we're muxing in some unrelated value -> fail). Memo
+        // to avoid evaluating twice.
+        if (auto it = muxMemo.find(instr); it != muxMemo.end()) {
+          rv = it.val();
+          bool polarity = use.getNum() == 2;
+          auto sel = instr.other(0)->as<HWValue>();
+          rv = scratchBuild.buildAnd(rv, polarity ? sel
+                                                  : scratchBuild.buildNot(sel));
+          rvValid = true;
+          break;
+        }
+        stack.emplace_back(instr.def()->as<WireRef>());
+        break;
+      }
+      default: {
+        return Format{"unexpected instr: {}",
+                      LazyFormat{[&, instr](std::ostream &str) {
+                        HWCtxPrinter print{ctx, str};
+                        print.printInstr(instr, false, false);
+                      }}};
+      }
+      }
     }
 
+    if (coveredMUXs.size() != 0)
+      return Format{"Invalid MUXs. Can only MUX in memory value (optionally "
+                    "routed through inserts)\n{}",
+                    LazyFormat{[&, coveredMUXs](std::ostream &str) {
+                      HWCtxPrinter print{ctx, str};
+                      for (auto [back, mux] :
+                           Range{coveredMUXs}.resolve(ctx).mark_back()) {
+                        str << "  ";
+                        print.printInstr(mux, !back);
+                      }
+                    }}};
+    if (unaccountedInserts != 0)
+      return Format{"unaccounted for inserts"};
+    if (store && !sawStore)
+      return Format{"DAG walk did not find store"};
+    // move exprs out of scratch block s.t. they're not deleted
+    DeepCopier copier{ctx};
+    copier.moveInstrs(scratchBlock.begin(), load.iter(ctx));
     return memory;
   }
 
@@ -420,128 +507,18 @@ class SimpleMemoryInferencePass : public Pass<SimpleMemoryInferencePass> {
     return InputRegister{store, load};
   }
 
-  template <typename T> void buildPort(T &rd) {}
-
-  void buildMemory(RegisterIRef reg, Memory &&memory) {
-    auto mod = HWInstrRef{reg}.parentMod(ctx);
-    HWInstrBuilder rbuild{ctx, mod.regs_end()};
-
-    auto block = ctx.getCFG().blocks.create(ctx.getCFG());
-    auto memI = InstrBuilder{ctx.getStore<Instr>().create(2, HW_MEMORY_DEF)}
-                    .addRef(block)
-                    .other()
-                    .addRef(ConstantRef::fromU32(*reg.getNumBits()))
-                    .instr();
-
-    auto mem = MemoryInstrRef{memI};
-
-    for (auto &rd : memory.reads) {
-      auto oldDef = rd.instr.def()->as<WireRef>();
-      MemoryInstrRef::Port port;
-
-      // not set for read, inferred later
-      port.en = nullref;
-      port.enPol = 0;
-
-      port.delay = 0;
-      port.clkReg = nullref;
-      port.clkPol = 0;
-
-      port.data = rbuild.buildRegister(oldDef.getNumBits());
-      HWInstrBuilder build{ctx, rd.instr};
-
-      if (auto asSplice = rd.instr.as<SpliceIRef>(); asSplice) {
-        assert(asSplice.getNumTerms() == 1);
-
-        auto terms = asSplice.terms().transform([&](size_t, auto term) {
-          auto reg = rbuild.buildRegister(32);
-          build.buildStore(reg, term.getIdx());
-          return MemoryInstrRef::Port::Term{
-              .addr = reg,
-              .fact = term.getFact(),
-              .max = term.getMax() ? *term.getMax() : ~0U};
-        });
-        port.terms.push_back_range(terms);
-        port.base = asSplice.getBase();
-      } else {
-        assert(rd.instr.isOpc(OP_TRUNC));
-        port.base = 0;
-      }
-
-      oldDef.replaceAllUsesWith(build.buildLoad(port.data));
-
-      mem.appendPort(ctx, port, HW_READ_PORT_DEF);
-    }
-
-    for (auto &wr : memory.writes) {
-      auto asInsert = wr.instr.as<InsertIRef>();
-      MemoryInstrRef::Port port;
-      HWInstrBuilder build{ctx, wr.instr};
-
-      if (!wr.enables.empty()) {
-        port.en = rbuild.buildRegister(1);
-        port.enPol = 1;
-        auto enW = build.buildAnd(
-            Range{wr.enables}.transform([&build](size_t, auto pair) {
-              if (pair.second)
-                return pair.first;
-              return build.buildNot(pair.first);
-            }));
-        build.buildStore(port.en, enW);
-      }
-
-      if (wr.dly == 0) {
-        port.delay = 0;
-        port.clkReg = nullref;
-        port.clkPol = 0;
-      } else {
-        port.delay = wr.dly;
-        assert(wr.trigger.others().size() == 1 &&
-               (wr.trigger.oref()->getMode(0) ==
-                Any{SensMode::POSEDGE, SensMode::NEGEDGE}));
-        port.clkReg = wr.trigger.other(0)->as<RegisterRef>();
-        port.clkPol = wr.trigger.oref()->getMode(0) == SensMode::POSEDGE;
-      }
-
-      port.data = rbuild.buildRegister(asInsert.getLen());
-      build.buildStore(port.data, asInsert.val()->as<HWValue>());
-
-      assert(asInsert.getNumTerms() == 1);
-
-      auto terms = asInsert.terms().transform([&](size_t, auto term) {
-        auto reg = rbuild.buildRegister(32);
-        build.buildStore(reg, term.getIdx());
-        return MemoryInstrRef::Port::Term{.addr = reg,
-                                          .fact = term.getFact(),
-                                          .max = term.getMax() ? *term.getMax()
-                                                               : ~0U};
-      });
-      port.terms.push_back_range(terms);
-      port.base = asInsert.getBase();
-
-      mem.appendPort(ctx, port, HW_WRITE_PORT_DEF);
-    }
-
-    rbuild.insertInstr(memI);
-  }
-
   void buildMemory2(ModuleIRef mod, RegisterIRef reg, Memory &&memory) {
     HWInstrBuilder build{ctx, mod.regs_end()};
     auto newReg = build.buildRegister(reg.getNumBits());
+    ctx.getCtx<HWDialectContext>().copyRegisterInfo(reg.oref(), newReg);
 
     for (auto &wr : memory.writes) {
       build.setInsertPoint(wr.instr);
-      auto asInsert = wr.instr.as<InsertIRef>();
-      HWValue en = nullref;
-      if (!wr.enables.empty()) {
-        en = build.buildAnd(
-            Range{wr.enables}.transform([&build](size_t, auto pair) {
-              if (pair.second)
-                return pair.first;
-              return build.buildNot(pair.first);
-            }));
-      }
+      AutoCopyDebugInfoStack autoDbgInfo{ctx};
+      auto tok = autoDbgInfo.addWithToken(wr.instr);
 
+      auto asInsert = wr.instr.as<InsertIRef>();
+      HWValue en = wr.enables;
       auto ref = build.buildMemStore(
           newReg, asInsert.val()->as<HWValue>(), en, wr.dly, wr.trigger,
           build.buildGEP(asInsert.getBase(), asInsert.terms()));
@@ -551,6 +528,9 @@ class SimpleMemoryInferencePass : public Pass<SimpleMemoryInferencePass> {
     for (auto &rd : memory.reads) {
       build.setInsertPoint(rd.instr);
       if (auto asSplice = rd.instr.as<SpliceIRef>()) {
+        AutoCopyDebugInfoStack autoDbgInfo{ctx};
+        auto tok = autoDbgInfo.addWithToken(rd.instr);
+
         auto val = build.buildMemLoad(
             newReg, asSplice.getLen(), nullref, 0, nullref,
             build.buildGEP(asSplice.getBase(), asSplice.terms()),
@@ -572,31 +552,27 @@ class SimpleMemoryInferencePass : public Pass<SimpleMemoryInferencePass> {
     if (!ld)
       return;
 
-    auto res = walkTree(ld);
+    auto res = walkTree3(ld);
 
-    DYNO_DBG("SimpleMemoryMappingPass", {
+    DYNO_DBG({
       dbgs() << "memory ";
       dumpInstr(reg, ctx);
 
       if (!res) {
-        dbgs() << "failed mapping: " << res.error() << "\n";
+        dbgs() << "failed mapping: " << res.error() << "\n\n";
       } else {
 
         dbgs() << "write ports:\n";
         for (auto &port : res->writes) {
-          dbgs() << "en{";
-          for (auto &en : port.enables) {
-            dumpObj(en.first);
-            dbgs() << ":" << en.second << ",";
-          }
-          dbgs() << "}:";
-          dumpInstr(port.instr);
+          dumpInstr(port.instr, ctx);
         }
 
         dbgs() << "read ports:\n";
         for (auto &port : res->reads) {
-          dumpInstr(port.instr);
+          dumpInstr(port.instr, ctx);
         }
+
+        dbgs() << "\n";
       }
     })
 

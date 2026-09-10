@@ -63,7 +63,7 @@ public:
   void renumber(BlockRef block);
   void insert(InstrRef instr, BlockRef_iterator_base it);
   void replace(InstrRef oldI, InstrRef newI);
-  uint64_t operator[](InstrRef instr) const {
+  uint64_t operator[](ObjRef<Instr> instr) const {
     return numbers[instr.getObjID() + 1];
   }
   uint64_t get(InstrRef instr) { return numbers[instr.getObjID() + 1]; }
@@ -266,6 +266,11 @@ public:
     ptr->instrs.clear();
     ptr->instrs.emplace_back(InstrRef{nullref}, IDImpl<uint32_t>{0},
                              IDImpl<uint32_t>{0});
+  }
+  void clear() {
+    for (auto instr : unordered())
+      getCFG().map[instr] = CFG::Node{nullref, 0};
+    clear_unsafe();
   }
 
   void reserve(size_t count) { (*this)->instrs.reserve(count + 1); }

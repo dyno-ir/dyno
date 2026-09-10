@@ -41,12 +41,14 @@ public:
 
     if (verbose)
       print.printInstr(instr);
+    print.reset();
 
     BlockCompare compare{};
     if (auto diff = compare.compareBlocks(pre, post)) {
       std::print(os, "failed test: \"{}\"\n", name);
       std::print(os, "actual  : {}\n",
                  diff->first ? print.toString(diff->first) : "<none>");
+      print.reset();
       std::print(os, "expected: {}\n\n",
                  diff->second ? print.toString(diff->second) : "<none>");
 
@@ -57,45 +59,9 @@ public:
     return true;
   }
 
-  bool execTestEquiv(InstrRef instr, bool verbose) {
+  Result<void, Format> execTestEquiv(InstrRef instr, bool verbose) {
     StringRef name = instr.def(0)->as<StringObjRef>()->data;
-    auto pre = instr.def(1)->as<BlockRef>();
     auto passes = instr.def(2)->as<BlockRef>();
-
-    std::array<void *, 1> ctorArgs = {reinterpret_cast<void *>(&*sandbox)};
-    MetaPassPipelineInterpreter pipeline{*sandbox, ctorArgs};
-
-    if (pre.size() != 1)
-      report_fatal_error("expected single Instr in body of test \"{}\"", name);
-
-    // duplicate the instr to be tested
-    DeepCopier copier{*sandbox};
-    copier.copyInstr(*pre.begin(), pre.end());
-
-    for (auto instr : Range{pre}.drop_back()) {
-      FatDynObjRef<> ref{instr};
-      std::array<void *, 1> args = {reinterpret_cast<void *>(&ref)};
-      pipeline.interpretPassPipeline(passes, args);
-    }
-
-    if (verbose)
-      print.printInstr(instr);
-
-    std::print(os, "passed test: \"{}\"\n", name);
-    return true;
-  }
-
-  std::expected<void, Format> execTestScript(InstrRef instr, bool verbose) {
-    StringRef name = instr.def(0)->as<StringObjRef>()->data;
-    BlockRef expected = nullref;
-    BlockRef passes;
-    if (instr.getNumDefs() == 2) {
-      passes = instr.def(1)->as<BlockRef>();
-    } else if (instr.getNumDefs() == 3) {
-      expected = instr.def(1)->as<BlockRef>();
-      passes = instr.def(2)->as<BlockRef>();
-    } else
-      return std::unexpected("invalid instr format");
 
     std::array<void *, 1> ctorArgs = {reinterpret_cast<void *>(&*sandbox)};
     MetaPassPipelineInterpreter pipeline{*sandbox, ctorArgs};
@@ -103,21 +69,50 @@ public:
     FatDynObjRef<> n = nullref;
     std::array<void *, 1> args = {reinterpret_cast<void *>(&n)};
     if (!pipeline.interpretPassPipeline(passes, args))
-      return std::unexpected("failed to run pass");
+      return Format("failed to run pass");
+
+    if (verbose)
+      print.printInstr(instr);
+
+    std::print(os, "passed test: \"{}\"\n", name);
+    return {};
+  }
+
+  Result<void, Format> execTestScript(InstrRef instr, bool verbose) {
+    StringRef name = instr.def(0)->as<StringObjRef>()->data;
+    BlockRef expected = nullref;
+    BlockRef passes;
+    Defer printFailed{[&]() { std::print(os, "failed test: \"{}\"\n", name); }};
+
+    if (instr.getNumDefs() == 2) {
+      passes = instr.def(1)->as<BlockRef>();
+    } else if (instr.getNumDefs() == 3) {
+      expected = instr.def(1)->as<BlockRef>();
+      passes = instr.def(2)->as<BlockRef>();
+    } else
+      return Format("invalid instr format");
+
+    std::array<void *, 1> ctorArgs = {reinterpret_cast<void *>(&*sandbox)};
+    MetaPassPipelineInterpreter pipeline{*sandbox, ctorArgs};
+
+    FatDynObjRef<> n = nullref;
+    std::array<void *, 1> args = {reinterpret_cast<void *>(&n)};
+    if (!pipeline.interpretPassPipeline(passes, args))
+      return Format("failed to run pass");
 
     if (instr.getNumDefs() == 3) {
       if (expected.size() != 1)
-        return std::unexpected("expected single instr in expected");
+        return Format("expected single instr in expected");
       auto expectedI = *expected.begin();
       auto expectedO = expectedI.def()->fat();
       if (expectedO.getObjID() != Any{0U, 1U})
-        return std::unexpected("more objects than expected");
+        return Format("more objects than expected");
       auto other = DynObjRef{expectedO.getDialectID(), expectedO.getTyID(),
                              ObjID{1U - expectedO.getObjID()}, 0};
       auto otherO = sandbox->resolve(other);
       auto otherDef = otherO.as<FatDynObjRef<InstrDefUse>>()->getSingleDef();
       if (!otherDef)
-        return std::unexpected("expected single def");
+        return Format("expected single def");
       auto otherI = otherDef->instr();
 
       if (auto diff = BlockCompare{}.compareInstrs(expectedI, otherI)) {
@@ -127,13 +122,14 @@ public:
                    diff->first ? print.toString(diff->first) : "<none>");
         std::print(str, "expected: {}\n\n",
                    diff->second ? print.toString(diff->second) : "<none>");
-        return std::unexpected(Format("{}", std::move(str).str()));
+        return Format("{}", std::move(str).str());
       }
     }
 
     if (verbose)
       print.printInstr(instr);
 
+    printFailed.clear();
     std::print(os, "passed test: \"{}\"\n", name);
     return {};
   }
@@ -144,7 +140,11 @@ public:
       return execTestCase(instr, verbose);
     }
     case *TEST_TEST_EQUIVALENCE: {
-      return execTestEquiv(instr, verbose);
+      if (auto rv = execTestEquiv(instr, verbose); !rv) {
+        os << "test equiv failed: " << rv.error() << "\n";
+        return false;
+      }
+      return true;
     }
     case *TEST_TEST_SCRIPT: {
       if (auto rv = execTestScript(instr, verbose); !rv) {

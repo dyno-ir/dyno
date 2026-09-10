@@ -21,6 +21,7 @@ public:
   static constexpr DialectID dialect{DIALECT_TEST};
 #define CONFIG_STRUCT_LAMBDA(FIELD, ENUM)                                      \
   FIELD(const char *, regex, "")                                               \
+  FIELD(const char *, excludeRegex, "")                                        \
   FIELD(uint32_t, num, 1)                                                      \
   ENUM(mode, EQ, EQ, LE, GE)
   CONFIG_STRUCT(CONFIG_STRUCT_LAMBDA)
@@ -33,7 +34,11 @@ public:
     // ignore test dialect to not find the key itself
     if (instr.getDialect() == DIALECT_TEST)
       return;
+    // ignore instrs matching excludeRegex
     auto str = printer.toString(instr);
+    if (config.excludeRegex[0] &&
+        std::regex_match(str, std::regex(config.excludeRegex)))
+      return;
     std::regex regex(config.regex);
     for (auto it = std::sregex_iterator(str.begin(), str.end(), regex);
          it != std::sregex_iterator(); ++it)

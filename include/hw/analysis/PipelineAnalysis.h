@@ -102,7 +102,7 @@ public:
     return p;
   }
 
-  // in the future we can add a retiming plan here to so if hypothetically
+  // in the future we can add a retiming plan here to determine if hypothetically
   // we could get a certain number of stages
   static Pipeline getOutPipeline(WireRef value, bool coalesce = true) {
     Pipeline p{0, {nullref, 0, 0}, {}};
@@ -133,7 +133,7 @@ public:
         curr = instr.def()->as<WireRef>();
         continue;
       }
-      // todo: remap
+      // todo: remap (concat etc)
       default:
         break;
       }
@@ -145,7 +145,7 @@ public:
 
   static bool isSameFlopType(FlipFlopIRef lhs, FlipFlopIRef rhs) {
     if (lhs.clkRaw() != rhs.clkRaw() || lhs.clkEnRaw() != rhs.clkEnRaw() ||
-        lhs.numRsts() != rhs.numRsts())
+        lhs.numRsts() != rhs.numRsts() || lhs.initValue() != rhs.initValue())
       return false;
     for (unsigned i = 0; i < lhs.numRsts(); ++i) {
       if (lhs.rstRaw(i) != rhs.rstRaw(i) || lhs.rstVal(i) != rhs.rstVal(i))
@@ -157,6 +157,9 @@ public:
     if (act.hasClkEn() && !mod.hasClkEn())
       return false;
     if (act.numRsts() > mod.numRsts())
+      return false;
+    if (act.initValue() &&
+        (mod.initValue() != act.initValue() && !mod.initValue().is<WireRef>()))
       return false;
     for (unsigned i = 0; i < act.numRsts(); i++) {
       // non-constant reset values may occur as parameters (especially on model

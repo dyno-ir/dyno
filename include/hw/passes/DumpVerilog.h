@@ -6,8 +6,10 @@
 #include "hw/HWContext.h"
 #include "hw/HWPrinter.h"
 #include "hw/IDs.h"
+#include "hw/LUT.h"
 #include "hw/LoadStore.h"
 #include "hw/Module.h"
+#include "hw/Wire.h"
 #include "op/IDs.h"
 #include "support/ErrorRecovery.h"
 #include "support/Tuple.h"
@@ -39,30 +41,21 @@ class DumpVerilogPass : public Pass<DumpVerilogPass> {
 
 public:
 #define CONFIG_STRUCT_LAMBDA(FIELD, ENUM)                                      \
-  FIELD(bool, dumpWiresLast, true)                                             \
+  FIELD(bool, dumpWiresLast, false)                                            \
   FIELD(std::string, fileName, "dump.v")
   CONFIG_STRUCT(CONFIG_STRUCT_LAMBDA)
 #undef CONFIG_STRUCT_LAMBDA
   Config config;
 
 private:
-  // Adapter for printer's regular IntroducedName, only overrides str()
-  struct VerilogIntroducedName : public IntroducedName {
-    using IntroducedName::IntroducedName;
-    VerilogIntroducedName(IntroducedName base) : IntroducedName(base) {}
-    std::string str() const {
-      switch (type()) {
-      case NUMERIC: {
-        auto len = strnlen(this->storage.numeric.prefix.data(), 4);
-        auto str = StringRef{this->storage.numeric.prefix.data(), len};
-        return "_r" + std::format("{}{}", str, this->storage.numeric.num) + "_";
-      }
-      case STRING:
-        return this->storage.string;
-      }
-      dyno_unreachable("unknown type");
-    }
-  };
+
+  std::string getRegName(RegisterRef reg) {
+    auto &regNameInfo = ctx.getCtx<HWDialectContext>().regNameInfo;
+    auto names = regNameInfo.getNames(reg);
+    if (names.empty())
+      return "_r" + std::to_string(reg.getObjID().num) + "_";
+    return std::string(" \\") + names.front() + std::string(" ");
+  }
 
   void dumpNetlistProcess(ProcessIRef proc) {
     ObjMapVec<Wire, Optional<uint32_t>> wireMap;
@@ -77,11 +70,8 @@ private:
     };
 
     auto dumpWires = [&]() {
-      for (auto [obj, id] : wireMap) {
-        if (!id || !ctx.getStore<Wire>().exists(obj))
-          continue;
-        auto wire = ctx.getStore<Wire>().resolve(obj);
-        std::print(os, "wire[{}:0] _w{}_;\n", *wire.getNumBits() - 1, *id);
+      for (auto wire : ctx.getStore<Wire>()) {
+        std::print(os, "wire[{}:0] _w{}_;\n", *wire.getNumBits() - 1, wireToID(wire));
       }
     };
     if (!config.dumpWiresLast)
@@ -93,10 +83,8 @@ private:
       switch (*instr.getDialectOpcode()) {
       case *HW_LOAD: {
         auto asLoad = instr.as<LoadIRef>();
-        std::print(
-            os, "assign _w{}_ = {}", wireToID(asLoad.value()),
-            VerilogIntroducedName{print.introduceNameFor(asLoad.reg()).second}
-                .str());
+        std::print(os, "assign _w{}_ = {}", wireToID(asLoad.value()),
+                   getRegName(asLoad.reg()));
         if (!asLoad.isFullReg()) {
           assert(asLoad.isConstantOffs());
           auto addr = asLoad.getBase();
@@ -109,10 +97,7 @@ private:
       case *HW_STORE: {
         auto asStore = instr.as<StoreIRef>();
         // fixme: what about constant stores?
-        std::print(
-            os, "assign {}",
-            VerilogIntroducedName{print.introduceNameFor(asStore.reg()).second}
-                .str());
+        std::print(os, "assign {}", getRegName(asStore.reg()));
         if (!asStore.isFullReg()) {
           assert(asStore.isConstantOffs());
           auto addr = asStore.getBase();
@@ -190,6 +175,19 @@ private:
         break;
       }
 
+      case *HW_LUT: {
+        auto asLUT = instr.as<LUTInstrRef>();
+        std::print(os, "LUT{}#({}) lut_{}(.O(_w{}_)", asLUT.numInputs(),
+                   asLUT.truthTable().toString(), asLUT.getObjID().num,
+                   wireToID(asLUT.def()->as<WireRef>()));
+        for (unsigned i = 0; i < asLUT.numInputs(); i++) {
+          std::print(os, ", .I{}(_w{}_)", i,
+                     wireToID(asLUT.inputs()[i].as<WireRef>()));
+        }
+        std::print(os, ");\n");
+        break;
+      }
+
       case *HW_STDCELL_INSTANCE: {
         auto mod = instr.other(0)->as<ModuleRef>();
         std::print(os, "{} _inst{}_ (", mod->name, instanceIDCnt++);
@@ -240,13 +238,19 @@ private:
       std::print(os, "reg");
       if (asReg.getNumBits() != 1)
         std::print(os, " [{}:0]", *asReg.getNumBits() - 1);
-      std::print(
-          os, " {};\n",
-          VerilogIntroducedName{print.introduceNameFor(asReg.oref()).second}
-              .str());
+      std::print(os, " {};\n", getRegName(asReg.oref()));
       break;
     }
     case *HW_NETLIST_PROCESS_DEF: {
+      dumpNetlistProcess(instr);
+      break;
+    }
+    // flow.dyno's %synthTechmap leaves the techmapped netlist as a
+    // COMB_PROCESS_DEF whose body is already netlist-level (LOAD/STORE/
+    // SPLICE/CONCAT/STDCELL_INSTANCE/...), so it dumps exactly like a
+    // NETLIST_PROCESS_DEF. DUMP_VERILOG only makes sense past techmap/ABC,
+    // where everything inside the process is a netlist instruction.
+    case *HW_COMB_PROCESS_DEF: {
       dumpNetlistProcess(instr);
       break;
     }
@@ -280,9 +284,8 @@ private:
       if (*port.getNumBits() != 1) {
         std::print(os, " [{}:0]", *port.getNumBits() - 1);
       }
-      VerilogIntroducedName name = print.introduceNameFor(port.oref()).second;
 
-      std::print(os, " {}", name.str());
+      std::print(os, " {}", getRegName(port.oref()));
       if (!last)
         os << ",";
       os << "\n";

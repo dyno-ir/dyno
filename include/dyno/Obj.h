@@ -249,7 +249,7 @@ public:
              reinterpret_cast<U *>(ptr)};
   }
 };
-static_assert(sizeof(FatObjRef<int>) == 16);
+static_assert(sizeof(FatObjRef<int>) == (sizeof(void*) == 8 ? 16 : 12));
 
 /// Note: Can be uninitialized!
 template <typename T>
@@ -381,16 +381,18 @@ bool FatObjRef<T>::is_impl(const DynObjRef &Ref) {
 
 template <> struct std::hash<dyno::DynObjRef> {
   size_t operator()(const dyno::DynObjRef &ref) const {
-    return std::bit_cast<size_t>(ref);
+    return hash_u64(std::bit_cast<uint64_t>(ref));
   }
 };
 
 template <dyno::IsPureObjRef T> struct std::hash<T> {
-  size_t operator()(const T &ref) const { return std::bit_cast<uint32_t>(ref); }
+  size_t operator()(const T &ref) const {
+    return hash_u32(std::bit_cast<uint32_t>(ref));
+  }
 };
 
 template <dyno::IsFatObjRef T> struct std::hash<T> {
-  size_t operator()(const T &ref) const { return ref.rawNoPtr(); }
+  size_t operator()(const T &ref) const { return hash_u64(ref.rawNoPtr()); }
 };
 
 template <> struct DenseMapInfo<dyno::DynObjRef> {

@@ -7,6 +7,10 @@
 #include "dyno/Obj.h"
 #include "hw/HWAbstraction.h"
 #include "hw/HWContext.h"
+#include "hw/HWTypeIDs.h"
+#include "meta/MetaContext.h"
+#include "op/OpContext.h"
+#include "aig/AIGContext.h"
 #include "hw/HWPrinter.h"
 #include "hw/IDs.h"
 #include "hw/Register.h"
@@ -54,23 +58,23 @@ public:
   PLI_INT32 (*func)(struct t_cb_data *);
   char *user_data;
   uint64_t time;
-  uint reason;
-  uint idx;
+  unsigned reason;
+  unsigned idx;
 };
 
 class Callbacks {
 public:
   std::vector<SmallVec<Callback *, 4>> callbacks;
 
-  void ensure(uint idx) {
+  void ensure(unsigned idx) {
     if (idx >= callbacks.size())
       callbacks.resize(idx + 1);
   }
-  SmallVecImpl<Callback *> &get(uint reason) {
+  SmallVecImpl<Callback *> &get(unsigned reason) {
     ensure(reason);
     return callbacks[reason];
   }
-  void deleteAll(uint reason) {
+  void deleteAll(unsigned reason) {
     while (!callbacks[reason].empty())
       remove(callbacks[reason].back());
   }
@@ -144,7 +148,7 @@ VPIHandler *handler;
 // This is so we have an instance of our top module to point to.
 InstrRef createTopInstance(Context &ctx, ModuleIRef topLevelModule) {
   HWInstrBuilder build{ctx};
-  ModuleIRef mod = build.buildModule("__Top");
+  ModuleIRef mod = build.buildModule("__Top").iref();
   build.setInsertPoint(mod.block().begin());
 
   SmallVec<RegisterRef, 16> ports;
@@ -157,6 +161,20 @@ InstrRef createTopInstance(Context &ctx, ModuleIRef topLevelModule) {
 
 int main(int argc, char **argv) {
   Context ctx;
+  HWDialectContext hwContext;
+  CoreDialectContext coreContext;
+  MetaDialectContext metaContext;
+  OpDialectContext opContext;
+  AIGDialectContext aigContext;
+  TypeDialectContext typeContext;
+  ctx.registerDialect(coreContext);
+  ctx.registerDialect(hwContext);
+  ctx.registerDialect(opContext);
+  ctx.registerDialect(aigContext);
+  ctx.registerDialect(metaContext);
+  ctx.registerDialect(typeContext);
+  ctx.getCtx<TypeDialectContext>().baseTypeNames.registerDialect(
+      DIALECT_HW, hw::hwTypeDialectTypeNames);
 
   if (argc != 3) {
     fprintf(stderr, "usage: %s <dyno file> <cocotb lib>\n", argv[0]);
@@ -166,7 +184,7 @@ int main(int argc, char **argv) {
   args = Args{argc, argv};
 
   ParseDynoPass parse{ctx};
-  parse.config.fileName = std::string(argv[1]);
+  parse.config.path = std::string(argv[1]);
 
   parse.run();
   HWPrinter print{std::cout};
@@ -552,7 +570,7 @@ vpiHandle vpi_register_cb(p_cb_data cb_data_p) {
 
     return (vpiHandle)handler->callbacks.insert(
         Callback{cb_data_p->cb_rtn, cb_data_p->user_data, ~0UL,
-                 uint(cb_data_p->reason), 0});
+                 unsigned(cb_data_p->reason), 0});
   }
   case cbAfterDelay: {
     if (cb_data_p->time->type != vpiSimTime)
@@ -561,7 +579,7 @@ vpiHandle vpi_register_cb(p_cb_data cb_data_p) {
     // t += handler->time;
     return (vpiHandle)handler->callbacks.insert(
         Callback{cb_data_p->cb_rtn, cb_data_p->user_data, t,
-                 uint(cb_data_p->reason), 0});
+                 unsigned(cb_data_p->reason), 0});
   }
   default:
     abort();

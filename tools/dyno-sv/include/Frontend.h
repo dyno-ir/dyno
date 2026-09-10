@@ -2,10 +2,12 @@
 #include "dyno/CFG.h"
 #include "dyno/Constant.h"
 #include "dyno/Context.h"
+#include "dyno/Obj.h"
 #include "hw/AutoDebugInfo.h"
 #include "hw/HWAbstraction.h"
 #include "hw/HWContext.h"
 #include "hw/HWTypeIDs.h"
+#include "hw/IDs.h"
 #include "hw/LoadStore.h"
 #include "op/IDs.h"
 #include "slang/ast/ASTVisitor.h"
@@ -110,6 +112,7 @@ public:
   DenseMap<const slang::ast::InstanceBodySymbol *, ObjRef<Module>> moduleMap;
   DenseMap<const slang::ast::SubroutineSymbol *, ObjRef<Function>> functionMap;
   bool curModIsInterface;
+  bool strictXZ = true;
 
   SmallVec<Value *, 4> assignLVStack;
 
@@ -145,7 +148,7 @@ public:
       case VK_L: {
         auto &asLVal = this->as<RegLValue>();
         auto ldVal = build.buildLoad(asLVal.lvReg, asLVal.numBits,
-                                     asLVal.baseAddr, ArrayRef(asLVal.terms));
+                                     asLVal.baseAddr, Range{asLVal.terms});
         assert(ldVal->numBits == type->getBitstreamWidth());
         return ldVal;
       }
@@ -208,7 +211,7 @@ public:
         // [[fallthrough]];
       case Value::VK_R: {
         auto splice = build.buildSplice(value.proGetValue(build), numBits,
-                                        baseAddr, terms);
+                                        baseAddr, Range{terms});
         if (auto asWire = splice.dyn_as<WireRef>())
           asWire->numBits = type->getBitstreamWidth();
         return std::make_unique<RValue>(splice, type);
@@ -254,7 +257,7 @@ public:
         auto asRegLV = this->as<RegLValue>();
         assert(val.getNumBits() == asRegLV.numBits);
         build.buildStore(asRegLV.lvReg, val, defer, nullref, asRegLV.baseAddr,
-                         ArrayRef(asRegLV.terms));
+                         Range(asRegLV.terms));
         break;
       }
       case Value::VK_CCL: {
@@ -264,7 +267,7 @@ public:
         for (auto &regLV : asCCLV.lvValues) {
           build.buildStore(regLV->lvReg,
                            build.buildSplice(val, regLV->numBits, offs), defer,
-                           nullref, regLV->baseAddr, ArrayRef(regLV->terms));
+                           nullref, regLV->baseAddr, Range(regLV->terms));
           offs += regLV->numBits;
         }
         break;
@@ -526,18 +529,37 @@ public:
     build.setInsertPoint(BlockRef_iterator<true>::invalid());
     handle_subr(subr);
   }
+  bool isBlackbox(const slang::ast::InstanceBodySymbol &body) {
+    for (auto *attr :
+         body.getCompilation().getAttributes(body.getDefinition())) {
+      if (attr->name == "black_box" && !attr->getValue().isFalse())
+        return true;
+    }
+    return false;
+  }
 
   void handle(const slang::ast::InstanceSymbol &node) {
     if (!(node.isModule() || node.isInterface()))
       report_fatal_error("only module and interface supported");
+    if (node.isInterface() && node.instanceDepth == 0) {
+      // skip top level (ie unused) interfaces, we expect module top level
+      return;
+    }
     auto &body = *(node.getCanonicalBody() ?: &node.body);
+    bool blackbox = isBlackbox(body);
     auto [found, it] = moduleMap.findOrInsert(&body, [&] {
-      std::string name = node.getHierarchicalPath();
-      preprocessName(name);
-      return HWInstrBuilder{ctx}
-          .buildModule(std::move(name))
-          .def()
-          ->as<ObjRef<Module>>();
+      std::string name = [&]() {
+        if (!blackbox) {
+          std::string name = node.getHierarchicalPath();
+          preprocessName(name);
+          return name;
+        } else {
+          return std::string(body.getDefinition().name);
+        }
+      }();
+
+      return HWInstrBuilder{ctx}.buildModule(
+          std::move(name), blackbox ? HW_BLACKBOX_MODULE_DEF : HW_MODULE_DEF);
     });
 
     if (found)
@@ -618,6 +640,8 @@ public:
 
     // can probably do this in parallel
     for (auto [slangMod, dynoMod] : modules) {
+      if (isBlackbox(*slangMod))
+        continue;
       ModuleRef fDynoMod{dynoMod, ctx.getStore<Module>()[dynoMod]};
       mod = fDynoMod.getSingleDef()->instr();
       vars.clear();
@@ -643,10 +667,7 @@ public:
               asIFS->getConnection().first->as<slang::ast::InstanceSymbol>();
 
           auto [found, ifMod] = moduleMap.findOrInsert(&ifInstance.body, [&] {
-            return HWInstrBuilder{ctx}
-                .buildModule(ifInstance.name)
-                .def()
-                ->as<ObjRef<Module>>();
+            return HWInstrBuilder{ctx}.buildModule(ifInstance.name);
           });
 
           // auto ifMod = moduleMap.find(&ifInstance.body);
@@ -715,7 +736,8 @@ public:
     return it;
   }
 
-  RegisterRef makeReg(const slang::ast::Symbol &symb) {
+  RegisterRef makeReg(const slang::ast::Symbol &symb,
+                      DialectOpcode opc = HW_REGISTER_DEF) {
     BlockRef_iterator<true> insertPt;
 
     bool inFuncVar = false;
@@ -739,7 +761,7 @@ public:
     auto name =
         buf[0] == '.' ? std::string_view(buf).substr(1) : std::string_view(buf);
     build.pushInsertPoint(insertPt);
-    auto reg = build.buildRegister();
+    auto reg = build.buildRegisterOrPort(opc);
     if (!inFuncVar)
       regsBackIt = build.insert.pred();
     uint32_t numBits = symb.getDeclaredType()->getType().getBitstreamWidth();
@@ -752,8 +774,9 @@ public:
     return reg;
   }
 
-  RegisterRef makeOrFindReg(const slang::ast::Symbol &symb) {
-    auto reg = vars.findOrInsert(&symb, [&] { return makeReg(symb); })
+  RegisterRef makeOrFindReg(const slang::ast::Symbol &symb,
+                            DialectOpcode opc = HW_REGISTER_DEF) {
+    auto reg = vars.findOrInsert(&symb, [&] { return makeReg(symb, opc); })
                    .second.val()
                    .as<RegisterRef>();
     return reg;
@@ -1152,6 +1175,10 @@ public:
 
       auto condVal = handle_expr(*cond.expr)->proGetValue(build);
       auto condBool = makeBool(condVal);
+      if (strictXZ) {
+        condBool = build.buildICmp(ConstantRef::fromBool(0), condBool,
+                                   BigInt::ICMP_WNE);
+      }
 
       if (!asCond.ifFalse) {
         auto ifInstr = build.buildIf(condBool);
@@ -1412,33 +1439,35 @@ public:
 
   std::unique_ptr<Value>
   handleNamedValueRef(const slang::ast::ValueSymbol &symbol) {
+    RegisterOrConstantRef sig;
     if (auto modport = symbol.as_if<slang::ast::ModportPortSymbol>();
         modport && modport->internalSymbol) {
       return handleNamedValueRef(
           modport->internalSymbol->as<slang::ast::ValueSymbol>());
+    } else if (auto param = symbol.as_if<slang::ast::ParameterSymbol>()) {
+      if (param->getValue().bad())
+        sig = makeOrFindReg(symbol, HW_INPUT_REGISTER_DEF);
+      else {
+        auto lambda = [&] {
+          return RegisterOrConstantRef{toDynoConstant(param->getValue())};
+        };
+        sig = vars.findOrInsert(&symbol, lambda).second.val();
+      }
+    } else if (auto enumMember = symbol.as_if<slang::ast::EnumValueSymbol>()) {
+      auto lambda = [&] {
+        return RegisterOrConstantRef{toDynoConstant(enumMember->getValue())};
+      };
+      sig = vars.findOrInsert(&symbol, lambda).second.val();
+    }
+    else {
+      auto lambda = [&] { return RegisterOrConstantRef{makeReg(symbol)}; };
+      sig = vars.findOrInsert(&symbol, lambda).second.val();
     }
 
-    auto [found, sig] = vars.findOrInsert(&symbol, [&] {
-      // when the enum is used in a structs, enum values aren't propagated to
-      // nval.getConstant()
-      if (auto enumMember = symbol.as_if<slang::ast::EnumValueSymbol>())
-        return RegisterOrConstantRef{toDynoConstant(enumMember->getValue())};
-      if (auto param = symbol.as_if<slang::ast::ParameterSymbol>()) {
-        auto &value = param->getValue();
-        return RegisterOrConstantRef{toDynoConstant(value)};
-      }
-
-      // if (nval.getConstant())
-      //   return RegisterOrConstantRef{toDynoConstant(*nval.getConstant())};
-
-      return RegisterOrConstantRef{makeReg(symbol)};
-    });
-
-    if (auto reg = sig.val().dyn_as<RegisterRef>())
+    if (auto reg = sig.dyn_as<RegisterRef>())
       return std::make_unique<RegLValue>(reg, &symbol.getType());
     else
-      return std::make_unique<RValue>(sig.val().as<ConstantRef>(),
-                                      &symbol.getType());
+      return std::make_unique<RValue>(sig.as<ConstantRef>(), &symbol.getType());
   }
 
   FatTypeRef toDynoType(const slang::ast::Type *type) {
@@ -1584,27 +1613,53 @@ public:
         auto lhs = handle_expr(binop.left());
         auto lhsVal = lhs->proGetValue(build);
 
-        auto lhsBool =
-            makeBool(lhsVal, binop.op == slang::ast::BinaryOperator::LogicalOr);
-        auto ifElse = build.buildIfElse(lhsBool);
-        build.pushInsertPoint(ifElse.getTrueBlock().end());
+        if (strictXZ) {
+          bool isAnd = binop.op == slang::ast::BinaryOperator::LogicalAnd;
+          auto lhsBool = makeBool(lhsVal);
+          // wildcard equal to one means _not_ short circuit, eval second
+          auto doEvalRHS = build.buildICmp(ConstantRef::fromBool(isAnd),
+                                           lhsBool, BigInt::ICMP_WEQ);
 
-        auto rhs = handle_expr(binop.right());
-        auto rhsVal = rhs->proGetValue(build);
+          auto ifElse = build.buildIfElse(doEvalRHS, 1);
+          build.pushInsertPoint(ifElse.getTrueBlock().end());
 
-        auto rhsBool = makeBool(rhsVal);
-        ifElse = build.buildYield(rhsBool).second;
+          auto rhs = handle_expr(binop.right());
+          auto rhsVal = rhs->proGetValue(build);
+          auto rhsBool = makeBool(rhsVal);
 
-        build.popInsertPoint();
-        build.pushInsertPoint(ifElse.getFalseBlock().end());
-        ifElse = build
-                     .buildYield(ConstantRef::fromBool(
-                         binop.op != slang::ast::BinaryOperator::LogicalAnd))
-                     .second;
-        build.popInsertPoint();
+          // with strict semantics we need another plain and/or to handle the
+          // lhs==unk case.
+          build.buildYield(isAnd ? build.buildAnd(lhsBool, rhsBool)
+                                 : build.buildOr(lhsBool, rhsBool));
 
-        return std::make_unique<RValue>(ifElse.getYieldValue(0)->as<WireRef>(),
-                                        expr.type);
+          build.popInsertPoint();
+          build.pushInsertPoint(ifElse.getFalseBlock().end());
+          build.buildYield(ConstantRef::fromBool(!isAnd));
+          build.popInsertPoint();
+          return std::make_unique<RValue>(
+              ifElse.getYieldValue(0)->as<WireRef>(), expr.type);
+        } else {
+          auto lhsBool = makeBool(
+              lhsVal, binop.op == slang::ast::BinaryOperator::LogicalOr);
+          auto ifElse = build.buildIfElse(lhsBool);
+          build.pushInsertPoint(ifElse.getTrueBlock().end());
+
+          auto rhs = handle_expr(binop.right());
+          auto rhsVal = rhs->proGetValue(build);
+
+          auto rhsBool = makeBool(rhsVal);
+          ifElse = build.buildYield(rhsBool).second;
+
+          build.popInsertPoint();
+          build.pushInsertPoint(ifElse.getFalseBlock().end());
+          ifElse = build
+                       .buildYield(ConstantRef::fromBool(
+                           binop.op != slang::ast::BinaryOperator::LogicalAnd))
+                       .second;
+          build.popInsertPoint();
+          return std::make_unique<RValue>(
+              ifElse.getYieldValue(0)->as<WireRef>(), expr.type);
+        }
       };
       default:
         break;
@@ -1987,18 +2042,56 @@ public:
         return std::make_unique<RValue>(val, expr.type);
       }
 
-      auto ifElse = build.buildIfElse(makeBool(sel), 1);
+      if (strictXZ) {
+        auto selBool = makeBool(sel);
 
-      build.pushInsertPoint(ifElse.getTrueBlock().end());
-      build.buildYield(handle_expr(asCond.left())->proGetValue(build));
-      build.popInsertPoint();
+        auto evalTrue =
+            build.buildIfElse(build.buildICmp(ConstantRef::fromBool(true),
+                                              selBool, BigInt::ICMP_WEQ),
+                              1);
+        build.pushInsertPoint(evalTrue.getTrueBlock().end());
+        auto trueV = handle_expr(asCond.left())->proGetValue(build);
+        build.buildYield(trueV);
+        build.popInsertPoint();
 
-      build.pushInsertPoint(ifElse.getFalseBlock().end());
-      build.buildYield(handle_expr(asCond.right())->proGetValue(build));
-      build.popInsertPoint();
+        build.pushInsertPoint(evalTrue.getFalseBlock().end());
+        auto undef = ConstantBuilder{ctx.getStore<Constant>()}
+                         .undef(*trueV.getNumBits())
+                         .get();
+        build.buildYield(undef);
+        build.popInsertPoint();
 
-      return std::make_unique<RValue>(ifElse.getYieldValue(0)->as<HWValue>(),
-                                      expr.type);
+        auto evalFalse =
+            build.buildIfElse(build.buildICmp(ConstantRef::fromBool(false),
+                                              selBool, BigInt::ICMP_WEQ),
+                              1);
+        build.pushInsertPoint(evalFalse.getTrueBlock().end());
+        auto falseV = handle_expr(asCond.right())->proGetValue(build);
+        build.buildYield(falseV);
+        build.popInsertPoint();
+
+        build.pushInsertPoint(evalFalse.getFalseBlock().end());
+        build.buildYield(undef);
+        build.popInsertPoint();
+
+        auto rv =
+            build.buildMux(selBool, evalTrue.getYieldValue().as<WireRef>(),
+                           evalFalse.getYieldValue().as<WireRef>());
+        return std::make_unique<RValue>(rv, expr.type);
+      } else {
+        auto ifElse = build.buildIfElse(makeBool(sel), 1);
+
+        build.pushInsertPoint(ifElse.getTrueBlock().end());
+        build.buildYield(handle_expr(asCond.left())->proGetValue(build));
+        build.popInsertPoint();
+
+        build.pushInsertPoint(ifElse.getFalseBlock().end());
+        build.buildYield(handle_expr(asCond.right())->proGetValue(build));
+        build.popInsertPoint();
+
+        return std::make_unique<RValue>(ifElse.getYieldValue(0)->as<HWValue>(),
+                                        expr.type);
+      }
     }
 
     case slang::ast::ExpressionKind::SimpleAssignmentPattern:
@@ -2169,7 +2262,8 @@ public:
               std::min(fmtValC.getWords().size() * sizeof(uint32_t),
                        *fmtVal.getNumBits() / 8zu);
           auto ptr = reinterpret_cast<const char *>(fmtValC.getWords().data());
-          buf.append_range(Range{ptr, ptr + directSize}.reverse());
+          for (auto c : Range{ptr, ptr + directSize}.reverse())
+            buf.push_back(c);
           int32_t expand =
               fmtValC.getNumBits() - fmtValC.getWords().size() * WordBits;
           // edge case for extend

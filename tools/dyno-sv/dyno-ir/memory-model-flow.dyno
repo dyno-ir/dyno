@@ -1,37 +1,27 @@
 
-PARSE_VERILOG_PASS map("code":[{
-  module FakeRAM#(parameter int DEPTH = 16, parameter int WIDTH = 18) (
-    input logic clk,
-    input logic[$clog2(DEPTH) - 1:0] IN_waddr,
-    input logic[WIDTH-1:0] IN_wdata,
-    input logic[1:0] IN_wmask,
-    input logic IN_wen,
-
-    input logic[$clog2(DEPTH) - 1:0] IN_raddr,
-    input logic IN_re,
-    output logic[WIDTH-1:0] OUT_rdata
-  );
-
-
-  logic[WIDTH-1:0] mem[DEPTH-1:0];
-
-  always_ff@(posedge clk)
-    for (int i = 0; i < WIDTH/9; i++)
-      if (IN_wmask[i] && IN_wen)
-        mem[IN_waddr][i*9+:9] <= IN_wdata[i*9+:9];
-
-
-  always_ff@(posedge clk)
-    if (IN_re)
-      OUT_rdata <= mem[IN_raddr];
-
-  endmodule
-}])
 
 CALL symbol("flow_earlyCanonFlow")
 CALL symbol("flow_synthCanonicalize")
+
+// get rid of verilog unknown semantics
+meta.LOWER_OPS_PASS map(
+  "lowerMultiInputAdd"     : "0",
+  "lowerAddCompress"       : "0",
+  "lowerSimpleAdd"         : "0",
+  "lowerSub"               : "0",
+  "lowerMul"               : "0",
+  "lowerMultiInputBitwise" : "0",
+  "lowerEqualityICMP"      : "0",
+  "lowerOrderingICMP"      : "0",
+  "lowerWildcardCaseICMP"  : "1",
+  "lowerShift"             : "0",
+  "lowerInsert"            : "0",
+  "lowerExtract"           : "0",
+  "lowerOneHotMux"         : "0",
+)
+
 CALL symbol("flow_synthEarlyOpt")
 CALL symbol("flow_synthLowerControlFlow")
 CALL symbol("flow_synthMemoryFFMuxHandling")
 
-meta.DUMP_PASS map("path": "memory.dyno")
+meta.DUMP_PASS map("path": "xilinx/memories.dyno")

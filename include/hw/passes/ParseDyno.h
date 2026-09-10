@@ -17,7 +17,7 @@ class ParseDynoPass : public Pass<ParseDynoPass> {
 
 public:
 #define CONFIG_STRUCT_LAMBDA(FIELD, ENUM)                                      \
-  FIELD(std::string, fileName, "")                                             \
+  FIELD(std::string, path, "")                                                 \
   FIELD(bool, newModulesActive, false)
   CONFIG_STRUCT(CONFIG_STRUCT_LAMBDA)
 #undef CONFIG_STRUCT_LAMBDA
@@ -27,13 +27,13 @@ public:
   explicit ParseDynoPass(Context &ctx) : ctx(ctx) {}
 
   void run() {
-    MMap mmap{config.fileName};
+    MMap mmap{config.path};
     if (mmap.size() == 0)
-      report_fatal_error(("could not open file: " + config.fileName).c_str());
+      report_fatal_error(("could not open file: " + config.path).c_str());
     HWParser parser{ctx};
     ctx.getStore<Module>().createHooks.emplace_back(
         [&](ModuleRef ref) { ref->ignore = !config.newModulesActive; });
-    parser.parse(mmap, config.fileName);
+    parser.parse(mmap, config.path);
     ctx.getStore<Module>().createHooks.pop_back();
   }
 

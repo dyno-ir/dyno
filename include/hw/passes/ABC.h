@@ -13,8 +13,10 @@
 #include "hw/IDs.h"
 #include "hw/LUT.h"
 #include "hw/Process.h"
+#include "support/Debug.h"
 #include "support/DynBitSet.h"
 #include "support/ErrorRecovery.h"
+#include "support/MMap.h"
 #include "support/SmallVec.h"
 #include "support/TemplateUtil.h"
 #include "support/Tokenizer.h"
@@ -23,6 +25,11 @@
 #include <fstream>
 #include <regex>
 #include <type_traits>
+
+#ifdef DYNO_USE_ABC
+#include "misc/util/abc_global.h"
+#include "base/main/abcapis.h"
+#endif
 
 namespace dyno {
 
@@ -85,55 +92,10 @@ public:
 
 class BLIF_Parser {
   Context &ctx;
-  std::istream &is;
-
-  template <char Delim = ' '> class SplitIterator {
-    const char *ptr;
-    size_t len;
-
-    void prime() {
-      while (ptr[len] != Delim && ptr[len] != '\0')
-        len++;
-    }
-
-  public:
-    SplitIterator(const char *ptr) : ptr(ptr), len(0) { prime(); }
-
-    SplitIterator &operator++() {
-      if (ptr[len] == '\0')
-        ptr += len;
-      else {
-        ptr += len + 1;
-        while (*ptr == Delim)
-          ++ptr;
-      }
-      len = 0;
-      prime();
-
-      return *this;
-    }
-
-    SplitIterator operator++(int) {
-      auto tmp{*this};
-      ++*this;
-      return tmp;
-    }
-
-    friend bool operator==(SplitIterator lhs, SplitIterator rhs) {
-      return lhs.ptr == rhs.ptr;
-    }
-
-    std::string_view operator*() const { return std::string_view{ptr, len}; }
-  };
-
-  auto split(const std::string &str) {
-    auto begin = SplitIterator<' '>{str.begin().base()};
-    auto end = SplitIterator<' '>{str.end().base()};
-    return Range{begin, end};
-  }
+  StringRef raw;
 
 public:
-  BLIF_Parser(Context &ctx, std::istream &is) : ctx(ctx), is(is) {}
+  BLIF_Parser(Context &ctx, StringRef raw) : ctx(ctx), raw(raw) {}
 
   /*
     Imports techmapped BLIF. Each gate turns into a standard cell instance.
@@ -143,7 +105,7 @@ public:
     and ideal solution though.
   */
   void parse(AIGObjRef aigObj) {
-    std::string line;
+    std::string_view line;
     TwoLevelMap<SSOStringRef, HWValue> names;
     TwoLevelMap<SSOStringRef, ModuleRef> modules;
 
@@ -153,16 +115,25 @@ public:
 
     HWInstrBuilder build{ctx};
 
-    while (std::getline(is, line), !line.empty()) {
+    Tokenizer tok{raw, "\n\0"};
+    auto tokIt = tok.begin();
+    auto getLine = [&]() -> std::string_view {
+      if (tokIt == tok.end())
+        return std::string_view();
+      return *tokIt++;
+    };
+
+    while (line = getLine(), !line.empty()) {
       while (line.ends_with('\\')) {
-        std::string rem;
-        std::getline(is, rem);
-        line = line.substr(0, line.size() - 1) + rem;
+        auto next = getLine();
+        line =
+            std::string_view{line.data(), uint32_t(next.end() - line.begin())};
       }
       if (line.empty() || line.starts_with("#") || line.starts_with(".end"))
         continue;
       if (line.starts_with(".inputs")) {
-        for (auto [i, tok] : split(line).drop_front().enumerate()) {
+        auto lineTok = Tokenizer{line, " \n\\\t"};
+        for (auto [i, tok] : Range{lineTok}.drop_front().enumerate()) {
           auto def = *aigObj->aig.inputs[i]->defUse.getSingleDef();
           auto defI = def.instr();
           build.setInsertPoint(defI);
@@ -188,8 +159,8 @@ public:
           lastDefI.def(0)->as<WireRef>().replaceAllUsesWith(newVal);
           outputBitArr.clear();
         };
-
-        for (auto [i, tok] : split(line).drop_front().enumerate()) {
+        auto lineTok = Tokenizer{line, " \n\\\t"};
+        for (auto [i, tok] : Range{lineTok}.drop_front().enumerate()) {
           auto def = *aigObj->aig.outputs[i]->defUse.getSingleDef();
           auto defI = def.instr();
           if (lastDefI != defI) {
@@ -218,7 +189,8 @@ public:
 
         ModuleRef mod = nullref;
         Optional<unsigned> constVal = nullopt;
-        for (auto [i, tok] : split(line).drop_front().enumerate()) {
+        auto lineTok = Tokenizer{line, " \n\\\t"};
+        for (auto [i, tok] : Range{lineTok}.drop_front().enumerate()) {
           if (i == 0) {
             if (tok == "_const0_")
               constVal = 0;
@@ -231,7 +203,7 @@ public:
           auto eqIdx = tok.find('=');
           if (eqIdx == std::string_view::npos)
             report_fatal_error("BLIF format");
-          auto tokStr = StringRef(tok.begin() + eqIdx + 1, tok.end());
+          auto tokStr = StringRef(tok.data() + eqIdx + 1, tok.data() + tok.size());
           auto wire = names.find(tokStr);
 
           if (constVal) {
@@ -270,7 +242,7 @@ public:
         }
       }
       if (line.starts_with(".names")) {
-        auto iosRange = Tokenizer{line, " \t"};
+        auto iosRange = Tokenizer{line, " \t\n\\"};
         SmallVec<std::string_view, 2> ios(Range{iosRange}.drop_front());
 
         auto inputIdents = Range{ios}.subrange(0, ios.size() - 1);
@@ -280,9 +252,26 @@ public:
         auto outputIdent = ios.back();
         BigInt lut;
 
-        while (is.peek() == Any{'0', '1', '-'}) {
-          std::getline(is, line);
-          auto lineRange = Tokenizer{line, " \t"};
+        // Constant assignment
+        if (inputIdents.size() == 0) {
+          line = getLine();
+          auto lineRange = Tokenizer{line, " \t\n\\"};
+          SmallVec<std::string_view, 1> parts(Range{lineRange});
+          if (parts.size() != 1 || parts.front() != Any{"0", "1"})
+            report_fatal_error("BLIF format");
+          auto val = ConstantRef::fromBool(parts.front() == "1");
+          auto [found, it] =
+              names.findOrInsert(outputIdent, [&]() { return val; });
+          if (found) {
+            it.val().as<WireRef>().replaceAllUsesWith(val);
+            it.val() = val;
+          }
+          continue;
+        }
+
+        while (tokIt != tok.end() && (*tokIt).front() == Any{'0', '1', '-'}) {
+          line = getLine();
+          auto lineRange = Tokenizer{line, " \t\n\\"};
           SmallVec<std::string_view, 2> parts(Range{lineRange});
           if (parts.size() < 2)
             report_fatal_error("BLIF format");
@@ -326,6 +315,8 @@ public:
           }
         }
 
+        assert(lut.getNumBits() != 0);
+
         LUTMutInstr lutInstr{
             ctx,
             names
@@ -343,6 +334,24 @@ public:
         build.buildLUT(std::move(lutInstr));
       }
     }
+
+    DYNO_DBG_RUN({
+      bool bad = false;
+      for (auto [k, v] : names) {
+        if (auto ref = v.dyn_as<ObjRef<Wire>>()) {
+          auto wire = ctx.resolve(ref);
+          if (wire.getNumDefs() == 0) {
+            std::print(dbgs(), "zero def: \"{}\"\n", k);
+            bad = true;
+          } else if (wire.getNumDefs() > 1) {
+            std::print(dbgs(), "multi def: \"{}\"\n", k);
+            bad = true;
+          }
+        }
+      }
+      if (bad)
+        report_fatal_error("bad blif file");
+    })
   }
 };
 
@@ -402,6 +411,15 @@ class ABCPass : public Pass<ABCPass> {
   Context &ctx;
   DestroyMap<Instr> destroyMap;
 
+#ifdef DYNO_USE_ABC
+  static int runAbcInProcess(const std::string &cmd) {
+    auto *pAbc = abc::Abc_FrameGetGlobalFrame();
+    int status = abc::Cmd_CommandExecute(pAbc, cmd.c_str());
+    abc::Abc_Stop();
+    return status;
+  }
+#endif
+
   void runOnAIG(InstrRef aigInstr) {
     auto aigRef = aigInstr.def(0)->as<AIGObjRef>();
     // auto &aig = aigRef->aig;
@@ -413,11 +431,20 @@ class ABCPass : public Pass<ABCPass> {
       BLIF_Printer print{ctx, blifFile};
       print.print(aigRef);
     }
+    //
 
-    auto cmd = std::regex_replace(config.abcCmd, std::regex("${liberty-path}"),
-                                  config.path);
+    auto cmd = std::regex_replace(
+        config.abcCmd, std::regex("\\$\\{liberty-path\\}"), config.path);
 
+#ifdef DYNO_USE_ABC
+    if (int abcStatus = runAbcInProcess(cmd); abcStatus != 0)
+      report_fatal_error(
+          ("ABC command failed with status " + std::to_string(abcStatus))
+              .c_str());
+#else
     system(("yosys-abc -q \"" + cmd + "\"").c_str());
+#endif
+
     // system(("yosys-abc -q \"read_blif aig.blif; read_lib -X "
     //         "sky130_fd_sc_hd__lpflow_inputiso1p_1 -X "
     //         "sky130_fd_sc_hd__lpflow_isobufsrc_1 -X sky130_fd_sc_hd__clkinv_1
@@ -443,8 +470,8 @@ class ABCPass : public Pass<ABCPass> {
     //        "print_stats; write_blif "
     //        "mapped_gen.blif\"");
 
-    std::ifstream mappedFile{"mapped.blif"};
-    BLIF_Parser parse{ctx, mappedFile};
+    MMap mappedFile{"mapped.blif"};
+    BLIF_Parser parse{ctx, StringRef{mappedFile.data(), mappedFile.size()}};
     parse.parse(aigRef);
   }
 

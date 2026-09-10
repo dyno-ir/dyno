@@ -15,7 +15,7 @@ meta.INST_COMBINE_PASS
 meta.SEQ_TO_COMB_PASS
 meta.SSA_CONSTRUCT_PASS map("dynamicToFullRegAccess": "0")
 meta.SSA_CONSTRUCT_PASS map("mode": "DEFERRED", "dynamicToFullRegAccess": "0")
-// meta.AGGRESSIVE_DEAD_CODE_ELIMINATION_PASS
+meta.AGGRESSIVE_DEAD_CODE_ELIMINATION_PASS map("keepRegs": "NAMED")
 meta.INST_COMBINE_PASS
 
 meta.PROCESS_LINEARIZE_PASS map("retainIODeps": "1", "retainInnerDeps": "1")
@@ -30,7 +30,7 @@ meta.ORDER_INSTRS_PASS map("assertNoCircularDeps": "1", "moveStoresBeforeLoads":
 meta.INST_COMBINE_PASS
 
 // todo: ADCE w/o deleting regs
-// meta.AGGRESSIVE_DEAD_CODE_ELIMINATION_PASS
+meta.AGGRESSIVE_DEAD_CODE_ELIMINATION_PASS map("keepRegs": "NAMED")
 
 meta.INST_COMBINE_PASS
 meta.PROCESS_LINEARIZE_PASS map("noFuseSortOnly": "1")

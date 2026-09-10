@@ -36,7 +36,7 @@ public:
     return val;
   }
 
-  OperandRef getUnderlyingOperand() const { return base; }
+  RefT getUnderlyingOperand() const { return base; }
 
   AddressGenTermOperandBase(RefT base) : base(base) {}
 };
@@ -77,8 +77,8 @@ public:
     if (getNumTerms() != 0)
       beginIt = self().other_begin() + getTermsBaseIndex();
 
-    return Range{beginIt, self().other_end()}.step(3).transform(
-        [](size_t, auto ref) { return AddressGenTermOperand{ref}; });
+    return Range{beginIt, self().other_end()}.step(3).tf(
+        [](auto ref) { return AddressGenTermOperand{ref}; });
   }
 
   AddressGenTermOperand term(unsigned i = 0) {
@@ -175,8 +175,7 @@ public:
 };
 
 template <typename U, typename T>
-inline bool addressingFragsEqual(AddressGenMixin<T> &lhs,
-                                 AddressGenMixin<U> &rhs) {
+inline bool addressingFragsEqual(T &&lhs, U &&rhs) {
   if (lhs.getNumTerms() != rhs.getNumTerms())
     return false;
   for (auto [lhs, rhs] : lhs.terms().zip(rhs.terms())) {
@@ -186,6 +185,7 @@ inline bool addressingFragsEqual(AddressGenMixin<T> &lhs,
   return true;
 }
 
+// Get Element Pointer
 class GEPIRef : public OpcodeInstrRef<HWInstrRef, HW_GEP>,
                 public AddressGenMixin<GEPIRef> {
 public:
@@ -204,82 +204,6 @@ public:
     }
     return endOffs;
   }
-};
-
-class LoadIRef : public OpcodeInstrRef<HWInstrRef, HW_LOAD>,
-                 public AddressGenMixin<LoadIRef> {
-public:
-  unsigned addressGenBaseIndex() const { return 1; }
-
-public:
-  using OpcodeInstrRef::OpcodeInstrRef;
-
-  WireRef value() { return operand(0)->as<WireRef>(); }
-  RegisterRef reg() { return operand(1)->as<RegisterRef>(); }
-
-  uint32_t getMemoryLen() { return *reg().getNumBits(); }
-  uint32_t getLen() { return *value().getNumBits(); }
-
-  bool isFullReg() {
-    return getLen() == reg().getNumBits() && isConstantOffs() && getBase() == 0;
-  }
-};
-
-class StoreIRef : public OpcodeInstrRef<HWInstrRef, HW_STORE, HW_STORE_DEFER>,
-                  public AddressGenMixin<StoreIRef> {
-public:
-  unsigned addressGenBaseIndex() const { return hasTrigger() ? 3 : 2; }
-
-public:
-  using OpcodeInstrRef::OpcodeInstrRef;
-
-  HWValue value() { return operand(0)->as<HWValue>(); }
-  RegisterRef reg() { return operand(1)->as<RegisterRef>(); }
-
-  bool hasTrigger() const {
-    return getNumOperands() > 2 && operand(2)->is<TriggerRef>();
-  }
-  TriggerIRef trigger() const {
-    if (!hasTrigger())
-      return nullref;
-    return operand(2)->as<TriggerRef>().iref();
-  }
-
-  uint32_t getMemoryLen() { return *reg().getNumBits(); }
-  uint32_t getLen() { return *value().getNumBits(); }
-
-  bool isFullReg() {
-    return getLen() == reg().getNumBits() && isConstantOffs() && getBase() == 0;
-  }
-};
-
-class SpliceIRef : public OpcodeInstrRef<HWInstrRef, HW_SPLICE>,
-                   public AddressGenMixin<SpliceIRef> {
-public:
-  unsigned addressGenBaseIndex() const { return 1; }
-
-public:
-  using OpcodeInstrRef::OpcodeInstrRef;
-  OperandRef out() { return operand(0); }
-  OperandRef in() { return operand(1); }
-
-  uint32_t getMemoryLen() { return *in()->as<HWValue>().getNumBits(); }
-  uint32_t getLen() { return *out()->as<HWValue>().getNumBits(); }
-};
-
-class InsertIRef : public OpcodeInstrRef<HWInstrRef, HW_INSERT>,
-                   public AddressGenMixin<InsertIRef> {
-public:
-  unsigned addressGenBaseIndex() const { return 2; }
-
-public:
-  using OpcodeInstrRef::OpcodeInstrRef;
-  OperandRef out() { return operand(0); }
-  OperandRef in() { return operand(1); }
-  OperandRef val() { return operand(2); }
-
-  uint32_t getMemoryLen() { return *out()->as<WireRef>().getNumBits(); }
-  uint32_t getLen() { return *val()->as<HWValue>().getNumBits(); }
 };
 
 template <typename Derived> class PointerMixin {
@@ -304,8 +228,9 @@ public:
     auto pessimisticMax = self().getMemoryLen() - base;
 
     if (maxOffset)
-      return std::make_pair(0U, std::min(*maxOffset, pessimisticMax));
-    return std::make_pair(0U, pessimisticMax);
+      return std::make_pair(
+          getBase(), std::min(*maxOffset + self().getLen(), pessimisticMax));
+    return std::make_pair(getBase(), pessimisticMax);
   }
 
   GEPIRef gep() {
@@ -326,9 +251,144 @@ public:
     if (!a)
       return 0U;
     if (auto asConst = a.template dyn_as<ConstantRef>())
-      asConst.getExactVal();
+      return asConst.getExactVal();
     return gep().getBase();
   }
+  uint32_t getBase() { return base(); }
+  unsigned getNumTerms() { return terms().size(); }
+  bool isConstantOffs() { return getNumTerms() == 0; }
+
+  bool hasAddr() { return !!self().addr(); }
+
+  // same as getConstAccessRange but keep length a multiple of minimum factor to
+  // avoid ugly splices.
+  std::pair<uint32_t, uint32_t> getConstAccessRangeAligned() {
+    if (isConstantOffs())
+      return std::make_pair(getBase(), self().getLen());
+
+    Optional<uint32_t> endOffs = 0;
+    Optional<uint32_t> minFactor = nullopt;
+
+    for (auto term : terms()) {
+      auto max = term.getMax();
+      if (!max) {
+        endOffs = nullopt;
+        break;
+      }
+      *endOffs += (*max - 1) * term.getFact();
+      minFactor =
+          minFactor ? std::min(*minFactor, term.getFact()) : term.getFact();
+    }
+
+    auto pessimisticMax = self().getMemoryLen() - getBase();
+
+    uint32_t max;
+    if (endOffs) {
+      *endOffs +=
+          minFactor ? std::max(*minFactor, self().getLen()) : self().getLen();
+      max = std::min(*endOffs, pessimisticMax);
+
+    } else
+      max = pessimisticMax;
+
+    return std::make_pair(getBase(), max);
+  }
+};
+
+class LoadIRef : public OpcodeInstrRef<HWInstrRef, HW_LOAD>,
+                 public PointerMixin<LoadIRef> {
+public:
+  unsigned addrIndex() const { return 1; }
+
+public:
+  using OpcodeInstrRef::OpcodeInstrRef;
+
+  WireRef value() { return operand(0)->as<WireRef>(); }
+  RegisterRef reg() { return operand(1)->as<RegisterRef>(); }
+  HWAddress addr() const {
+    if (getNumOthers() < addrIndex() + 1)
+      return nullref;
+    return other(addrIndex())->as<HWAddress>();
+  }
+
+  uint32_t getMemoryLen() { return *reg().getNumBits(); }
+  uint32_t getLen() { return *value().getNumBits(); }
+
+  bool isFullReg() {
+    return getLen() == reg().getNumBits() && isConstantOffs() && getBase() == 0;
+  }
+};
+
+class StoreIRef : public OpcodeInstrRef<HWInstrRef, HW_STORE, HW_STORE_DEFER>,
+                  public PointerMixin<StoreIRef> {
+public:
+  unsigned addrIndex() const { return hasTrigger() ? 3 : 2; }
+
+public:
+  using OpcodeInstrRef::OpcodeInstrRef;
+
+  HWValue value() { return operand(0)->as<HWValue>(); }
+  RegisterRef reg() { return operand(1)->as<RegisterRef>(); }
+
+  bool hasTrigger() const {
+    return getNumOperands() > 2 && operand(2)->is<TriggerRef>();
+  }
+  TriggerIRef trigger() const {
+    if (!hasTrigger())
+      return nullref;
+    return operand(2)->as<TriggerRef>().iref();
+  }
+  HWAddress addr() const {
+    if (getNumOthers() < addrIndex() + 1)
+      return nullref;
+    return other(addrIndex())->as<HWAddress>();
+  }
+
+  uint32_t getMemoryLen() { return *reg().getNumBits(); }
+  uint32_t getLen() { return *value().getNumBits(); }
+
+  bool isFullReg() {
+    return getLen() == reg().getNumBits() && isConstantOffs() && getBase() == 0;
+  }
+};
+
+class SpliceIRef : public OpcodeInstrRef<HWInstrRef, HW_SPLICE>,
+                   public PointerMixin<SpliceIRef> {
+public:
+  unsigned addrIndex() const { return 1; }
+
+public:
+  using OpcodeInstrRef::OpcodeInstrRef;
+  OperandRef out() { return operand(0); }
+  OperandRef in() { return operand(1); }
+  HWAddress addr() const {
+    if (getNumOthers() < addrIndex() + 1)
+      return nullref;
+    return other(addrIndex())->as<HWAddress>();
+  }
+
+  uint32_t getMemoryLen() { return *in()->as<HWValue>().getNumBits(); }
+  uint32_t getLen() { return *out()->as<HWValue>().getNumBits(); }
+};
+
+class InsertIRef : public OpcodeInstrRef<HWInstrRef, HW_INSERT>,
+                   public PointerMixin<InsertIRef> {
+public:
+  unsigned addrIndex() const { return 2; }
+
+public:
+  using OpcodeInstrRef::OpcodeInstrRef;
+  OperandRef out() { return operand(0); }
+  OperandRef in() { return operand(1); }
+  OperandRef val() { return operand(2); }
+  HWAddress addr() const {
+    if (getNumOthers() < addrIndex() + 1)
+      return nullref;
+    return other(addrIndex())->as<HWAddress>();
+  }
+
+  uint32_t getMemoryLen() { return *out()->as<WireRef>().getNumBits(); }
+  uint32_t getLen() { return *val()->as<HWValue>().getNumBits(); }
 };
 
 class MemLoadIRef : public OpcodeInstrRef<HWInstrRef, HW_MEM_LOAD>,
@@ -388,14 +448,14 @@ public:
   using OpcodeInstrRef::OpcodeInstrRef;
 
   MemoryPortRef port() { return def(0)->as<MemoryPortRef>(); }
-  WireRef value() { return other(0)->as<WireRef>(); }
+  HWValue value() { return other(0)->as<HWValue>(); }
 
   RegisterRef reg() { return other(1)->as<RegisterRef>(); }
 
-  WireRef en() const {
+  HWValue en() const {
     if (getNumOthers() < 3)
       return nullref;
-    return other(2)->dyn_as<WireRef>();
+    return other(2)->dyn_as<HWValue>();
   }
   bool hasEn() const { return !!en(); }
 
@@ -418,5 +478,35 @@ public:
 
   bool isFullReg() { return getLen() == reg().getNumBits() && !addr(); }
 };
+
+inline bool RegisterIRef::isDynAddressed() {
+  for (auto use : oref().uses()) {
+    auto instr = use.instr();
+    HWAddress addr;
+    switch (*instr.getDialectOpcode()) {
+    case *HW_LOAD:
+      addr = instr.as<LoadIRef>().addr();
+      break;
+    case *HW_STORE_DEFER:
+    case *HW_STORE:
+      addr = instr.as<StoreIRef>().addr();
+      break;
+    case *HW_MEM_LOAD:
+      addr = instr.as<MemLoadIRef>().addr();
+      break;
+    case *HW_MEM_STORE:
+      addr = instr.as<MemStoreIRef>().addr();
+      break;
+    }
+    if (!addr)
+      continue;
+    if (auto ptr = addr.dyn_as<PointerRef>()) {
+      assert(ptr.getSingleDef()->instr().as<GEPIRef>().getNumTerms() != 0 &&
+             "expected canonicalized");
+      return true;
+    }
+  }
+  return false;
+}
 
 }; // namespace dyno

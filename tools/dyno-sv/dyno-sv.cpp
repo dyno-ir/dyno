@@ -40,14 +40,13 @@ CmdLineArg<Vec<StringRef>> argInputFiles{
     CmdLineArgFlags::VALUE_REQUIRED | CmdLineArgFlags::MULTIPLE |
         CmdLineArgFlags::POSITIONAL | CmdLineArgFlags::MANDATORY};
 
-CmdLineArg<std::string_view>
+CmdLineArg<StringRef>
     argLibertyFile('l', "liberty", "Liberty (stdcell definitions) file path.",
                    CmdLineArgFlags::VALUE_REQUIRED | CmdLineArgFlags::MANDATORY,
                    "");
 
-CmdLineArg<std::string_view> argOutFile('o', "",
-                                        "Output Verilog netlist file path.",
-                                        CmdLineArgFlags::VALUE_REQUIRED);
+CmdLineArg<StringRef> argOutFile('o', "", "Output Verilog netlist file path.",
+                                 CmdLineArgFlags::VALUE_REQUIRED);
 
 CmdLineArg<Vec<StringRef>>
     argSlangArgs('X', "Xslang",
@@ -251,6 +250,7 @@ int main(int argc, char **argv) {
     dbg_enable_all();
   dbg_disable_for_id(128); // known bits
   dbg_disable_for_id(129); // hwinterp
+  dbg_disable_for_id(130); // loopback
   ctx.getPassRegistry().setDebugEnForPasses(*argDebugPasses, true);
 #endif
 

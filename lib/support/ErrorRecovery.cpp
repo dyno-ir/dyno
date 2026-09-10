@@ -5,7 +5,11 @@
 
 SmallVec<CallableRef<void()>, 16> fatalErrorCallbacks;
 
+const char *lastFatalReason;
+const char *last_fatal_error_reason() { return lastFatalReason; }
+
 __attribute__((noreturn)) void report_fatal_error(const char *reason) {
+  lastFatalReason = reason;
   for (auto cb : Range{fatalErrorCallbacks}.reverse())
     cb();
   fputs(reason, stderr);

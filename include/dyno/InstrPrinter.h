@@ -144,6 +144,7 @@ public:
   // may be unset, printers must be able to handle both.
   // can print with more fidelity when set though.
   Context *ctx = nullptr;
+  CallableRef<void(InstrRef)> instrPrefixHook{};
 
 public:
   struct type {
@@ -326,6 +327,8 @@ public:
 
   void printInstr(InstrRef instr, bool trailingNewline = true,
                   bool expandBlocks = true) {
+    if (instrPrefixHook)
+      instrPrefixHook(instr);
     printOpcodeDefault(instr);
     str << ' ';
 

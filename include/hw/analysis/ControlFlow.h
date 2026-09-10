@@ -12,7 +12,8 @@ class ControlFlowAnalysis {
 
   Context &ctx;
 
-  template <typename T> static auto findFirstShared(Range<T> a, Range<T> b) {
+public:
+  template <typename T, typename U> static auto findFirstShared(Range<T> a, Range<U> b) {
     // todo binary search
     auto itA = a.end() - 1;
     auto itB = b.end() - 1;
@@ -24,7 +25,6 @@ class ControlFlowAnalysis {
     return std::make_pair(itA - a.begin() + 1, itB - b.begin() + 1);
   }
 
-public:
   explicit ControlFlowAnalysis(Context &ctx) : ctx(ctx) {}
 
   void buildDepStack(SmallVecImpl<OperandRef> &stack, BlockRef block) {

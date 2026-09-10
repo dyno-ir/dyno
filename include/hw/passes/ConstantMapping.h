@@ -142,12 +142,14 @@ class ConstantMappingPass : public Pass<ConstantMappingPass> {
 
     for (auto instr : proc.block().unordered()) {
       // only map constants for stdcells, stores and concats
-      if (!instr.isOpc(HW_STDCELL_INSTANCE, HW_STORE, HW_CONCAT))
+      if (!instr.isOpc(HW_STDCELL_INSTANCE, HW_LUT, HW_STORE, HW_CONCAT))
         continue;
       for (auto use : instr.others()) {
         if (!use->is<ConstantRef>())
           continue;
         if (instr.isOpc(HW_STORE) && use != instr.other(0))
+          continue;
+        if (instr.isOpc(HW_LUT) && use == instr.other(0))
           continue;
         build.setInsertPoint(instr);
         auto w = makeConstant(use->as<ConstantRef>(), zeroW, oneW);
@@ -179,9 +181,9 @@ public:
     runWrapper([&] { runOnProcess(proc); });
   }
 
-  static constexpr auto runFuncs = mk_tuple(
-      &ConstantMappingPass::runProcess, &ConstantMappingPass::runModule,
-      &ConstantMappingPass::run);
+  static constexpr auto runFuncs =
+      mk_tuple(&ConstantMappingPass::runProcess,
+               &ConstantMappingPass::runModule, &ConstantMappingPass::run);
 
   auto make(Context &ctx) { return ConstantMappingPass(ctx); }
   explicit ConstantMappingPass(Context &ctx) : ctx(ctx), build(ctx) {}

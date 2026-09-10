@@ -49,6 +49,10 @@ public:
     return SimRegisterHandle{interp, reg, addr + index * 32, 32};
   }
 
+  auto &getRef() { return reg; }
+  auto &getCtx() { return interp->getCtx(); }
+  bool isLinked() const { return !!interp; }
+
   // return length of array for array types. Length in bits is returned for non
   // array types.
   uint32_t arrSize() {

@@ -15,6 +15,7 @@
 HEADER
 
 ADD_OP(MODULE_DEF)
+ADD_OP(BLACKBOX_MODULE_DEF)
 ADD_OP(STDCELL_DEF)
 
 ADD_OP(INIT_PROCESS_DEF)
@@ -42,7 +43,7 @@ ADD_OP(STORE_DEFER)
 ADD_OP(ASSERT_DEFER)
 ADD_OP(PRINT_DEFER)
 
-ADD_OP(SELECT)
+// out | sel true_val false_val
 ADD_OP(MUX)
 
 ADD_OP(CASE_X)
@@ -60,14 +61,23 @@ ADD_OP(UPOW)
 ADD_OP(SPOW)
 
 ADD_OP(CLOG2)
+
+// Get Element Pointer. Encodes linear address calculation expression
+// `base + (idx * mult)...` with known bounds (max).
+// ptr | base (idx mult max)
 ADD_OP(GEP)
 
-// clk d q | en en_pol | rst rst_pol rst_val
+// q | clk d en (rst rst_val)...
 ADD_OP(FLIP_FLOP)
+// q | clk d en (rst rst_val)...
 ADD_OP(FLIP_FLOP_SRST)
 ADD_OP(LATCH)
 
+// out | (select, value)...
 ADD_OP(ONEHOT_MUX)
+
+// Forward value if condition met, else 'x.
+// out | value condition
 ADD_OP(ASSUME)
 
 ADD_OP(MEM_LOAD)
@@ -79,6 +89,7 @@ ADD_OP(WRITE_PORT_DEF)
 ADD_OP(READ_WRITE_PORT_DEF)
 ADD_OP(WRITE_FORWARD)
 
+// out:wire | truth_table:constant bool_input:wire...
 ADD_OP(LUT)
 
 FOOTER

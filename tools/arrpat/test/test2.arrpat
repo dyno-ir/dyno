@@ -19,6 +19,9 @@ macro constant_like_anyorder_obj $val, $other -> $rv [{
 macro wire_like $other -> $rv [{
   FatDynObjRef<> w = ctx.getStore<Wire>().create((*$other.begin())->as<HWValue>().getNumBits()); $rv = w;
 }]
+macro make_pointer $other -> $rv [{
+  FatDynObjRef<> pointer = ctx.getStore<Pointer>().create(); $rv = pointer;
+}]
 macro wire_like2 $other -> $rv [{
   FatDynObjRef<> w2 = ctx.getStore<Wire>().create((*$other.begin())->as<HWValue>().getNumBits()); $rv = w2;
 }]
@@ -240,15 +243,18 @@ replace {
 }
 
 match {
-  HW_SPLICE $temp, $in, $addrA, $termsA...
-  HW_SPLICE $out, $temp:HW_WIRE, $addrB, $termsB...
+  HW_GEP $ptrA, $addrA, $termsA...
+  HW_SPLICE $temp, $in, $ptrA:HW_POINTER
+  HW_GEP $ptrB, $addrB, $termsB...
+  HW_SPLICE $out, $temp:HW_WIRE, $ptrB:HW_POINTER
 }
 with [{
   if (!(*$temp.begin())->as<WireRef>().hasSingleUse())
     goto $fail;
 }]
 replace {
-  HW_SPLICE $out, $in, const_add($addrA, $addrB), $termsA..., $termsB...
+  HW_GEP $newPtr:make_pointer(), const_add($addrA, $addrB), $termsA..., $termsB...
+  HW_SPLICE $out, $in, $newPtr
 }
 
 match {
@@ -272,6 +278,8 @@ macro chk_const_diff_lens $self, $lhs, $rhs [{
     goto $fail;
 }]
 macro chk_const_len_of_minus1 $self, $obj [{
+  if (!(*$self.begin())->is<PointerRef>())
+    goto $fail;
   FatDynObjRef<> c = ConstantRef::fromU32(*(*$obj.begin())->as<HWValue>().getNumBits() - 1);
   if ((*$self.begin())->as<FatDynObjRef<>>() != c)
     goto $fail;
@@ -371,6 +379,13 @@ macro chk_constant_unsized $self, $len [{
     goto $fail;
 }]
 
+macro chk_constant_all_unk $self [{
+  if (!$self.begin()->is<ConstantRef>())
+    goto $fail;
+  if (!$self.begin()->as<ConstantRef>().allBitsUndef())
+    goto $fail;
+}]
+
 macro chk_wire_constant $self, $len [{
   if (!(*$self.begin())->is<WireRef>())
     goto $fail;
@@ -427,6 +442,27 @@ match {
 replace {
   $opc $out, $rhs, $lhs
 }
+
+// case equal is perfect bitwise equal including x/z, so different constants are not equal
+match {
+  OP_ICMP_CEQ $out, $lhs:CORE_CONSTANT, $rhs:CORE_CONSTANT
+}
+with [{
+  auto equal = $lhs.begin()->as<ConstantRef>() == $rhs.begin()->as<ConstantRef>();
+  FatDynObjRef<> ref = ConstantRef::fromBool(equal);
+  $const_out = ref;
+}]
+replace $out -> $const_out
+
+match {
+  OP_ICMP_CNE $out, $lhs:CORE_CONSTANT, $rhs:CORE_CONSTANT
+}
+with [{
+  auto nequal = $lhs.begin()->as<ConstantRef>() != $rhs.begin()->as<ConstantRef>();
+  FatDynObjRef<> ref = ConstantRef::fromBool(nequal);
+  $const_out = ref;
+}]
+replace $out -> $const_out
 
 // NOT Opt
 match {
@@ -539,6 +575,10 @@ replace {
 match {
   HW_MUX $out, $cond, #'1, $rhs:HW_WIRE
 }
+with [{
+  if (!config.muxToBitwise)
+    goto $fail;
+}]
 replace {
   HW_REPEAT $temp:wire_like($out), $cond
   OP_OR $out, $temp, $rhs
@@ -547,6 +587,10 @@ replace {
 match {
   HW_MUX $out, $cond, $rhs:HW_WIRE, #'1
 }
+with [{
+  if (!config.muxToBitwise)
+    goto $fail;
+}]
 replace {
   OP_NOT $conv_inv:wire_like($cond), $cond
   HW_REPEAT $temp:wire_like2($out), $conv_inv
@@ -556,6 +600,10 @@ replace {
 match {
   HW_MUX $out, $cond, $lhs:HW_WIRE, #'0
 }
+with [{
+  if (!config.muxToBitwise)
+    goto $fail;
+}]
 replace {
   HW_REPEAT $temp:wire_like($out), $cond
   OP_AND $out, $temp, $lhs
@@ -564,6 +612,10 @@ replace {
 match {
   HW_MUX $out, $cond, #'0, $lhs:HW_WIRE
 }
+with [{
+  if (!config.muxToBitwise)
+    goto $fail;
+}]
 replace {
   OP_NOT $conv_inv:wire_like($cond), $cond
   HW_REPEAT $temp:wire_like2($out), $conv_inv
@@ -575,6 +627,10 @@ replace {
 match {
   HW_MUX $out, $cond, #1'b1, $rhs:HW_WIRE
 }
+with [{
+  if (!config.muxToBitwise)
+    goto $fail;
+}]
 replace {
   OP_OR $out, $cond, $rhs
 }
@@ -582,6 +638,10 @@ replace {
 match {
   HW_MUX $out, $cond, $rhs:HW_WIRE, #1'b1
 }
+with [{
+  if (!config.muxToBitwise)
+    goto $fail;
+}]
 replace {
   OP_NOT $conv_inv:wire_like($cond), $cond
   OP_OR $out, $conv_inv, $rhs
@@ -590,6 +650,10 @@ replace {
 match {
   HW_MUX $out, $cond, $lhs:HW_WIRE, #1'b0
 }
+with [{
+  if (!config.muxToBitwise)
+    goto $fail;
+}]
 replace {
   OP_AND $out, $cond, $lhs
 }
@@ -597,6 +661,10 @@ replace {
 match {
   HW_MUX $out, $cond, #1'b0, $lhs:HW_WIRE
 }
+with [{
+  if (!config.muxToBitwise)
+    goto $fail;
+}]
 replace {
   OP_NOT $conv_inv:wire_like($cond), $cond
   OP_AND $out, $conv_inv, $lhs
@@ -726,7 +794,8 @@ replace $out -> $zeroR
 // low side -> add to base offset
 match {
   HW_SPLICE $short, $in, $offs:CORE_CONSTANT
-  HW_INSERT $inserted, $short:HW_WIRE, $insval, $base, $terms...
+  HW_GEP $ptr, $base, $terms...
+  HW_INSERT $inserted, $short:HW_WIRE, $insval, $ptr:HW_POINTER
   OP_TRUNC $low, $in
   HW_CONCAT $out, $pre..., $inserted:HW_WIRE, $low:chk_wire_constant($offs), $post...
 }
@@ -740,15 +809,17 @@ with [{
 }]
 replace {
   OP_TRUNC $temp, $in
-  HW_INSERT $temp2, $temp, $insval, const_add($offs, $base), $terms...
+  HW_GEP $new_ptr:make_pointer(), const_add($offs, $base), $terms...
+  HW_INSERT $temp2, $temp, $insval, $new_ptr
   HW_CONCAT $out, $pre..., $temp2, $post...
 }
 
 // high side -> limited w/ max bounds
 match {
   OP_TRUNC $short, $in
-  HW_INSERT $inserted, $short:HW_WIRE, $insval, $base, $terms...
-  HW_SPLICE $high, $in, $offs
+  HW_GEP $ptr, $base, $terms...
+  HW_INSERT $inserted, $short:HW_WIRE, $insval, $ptr:HW_POINTER
+  HW_SPLICE $high, $in, $offs:CORE_CONSTANT
   HW_CONCAT $out, /*$pre..., */$high:HW_WIRE, $inserted:chk_wire_constant($offs), $post...
 }
 with [{
@@ -761,7 +832,8 @@ with [{
 }]
 replace {
   OP_TRUNC $temp, $in
-  HW_INSERT $temp2, $temp, $insval, $base, $terms...
+  HW_GEP $new_ptr:make_pointer(), $base, $terms...
+  HW_INSERT $temp2, $temp, $insval, $new_ptr
   HW_CONCAT $out, /*$pre..., */$temp2, $post...
 }
 
@@ -772,17 +844,39 @@ replace $out -> $in
 
 // elaborate d flip flops
 match {
+  HW_FLIP_FLOP_SRST $q, $clk, #1'd0, #1'd1, $other_rsts..., $d, #1'd1, $init
+}
+replace {
+  HW_FLIP_FLOP_SRST $q, $clk, $d, #1'd1, $other_rsts..., $init
+}
+match {
+  HW_FLIP_FLOP_SRST $q, $clk, #1'd1, #1'd1, $other_rsts..., $d, #1'd0, $init
+}
+replace {
+  OP_NOT $d_inv:wire_like($d)
+  HW_FLIP_FLOP_SRST $q, $clk, $d_inv, #1'd1, $other_rsts..., $init
+}
+
+match {
   HW_FLIP_FLOP_SRST $q, $clk, #1'd0, #1'd1, $other_rsts..., $d, #1'd1
 }
 replace {
-  HW_FLIP_FLOP $q, $clk, $d, #1'd1, $other_rsts...
+  HW_FLIP_FLOP_SRST $q, $clk, $d, #1'd1, $other_rsts...
 }
 match {
   HW_FLIP_FLOP_SRST $q, $clk, #1'd1, #1'd1, $other_rsts..., $d, #1'd0
 }
 replace {
   OP_NOT $d_inv:wire_like($d)
-  HW_FLIP_FLOP $q, $clk, $d_inv, #1'd1, $other_rsts...
+  HW_FLIP_FLOP_SRST $q, $clk, $d_inv, #1'd1, $other_rsts...
+}
+
+// no resets is canon'd to regular flip flop
+match {
+  HW_FLIP_FLOP_SRST $q, $clk, $d, $en
+}
+replace {
+  HW_FLIP_FLOP $q, $clk, $d, $en
 }
 
 /*
@@ -802,7 +896,7 @@ match {
 replace {
   OP_TRUNC $truncShamt:wire32(), $shamt
   OP_OR $temp:wire_like($out), $others...
-  HW_SPLICE $origVal:wire_like($x), $temp, $truncShamt
+  HW_SPLICE $origVal:wire_like($x), $temp, $truncShamt:CORE_CONSTANT
   OP_OR $modVal:wire_like($x), $origVal, $x
   HW_INSERT $out, $temp, $modVal, $truncShamt
 
@@ -837,12 +931,108 @@ replace {
   HW_ASSUME $y, $a, $both
 }
 
+// remove constant 1 enable
+match {
+  HW_MEM_STORE $port, $data, $register, #1'd1, $addr, anyorder($trigger...{0,1})
+}
+replace {
+  HW_MEM_STORE $port, $data, $register, $addr, $trigger...
+}
+match {
+  HW_MEM_LOAD $data, $port, $register, #1'd1, $addr, anyorder($trigger...{0,1})
+}
+replace {
+  HW_MEM_LOAD defs=2 $data, $port, $register, $addr, $trigger...
+}
+
+// constant 0 enable
+match {
+  HW_MEM_STORE $port, $data, $register, #1'd0, $addr, anyorder($trigger...{0,1})
+}
+with [{
+  FatDynObjRef<> ref = (*$port.begin())->fat();
+  $port.begin()->replace(FatDynObjRef<>{nullref});
+  ctx.destroy(ref.as<MemoryPortRef>());
+}]
+replace {}
+
+match {
+  HW_MEM_LOAD $data, $port, $register, #1'd0, $addr, anyorder($trigger...{0,1})
+}
+with [{
+  FatDynObjRef<> ref = (*$port.begin())->fat();
+  $port.begin()->replace(FatDynObjRef<>{nullref});
+  ctx.destroy(ref.as<MemoryPortRef>());
+
+  FatDynObjRef<> undefStore = cbuild.undef(*((*$data.begin())->as<WireRef>().getNumBits())).get();
+  $undef = undefStore;
+}]
+replace $data -> $undef
+
+// copy en into read port
+// commented, to enable this need to (transiently) disable flip flop assume en=1 for data path opt otherwise loops as copied en is set to 1.
+/*match {
+  HW_MEM_LOAD $data, $port, $register, $addr, $trigger:HW_TRIGGER...{0,1}
+  //HW_FLIP_FLOP_SRST
+  HW_FLIP_FLOP $out, $clk, $data:HW_WIRE, $en:HW_WIRE, $rsts...
+}
+with [{
+  if ($data.begin()->as<WireRef>().getNumUses() != 1)
+    goto $fail;
+  auto dataRef = (*$data.begin())->fat();
+  $dataCopy = dataRef;
+  // hack: replace old load's wire with unused new one (else we double def)
+  $data.begin()->replace(ctx.getStore<Wire>().create(dataRef.as<WireRef>().getNumBits()));
+}]
+replace {
+  HW_MEM_LOAD defs=2 $dataCopy, $port, $register, $en, $addr, $trigger...
+  // recreate FF as is. can't nicely say that it does not change
+  HW_FLIP_FLOP $out, $clk, $dataCopy:HW_WIRE, $en:HW_WIRE, $rsts...
+}*/
+
+/*match {
+  HW_MEM_LOAD $data, $port, $register, $addr, $trigger...{0,1}
+  HW_ONEHOT_MUX $out, $pre..., $en, $data, $post...
+}
+replace {
+  HW_MEM_LOAD $data, $port, $register, $en, $addr, $trigger...{0,1}
+  HW_FLIP_FLOP $out, $clk, $data:HW_WIRE, $en:HW_WIRE, $rsts...
+}*/
+
 match {
   HW_ONEHOT_MUX $out, $sel, $val
 }
 replace {
   HW_ASSUME $out, $val, $sel
 }
+
+match {
+  HW_MUX $out, $sel, $val, chk_constant_all_unk()
+}
+replace {
+  HW_ASSUME $out, $val, $sel
+}
+
+match {
+  HW_MUX $out, $sel, chk_constant_all_unk(), $val
+}
+replace {
+  OP_NOT $inv:wire_like($sel), $sel
+  HW_ASSUME $out, $val, $inv
+}
+
+// assume on constant (adds nothing)
+match {
+  HW_ASSUME $out, $in:CORE_CONSTANT, $cond
+}
+replace $out -> $in
+
+// buffer LUT
+match {
+  HW_LUT $out, #2'd2, $in
+}
+replace $out -> $in
+
 
 match {
   HW_MUX $out, $sel, $trueV, $falseV

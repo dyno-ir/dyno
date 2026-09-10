@@ -71,6 +71,7 @@ public:
     ContextMixin::reset();
     regNameInfo.reset();
     regTypeInfo.reset();
+    regResetValue.clear();
   }
 
   void copyRegisterInfo(RegisterRef src, RegisterRef dst) {
@@ -92,7 +93,11 @@ class HWContext {
   ConstantStore constants;
   NewDeleteObjStore<Module> modules;
   NewDeleteObjStore<Register> regs;
+#if __SIZEOF_POINTER__ == 4
+  NewDeleteObjStore<Wire> wires;
+#else
   FixedFlatObjStore<Wire> wires;
+#endif
   NewDeleteObjStore<Function> funcs;
   NewDeleteObjStore<Process> procs;
   NewDeleteObjStore<Trigger> triggers;

@@ -19,8 +19,6 @@
 #include "support/TemplateUtil.h"
 #include "support/Tokenizer.h"
 #include "support/VectorLUT.h"
-#include <charconv>
-#include <expected>
 #include <string>
 
 namespace dyno {
@@ -159,7 +157,7 @@ protected:
     lineNums.push_back_range(
         Range{linesSplit}.transform([&bad](size_t, std::string_view view) {
           uint32_t val;
-          auto res = std::from_chars(view.begin(), view.end(), val);
+          auto res = std::from_chars(view.data(), view.data() + view.size(), val);
           if (res.ec != std::errc())
             bad = true;
           return val;
@@ -208,7 +206,7 @@ protected:
     DYNO_EXPECT(opc, lexer->popOpcode());
 
     SmallVec<FatDynObjRef<>, 16> operands;
-    uint numDefs = 0;
+    unsigned numDefs = 0;
 
     SmallVec<BlockRef, 4> defBlocks;
 

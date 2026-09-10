@@ -4,7 +4,9 @@
 #include "aig/IDs.h"
 #include "dyno/Constant.h"
 #include "dyno/Context.h"
+#include "dyno/HierBlockIterator.h"
 #include "dyno/IDs.h"
+#include "dyno/Obj.h"
 #include "dyno/ObjMap.h"
 #include "dyno/Pass.h"
 #include "hw/FlipFlop.h"
@@ -38,9 +40,21 @@ class AggressiveDeadCodeEliminationPass
   ObjMapVec<Wire, bool> wireMap;
   ObjMapVec<Constant, bool> constantMap;
 
-  SmallVec<InstrRef, 256> worklist;
+  Vec<InstrRef> worklist;
 
+public:
+#define CONFIG_STRUCT_LAMBDA(FIELD, ENUM) ENUM(keepRegs, NONE, NONE, NAMED, ALL)
+  CONFIG_STRUCT(CONFIG_STRUCT_LAMBDA)
+#undef CONFIG_STRUCT_LAMBDA
+  Config config;
+
+private:
   void visitRegister(RegisterIRef reg) {
+    auto &regInitValues = ctx.getCtx<HWDialectContext>().regResetValue;
+    if (regInitValues.inRange(reg.oref()) && regInitValues[reg.oref()]) {
+      visitHWValue(ctx.resolve(regInitValues[reg.oref()]));
+    }
+
     for (auto use : reg.oref().uses()) {
       auto instr = use.instr();
       // none of our sources want to re-inspect so this is fine.
@@ -88,7 +102,7 @@ class AggressiveDeadCodeEliminationPass
   void visitHWValue(HWValue value) {
     assert(value);
     if (auto asConst = value.dyn_as<ConstantRef>()) {
-      if (asConst.isInline())
+      if (asConst.isInline()) [[likely]]
         return;
       constantMap[asConst] = 1;
     } else {
@@ -264,9 +278,8 @@ class AggressiveDeadCodeEliminationPass
       auto reg = asLoad.reg().iref();
       if (!instrMap[reg])
         pushInstr(reg);
-      for (auto term : asLoad.terms()) {
-        visitHWValue(term.getIdx());
-      }
+      if (auto addr = asLoad.addr())
+        visitHWAddr(addr);
       break;
     }
 
@@ -276,11 +289,12 @@ class AggressiveDeadCodeEliminationPass
         break;
       auto asStore = instr.as<StoreIRef>();
       visitHWValue(asStore.value());
+      if (auto trig = asStore.trigger())
+        worklist.emplace_back(trig);
       auto reg = asStore.reg().iref();
       assert(instrMap[reg]);
-      for (auto term : asStore.terms()) {
-        visitHWValue(term.getIdx());
-      }
+      if (auto addr = asStore.addr())
+        visitHWAddr(addr);
       break;
     }
 
@@ -309,6 +323,27 @@ class AggressiveDeadCodeEliminationPass
       if (asStore.hasEn())
         visitHWValue(asStore.en());
       if (auto addr = asStore.addr())
+        visitHWAddr(addr);
+      break;
+    }
+
+    case *HW_SPLICE: {
+      if (instrMap[instr])
+        break;
+      auto asSplice = instr.as<SpliceIRef>();
+      visitHWValue(asSplice.in()->as<HWValue>());
+      if (auto addr = asSplice.addr())
+        visitHWAddr(addr);
+      break;
+    }
+
+    case *HW_INSERT: {
+      if (instrMap[instr])
+        break;
+      auto asInsert = instr.as<InsertIRef>();
+      visitHWValue(asInsert.in()->as<HWValue>());
+      visitHWValue(asInsert.val()->as<HWValue>());
+      if (auto addr = asInsert.addr())
         visitHWAddr(addr);
       break;
     }
@@ -412,6 +447,14 @@ class AggressiveDeadCodeEliminationPass
       break;
     }
 
+    case *HW_ASSERT_DEFER: {
+      if (instrMap[instr])
+        break;
+      visitHWValue(instr.other(0)->as<HWValue>());
+      worklist.emplace_back(instr.other(1)->as<TriggerRef>().iref());
+      break;
+    }
+
     default: {
       if (instrMap[instr])
         break;
@@ -429,7 +472,13 @@ class AggressiveDeadCodeEliminationPass
     // initially, only i/os are live
     for (auto instr : module.block()) {
       if (instr.isOpc(HW_INPUT_REGISTER_DEF, HW_OUTPUT_REGISTER_DEF,
-                      HW_INOUT_REGISTER_DEF, HW_REF_REGISTER_DEF)) {
+                      HW_INOUT_REGISTER_DEF, HW_REF_REGISTER_DEF) ||
+          (instr.isOpc(HW_REGISTER_DEF) &&
+           (config.keepRegs == Config::ALL ||
+            (config.keepRegs == Config::NAMED &&
+             !ctx.getCtx<HWDialectContext>()
+                  .regNameInfo.getNames(instr.as<RegisterIRef>().oref())
+                  .empty())))) {
         worklist.emplace_back(instr);
         continue;
       }
@@ -441,12 +490,18 @@ class AggressiveDeadCodeEliminationPass
     for (auto instr : module.triggers()) {
       worklist.emplace_back(instr);
     }
+
+    for (auto proc : module.procs()) {
+      for (auto instr : HierBlockRange{proc.block()}) {
+        // todo: keep instr bit
+        if (instr.isOpc(HW_PRINT, HW_PRINT_DEFER, OP_ASSERT, HW_ASSERT_DEFER))
+          worklist.emplace_back(instr);
+      }
+    }
   }
 
   void destroyDeadInstrs() {
-    ObjMapVec<Block, bool> blockDestroyMap;
-    blockDestroyMap.resize(
-        ctx.getCtx<CoreDialectContext>().cfg.blocks.numIDs());
+    Vec<FatDynObjRef<>> destroyList;
 
     for (auto [obj, live] : instrMap) {
       if (!ctx.getStore<Instr>().exists(obj) || live)
@@ -460,55 +515,58 @@ class AggressiveDeadCodeEliminationPass
       case *HW_LATCH_PROCESS_DEF:
       case *HW_FINAL_PROCESS_DEF:
       case *HW_NETLIST_PROCESS_DEF: {
-        blockDestroyMap[instr.as<ProcessIRef>().block()] = 1;
+        destroyList.emplace_back(instr.as<ProcessIRef>().block());
         break;
       }
       case *OP_IF: {
-        blockDestroyMap[instr.as<IfInstrRef>().getTrueBlock()] = 1;
+        destroyList.emplace_back(instr.as<IfInstrRef>().getTrueBlock());
         if (instr.as<IfInstrRef>().hasFalseBlock())
-          blockDestroyMap[instr.as<IfInstrRef>().getFalseBlock()] = 1;
+          destroyList.emplace_back(instr.as<IfInstrRef>().getFalseBlock());
         break;
       }
       case *OP_WHILE: {
-        blockDestroyMap[instr.as<WhileInstrRef>().getCondBlock()] = 1;
-        blockDestroyMap[instr.as<WhileInstrRef>().getBodyBlock()] = 1;
+        destroyList.emplace_back(instr.as<WhileInstrRef>().getCondBlock());
+        destroyList.emplace_back(instr.as<WhileInstrRef>().getBodyBlock());
         break;
       }
       case *OP_DO_WHILE: {
-        blockDestroyMap[instr.as<DoWhileInstrRef>().getBlock()] = 1;
+        destroyList.emplace_back(instr.as<DoWhileInstrRef>().getBlock());
         break;
       }
       case *OP_FOR: {
-        blockDestroyMap[instr.as<ForInstrRef>().getBlock()] = 1;
+        destroyList.emplace_back(instr.as<ForInstrRef>().getBlock());
         break;
       }
       case *OP_CASE:
       case *OP_CASE_DEFAULT: {
-        blockDestroyMap[instr.as<CaseInstrRef>().block()] = 1;
+        destroyList.emplace_back(instr.as<CaseInstrRef>().block());
         break;
       }
       case *OP_SWITCH: {
-        blockDestroyMap[instr.as<SwitchInstrRef>().block()] = 1;
+        destroyList.emplace_back(instr.as<SwitchInstrRef>().block());
         break;
       }
       case *OP_FUNC: {
-        blockDestroyMap[instr.as<FunctionIRef>().getBlock()] = 1;
+        destroyList.emplace_back(instr.as<FunctionIRef>().getBlock());
         break;
       }
       }
 
       if (ctx.getCtx<CoreDialectContext>().cfg.contains(instr))
         ctx.getCtx<CoreDialectContext>().cfg[instr].erase();
-      instr.destroyOperands();
+      for (auto def : instr.defs()) {
+        // destroy if no special handling, else just unlink
+        if (def->fat().getType() != Any{HW_WIRE, CORE_BLOCK})
+          destroyList.emplace_back(def->fat());
+        else // unlink
+          def.destroy();
+      }
+      instr.destroyOthers();
       ctx.getStore<Instr>().destroy(instr);
     }
 
-    for (auto [obj, destroy] : blockDestroyMap) {
-      if (!ctx.getCtx<CoreDialectContext>().cfg.blocks.exists(obj) || !destroy)
-        continue;
-      auto block = ctx.getCtx<CoreDialectContext>().cfg.blocks.resolve(obj);
-      ctx.getCtx<CoreDialectContext>().cfg.blocks.destroy(block);
-    }
+    for (auto ref : destroyList)
+      ctx.destroy(ref);
   }
 
   void destroyDeadWires() {
@@ -551,7 +609,7 @@ class AggressiveDeadCodeEliminationPass
       auto instr = worklist.pop_back_val();
       instrMap[instr] = 1;
 
-      if (instr.isOpc(HW_MODULE_DEF, HW_STDCELL_DEF)) {
+      if (instr.isOpc(HW_MODULE_DEF, HW_STDCELL_DEF, HW_BLACKBOX_MODULE_DEF)) {
         // contents of non-ignored modules are DCEd, don't mark alive
         if (activeMod ? instr.as<ModuleIRef>() == activeMod
                       : !instr.as<ModuleIRef>().mod()->ignore)

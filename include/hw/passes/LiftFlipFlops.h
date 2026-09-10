@@ -20,6 +20,8 @@ class LiftFlipFlopsPass : public Pass<LiftFlipFlopsPass> {
     pbuild.setInsertPoint(instr);
 
     auto state = build.buildRegister(instr.q().getNumBits());
+    if (auto init = instr.initValue())
+      ctx.getCtx<HWDialectContext>().regResetValue.get_ensure(state) = init;
     auto stateVal = pbuild.buildLoad(state);
     instr.q().replaceAllUsesWith(stateVal);
 
@@ -45,8 +47,11 @@ class LiftFlipFlopsPass : public Pass<LiftFlipFlopsPass> {
       else
         dVal = pbuild.buildMux(instr.rst(rstIdx), dVal, instr.rstVal(rstIdx));
 
-      sens.signals.emplace_back(
-          rstReg, instr.rstPol(rstIdx) ? SensMode::POSEDGE : SensMode::NEGEDGE);
+      if (!instr.isOpc(HW_FLIP_FLOP_SRST)) {
+        sens.signals.emplace_back(rstReg, instr.rstPol(rstIdx)
+                                              ? SensMode::POSEDGE
+                                              : SensMode::NEGEDGE);
+      }
     }
 
     auto trig = build.buildTrigger(sens);
@@ -60,7 +65,7 @@ class LiftFlipFlopsPass : public Pass<LiftFlipFlopsPass> {
     build.setInsertPoint(mod.regs_end());
     for (auto proc : mod.procs())
       for (auto instr : Range{proc.block()}.earlyincr())
-        if (instr.isOpc(HW_FLIP_FLOP))
+        if (instr.isOpc(HW_FLIP_FLOP, HW_FLIP_FLOP_SRST))
           runOnInstance(instr);
   }
 

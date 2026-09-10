@@ -9,10 +9,10 @@ namespace dyno {
 struct SimpleDebugInfo {
   bool isNewEntry;
   std::string_view name;
-  uint32_t beginLine;
-  uint32_t beginCol;
-  uint32_t endLine;
-  uint32_t endCol;
+  uint32_t beginLine = 0;
+  uint32_t beginCol = 0;
+  uint32_t endLine = 0;
+  uint32_t endCol = 0;
 
   static SimpleDebugInfo empty() {
     return SimpleDebugInfo{true, std::string_view{}, 0, 0, 0, 0};
@@ -25,7 +25,7 @@ struct SimpleDebugInfo {
 
   bool isStartEntry() { return isNewEntry; }
 
-  explicit operator bool() { return beginLine != 0; }
+  explicit operator bool() { return name.size() != 0; }
 };
 
 struct CopyDebugInfo {

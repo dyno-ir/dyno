@@ -45,6 +45,7 @@ public:
   FIELD(bool, lowerMultiInputBitwise, true)                                    \
   FIELD(bool, lowerEqualityICMP, true)                                         \
   FIELD(bool, lowerOrderingICMP, true)                                         \
+  FIELD(bool, lowerWildcardCaseICMP, true)                                     \
   FIELD(bool, lowerShift, true)                                                \
   FIELD(bool, lowerInsert, true)                                               \
   FIELD(bool, lowerExtract, true)                                              \
@@ -510,6 +511,109 @@ private:
       ibOR.addRef(bit);
     }
 
+    destroyMap[instr] = 1;
+  }
+
+  void lowerWildcardCaseICMP(InstrRef instr) {
+    build.setInsertPoint(instr);
+
+    std::optional<BigInt> mask = std::nullopt;
+    bool invert = false;
+    auto lhsConst = instr.other(0)->dyn_as<ConstantRef>();
+    auto rhsConst = instr.other(1)->dyn_as<ConstantRef>();
+
+    switch (*instr.getDialectOpcode()) {
+    case *OP_ICMP_WNE:
+      invert = true;
+      [[fallthrough]];
+    case *OP_ICMP_WEQ: {
+      if (rhsConst) {
+        mask = BigInt::unknownMask(rhsConst);
+      }
+      break;
+    }
+    case *OP_ICMP_CZNE:
+      invert = true;
+      [[fallthrough]];
+    case *OP_ICMP_CZEQ: {
+
+      auto lhsF = [&]() {
+        return BigInt::bitsExactEqual4S(
+            lhsConst, PatBigInt::undef2(lhsConst.getNumBits()));
+      };
+      auto rhsF = [&]() {
+        return BigInt::bitsExactEqual4S(
+            rhsConst, PatBigInt::undef2(rhsConst.getNumBits()));
+      };
+
+      if (lhsConst && rhsConst) {
+        mask = lhsF();
+        *mask |= rhsF();
+      } else if (lhsConst)
+        mask = lhsF();
+      else if (rhsConst)
+        mask = rhsF();
+      break;
+    }
+
+    case *OP_ICMP_CXNE:
+      invert = true;
+      [[fallthrough]];
+    case *OP_ICMP_CXEQ: {
+
+      if (lhsConst && rhsConst)
+        mask = BigInt::unknownMask(lhsConst) | BigInt::unknownMask(rhsConst);
+      else if (lhsConst)
+        mask = BigInt::unknownMask(lhsConst);
+      else if (rhsConst)
+        mask = BigInt::unknownMask(rhsConst);
+      break;
+    }
+
+    case *OP_ICMP_CEQ:
+    case *OP_ICMP_CNE: {
+      // we're lowering away 4 state, so no real 0/1 variable matches 4 state
+      if ((lhsConst && lhsConst.getIs4S()) ||
+          (rhsConst && rhsConst.getIs4S())) {
+        assert(lhsConst != rhsConst && "handled in instcombine");
+        instr.def()->as<WireRef>().replaceAllUsesWith(
+            ConstantRef::fromBool(instr.isOpc(OP_ICMP_CNE)));
+      } else {
+        auto res = build.buildICmp(
+            instr.other(0)->as<HWValue>(), instr.other(1)->as<HWValue>(),
+            instr.isOpc(OP_ICMP_CNE) ? BigInt::ICMP_NE : BigInt::ICMP_EQ);
+        instr.def()->as<WireRef>().replaceAllUsesWith(res);
+      }
+      destroyMap[instr] = 1;
+      return;
+    }
+    }
+    assert(!mask || !mask->getIs4S());
+
+    auto bitwiseNE = build.buildXor(instr.other(0)->as<HWValue>(),
+                                    instr.other(1)->as<HWValue>());
+
+    OperandVec<HWValue> orOperands{ctx, 1,
+                                   (mask ? BigInt::countBitsExact(*mask, false)
+                                         : *bitwiseNE.getNumBits())};
+    orOperands.pushPlaceholderDefs();
+
+    for (uint32_t i = 0; i < *bitwiseNE.getNumBits(); i++) {
+      if (!mask || !mask->getBit(i))
+        orOperands.emplace_back(build.buildSplice(bitwiseNE, 1, i));
+    }
+
+    if (invert) {
+      orOperands.def() = instr.def()->fat();
+      auto ref = build.buildOr(std::move(orOperands));
+      if (ref != instr.def()->fat())
+        instr.def()->as<WireRef>().replaceAllUsesWith(ref);
+      else
+        instr.def().replace(FatDynObjRef{nullref});
+    } else {
+      auto val = build.buildNot(build.buildOr(std::move(orOperands)));
+      instr.def()->as<WireRef>().replaceAllUsesWith(val);
+    }
     destroyMap[instr] = 1;
   }
 
@@ -979,6 +1083,17 @@ private:
     case *HW_ONEHOT_MUX:
       lowerOneHotMux(instr);
       break;
+
+    case *OP_ICMP_CEQ:
+    case *OP_ICMP_CNE:
+    case *OP_ICMP_WEQ:
+    case *OP_ICMP_WNE:
+    case *OP_ICMP_CZEQ:
+    case *OP_ICMP_CZNE:
+    case *OP_ICMP_CXEQ:
+    case *OP_ICMP_CXNE:
+      lowerWildcardCaseICMP(instr);
+      break;
     }
   }
 
@@ -1021,6 +1136,11 @@ public:
 
       if (instr.isOpc(HW_ONEHOT_MUX))
         return config.lowerOneHotMux;
+
+      if (instr.isOpc(OP_ICMP_CEQ, OP_ICMP_CNE, OP_ICMP_WEQ, OP_ICMP_WNE,
+                      OP_ICMP_CZEQ, OP_ICMP_CZNE, OP_ICMP_CXEQ, OP_ICMP_CXNE)) {
+        return config.lowerWildcardCaseICMP;
+      }
 
       return false;
     };

@@ -56,7 +56,7 @@ public:
   InstrRef getInnerYieldFalse() { return getBlockYield(getFalseBlock()); }
 
   // also implement switch's methods for compatibility.
-  auto getNumCases() { return hasFalseBlock() ? 2 : 1; }
+  uint32_t getNumCases() { return hasFalseBlock() ? 2 : 1; }
   auto caseYields() {
     assert(getNumYieldValues() != 0 && "no yield values");
     return Range{this->begin(), this->begin() + 1 + hasFalseBlock()}.transform(
@@ -100,7 +100,7 @@ public:
   auto yieldValues() { return Range{this->def_begin() + 1, this->def_end()}; }
   auto cond() { return this->other(0); }
 
-  auto getNumCases() { return block().size(); }
+  uint32_t getNumCases() { return block().size(); }
   auto getYieldValue(unsigned i) { return *(yieldValues().begin() + i); }
   unsigned getNumYieldValues() {
     return yieldValues().end() - yieldValues().begin();

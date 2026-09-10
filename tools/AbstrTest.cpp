@@ -7,7 +7,7 @@ using namespace dyno;
 int main() {
   Context ctx;
 
-  auto mod = HWInstrBuilder{ctx}.buildModule("test");
+  auto mod = HWInstrBuilder{ctx}.buildModule("test").iref();
   HWInstrBuilder buildTop{ctx, mod.block().begin()};
 
   buildTop.buildInputPort(mod);

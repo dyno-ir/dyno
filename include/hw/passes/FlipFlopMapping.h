@@ -22,6 +22,7 @@
 #include "support/Bits.h"
 #include "support/Debug.h"
 #include "support/ErrorRecovery.h"
+#include "support/Format.h"
 #include "support/PointerVariant.h"
 #include "support/SlabAllocator.h"
 #include "support/Utility.h"
@@ -30,7 +31,6 @@
 namespace dyno {
 
 class FlipFlopMappingPass : public Pass<FlipFlopMappingPass> {
-
   struct AbstractFF {
     enum Indices {
       CLK_POL,
@@ -50,21 +50,49 @@ class FlipFlopMappingPass : public Pass<FlipFlopMappingPass> {
     uint16_t raw = 0;
 
   public:
-    auto clkPol() { return BitField<uint16_t, 1, CLK_POL>{raw}; }
-    auto hasEn() { return BitField<uint16_t, 1, HAS_EN>{raw}; }
-    auto enPol() { return BitField<uint16_t, 1, EN_POL>{raw}; }
-    auto hasRst() { return BitField<uint16_t, 1, HAS_RST>{raw}; }
-    auto rstPol() { return BitField<uint16_t, 1, RST_POL>{raw}; }
-    auto setRstSync() { return BitField<uint16_t, 1, SET_RST_SYNC>{raw}; }
-    auto hasSet() { return BitField<uint16_t, 1, HAS_SET>{raw}; }
-    auto setPol() { return BitField<uint16_t, 1, SET_POL>{raw}; }
-    auto hasInvOut() { return BitField<uint16_t, 1, HAS_INV_OUT>{raw}; }
-    auto hasRegularOut() { return BitField<uint16_t, 1, HAS_REGULAR_OUT>{raw}; }
+    constexpr auto clkPol() { return BitField<uint16_t, 1, CLK_POL>{raw}; }
+    constexpr auto hasEn() { return BitField<uint16_t, 1, HAS_EN>{raw}; }
+    constexpr auto enPol() { return BitField<uint16_t, 1, EN_POL>{raw}; }
+    constexpr auto hasRst() { return BitField<uint16_t, 1, HAS_RST>{raw}; }
+    constexpr auto rstPol() { return BitField<uint16_t, 1, RST_POL>{raw}; }
+    constexpr auto setRstSync() {
+      return BitField<uint16_t, 1, SET_RST_SYNC>{raw};
+    }
+    constexpr auto hasSet() { return BitField<uint16_t, 1, HAS_SET>{raw}; }
+    constexpr auto setPol() { return BitField<uint16_t, 1, SET_POL>{raw}; }
+    constexpr auto hasInvOut() {
+      return BitField<uint16_t, 1, HAS_INV_OUT>{raw};
+    }
+    constexpr auto hasRegularOut() {
+      return BitField<uint16_t, 1, HAS_REGULAR_OUT>{raw};
+    }
 
     auto getRaw() const { return raw; }
 
-    AbstractFF() = default;
-    explicit AbstractFF(uint16_t raw) : raw(raw) {};
+    constexpr AbstractFF() = default;
+    constexpr explicit AbstractFF(uint16_t raw) : raw(raw) {};
+
+    constexpr static bool valid(AbstractFF ff) {
+      if (ff.enPol() && !ff.hasEn())
+        return false;
+      if (ff.rstPol() && !ff.hasRst())
+        return false;
+      if (ff.setPol() && !ff.hasSet())
+        return false;
+      if (ff.setRstSync() && !ff.hasSet() && !ff.hasRst())
+        return false;
+      if (!ff.hasRegularOut() && !ff.hasInvOut())
+        return false;
+      return true;
+    }
+    constexpr static uint32_t numConfigs() {
+      uint32_t rv = 0;
+      for (uint32_t i = 0; i < (1ull << uint32_t(NUM_INDICES)); i++) {
+        if (valid(AbstractFF{uint16_t(i)}))
+          rv++;
+      }
+      return rv;
+    }
   };
 
   enum class FFPortType : uint8_t {
@@ -131,6 +159,13 @@ class FlipFlopMappingPass : public Pass<FlipFlopMappingPass> {
     auto bits = *instr.q()->numBits;
     AbstractFF abstr;
     FFWires wires;
+
+    if (bits >= 0xFFFE) {
+      std::stringstream str;
+      HWCtxPrinter{ctx, str}.printInstr(instr, false);
+      report_fatal_error("too many bits ({}) in ff, meant to infer memory?: {}",
+                         bits, std::move(str).str());
+    }
 
     wires.qReg = regBuild.buildRegister(instr.q().getNumBits());
 
@@ -299,7 +334,7 @@ class FlipFlopMappingPass : public Pass<FlipFlopMappingPass> {
         case FixupType::TIE0_EN:
         case FixupType::TIE1_EN:
           wires.en = ConstantRef::fromBool(type == FixupType::TIE1_EN);
-          abstr.enPol() = (type == FixupType::TIE0_EN);
+          abstr.enPol() = (type == FixupType::TIE1_EN);
           abstr.hasEn() = 1;
           break;
 
@@ -448,7 +483,7 @@ public:
     auto def = wire.getSingleDef();
     if (!def)
       return false;
-    if (!def->instr().isOpc(HW_FLIP_FLOP))
+    if (!def->instr().isOpc(HW_FLIP_FLOP, HW_FLIP_FLOP_SRST))
       return false;
 
     auto asFF = def->instr().as<FlipFlopIRef>();
@@ -485,7 +520,7 @@ public:
         continue;
       for (auto proc : mod.procs())
         for (auto instr : proc.block())
-          if (instr.isOpc(HW_FLIP_FLOP))
+          if (instr.isOpc(HW_FLIP_FLOP, HW_FLIP_FLOP_SRST))
             goto found;
       continue;
     found:
@@ -502,7 +537,7 @@ public:
     }
     DYNO_DBG({
       std::print(dbgs(), "found {} out of {} flip flop types as std cells\n",
-                 count, ffMap.size());
+                 count, AbstractFF::numConfigs());
     });
   }
 
@@ -536,7 +571,7 @@ public:
     }
     case FixupType::TIE0_EN:
     case FixupType::TIE1_EN: {
-      if (!abstr.hasEn() || abstr.enPol() != (type == FixupType::TIE0_EN))
+      if (!abstr.hasEn() || abstr.enPol() != (type == FixupType::TIE1_EN))
         break;
       abstr.hasEn() = 0;
       abstr.enPol() = 0;
@@ -623,14 +658,16 @@ public:
     }
 
     unsigned missing [[maybe_unused]] = 0;
-    for (auto entry : ffMap) {
+    for (auto [i, entry] : Range{ffMap}.enumerate()) {
+      if (!AbstractFF::valid(AbstractFF{uint16_t(i)}))
+        continue;
       if (auto fixup = entry.dyn_as<FixupType>();
           fixup && *fixup == FixupType::FAIL)
         missing++;
     }
     DYNO_DBG({
       std::print(dbgs(), "covered {} out of {} flip flop types with fixups\n",
-                 ffMap.size() - missing, ffMap.size());
+                 AbstractFF::numConfigs() - missing, AbstractFF::numConfigs());
     });
   }
   void runWrapper(auto &&runFunc) {
