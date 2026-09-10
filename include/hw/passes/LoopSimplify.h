@@ -496,6 +496,7 @@ end:
         forIterWire = unyield.def(0)->as<WireRef>();
         unyield.def(0).replace(FatDynObjRef<>{nullref});
       }
+      unyieldBuild.addRef(forIterWire);
     }
     if (newHasCond)
       yieldBuild->addRef(yield.operand(0)->fat());
