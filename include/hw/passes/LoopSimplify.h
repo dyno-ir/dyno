@@ -489,11 +489,13 @@ end:
 
     WireRef forIterWire;
     if (isForLoop) {
-      forIterWire = isNewForLoop
-                        ? ctx.getStore<Wire>().create(
-                              yieldVals[*forLoopIter].init.getNumBits())
-                        : unyield.def(0)->as<WireRef>();
-      unyieldBuild.addRef(forIterWire);
+      if (isNewForLoop) {
+        forIterWire = ctx.getStore<Wire>().create(
+            yieldVals[*forLoopIter].init.getNumBits());
+      } else {
+        forIterWire = unyield.def(0)->as<WireRef>();
+        unyield.def(0).replace(FatDynObjRef<>{nullref});
+      }
     }
     if (newHasCond)
       yieldBuild->addRef(yield.operand(0)->fat());
