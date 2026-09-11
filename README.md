@@ -16,7 +16,7 @@ cmake --build build/release
 We currently only test with `clang` + `libc++`, errors might occur with other toolchains.
 
 # Dyno-SV
-Dyno-SV is a Dyno-IR based SystemVerilog synthesis tool. [For a synthesis pipeline walkthrough by example see here](docs/Dyno-SV_Example_Compilation.md).
+Dyno-SV is a Dyno-IR based SystemVerilog synthesis tool. [Try it in Dyno Explorer here!](https://dyno-ir.github.io/dyno-explorer/) For a synthesis pipeline walkthrough by example see [here](docs/Dyno-SV_Example_Compilation.md).
 
 ## Example Usage
 Note: Currently `yosys-abc` must be installed and available in `$PATH`.
