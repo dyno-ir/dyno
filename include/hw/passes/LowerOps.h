@@ -452,7 +452,7 @@ private:
     if (auto asConstant = shamt.dyn_as<ConstantRef>()) {
       auto shamtC = asConstant.getLimitedVal();
       if (!shamtC)
-        report_fatal_error("shift amount too large");
+        report_fatal_error(ctx, instr, "shift amount too large");
       auto val = shiftByConstant(instr.getDialectOpcode(), value, *shamtC);
       instr.def(0)->as<WireRef>().replaceAllUsesWith(val);
       destroyMap[instr] = 1;

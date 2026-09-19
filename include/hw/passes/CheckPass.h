@@ -23,7 +23,8 @@ public:
   FIELD(bool, operandsDefined, true)                                           \
   FIELD(bool, danglingBlocks, false)                                           \
   FIELD(bool, noLoops, false)                                                  \
-  FIELD(bool, multiDriven, false)
+  FIELD(bool, multiDriven, false)                                              \
+  FIELD(bool, wellDefinedCFG, true)
   CONFIG_STRUCT(CONFIG_STRUCT_LAMBDA)
 #undef CONFIG_STRUCT_LAMBDA
   Config config;
@@ -208,6 +209,20 @@ public:
     }
   }
 
+  void checkWellDefinedCFG() {
+    for (auto instr : ctx.getStore<Instr>()) {
+      if (instr.isOpc(OP_IF, OP_SWITCH, OP_FOR, OP_WHILE, OP_DO_WHILE,
+                      OP_UNYIELD, OP_YIELD, HW_LOAD, HW_STORE, HW_STORE_DEFER,
+                      HW_MEM_STORE, HW_MEM_LOAD, HW_ASSERT_DEFER,
+                      HW_PRINT_DEFER, HW_PRINT, OP_ASSERT, OP_CASE, HW_CASE_X,
+                      HW_CASE_Z, OP_CASE_DEFAULT)) {
+        if (!ctx.getCFG().contains(instr))
+          error(instr, "control flow dependent instr not in CFG");
+        assert(ctx.getCFG()[instr].blockRef().getPtr());
+      }
+    }
+  }
+
   void runOnModule(ModuleIRef mod) {
     if (config.operandsDefined)
       checkOperands(mod);
@@ -229,6 +244,8 @@ public:
     }
     if (config.danglingBlocks)
       checkNoDanglingBlocks();
+    if (config.wellDefinedCFG)
+      checkWellDefinedCFG();
     if (hasError) {
       {
         std::ofstream str{"dump_error.dyno"};

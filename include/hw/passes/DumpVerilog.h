@@ -48,7 +48,6 @@ public:
   Config config;
 
 private:
-
   std::string getRegName(RegisterRef reg) {
     auto &regNameInfo = ctx.getCtx<HWDialectContext>().regNameInfo;
     auto names = regNameInfo.getNames(reg);
@@ -71,7 +70,8 @@ private:
 
     auto dumpWires = [&]() {
       for (auto wire : ctx.getStore<Wire>()) {
-        std::print(os, "wire[{}:0] _w{}_;\n", *wire.getNumBits() - 1, wireToID(wire));
+        std::print(os, "wire[{}:0] _w{}_;\n", *wire.getNumBits() - 1,
+                   wireToID(wire));
       }
     };
     if (!config.dumpWiresLast)
@@ -222,7 +222,7 @@ private:
 
       default:
         dumpInstr(instr, ctx);
-        report_fatal_error("verilog dump not implemented for instruction");
+        report_fatal_error(ctx, instr, "verilog dump not implemented for instruction");
         break;
       }
     }
@@ -258,7 +258,7 @@ private:
       // printed as part of uses.
       break;
     default:
-      report_fatal_error("unimplemented");
+      report_fatal_error(ctx, instr, "Verilog dump unimplemented");
     }
   }
 

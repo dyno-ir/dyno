@@ -252,7 +252,7 @@ public:
           auto type = base.parseOperand();
           if (!type) {
             base.lexer->printError(type.error());
-            report_fatal_error("parse error");
+            report_fatal_error();
           }
           if (type->ref.is<FatTypeRef>())
             base.ctx.getCtx<HWDialectContext>().regTypeInfo.setType(

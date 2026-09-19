@@ -272,7 +272,7 @@ public:
     while (!lexer->peekIs(Token::NONE)) {
       if (auto res = parseInstr(); !res) {
         lexer->printError(res.error());
-        report_fatal_error("parse error");
+        report_fatal_error();
       }
     }
   }
@@ -285,7 +285,7 @@ public:
     while (!lexer->peekIs(Token::NONE)) {
       if (auto instr = parseInstr(); !instr) {
         lexer->printError(instr.error());
-        report_fatal_error("parse error");
+        report_fatal_error();
       } else
         insert.insertPrev(*instr);
     }
@@ -299,7 +299,7 @@ public:
       return nullref;
     if (auto res = parseInstr(); !res) {
       lexer->printError(res.error());
-      report_fatal_error("parse error");
+      report_fatal_error();
     } else {
       return *res;
     }

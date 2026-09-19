@@ -34,7 +34,8 @@ public:
 #define CONFIG_STRUCT_LAMBDA(FIELD, ENUM)                                      \
   FIELD(bool, flattenLoops, true)                                              \
   FIELD(bool, flattenMultiway, true)                                           \
-  FIELD(bool, autoSimplifyLoops, true)
+  FIELD(bool, autoSimplifyLoops, true)                                         \
+  FIELD(bool, errorOnNonLinearizable, false)
   CONFIG_STRUCT(CONFIG_STRUCT_LAMBDA)
 #undef CONFIG_STRUCT_LAMBDA
   Config config;
@@ -45,8 +46,13 @@ private:
                             SmallVecImpl<HWValue> &yields) {
 
     // todo: properly lower earlier or here
-    if (old.isOpc(OP_ASSERT, HW_ASSERT_DEFER, HW_PRINT, HW_PRINT_DEFER))
+    if (old.isOpc(OP_ASSERT, HW_ASSERT_DEFER, HW_PRINT, HW_PRINT_DEFER)) {
+      if (config.errorOnNonLinearizable) {
+        report_fatal_error(ctx, old,
+                           "side effect in to-be-linearized if statement");
+      }
       return true;
+    }
 
     assert(!old.isOpc(HW_STORE, HW_STORE_DEFER) &&
            "branch with side effects can't be linearized");
@@ -103,6 +109,11 @@ private:
 
   void linearizeIf(IfInstrRef instr) {
     SmallVec<HWValue, 8> yields;
+    if (!instr.hasFalseBlock()) {
+      if (config.errorOnNonLinearizable)
+        report_fatal_error(ctx, instr, "non-linearizable if statement");
+      return;
+    }
 
     auto copyHook = [&](DeepCopier *self, InstrRef old,
                         BlockRef_iterator<true> insert) {
@@ -228,16 +239,16 @@ private:
                   forLoop.getLower()->as<ConstantRef>();
     BigInt step = forLoop.getStep()->as<ConstantRef>();
     if (diff.getSignBit() != step.getSignBit())
-      report_fatal_error("ill-formed for loop");
+      report_fatal_error(ctx, forLoop, "ill-formed for loop");
     if (diff.getIs4S() || step.getIs4S())
-      report_fatal_error("loop with undefined bounds");
+      report_fatal_error(ctx, forLoop, "loop with undefined bounds");
     auto [div, mod] = BigInt::sdivmodOp4S(diff, step);
     if (!mod.valueEquals(0)) {
       dumpInstr(forLoop, ctx);
-      report_fatal_error("loop never terminates (diff not divisible by step)");
+      report_fatal_error(ctx, forLoop, "loop never terminates (diff not divisible by step)");
     }
     if (!div.getLimitedVal())
-      report_fatal_error("too many loop iterations");
+      report_fatal_error(ctx, forLoop, "too many loop iterations");
 
     SmallVec<HWValue, 16> yieldValues(forLoop.getNumYieldValues());
     for (size_t i = 0; i < forLoop.getNumYieldValues(); i++)

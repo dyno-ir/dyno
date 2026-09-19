@@ -155,7 +155,8 @@ public:
           break;
 
         default:
-          report_fatal_error("register ref'd by unexpected instr");
+          report_fatal_error(ctx, access.instr(),
+                             "register ref'd by unexpected instr");
         }
       }
 

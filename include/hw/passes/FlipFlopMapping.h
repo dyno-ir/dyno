@@ -163,7 +163,8 @@ class FlipFlopMappingPass : public Pass<FlipFlopMappingPass> {
     if (bits >= 0xFFFE) {
       std::stringstream str;
       HWCtxPrinter{ctx, str}.printInstr(instr, false);
-      report_fatal_error("too many bits ({}) in ff, meant to infer memory?: {}",
+      report_fatal_error(ctx, instr,
+                         "too many bits ({}) in ff, meant to infer memory?: {}",
                          bits, std::move(str).str());
     }
 

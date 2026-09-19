@@ -178,18 +178,19 @@ private:
 
     // assume ranges lowered
     if (!storeI.isFullReg())
-      report_fatal_error("store range not lowered?");
+      report_fatal_error(ctx, storeI, "store range not lowered?");
     if (!storeI.hasTrigger())
-      report_fatal_error("store has no trigger, did seqtocomb run?");
+      report_fatal_error(ctx, storeI,
+                         "store has no trigger, did seqtocomb run?");
     auto trigger = storeI.trigger().oref();
     if (trigger->size() > 3)
-      report_fatal_error("too many sensitivities on flip flop");
+      report_fatal_error(ctx, storeI, "too many sensitivities on flip flop");
     bool hasReset = trigger->size() != 1;
     bool hasIFF =
         trigger->size() == 3 && (trigger->getMode(1) == SensMode::IFF ||
                                  trigger->getMode(1) == SensMode::IFFN);
     if (!hasIFF && trigger->size() == 3)
-      report_fatal_error("too many sensitivities!");
+      report_fatal_error(ctx, trigger.iref(), "too many sensitivities!");
 
     std::pair<RegisterRef, bool> clkReg;
     std::pair<RegisterRef, bool> rstReg;
@@ -218,7 +219,8 @@ private:
       unsigned resetIndex = 0;
       std::tie(resetValue, resetIndex) = findReset2(storeI, resetCandidates);
       if (!resetValue)
-        report_fatal_error("reset sensitivity but no reset value found");
+        report_fatal_error(ctx, storeI,
+                           "reset sensitivity but no reset value found");
       rstReg = resetCandidates[resetIndex];
       clkReg = hasIFF ? resetCandidates[0] : (resetCandidates[1 - resetIndex]);
 
@@ -239,8 +241,7 @@ private:
 
     WireRef qWire = ctx.getStore<Wire>().create(dValue.getNumBits());
 
-    auto ib = build.buildInstrRaw(HW_FLIP_FLOP,
-                                  4 + hasReset * 2 + !!initVal);
+    auto ib = build.buildInstrRaw(HW_FLIP_FLOP, 4 + hasReset * 2 + !!initVal);
     build.pushInsertPoint(ib.instr());
     ib.addRef(qWire).other().addRef(clkVal).addRef(dValue);
 

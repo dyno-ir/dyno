@@ -1,6 +1,9 @@
 #pragma once
+#include "ANSITerminal.h"
+#include "ErrorRecovery.h"
 #include "StringRef.h"
 #include "dyno/Constant.h"
+#include "support/ANSITerminal.h"
 #include "support/ArrayRef.h"
 #include "support/Debug.h"
 #include "support/ErrorRecovery.h"
@@ -427,13 +430,6 @@ public:
     return StringRef(start, end);
   }
 
-  static StringRef trimLeadingSpace(StringRef input) {
-    auto start = input.begin();
-    while (isspace(*start))
-      ++start;
-    return StringRef(start, input.end());
-  }
-
   template <typename... Ts> Token popEnsure(Ts... types) {
     peekEnsure(types...);
     return Pop();
@@ -457,28 +453,33 @@ public:
   void printError(const ParseError &error) {
     auto line = extractEnclosingLine(StringRef{src}, error.start);
     unsigned col = &src[error.start] - line.begin() + 1;
-    line = trimLeadingSpace(line);
 
-    fprintf(stderr, "%s:%u:%u: ", path.c_str(), error.lineNumber, col);
+    fprintf(stderr, "%s%s:%u:%u: %serror: %s", stderrBold(), path.c_str(),
+            error.lineNumber, col, stderrRed(), stderrWhite());
     error.message.toStream(std::cerr);
-    fprintf(stderr, "\n");
+    fprintf(stderr, "%s\n", stderrReset());
     unsigned pos;
-    fprintf(stderr, "%s:%u:%u: %n", path.c_str(), error.lineNumber, col, &pos);
+    fprintf(stderr, "  %u |%n", error.lineNumber, &pos);
     std::cerr << std::string_view(line) << "\n";
-    pos += &src[error.start] - line.begin();
+    for (unsigned i = 0; i < pos - 1; i++)
+      putc(' ', stderr);
+    putc('|', stderr);
+    pos = &src[error.start] - line.begin();
     for (unsigned i = 0; i < pos; i++)
       putc(' ', stderr);
+    fprintf(stderr, "%s%s", stderrBold(), stderrGreen());
     putc('^', stderr);
     if (error.start != error.end)
       for (size_t i = error.start; i < error.end - 1; i++)
         putc('~', stderr);
+    fprintf(stderr, "%s", stderrReset());
     putc('\n', stderr);
   }
 
   [[noreturn]] void printErrorOnPeekToken(const char *error, auto &&...args) {
     printError(
         makeErrorOnPeekToken(error, std::forward<decltype(args)>(args)...));
-    report_fatal_error("parser error");
+    report_fatal_error();
   }
   ParseError makeErrorOnPeekToken(const char *error, auto &&...args) {
     assert(peekToken);
@@ -516,10 +517,15 @@ public:
           [&](size_t, uint32_t t) { return getTokenTypeString(t); });
       std::array<const char *, sizeof...(types)> arr;
       std::copy_n(rng.begin(), sizeof...(types), arr.begin());
-      return makeErrorOnPeekToken("unexpected token: {}, expected: {}",
-                                  getTokenTypeString(actualType), arr);
+      return makeErrorOnPeekToken("unexpected token: \'{}\', expected: {}",
+                                  getTokenTypeString(actualType),
+                                  LazyFormat{[arr](std::ostream &str) {
+                                    for (auto elem : Range{arr}.drop_back())
+                                      str << "\'" << elem << "\', ";
+                                    str << "\'" << arr.back() << "\'";
+                                  }});
     } else {
-      return makeErrorOnPeekToken("unexpected token: {}, expected: {}",
+      return makeErrorOnPeekToken("unexpected token: \'{}\', expected: \'{}\'",
                                   getTokenTypeString(actualType),
                                   getTokenTypeString(types...));
     }
@@ -529,6 +535,7 @@ public:
     Token t = Peek();
     if (!((t.type == types) || ...)) {
       printError(makeExpectedTokenError(t.type, types...));
+      report_fatal_error();
     }
     return t;
   }

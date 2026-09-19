@@ -455,6 +455,15 @@ private:
       break;
     }
 
+    case *HW_PRINT_DEFER: {
+      if (instrMap[instr])
+        break;
+      for (auto use : instr.others().drop_back())
+        visitHWValue(use->as<HWValue>());
+      pushInstr(instr.others().back()->as<TriggerRef>().iref());
+      break;
+    }
+
     default: {
       if (instrMap[instr])
         break;

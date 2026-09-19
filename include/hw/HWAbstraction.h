@@ -1641,11 +1641,16 @@ public:
       return buildInstr(HW_ASSERT_DEFER, false, value, deferTrigger.oref());
     return buildInstr(OP_ASSERT, false, value);
   }
-  template <typename T> auto buildPrint(StringRef fmtString, Range<T> args) {
-    auto ib = buildInstrRaw(HW_PRINT, getNumOperands(args) + 1);
+  template <typename T>
+  auto buildPrint(StringRef fmtString, Range<T> args,
+                  TriggerIRef deferTrigger = nullref) {
+    auto ib = buildInstrRaw(deferTrigger ? HW_PRINT_DEFER : HW_PRINT,
+                            getNumOperands(args) + 1 + !!deferTrigger);
     ib.addRef(ctx.getStore<StringObj>().create(fmtString));
     ib.other();
     ib.addRefs(args);
+    if (deferTrigger)
+      ib.addRef(deferTrigger.oref());
     return ib.instr();
   }
 

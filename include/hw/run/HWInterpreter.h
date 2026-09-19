@@ -444,7 +444,7 @@ public:
       auto val = getValue(instr.other(0)->as<HWValue>());
       if (!val.valueEquals(1)) {
         failedAssert(instr);
-        report_fatal_error("HWInterpreter: failed assert");
+        report_fatal_error(ctx, instr, "HWInterpreter: failed assert");
       }
       break;
     }
@@ -481,7 +481,7 @@ public:
           std::print(os, "{}", std::string_view(str).substr(pos));
           if (argIt != instr.end()) {
             dumpInstr(instr, ctx);
-            report_fatal_error("too many print args");
+            report_fatal_error(ctx, instr, "too many print args");
           }
           break;
         }
@@ -490,7 +490,7 @@ public:
 
         if (argIt == instr.end()) {
           dumpInstr(instr, ctx);
-          report_fatal_error("too few print args");
+          report_fatal_error(ctx, instr, "too few print args");
         }
 
         auto arg = getValue(argIt->as<HWValue>());
@@ -522,7 +522,7 @@ public:
           break;
         default: {
           dumpInstr(instr, ctx);
-          report_fatal_error("invalid fmt string");
+          report_fatal_error(ctx, instr, "invalid fmt string");
         }
         }
 
@@ -880,7 +880,8 @@ public:
       for (auto assert : deferredAsserts[trigger])
         failedAssert(ctx.resolve(assert));
       if (!deferredAsserts[trigger].empty())
-        report_fatal_error("HWInterpreter: failed assert");
+        report_fatal_error(ctx, ctx.resolve(*deferredAsserts[trigger].begin()),
+                           "HWInterpreter: failed assert");
       for (auto deferred : deferredStores[trigger]) {
         runStore(deferred.store.reg().iref(), GenericBigIntRef{deferred.value},
                  deferred.addr);

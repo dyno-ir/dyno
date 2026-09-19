@@ -72,7 +72,7 @@ public:
       case *HW_STORE_DEFER: {
         auto tok = autoDbgInfo->addWithToken(instr);
         auto store = instr.as<StoreIRef>();
-        build.setInsertPoint(HWInstrRef{instr}.iter(ctx));
+        build.setInsertPoint(instr);
 
         build.buildStore(store.reg(), store.value(), true, trigger,
                          store.getBase(), store.terms());
@@ -81,10 +81,17 @@ public:
       }
       case *OP_ASSERT: {
         auto tok = autoDbgInfo->addWithToken(instr);
-        build.setInsertPoint(HWInstrRef{instr}.iter(ctx));
+        build.setInsertPoint(instr);
         build.buildAssert(instr.operand(0)->as<HWValue>(), trigger);
         destroyList.emplace_back(instr);
         break;
+      }
+      case *HW_PRINT: {
+        auto tok = autoDbgInfo->addWithToken(instr);
+        build.setInsertPoint(instr);
+        build.buildPrint(instr.operand(0)->as<StringObjRef>()->data,
+                         instr.others().as<HWValue>(), trigger);
+        destroyList.emplace_back(instr);
       }
       default:
         break;

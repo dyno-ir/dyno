@@ -113,7 +113,8 @@ private:
             if (src.isOpc(OP_RETURN)) {
               if (BlockRef_iterator<true>{HWInstrRef{src}.iter(ctx)}.succ() !=
                   funcInstr.getBlock().end())
-                report_fatal_error("expected return to be last instruction");
+                report_fatal_error(ctx, funcInstr,
+                                   "expected return to be last instruction");
 
               HWInstrBuilder build{self->ctx, dstIt};
               for (size_t i = 0; i < src.getNumOperands(); i++)
@@ -140,7 +141,7 @@ private:
       if (calledAny) {
         if (std::find(callStack.begin(), callStack.end(), funcInstr) !=
             callStack.end()) {
-          report_fatal_error("mutual recursion");
+          report_fatal_error(ctx, funcInstr, "mutual recursion");
         }
         callStack.emplace_back(funcInstr);
         assert(TaggedCallRef{callInstr}.get() == 0);

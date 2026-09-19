@@ -52,10 +52,9 @@ class MetaPassPipelineInterpreter {
         auto locs =
             ctx.getCtx<CoreDialectContext>().instrSourceLocInfo.getSourceLocs(
                 instr);
-        if (!locs.empty())
-          std::print(std::cerr, "{}: ", locs.front());
-        std::print(
-            std::cerr, "note: in {}\n",
+        print_note(
+            locs.empty() ? std::optional<DebugSourceLoc>{} : locs.front(),
+            "in pass {}",
             ContextPrinterWrapper<CoreDialectPrinter, OpDialectPrinter,
                                   MetaDialectPrinter>{ctx, OStreamWrapper{}}
                 .toString(instr));
@@ -72,7 +71,7 @@ class MetaPassPipelineInterpreter {
         continue;
       }
       if (instr.getDialect() != DIALECT_META)
-        report_fatal_error("expected meta dialect instruction");
+        report_fatal_error(ctx, instr, "expected meta dialect instruction");
 
       auto opc = instr.getDialectOpcode();
       auto &pass = passes.findOrCreate(opc, passCtorArgs);
@@ -80,10 +79,10 @@ class MetaPassPipelineInterpreter {
       FatObjRef<MapObj> cfg = nullref;
       if (instr.getNumOperands() != 0) {
         if (instr.getNumOperands() != 1)
-          report_fatal_error("expected at most one operand (config)");
+          report_fatal_error(ctx, instr, "expected at most one operand (config)");
         cfg = instr.operand(0)->dyn_as<MapRef>();
         if (!cfg)
-          report_fatal_error("expected map object");
+          report_fatal_error(ctx, instr, "expected map object");
       }
       DynoLexer lexer{ctx.getDialectInfos(), ArrayRef<char>::emptyRef(),
                       "<internal>"};

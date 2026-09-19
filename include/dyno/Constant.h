@@ -406,7 +406,11 @@ public:
     if (bits < 32)
       word &= bit_mask_ones<uint32_t>(bits);
 
-    extend() = pattern;
+    if (bits <= WordBits)
+      extend() = 0;
+    else
+      extend() = pattern;
+
     this->custom() = custom;
   }
 
@@ -435,6 +439,7 @@ class BigIntBase : public BigIntMixin<BigIntBase<Container>> {
   friend class Constant;
   friend class ConstantStore;
   friend class BigIntMixin<BigIntBase>;
+  friend class ConstantBuilderBase<BigIntBase>;
   using BigIntMixin<BigIntBase<Container>>::repeatExtend;
   using BigIntMixin<BigIntBase<Container>>::isExtended;
   using BigIntMixin<BigIntBase<Container>>::getExtNumWords;
@@ -473,11 +478,13 @@ private:
     Custom<uint8_t>{field} = custom;
   }
 
-public:
+protected:
   constexpr void setExtend(uint8_t val) {
     extend() = val & bit_mask_ones<uint8_t>(BigIntExtendBits);
     normalizeLastWord();
   }
+
+public:
   constexpr void setCustom(uint8_t val) {
     custom() = val & bit_mask_ones<uint8_t>(BigIntCustomBits);
   }
@@ -1801,6 +1808,7 @@ public:
 
     BigIntBase lhsCopy, rhsCopy;
 
+    // todo: remove copies, shouldn't be able to work around
     const T0 *lhsNoAlias = &lhs;
     if constexpr (std::is_same_v<BigIntBase, T0>) {
       if (!lhs.getIs4S() && lhsNoAlias == &out) {
@@ -1822,8 +1830,7 @@ public:
 
     auto lhsNumWords = lhsR.getNumWords();
     auto rhsNumWords = rhsR.getNumWords();
-
-    out.numBits = std::max(lhsR.getRawNumBits(), rhsR.getRawNumBits());
+    out.numBits = 2 * std::max(lhsR.getNumBits(), rhsR.getNumBits());
     out.words.resize(
         std::min(std::max(lhsR.getNumWords() * (lhsR.getIs4S() ? 1 : 2),
                           rhsR.getNumWords() * (rhsR.getIs4S() ? 1 : 2)),
@@ -1901,7 +1908,7 @@ public:
   }
   template <BigIntAPI T0>
   constexpr static void notOp4S(BigIntBase &out, const T0 &lhs) {
-    return xorOp4S(out, lhs, PatBigInt{lhs.getRawNumBits(), 0b11});
+    return xorOp4S(out, lhs, PatBigInt{lhs.getNumBits(), 0b11});
   }
 
   template <typename T0, typename T1>
@@ -1945,7 +1952,7 @@ public:
     }
     if (lhs.allBitsUndef() || rhs.allBitsUndef()) {
       out.setRepeating(EXTX_MASK,
-                       std::max(lhs.getRawNumBits(), rhs.getRawNumBits()), 1);
+                       2 * std::max(lhs.getNumBits(), rhs.getNumBits()), 1);
       return;
     }
 
@@ -1961,7 +1968,7 @@ public:
       if (&out == &rhs && !rhs.getIs4S())
         out.conv2To4State();
 
-    out.numBits = std::max(lhs.getRawNumBits(), rhs.getRawNumBits());
+    out.numBits = 2 * std::max(lhs.getNumBits(), rhs.getNumBits());
     out.expand();
 
     FourState carry = sub;
@@ -2080,8 +2087,8 @@ public:
     if (lhs.getIs4S() || rhs.getIs4S()) {
       BigIntBase outA;
       BigIntBase outB;
-      outA.setRepeating(EXTX_MASK, lhs.getRawNumBits(), 1);
-      outB.setRepeating(EXTX_MASK, lhs.getRawNumBits(), 1);
+      outA.setRepeating(EXTX_MASK, 2 * lhs.getNumBits(), 1);
+      outB.setRepeating(EXTX_MASK, 2 * lhs.getNumBits(), 1);
       return std::make_pair(std::move(outA), std::move(outB));
     }
     auto [div, rem] = BigIntBase::udivmodOp(lhs, rhs);
@@ -2119,8 +2126,8 @@ public:
       BigIntBase out;
       out.setRepeating(EXTX_MASK,
                        Mode == 0
-                           ? std::max(lhs.getRawNumBits(), rhs.getRawNumBits())
-                           : lhs.getRawNumBits() + rhs.getRawNumBits(),
+                           ? 2 * std::max(lhs.getNumBits(), rhs.getNumBits())
+                           : 2 * (lhs.getNumBits() + rhs.getNumBits()),
                        1);
       return out;
     }
@@ -3127,7 +3134,7 @@ public:
   static ConstantRef fromBool(bool b) { return ConstantRef{1, b, 0, 0}; }
 
   static ConstantRef undef32() {
-    return ConstantRef{32, BigInt::EXTX_MASK, FourState::SX, 1};
+    return ConstantRef{32, BigInt::EXTX_MASK, 0, 1};
   }
   static ConstantRef zeroBitZero() { return ConstantRef{0, 0, 0, 0}; }
   // static ConstantRef zero(uint32_t bits) { return ConstantRef{bits, 0, 0,
@@ -3430,7 +3437,7 @@ public:
     return *this;
   }
   ConstantBuilderBase &bitNOT() {
-    BigInt::xorOp4S(cur, cur, PatBigInt{cur.getNumBits(), 0b11});
+    BigInt::notOp4S(cur, cur);
     return *this;
   }
   template <BigIntAPI U> ConstantBuilderBase &mul(const U &rhs) {

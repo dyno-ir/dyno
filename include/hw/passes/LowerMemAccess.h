@@ -116,7 +116,7 @@ class LowerMemAccessPass : public Pass<LowerMemAccessPass> {
         auto t = access.as<MemStoreIRef>().trigger();
         if (t) {
           if (trig && trig != t)
-            report_fatal_error("expected same trigger");
+            report_fatal_error(ctx, reg, "expected same trigger on accesses");
           trig = t;
         }
         destroyList.emplace_back(access);
@@ -127,7 +127,7 @@ class LowerMemAccessPass : public Pass<LowerMemAccessPass> {
         auto t = access.as<MemLoadIRef>().trigger();
         if (t) {
           if (trig && trig != t)
-            report_fatal_error("expected same trigger");
+            report_fatal_error(ctx, reg, "expected same trigger on accesses");
           trig = t;
         }
         destroyList.emplace_back(access);
@@ -138,7 +138,7 @@ class LowerMemAccessPass : public Pass<LowerMemAccessPass> {
 
     if (anyStore) {
       if (!trig)
-        report_fatal_error("expected synchronous store");
+        report_fatal_error(ctx, reg, "expected synchronous store");
       build.buildStore(reg.oref(), memFlat, true, trig.iref());
     }
     for (auto e : Range{destroyList}.resolve(ctx))
