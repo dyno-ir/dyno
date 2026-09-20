@@ -41,6 +41,7 @@
 #include "hw/passes/RegisterPartition.h"
 #include "hw/passes/RemoveBuffers.h"
 #include "hw/passes/RemoveInitProcs.h"
+#include "hw/passes/RemoveSideEffectInstrs.h"
 #include "hw/passes/ResolveModules.h"
 #include "hw/passes/SSAConstruct.h"
 #include "hw/passes/SelectModules.h"
@@ -179,5 +180,7 @@ inline void registerDialectPasses<DIALECT_HW>(PassRegistry &passRegistry) {
   passRegistry.registerPass<DumpSimHeaderPass>(DIALECT_HW);
   // Interpret initial processes to find initial register values.
   passRegistry.registerPass<EvalInitProcsPass>(DIALECT_HW);
+  // Pass to explicitly remove RTL-level side effects like prints
+  passRegistry.registerPass<RemoveSideEffectInstrsPass>(DIALECT_HW);
 }
 }; // namespace dyno

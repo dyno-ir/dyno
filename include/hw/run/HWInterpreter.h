@@ -77,7 +77,9 @@ public:
   ObjMapVec<Register, SmallVec<OperandRef, 1>> triggers;
   ObjMapVec<Trigger, SmallVec<DeferredStore, 16>> deferredStores;
   // failing deferred asserts
-  ObjMapVec<Trigger, SmallDenseSet<ObjRef<Instr>>> deferredAsserts;
+  ObjMapVec<Trigger, SmallVec<ObjRef<Instr>, 4>> deferredAsserts;
+  ObjMapVec<Trigger, SmallVec<ObjRef<Instr>, 4>> deferredPrints;
+
   SmallDenseSet<ObjRef<Trigger>, 4> firedTriggers;
   std::optional<Range<InstrRef::iterator>> loopYieldVals;
 
@@ -230,6 +232,77 @@ private:
   }
 
 public:
+  void printFormatted(InstrRef instr) {
+    // todo: full verilog formatting
+    auto strObjRef = instr.operand(0)->as<StringObjRef>();
+    auto &str = strObjRef->data;
+
+    auto argIt = instr.operand(1);
+    auto end = instr.isOpc(HW_PRINT) ? instr.end() : instr.end() - 1;
+    uint64_t pos = 0;
+
+    while (1) {
+      auto idx = str.find('%', pos);
+
+      if (argIt == end && idx == std::string::npos) {
+        std::print(os, "{}", std::string_view(str).substr(pos));
+        break;
+      }
+
+      if (idx == std::string::npos) {
+        std::print(os, "{}", std::string_view(str).substr(pos));
+        if (argIt != end) {
+          dumpInstr(instr, ctx);
+          report_fatal_error(ctx, instr, "too many print args");
+        }
+        break;
+      }
+
+      std::print(os, "{}", std::string_view(str).substr(pos, idx - pos));
+
+      if (argIt == end) {
+        dumpInstr(instr, ctx);
+        report_fatal_error(ctx, instr, "too few print args");
+      }
+
+      auto arg = getValue(argIt->as<HWValue>());
+      switch (str[idx + 1]) {
+      case 'c': {
+        // if (arg.getIs4S()) {
+        //   // being strict, verilog just treats x as 0
+        //   report_fatal_error("%c: attempted to print unknown value: {}",
+        //   arg);
+        // }
+        if (!arg.getIs4S())
+          std::print(os, "{}", (char)(arg).getExactVal());
+        else {
+          assert(arg == (arg & ~BigInt::unknownMask(arg)));
+        }
+      } break;
+      case 'x':
+        BigInt::stream_hex_4s_vlog(os, arg);
+        break;
+      case 'b':
+        BigInt::stream_bin_4s_vlog(os, arg);
+        break;
+      case 'd':
+      case 'u':
+        if (arg.getIs4S())
+          os << 'X';
+        else
+          BigInt::stream_dec(os, arg, str[idx + 1] == 'd');
+        break;
+      default: {
+        dumpInstr(instr, ctx);
+        report_fatal_error(ctx, instr, "invalid fmt string");
+      }
+      }
+
+      ++argIt;
+      pos = idx + 2;
+    }
+  }
+
   void runInstr(InstrRef instr) {
     switch (*instr.getDialectOpcode()) {
 #define LAMBDA(opc, ib, cb, bigIntFunc)                                        \
@@ -452,83 +525,19 @@ public:
     case *HW_ASSERT_DEFER: {
       auto trigger = instr.operand(1)->as<TriggerRef>();
       auto val = getValue(instr.operand(0)->as<HWValue>());
-      if (val.valueEquals(1)) {
-        if (auto it = deferredAsserts[trigger].find(instr))
-          deferredAsserts[trigger].erase(it);
-      } else {
-        deferredAsserts[trigger].findOrInsert(instr);
+      if (!val.valueEquals(1)) {
+        deferredAsserts[trigger].emplace_back(instr);
       }
       break;
     }
 
     case *HW_PRINT: {
-      auto strObjRef = instr.operand(0)->as<StringObjRef>();
-      auto &str = strObjRef->data;
+      printFormatted(instr);
+      break;
+    }
 
-      auto argIt = instr.operand(1);
-
-      // todo: full verilog formatting
-      uint64_t pos = 0;
-      while (1) {
-        auto idx = str.find('%', pos);
-
-        if (argIt == instr.end() && idx == std::string::npos) {
-          std::print(os, "{}", std::string_view(str).substr(pos));
-          break;
-        }
-
-        if (idx == std::string::npos) {
-          std::print(os, "{}", std::string_view(str).substr(pos));
-          if (argIt != instr.end()) {
-            dumpInstr(instr, ctx);
-            report_fatal_error(ctx, instr, "too many print args");
-          }
-          break;
-        }
-
-        std::print(os, "{}", std::string_view(str).substr(pos, idx - pos));
-
-        if (argIt == instr.end()) {
-          dumpInstr(instr, ctx);
-          report_fatal_error(ctx, instr, "too few print args");
-        }
-
-        auto arg = getValue(argIt->as<HWValue>());
-        switch (str[idx + 1]) {
-        case 'c': {
-          // if (arg.getIs4S()) {
-          //   // being strict, verilog just treats x as 0
-          //   report_fatal_error("%c: attempted to print unknown value: {}",
-          //   arg);
-          // }
-          if (!arg.getIs4S())
-            std::print(os, "{}", (char)(arg).getExactVal());
-          else {
-            assert(arg == (arg & ~BigInt::unknownMask(arg)));
-          }
-        } break;
-        case 'x':
-          BigInt::stream_hex_4s_vlog(os, arg);
-          break;
-        case 'b':
-          BigInt::stream_bin_4s_vlog(os, arg);
-          break;
-        case 'd':
-        case 'u':
-          if (arg.getIs4S())
-            os << 'X';
-          else
-            BigInt::stream_dec(os, arg, str[idx + 1] == 'd');
-          break;
-        default: {
-          dumpInstr(instr, ctx);
-          report_fatal_error(ctx, instr, "invalid fmt string");
-        }
-        }
-
-        ++argIt;
-        pos = idx + 2;
-      }
+    case *HW_PRINT_DEFER: {
+      deferredPrints[instr.operand(2)->as<TriggerRef>()].emplace_back(instr);
       break;
     }
 
@@ -844,14 +853,16 @@ public:
     }
   }
 
-  void removeProcAssertDefers(ProcessIRef proc) {
-    for (auto [trig, asserts] : deferredAsserts) {
+  void removeProcDeferred(ProcessIRef proc,
+                          decltype(deferredAsserts) &deferred) {
+    for (auto [trig, asserts] : deferred) {
       if (!ctx.getStore<Trigger>().exists(trig))
         continue;
       for (auto it = asserts.begin(); it != asserts.end();) {
         auto assertI = ctx.resolve(*it);
         if (HWInstrRef{assertI}.parentProc(ctx) == proc) {
-          it = asserts.erase(it);
+          if (!asserts.erase_unordered(it))
+            break;
         } else
           ++it;
       }
@@ -859,8 +870,10 @@ public:
   }
 
   void evalProc(ProcessIRef proc) {
+    // not needed on SSA constructed processes
     // removeProcStoreDefers(proc);
-    removeProcAssertDefers(proc);
+    removeProcDeferred(proc, deferredAsserts);
+    removeProcDeferred(proc, deferredPrints);
     DYNO_DBG(std::print(dbgs(), "eval: "); dumpInstr(proc, ctx, true, false);)
     evalBlock(proc.block());
   }
@@ -882,6 +895,9 @@ public:
       if (!deferredAsserts[trigger].empty())
         report_fatal_error(ctx, ctx.resolve(*deferredAsserts[trigger].begin()),
                            "HWInterpreter: failed assert");
+      for (auto deferred : deferredPrints[trigger]) {
+        printFormatted(ctx.resolve(deferred));
+      }
       for (auto deferred : deferredStores[trigger]) {
         runStore(deferred.store.reg().iref(), GenericBigIntRef{deferred.value},
                  deferred.addr);
@@ -932,6 +948,7 @@ public:
     triggers.resize(ctx.getStore<Register>().numIDs());
     deferredStores.resize(ctx.getStore<Trigger>().numIDs());
     deferredAsserts.resize(ctx.getStore<Trigger>().numIDs());
+    deferredPrints.resize(ctx.getStore<Trigger>().numIDs());
 
     auto &regResetValues = ctx.getCtx<HWDialectContext>().regResetValue;
 
