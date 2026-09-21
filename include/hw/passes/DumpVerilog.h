@@ -56,6 +56,29 @@ private:
     return std::string(" \\") + names.front() + std::string(" ");
   }
 
+  void forPorts(InstrRef inst, auto &&func) {
+    // in the instance outputs (defs) come first then inputs (uses),
+    // interleave them in original order again.
+    OperandRef defIt = *inst.def_begin();
+    OperandRef useIt = *(inst.other_begin() + 1);
+
+    ModuleRef mod = inst.other(0)->as<ModuleRef>();
+
+    for (auto port : mod->ports) {
+      HWValue val;
+      if (port.portType == Any{HW_INPUT_REGISTER_DEF, HW_PARAM_REGISTER_DEF})
+        val = (useIt++)->as<HWValue>();
+      else if (port.portType == HW_OUTPUT_REGISTER_DEF)
+        val = (defIt++)->as<HWValue>();
+      else
+        dyno_unreachable("invalid port on stdcell");
+
+      auto names =
+          ctx.getCtx<HWDialectContext>().regNameInfo.getNames(port.reg);
+      func(port.portType, names, val);
+    }
+  }
+
   void dumpNetlistProcess(ProcessIRef proc) {
     ObjMapVec<Wire, Optional<uint32_t>> wireMap;
     wireMap.resize(ctx.getStore<Wire>().numIDs());
@@ -67,9 +90,20 @@ private:
       wireMap[wire] = wireIdCnt;
       return wireIdCnt++;
     };
+    auto dumpValue = [&](HWValue val) {
+      if (auto asWire = val.dyn_as<WireRef>())
+        std::print(os, "_w{}_", wireToID(asWire));
+      else if (auto asConst = val.dyn_as<ConstantRef>())
+        std::print(os, "{}", asConst);
+    };
 
     auto dumpWires = [&]() {
       for (auto wire : ctx.getStore<Wire>()) {
+        if (wire.getNumDefsAndUses() == 0)
+          continue;
+        if (wire.hasSingleDef() &&
+            HWInstrRef{wire.getDefI()}.parentProc(ctx) != proc)
+          continue;
         std::print(os, "wire[{}:0] _w{}_;\n", *wire.getNumBits() - 1,
                    wireToID(wire));
       }
@@ -83,7 +117,7 @@ private:
       switch (*instr.getDialectOpcode()) {
       case *HW_LOAD: {
         auto asLoad = instr.as<LoadIRef>();
-        std::print(os, "assign _w{}_ = {}", wireToID(asLoad.value()),
+        std::print(os, "assign _w{}_ ={}", wireToID(asLoad.value()),
                    getRegName(asLoad.reg()));
         if (!asLoad.isFullReg()) {
           assert(asLoad.isConstantOffs());
@@ -97,7 +131,7 @@ private:
       case *HW_STORE: {
         auto asStore = instr.as<StoreIRef>();
         // fixme: what about constant stores?
-        std::print(os, "assign {}", getRegName(asStore.reg()));
+        std::print(os, "assign{}", getRegName(asStore.reg()));
         if (!asStore.isFullReg()) {
           assert(asStore.isConstantOffs());
           auto addr = asStore.getBase();
@@ -190,31 +224,47 @@ private:
 
       case *HW_STDCELL_INSTANCE: {
         auto mod = instr.other(0)->as<ModuleRef>();
-        std::print(os, "{} _inst{}_ (", mod->name, instanceIDCnt++);
 
-        // in the instance outputs (defs) come first then inputs (uses),
-        // interleave them in original order again.
-        OperandRef defIt = *instr.def_begin();
-        OperandRef useIt = *(instr.other_begin() + 1);
+        bool hasParams = Range{mod->ports}.any(
+            [](auto &port) { return port.portType == HW_PARAM_REGISTER_DEF; });
+        std::print(os, "{}", mod->name);
 
-        for (auto [last, port] : Range{mod->ports}.mark_back()) {
-          WireRef wire;
-          if (port.portType == HW_INPUT_REGISTER_DEF)
-            wire = (useIt++)->as<WireRef>();
-          else if (port.portType == HW_OUTPUT_REGISTER_DEF)
-            wire = (defIt++)->as<WireRef>();
-          else
-            dyno_unreachable("invalid port on stdcell");
-
-          auto names =
-              ctx.getCtx<HWDialectContext>().regNameInfo.getNames(port.reg);
-          if (names.begin() != names.end())
-            std::print(os, ".{}(_w{}_)", *names.begin(), wireToID(wire));
-          else
-            std::print(os, "_w{}_", *names.begin(), wireToID(wire));
-          if (!last)
-            std::print(os, ", ");
+        if (hasParams) {
+          std::print(os, "#(");
+          bool first = true;
+          forPorts(instr, [&](DialectOpcode portT, auto &&names, HWValue val) {
+            if (portT != HW_PARAM_REGISTER_DEF)
+              return;
+            if (!first)
+              std::print(os, ", ");
+            first = false;
+            if (!val.is<ConstantRef>())
+              report_fatal_error(ctx, instr,
+                                 "non-constant param in stdcell instance");
+            if (!names.empty())
+              std::print(os, ".{}({})", names.front(), val.as<ConstantRef>());
+            else
+              std::print(os, "{}", val.as<ConstantRef>());
+          });
+          std::print(os, ")");
         }
+
+        std::print(os, " _inst{}_ (", instanceIDCnt++);
+
+        bool first = true;
+        forPorts(instr, [&](DialectOpcode portT, auto &&names, HWValue val) {
+          if (portT == HW_PARAM_REGISTER_DEF)
+            return;
+          if (!first)
+            std::print(os, ", ");
+          first = false;
+          if (!names.empty()) {
+            std::print(os, ".{}(", names.front());
+            dumpValue(val);
+            std::print(os, ")");
+          } else
+            dumpValue(val);
+        });
 
         std::print(os, ");\n");
         break;
@@ -222,7 +272,8 @@ private:
 
       default:
         dumpInstr(instr, ctx);
-        report_fatal_error(ctx, instr, "verilog dump not implemented for instruction");
+        report_fatal_error(ctx, instr,
+                           "verilog dump not implemented for instruction");
         break;
       }
     }
@@ -238,7 +289,7 @@ private:
       std::print(os, "reg");
       if (asReg.getNumBits() != 1)
         std::print(os, " [{}:0]", *asReg.getNumBits() - 1);
-      std::print(os, " {};\n", getRegName(asReg.oref()));
+      std::print(os, "{};\n", getRegName(asReg.oref()));
       break;
     }
     case *HW_NETLIST_PROCESS_DEF: {
@@ -285,7 +336,7 @@ private:
         std::print(os, " [{}:0]", *port.getNumBits() - 1);
       }
 
-      std::print(os, " {}", getRegName(port.oref()));
+      std::print(os, "{}", getRegName(port.oref()));
       if (!last)
         os << ",";
       os << "\n";

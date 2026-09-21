@@ -73,7 +73,8 @@ private:
         auto asInst = instr.as<InstanceIRef>();
         ModuleRef mod = asInst.mod();
         unsigned idx = (use - instr.other_begin()) - 1;
-        if (mod->ports[idx].portType == HW_INPUT_REGISTER_DEF)
+        if (mod->ports[idx].portType ==
+            Any{HW_INPUT_REGISTER_DEF, HW_PARAM_REGISTER_DEF})
           break;
         worklist.emplace_back(instr);
         break;
@@ -157,6 +158,7 @@ private:
       markParentBlockDef(instr);
     switch (*instr.getDialectOpcode()) {
     case *HW_REGISTER_DEF:
+    case *HW_PARAM_REGISTER_DEF:
     case *HW_INPUT_REGISTER_DEF:
     case *HW_OUTPUT_REGISTER_DEF:
     case *HW_INOUT_REGISTER_DEF:

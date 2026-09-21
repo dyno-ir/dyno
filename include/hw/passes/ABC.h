@@ -27,8 +27,8 @@
 #include <type_traits>
 
 #ifdef DYNO_USE_ABC
-#include "misc/util/abc_global.h"
 #include "base/main/abcapis.h"
+#include "misc/util/abc_global.h"
 #endif
 
 namespace dyno {
@@ -203,7 +203,8 @@ public:
           auto eqIdx = tok.find('=');
           if (eqIdx == std::string_view::npos)
             report_fatal_error("BLIF format");
-          auto tokStr = StringRef(tok.data() + eqIdx + 1, tok.data() + tok.size());
+          auto tokStr =
+              StringRef(tok.data() + eqIdx + 1, tok.data() + tok.size());
           auto wire = names.find(tokStr);
 
           if (constVal) {
@@ -227,7 +228,8 @@ public:
           }
 
           if (mod) {
-            if (mod->ports[i - 1].portType.is(HW_INPUT_REGISTER_DEF))
+            if (mod->ports[i - 1].portType.is(HW_INPUT_REGISTER_DEF,
+                                              HW_PARAM_REGISTER_DEF))
               uses.emplace_back(wire->second);
             else if (mod->ports[i - 1].portType.is(HW_OUTPUT_REGISTER_DEF))
               defs.emplace_back(wire->second);

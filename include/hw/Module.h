@@ -55,7 +55,9 @@ template <> struct ObjTraits<Module> {
 class ModuleIRef : public InstrRef {
 public:
   using InstrRef::InstrRef;
-  ModuleIRef(InstrRef instr) : InstrRef(instr) {}
+  ModuleIRef(InstrRef instr) : InstrRef(instr) {
+    assert(instr.is<ModuleIRef>());
+  }
 
   ModuleRef mod() { return def(0)->as<ModuleRef>(); }
   BlockRef block() { return def(1)->as<BlockRef>(); }
@@ -65,6 +67,7 @@ public:
     // todo: decent impl via block defrag
     while (it != block().end()) {
       switch (it.instr().getDialectOpcode().raw()) {
+      case HW_PARAM_REGISTER_DEF.raw():
       case HW_INPUT_REGISTER_DEF.raw():
       case HW_OUTPUT_REGISTER_DEF.raw():
       case HW_INOUT_REGISTER_DEF.raw():
@@ -84,6 +87,7 @@ public:
     auto it = block().begin();
     while (it != block().end()) {
       switch (it.instr().getDialectOpcode().raw()) {
+      case HW_PARAM_REGISTER_DEF.raw():
       case HW_INPUT_REGISTER_DEF.raw():
       case HW_OUTPUT_REGISTER_DEF.raw():
       case HW_INOUT_REGISTER_DEF.raw():
@@ -103,6 +107,7 @@ public:
     // todo: decent impl via block defrag
     while (it != block().end()) {
       switch (it.instr().getDialectOpcode().raw()) {
+      case HW_PARAM_REGISTER_DEF.raw():
       case HW_INPUT_REGISTER_DEF.raw():
       case HW_OUTPUT_REGISTER_DEF.raw():
       case HW_INOUT_REGISTER_DEF.raw():

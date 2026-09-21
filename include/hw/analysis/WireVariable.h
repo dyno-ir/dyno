@@ -118,7 +118,7 @@ public:
   static std::optional<RegSlice> checkIsInputLookthru(HWValue val) {
     auto rv = checkIsInputRegRemap(val);
     if (rv && rv->reg.isOpc(HW_INPUT_REGISTER_DEF, HW_INOUT_REGISTER_DEF,
-                            HW_REF_REGISTER_DEF))
+                            HW_REF_REGISTER_DEF, HW_PARAM_REGISTER_DEF))
       return rv;
     return std::nullopt;
   }

@@ -20,8 +20,13 @@ class LiftFlipFlopsPass : public Pass<LiftFlipFlopsPass> {
     pbuild.setInsertPoint(instr);
 
     auto state = build.buildRegister(instr.q().getNumBits());
-    if (auto init = instr.initValue())
-      ctx.getCtx<HWDialectContext>().regResetValue.get_ensure(state) = init;
+    if (auto init = instr.initValue()) {
+      if (auto asConst = init.dyn_as<ConstantRef>())
+        ctx.getCtx<HWDialectContext>().regResetValue.get_ensure(state) =
+            asConst;
+      else
+        report_fatal_error(ctx, instr, "ff init val is not a constant");
+    }
     auto stateVal = pbuild.buildLoad(state);
     instr.q().replaceAllUsesWith(stateVal);
 

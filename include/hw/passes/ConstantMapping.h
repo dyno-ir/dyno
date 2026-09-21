@@ -151,6 +151,12 @@ class ConstantMappingPass : public Pass<ConstantMappingPass> {
           continue;
         if (instr.isOpc(HW_LUT) && use == instr.other(0))
           continue;
+        if (instr.isOpc(HW_STDCELL_INSTANCE) &&
+            instr.other(0)
+                    ->as<ModuleRef>()
+                    ->ports[use - instr.other_begin() - 1]
+                    .portType == HW_PARAM_REGISTER_DEF)
+          continue;
         build.setInsertPoint(instr);
         auto w = makeConstant(use->as<ConstantRef>(), zeroW, oneW);
         use.replace(w);

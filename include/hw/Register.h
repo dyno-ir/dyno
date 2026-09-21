@@ -55,7 +55,7 @@ public:
   static bool is_impl(FatObjRef<Instr> instr) {
     return InstrRef{instr}.isOpc(HW_REGISTER_DEF, HW_INPUT_REGISTER_DEF,
                                  HW_OUTPUT_REGISTER_DEF, HW_INOUT_REGISTER_DEF,
-                                 HW_REF_REGISTER_DEF);
+                                 HW_REF_REGISTER_DEF, HW_PARAM_REGISTER_DEF);
   }
   static bool is_impl(FatDynObjRef<> ref) {
     if (auto asInstr = ref.dyn_as<InstrRef>())

@@ -55,8 +55,9 @@ class ModuleInlinePass : public Pass<ModuleInlinePass> {
     unsigned portIndex = 0;
     auto inlineHook = [&](DeepCopier *self, InstrRef src,
                           BlockRef_iterator<true> dstIt) {
-      if (src.isOpc(HW_INPUT_REGISTER_DEF, HW_OUTPUT_REGISTER_DEF,
-                    HW_INOUT_REGISTER_DEF, HW_REF_REGISTER_DEF)) {
+      if (src.isOpc(HW_PARAM_REGISTER_DEF, HW_INPUT_REGISTER_DEF,
+                    HW_OUTPUT_REGISTER_DEF, HW_INOUT_REGISTER_DEF,
+                    HW_REF_REGISTER_DEF)) {
         auto srcReg = src.as<RegisterIRef>().oref();
         auto portReg = instance.ports()[portIndex++];
         self->oldToNewMap.insert(srcReg, portReg);

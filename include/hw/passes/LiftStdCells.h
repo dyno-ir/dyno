@@ -30,7 +30,7 @@ class LiftStdCellsPass : public Pass<LiftStdCellsPass> {
 
     for (auto port : cell.ports()) {
       auto reg = build.buildRegister(port.getNumBits());
-      if (port.isOpc(HW_INPUT_REGISTER_DEF)) {
+      if (port.isOpc(HW_INPUT_REGISTER_DEF, HW_PARAM_REGISTER_DEF)) {
         modInst.emplace_back(reg);
         lbuild.buildStore(reg, inputs->as<HWValue>());
         ++inputs;

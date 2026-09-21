@@ -114,6 +114,7 @@ public:
 
   // allocate a number of words. returns idx, resolvable to ptr via resolve
   size_type allocate(size_type sz) {
+    assert(sz <= slab_size);
     assert(sz && "empty alloc?");
     if (remElems < sz) [[unlikely]]
       makeSlab();

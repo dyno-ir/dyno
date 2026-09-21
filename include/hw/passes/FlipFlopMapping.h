@@ -41,6 +41,7 @@ class FlipFlopMappingPass : public Pass<FlipFlopMappingPass> {
       SET_RST_SYNC,
       HAS_SET,
       SET_POL,
+      HAS_INIT,
       HAS_INV_OUT,
       HAS_REGULAR_OUT,
       NUM_INDICES
@@ -60,6 +61,7 @@ class FlipFlopMappingPass : public Pass<FlipFlopMappingPass> {
     }
     constexpr auto hasSet() { return BitField<uint16_t, 1, HAS_SET>{raw}; }
     constexpr auto setPol() { return BitField<uint16_t, 1, SET_POL>{raw}; }
+    constexpr auto hasInit() { return BitField<uint16_t, 1, HAS_INIT>{raw}; }
     constexpr auto hasInvOut() {
       return BitField<uint16_t, 1, HAS_INV_OUT>{raw};
     }
@@ -104,6 +106,7 @@ class FlipFlopMappingPass : public Pass<FlipFlopMappingPass> {
 
     RST = NUM_MANDATORY,
     SET,
+    INIT,
     D2,
     DSEL,
     Q_INV,
@@ -128,6 +131,7 @@ class FlipFlopMappingPass : public Pass<FlipFlopMappingPass> {
     TIE1_RST,
     TIE1_SET,
     TIE1_EN,
+    TIE0_INIT,
     ADD_SYNC_RST,
     ADD_SYNC_SET,
     INVERT_RST,
@@ -202,13 +206,13 @@ class FlipFlopMappingPass : public Pass<FlipFlopMappingPass> {
       abstr.rstPol() = 0;
       abstr.hasSet() = 0;
       abstr.setPol() = 0;
+      abstr.hasInit() = 0;
 
       unsigned nRst = instr.numRsts();
       for (unsigned rstIdx = 0; rstIdx < nRst; rstIdx++) {
         auto val = instr.rstVal(rstIdx).dyn_as<ConstantRef>();
         if (!val)
-          report_fatal_error("ff with non-constant reset value: {}",
-                             HWCtxPrinter{ctx}.toString(instr));
+          report_fatal_error(ctx, instr, "ff with non-constant reset value");
 
         auto bitVal = val.getBit(i);
         if (bitVal.isUnk())
@@ -228,6 +232,17 @@ class FlipFlopMappingPass : public Pass<FlipFlopMappingPass> {
           wires.set = rstWires[rstIdx];
         }
       }
+
+      if (auto init = instr.initValue()) {
+        auto val = init.dyn_as<ConstantRef>();
+        if (!val)
+          report_fatal_error(ctx, instr, "ff with non-constant init value");
+        if (auto bval = val.getBit(i); !bval.isUnk()) {
+          abstr.hasInit() = 1;
+          wires.init = ConstantRef::fromFourState(bval);
+        }
+      }
+
       buildSingleFF(abstr, wires);
     }
 
@@ -246,6 +261,7 @@ class FlipFlopMappingPass : public Pass<FlipFlopMappingPass> {
     HWValue en;
     HWValue rst;
     HWValue set;
+    HWValue init;
 
     RegisterRef qReg;
     unsigned bitIdx;
@@ -288,6 +304,10 @@ class FlipFlopMappingPass : public Pass<FlipFlopMappingPass> {
       case FFPortType::SET:
         assert(wires.set);
         ib.addRef(wires.set);
+        break;
+      case FFPortType::INIT:
+        assert(wires.init);
+        ib.addRef(wires.init);
         break;
       case FFPortType::EN:
         assert(wires.en);
@@ -338,6 +358,12 @@ class FlipFlopMappingPass : public Pass<FlipFlopMappingPass> {
           abstr.enPol() = (type == FixupType::TIE1_EN);
           abstr.hasEn() = 1;
           break;
+
+        case FixupType::TIE0_INIT: {
+          wires.init = ConstantRef::fromBool(false);
+          abstr.hasInit() = 1;
+          break;
+        }
 
         case FixupType::ADD_SYNC_RST:
           // reset is active low when we get here
@@ -449,6 +475,10 @@ public:
       ff.abstr.hasEn() = 1;
       ff.abstr.enPol() = pol;
       return true;
+    case FlipFlopIRef::INIT_VAL:
+      ff.stdcell.ports.emplace_back(FFPortType::INIT);
+      ff.abstr.hasInit() = 1;
+      return true;
     case FlipFlopIRef::RESET_0:
     case FlipFlopIRef::RESET_1: {
       auto val = asFF.rstVal(useType == FlipFlopIRef::RESET_1 ? 1 : 0);
@@ -501,7 +531,7 @@ public:
 
   bool classifyPorts(ModuleIRef mod, FatFF &ff) {
     for (auto port : mod.ports()) {
-      if (port.isOpc(HW_INPUT_REGISTER_DEF)) {
+      if (port.isOpc(HW_INPUT_REGISTER_DEF, HW_PARAM_REGISTER_DEF)) {
         if (!classifyInput(port, ff))
           return false;
       } else if (port.isOpc(HW_OUTPUT_REGISTER_DEF)) {
@@ -567,6 +597,13 @@ public:
         break;
       abstr.hasSet() = 0;
       abstr.setPol() = 0;
+      fixupIfNone();
+      break;
+    }
+    case FixupType::TIE0_INIT: {
+      if (!abstr.hasInit())
+        break;
+      abstr.hasInit() = 0;
       fixupIfNone();
       break;
     }

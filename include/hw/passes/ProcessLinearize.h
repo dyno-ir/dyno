@@ -78,8 +78,9 @@ public:
     unsigned outputIdxCnt = 0;
 
     for (auto reg : module.regs()) {
-      bool regIsAnyInput = reg.isOpc(
-          HW_INPUT_REGISTER_DEF, HW_INOUT_REGISTER_DEF, HW_REF_REGISTER_DEF);
+      bool regIsAnyInput =
+          reg.isOpc(HW_PARAM_REGISTER_DEF, HW_INPUT_REGISTER_DEF,
+                    HW_INOUT_REGISTER_DEF, HW_REF_REGISTER_DEF);
 
       bool regIsAnyOutput = reg.isOpc(
           HW_OUTPUT_REGISTER_DEF, HW_INOUT_REGISTER_DEF, HW_REF_REGISTER_DEF);
