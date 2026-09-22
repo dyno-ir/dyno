@@ -1266,10 +1266,10 @@ TEST_SCRIPT :string("test-memory-tdp"), :block {
       output reg[WORD_SIZE-1:0] OUT_data1
   );
 
-  reg[WORD_SIZE-1:0] mem[NUM_WORDS-1:0] /* verilator public */;
+  reg[WORD_SIZE-1:0] mem[NUM_WORDS-1:0];
 
-  reg ce_reg = 1;
-  reg ce1_reg = 1;
+  reg ce_reg;
+  reg ce1_reg;
   reg we_reg;
   reg[$clog2(NUM_WORDS)-1:0] addr_reg;
   reg[$clog2(NUM_WORDS)-1:0] addr1_reg;
