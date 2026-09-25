@@ -1002,6 +1002,39 @@ TEST_SCRIPT :string("test-memory-basic"), :block {
   meta.RANDOM_EQUIVALENCE_CHECK_PASS map("cycles": "10000", "clockMode": "CLOCK")
 }
 
+TEST_SCRIPT :string("test-memory-multidim"), :block {
+  PARSE_VERILOG_PASS map("code":[{
+    module Test#(parameter int WIDTH = 32) (
+      input logic clk,
+      input logic[0:0] IN_waddrX,
+      input logic[1:0] IN_waddrY,
+      input logic[2:0] IN_waddrZ,
+      input logic[WIDTH-1:0] IN_wdata,
+      input logic[0:0] IN_wmask,
+
+      input logic[0:0] IN_raddrX,
+      input logic[1:0] IN_raddrY,
+      input logic[2:0] IN_raddrZ,
+      output logic[WIDTH-1:0] OUT_rdata
+    );
+
+    logic[WIDTH-1:0] mem[1:0][2:0][7:0];
+
+    always_ff@(posedge clk)
+      if (IN_wmask[0] && IN_waddrY <= 2)
+        mem[IN_waddrX][IN_waddrY][IN_waddrZ] <= IN_wdata;
+
+    always_comb
+      OUT_rdata = mem[IN_raddrX][IN_raddrY][IN_raddrZ];
+
+    endmodule
+  }])
+  CALL %memoryTestSynth
+  meta.ASSERT_EXISTS_PASS map("regex": "STDCELL_INSTANCE.+%FakeRAM_288", "num": "6")
+  CALL %memoryTestLift
+  meta.RANDOM_EQUIVALENCE_CHECK_PASS map("cycles": "10000", "clockMode": "CLOCK", "relaxXZ": "1")
+}
+
 TEST_SCRIPT :string("test-ff-clken"), :block {
   PARSE_VERILOG_PASS map("code":[{
     module Test#(parameter int WIDTH = 32) (

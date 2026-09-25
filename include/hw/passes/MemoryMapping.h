@@ -209,8 +209,8 @@ private:
     SmallVec<PipelineAnalysis::Pipeline, 4> modLoadPipelines;
 
     // interesting state goes in mapping so we can save/restore. idea is explore
-    // multiple mappings and restore the best. state that's directly in
-    // here is easy to recompute (done in constructor).
+    // multiple mappings and restore the best. state that's directly here in
+    // MemoryMapper (not mapping) is easy to recompute (done in constructor).
     MemoryMapping mapping;
 
     // (i*numPorts+:numPorts) is bit field of ports mutually exclusive with port
@@ -577,8 +577,8 @@ private:
           mapping.tgtAdjModelWidth =
               (mapping.getAdjModelWidth() / actualPortsLCM) * actualPortsLCM;
           // if depth too small, fail
-          if ((mapping.tgtAdjModelWidth *
-               *modelLoads[0].terms().front().getMax()) < *actual.getNumBits())
+          if ((mapping.tgtAdjModelWidth * getCombinedMax(modelLoads[0])) <
+              *actual.getNumBits())
             return false;
         }
 
@@ -748,8 +748,7 @@ private:
           }
           modelPortMeta.addr = actPtr;
 
-          modelPortMeta.idxOffs =
-              (adjAddr - baseAddr) / modSt.terms().front().getFact();
+          modelPortMeta.idxOffs = (adjAddr - baseAddr) / *getMinFact(modSt);
 
           // commit mapping now that we can't fail anymore
           triggerMapping.commit();
@@ -847,6 +846,36 @@ private:
     }
 
     template <typename RefT>
+    HWValue getCombinedAddr(HWInstrBuilder build, RefT instr) {
+      HWValue addr = nullref;
+      auto min = getMinFact(instr);
+      assert(min);
+      // express address in terms of minimal factor's stride
+      for (auto term : instr.terms()) {
+        auto idx = term.getIdx();
+        assert(term.getFact() % *min == 0);
+        if (term.getFact() != min) {
+          ConstantBuilder cbuild{build.ctx.getStore<Constant>()};
+          idx =
+              build.buildMul(idx, cbuild.val(32, term.getFact() / *min).get());
+        }
+        addr = addr ? build.buildAdd(addr, idx) : idx;
+      }
+      return addr;
+    }
+
+    template <typename RefT> uint32_t getCombinedMax(RefT instr) {
+      uint32_t max = 0;
+      auto min = getMinFact(instr);
+      assert(min);
+      for (auto term : instr.terms()) {
+        assert(term.getFact() % *min == 0);
+        max += (*term.getMax() * term.getFact()) / *min;
+      }
+      return max;
+    }
+
+    template <typename RefT>
     void applyPort(Context &ctx, uint32_t actLoadIdx, RefT actLoad,
                    PortPartition &part, uint32_t factor, auto &&connect,
                    auto &&connectReverse, auto &&getConnection,
@@ -854,12 +883,10 @@ private:
       HWInstrBuilder build{ctx, actLoad};
 
       HWValue subIdx = nullref;
-      // todo: more than one term
-      assert(actLoad.terms().size() == 1);
-      auto addr = actLoad.terms().front().getIdx();
+      auto addr = getCombinedAddr(build, actLoad);
+
       if (factor != 1) {
-        subIdx = build.buildUMod(actLoad.terms().front().getIdx(),
-                                 ConstantRef::fromU32(factor));
+        subIdx = build.buildUMod(addr, ConstantRef::fromU32(factor));
         addr = build.buildUDiv(addr, ConstantRef::fromU32(factor));
       }
 
@@ -990,6 +1017,9 @@ private:
         }
 
         // Connected address, possibly MUX'd by port enable if shared
+        if (modLoad.terms().size() != 1)
+          report_fatal_error(
+              "not supported: model memory w/ multi-dimensional access");
         auto existingConn = getConnection(
             modLoad.terms().front().getIdx().template as<WireRef>(), repIdx);
         if (existingConn) {
@@ -1412,7 +1442,18 @@ public:
       if (uses.empty())
         continue;
       if (!Range{uses}.all([](auto use) {
-            return use.instr().isOpc(HW_MEM_LOAD, HW_MEM_STORE);
+            // only consider well formed memories, aligned access and aligned
+            // terms if multidimensional
+            if (auto asLoad = use.instr().template dyn_as<MemLoadIRef>()) {
+              if (getMinFact(asLoad).value_or(0) != asLoad.getLen())
+                return false;
+            } else if (auto asStore =
+                           use.instr().template dyn_as<MemStoreIRef>()) {
+              if (getMinFact(asStore).value_or(0) != asStore.getLen())
+                return false;
+            } else
+              return false;
+            return true;
           }))
         continue;
       findBestAndMap(reg);

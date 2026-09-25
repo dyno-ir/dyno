@@ -853,7 +853,7 @@ private:
       auto curAddr = baseOffs + i * fact;
       assert(size);
       auto word = build.buildExt(
-          elemSize, build.buildSplice(pad, size, curAddr), OP_ANYEXT);
+          elemSize, build.buildSplice(cur, size, curAddr), OP_ANYEXT);
       auto sel = build.buildSplice(oneHot, 1, i);
       if (enable)
         sel = build.buildAnd(sel, enable);

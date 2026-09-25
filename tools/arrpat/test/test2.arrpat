@@ -328,7 +328,28 @@ replace {
   $opc $out, $x
 }
 
-
+// ext ext patterns (todo: combine with simplifyBitAliases)
+match {
+  OP_ZEXT $ext, $x
+  OP_ZEXT $out, $ext:HW_WIRE
+}
+replace {
+  OP_ZEXT $out, $x
+}
+match {
+  OP_SEXT $ext, $x
+  OP_SEXT $out, $ext:HW_WIRE
+}
+replace {
+  OP_SEXT $out, $x
+}
+match {
+  OP_ANYEXT $ext, $x
+  OP_ANYEXT $out, $ext:HW_WIRE
+}
+replace {
+  OP_ANYEXT $out, $x
+}
 
 // trunc(load())
 match {

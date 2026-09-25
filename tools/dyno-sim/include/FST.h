@@ -193,6 +193,7 @@ public:
     }
   }
 
+private:
   template <typename T>
   void createVarImpl(T ref, dyno::FatTypeRef type, VarDir dir, uint32_t numBits,
                      const char *name, uint32_t *aliasIdx) {
@@ -211,6 +212,7 @@ public:
     }
   }
 
+public:
   uint64_t getTime() const { return time; }
 
 private:

@@ -1049,8 +1049,9 @@ public:
           HWInstrRef{wire.getDefI()}.parentMod(ctx) != module)
         continue;
       auto name = std::string("w") + std::to_string(wire.getObjID().num);
+      auto arr = std::to_array({name.c_str()});
       fstWriter->createVar(wire, nullref, RegWireFSTWriter::VarDir::INPUT,
-                           *wire.getNumBits(), InitListRange{name.c_str()});
+                           *wire.getNumBits(), Range{arr});
     }
 #endif
 
