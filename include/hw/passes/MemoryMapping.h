@@ -1445,11 +1445,11 @@ public:
             // only consider well formed memories, aligned access and aligned
             // terms if multidimensional
             if (auto asLoad = use.instr().template dyn_as<MemLoadIRef>()) {
-              if (getMinFact(asLoad).value_or(0) != asLoad.getLen())
+              if (auto f = getMinFact(asLoad); !f || asLoad.getLen() > *f)
                 return false;
             } else if (auto asStore =
                            use.instr().template dyn_as<MemStoreIRef>()) {
-              if (getMinFact(asStore).value_or(0) != asStore.getLen())
+              if (auto f = getMinFact(asStore); !f || asStore.getLen() > *f)
                 return false;
             } else
               return false;
