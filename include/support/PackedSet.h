@@ -1,5 +1,6 @@
 #pragma once
 
+#include "support/SmallVec.h"
 #include <cassert>
 #include <utility>
 

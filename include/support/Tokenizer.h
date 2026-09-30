@@ -29,6 +29,7 @@ public:
       pos = parent->s.find_first_not_of(parent->delims, pos);
       if (pos == std::string_view::npos) {
         len = 0;
+        pos = parent->s.size();
         return *this;
       }
       size_t end = parent->s.find_first_of(parent->delims, pos);

@@ -214,7 +214,7 @@ public:
       if (c.noValue())
         report_fatal_error("flag --{} does not accept an argument",
                            c.longName.data());
-    } else {
+    } else if (!c.noValue()) {
       // --flag ARG
       auto next = it + 1;
       if (*next && (*next)[0] != '-') {
@@ -237,7 +237,7 @@ public:
     // next isn't valid flag.
     while (true) {
       char nm = (*it)[offset];
-      auto mapIt = shortArgMap[nm];
+      auto mapIt = shortArgMap[static_cast<unsigned char>(nm)];
       if (!mapIt) {
         if (offset == 1) {
           // first char has to be a valid arg
@@ -267,7 +267,7 @@ public:
         arg = &(*it)[offset + 1];
       else
         arg = &(*it)[offset];
-    } else {
+    } else if (!c->noValue()) {
       // -a ARG
       auto next = it + 1;
       if (*next && (*next)[0] != '-') {
@@ -349,11 +349,11 @@ inline void CmdLineArg<bool>::parse(CmdLineArgBase *self, const char *ptr) {
     // flag specified without argument sets it.
     static_cast<CmdLineArg *>(self)->value = true;
   else {
-    if (strcasecmp(ptr, "1") || strcasecmp(ptr, "y") ||
-        strcasecmp(ptr, "yes") || strcasecmp(ptr, "true"))
+    if (strcasecmp(ptr, "1") == 0 || strcasecmp(ptr, "y") == 0 ||
+        strcasecmp(ptr, "yes") == 0 || strcasecmp(ptr, "true") == 0)
       static_cast<CmdLineArg *>(self)->value = true;
-    else if (strcasecmp(ptr, "0") || strcasecmp(ptr, "n") ||
-             strcasecmp(ptr, "no") || strcasecmp(ptr, "false"))
+    else if (strcasecmp(ptr, "0") == 0 || strcasecmp(ptr, "n") == 0 ||
+             strcasecmp(ptr, "no") == 0 || strcasecmp(ptr, "false") == 0)
       static_cast<CmdLineArg *>(self)->value = false;
     else
       report_fatal_error("invalid bool value: {}", ptr);

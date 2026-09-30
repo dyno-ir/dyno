@@ -1,6 +1,7 @@
 #pragma once
 
 #include "support/Optional.h"
+#include "support/SmallVec.h"
 #include <cassert>
 
 template <typename T> class VectorLUT {

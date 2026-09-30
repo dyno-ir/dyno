@@ -2,6 +2,7 @@
 
 #include "support/DenseMap.h"
 #include "support/DenseMultimap.h"
+#include "support/SmallVec.h"
 #include <cstdint>
 
 template <typename T, typename Container = Vec<T>,

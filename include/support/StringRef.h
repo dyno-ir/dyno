@@ -6,6 +6,7 @@
 #include <cstring>
 #include <format>
 #include <limits>
+#include <ostream>
 #include <string>
 #include <string_view>
 
@@ -54,14 +55,24 @@ public:
       return cself().end();
     return cself().begin() + idx;
   }
-  template <typename T> const char *find(T &&other) {
-    auto idx = std::string_view(self()).find(std::string_view(other));
+  template <typename T> const char *find(T &&other) const {
+    auto idx = std::string_view(cself()).find(std::string_view(other));
     if (idx == std::string_view::npos)
       return cself().end();
     return cself().begin() + idx;
   }
   bool contains(char c) const { return find(c) != cself().end(); }
+  template <typename T> bool contains(T &&other) const {
+    return find(std::forward<T>(other)) != cself().end();
+  }
 };
+
+template <typename Derived>
+std::ostream &operator<<(std::ostream &os, const StringRefMixin<Derived> &ref) {
+  const Derived &d = static_cast<const Derived &>(ref);
+  os.write(d.data(), d.size());
+  return os;
+}
 
 class StringRef : public ArrayRef<char>, public StringRefMixin<StringRef> {
 public:

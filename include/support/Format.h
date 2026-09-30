@@ -3,6 +3,7 @@
 #include "support/StringRef.h"
 #include <memory>
 #include <ostream>
+#include <type_traits>
 #include <utility>
 
 class FormatObjBase {
@@ -31,6 +32,8 @@ template <typename T> class FormatObj : public FormatObjBase {
 
 public:
   FormatObj(T &&obj, FormatObjBase *next)
+      : FormatObjBase(next, &funcs), t(std::forward<T>(obj)) {}
+  FormatObj(const T &obj, FormatObjBase *next)
       : FormatObjBase(next, &funcs), t(obj) {}
 };
 
@@ -41,11 +44,16 @@ class Format {
 
   template <typename T, typename... Rest> void add(T &&t, Rest &&...rest) {
     add(std::forward<Rest>(rest)...);
-    auto *newNode =
-        reinterpret_cast<FormatObj<T> *>(malloc(sizeof(FormatObj<T>)));
-    list = std::construct_at(newNode, std::forward<decltype(t)>(t), list);
+    addSingle(std::forward<T>(t));
   }
   void add() {}
+
+  template <typename T> void addSingle(T &&t) {
+    using Arg = std::decay_t<T>;
+    auto *newNode =
+        reinterpret_cast<FormatObj<Arg> *>(malloc(sizeof(FormatObj<Arg>)));
+    list = std::construct_at(newNode, std::forward<T>(t), list);
+  }
 
 public:
   Format(const Format &) = delete;
