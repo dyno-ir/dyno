@@ -3152,8 +3152,10 @@ r10 = std::next(r9);
 if (r10 != r2) goto fail_67;
 
   FatDynObjRef<> w = ctx.getStore<Wire>().create((*Range{r7, r8}.begin())->as<HWValue>().getNumBits()); RefRange{r12, r13} = w;
-auto r11 = build.buildInstrRaw(OP_NOT, (r13-r12));
+auto r11 = build.buildInstrRaw(OP_NOT, (r13-r12)+(r8-r7));
 copyOperands(r11, r12, r13);
+r11.other();
+copyOperands(r11, r7, r8);
 auto r14 = build.buildInstrRaw(HW_FLIP_FLOP_SRST, (r3-r1)+(r4-r3)+(r13-r12)+1+(r7-r6)+(r10-r9));
 copyOperands(r14, r1, r3);
 r14.other();
@@ -3253,8 +3255,10 @@ r9 = std::next(r8);
 if (r9 != r2) goto fail_69;
 
   FatDynObjRef<> w = ctx.getStore<Wire>().create((*Range{r7, r8}.begin())->as<HWValue>().getNumBits()); RefRange{r11, r12} = w;
-auto r10 = build.buildInstrRaw(OP_NOT, (r12-r11));
+auto r10 = build.buildInstrRaw(OP_NOT, (r12-r11)+(r8-r7));
 copyOperands(r10, r11, r12);
+r10.other();
+copyOperands(r10, r7, r8);
 auto r13 = build.buildInstrRaw(HW_FLIP_FLOP_SRST, (r3-r1)+(r4-r3)+(r12-r11)+1+(r7-r6));
 copyOperands(r13, r1, r3);
 r13.other();

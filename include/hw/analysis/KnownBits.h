@@ -3,8 +3,10 @@
 #include "dyno/AnalysisCache.h"
 #include "dyno/Constant.h"
 #include "dyno/Context.h"
+#include "dyno/IDs.h"
 #include "dyno/Instr.h"
 #include "dyno/Opcode.h"
+#include "hw/HWContext.h"
 #include "hw/HWPrinter.h"
 #include "hw/HWValue.h"
 #include "hw/IDs.h"
@@ -349,6 +351,57 @@ public:
         break;
       }
 
+      case *HW_LOAD: {
+        auto asLoad = instr.as<LoadIRef>();
+        if (!asLoad.isConstantOffs())
+          // todo: for small number of discrete offsets maybe combine?
+          goto ret_unknown;
+        auto reg = asLoad.reg();
+        auto initValPtr =
+            ctx.getCtx<HWDialectContext>().regResetValue.find(reg);
+        auto initVal = (initValPtr && initValPtr->getType() == CORE_CONSTANT)
+                           ? ctx.getStore<Constant>().resolve(*initValPtr)
+                           : nullref;
+        if (initVal)
+          BigInt::rangeSelectOp4S(retVal.val, initVal, asLoad.getBase(),
+                                  asLoad.getLen());
+        else
+          retVal.val = PatBigInt::undef(asLoad.getLen());
+        assert(retVal.val.getNumBits() == asLoad.getLen());
+
+        auto setRegion = [&](uint32_t globOffs, uint32_t globLen) {
+          int64_t offs = globOffs - (int64_t)asLoad.getBase();
+          int64_t len = globLen;
+          if (offs >= asLoad.getLen())
+            return;
+          if (offs < 0) {
+            len += offs;
+            if (len <= 0)
+              return;
+            offs = 0;
+          }
+          len = std::min<int64_t>(len, asLoad.getLen());
+          BigInt::insertOp4S(retVal.val, retVal.val, PatBigInt::undef(len),
+                             offs);
+          assert(retVal.val.getNumBits() == asLoad.getLen());
+        };
+
+        for (auto use : reg.uses()) {
+          auto instr = use.instr();
+          if (auto asStore = instr.dyn_as<StoreIRef>()) {
+            auto [offs, len] = asStore.getConstAccessRange();
+            setRegion(offs, len);
+          } else if (instr.isOpc(HW_INSTANCE, HW_MEM_STORE)) {
+            goto ret_unknown;
+          }
+        }
+
+        cache.insert(wire, retVal.val);
+        stack.pop_back();
+        break;
+      }
+
+      ret_unknown:
       default:
         retVal = KnownBitsVal{PatBigInt::undef(*wire.getNumBits())};
         cache.insert(wire, retVal.val);

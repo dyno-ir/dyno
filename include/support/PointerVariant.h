@@ -18,8 +18,8 @@ public:
   static constexpr uintptr_t PointerMask =
       bit_mask_zeros<uintptr_t>(LowBitsAvail);
 
-  Ptr getPtr() { return reinterpret_cast<Ptr>(getPtrAsInt()); }
-  uintptr_t getPtrAsInt() { return base & PointerMask; }
+  Ptr getPtr() const { return reinterpret_cast<Ptr>(getPtrAsInt()); }
+  uintptr_t getPtrAsInt() const { return base & PointerMask; }
   auto getInt() const { return CValue{base}; }
   void setInt(unsigned val) { Value{base} = val; }
   void setPtr(Ptr ptr) { setPtrAsInt(reinterpret_cast<uintptr_t>(ptr)); }

@@ -820,9 +820,9 @@ public:
     // or double indirection for mapping without eager allocation.
     regMap.clear();
     regMap.resize(ctx.getStore<Register>().numIDs());
+
     isDynRegister.clear();
     isDynRegister.resize(ctx.getStore<Register>().numIDs());
-
     for (auto reg : mod.regs())
       isDynRegister[reg.oref()] = reg.isDynAddressed();
 
@@ -830,8 +830,15 @@ public:
   }
 
   void runOnModule(ModuleIRef mod) {
+    isDynRegister.clear();
+    isDynRegister.resize(ctx.getStore<Register>().numIDs());
+    for (auto reg : mod.regs())
+      isDynRegister[reg.oref()] = reg.isDynAddressed();
+
     for (auto proc : mod.procs()) {
-      runOnProc(mod, proc);
+      regMap.clear();
+      regMap.resize(ctx.getStore<Register>().numIDs());
+      runOnBlock(proc, proc.block());
     }
   }
 

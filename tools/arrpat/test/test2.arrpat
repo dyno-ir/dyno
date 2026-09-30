@@ -874,7 +874,7 @@ match {
   HW_FLIP_FLOP_SRST $q, $clk, #1'd1, #1'd1, $other_rsts..., $d, #1'd0, $init
 }
 replace {
-  OP_NOT $d_inv:wire_like($d)
+  OP_NOT $d_inv:wire_like($d), $d
   HW_FLIP_FLOP_SRST $q, $clk, $d_inv, #1'd1, $other_rsts..., $init
 }
 
@@ -888,7 +888,7 @@ match {
   HW_FLIP_FLOP_SRST $q, $clk, #1'd1, #1'd1, $other_rsts..., $d, #1'd0
 }
 replace {
-  OP_NOT $d_inv:wire_like($d)
+  OP_NOT $d_inv:wire_like($d), $d
   HW_FLIP_FLOP_SRST $q, $clk, $d_inv, #1'd1, $other_rsts...
 }
 

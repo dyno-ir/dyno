@@ -16,6 +16,20 @@ class InactiveCopyPass : public Pass<InactiveCopyPass> {
     auto copy = copier.copyInstr(mod, BlockRef_iterator<true>::invalid());
     copy.as<ModuleIRef>().mod()->ignore = true;
     copy.as<ModuleIRef>().mod()->name += "__inactive";
+
+    // this should really be done in register copy method. maybe expose it
+    // as a fully free method for SoA type objects.
+    auto &regNameInfo = ctx.getCtx<HWDialectContext>().regNameInfo;
+    auto &regInitValue = ctx.getCtx<HWDialectContext>().regResetValue;
+    auto &regTypeInfo = ctx.getCtx<HWDialectContext>().regTypeInfo;
+    for (auto [oldRef, newRef] : copier.oldToNewMap) {
+      if (auto oldReg = oldRef.dyn_as<ObjRef<Register>>()) {
+        regNameInfo.copyNames(oldReg, newRef.as<ObjRef<Register>>());
+        if (auto val = regInitValue.find(oldReg))
+          regInitValue.get_ensure(newRef.as<ObjRef<Register>>()) = *val;
+        regTypeInfo.copyType(oldReg, newRef.as<ObjRef<Register>>());
+      }
+    }
   }
 
 public:

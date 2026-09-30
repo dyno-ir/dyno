@@ -281,6 +281,19 @@ public:
       return commutativeOpWireOrder(lhs.as<WireRef>(), rhs.as<WireRef>());
     return lhs.is<WireRef>();
   }
+  static bool onehotMuxOperandOrder(HWValue lhs, HWValue rhs) {
+    if (lhs.is<WireRef>() && rhs.is<WireRef>())
+      return commutativeOpWireOrder(lhs.as<WireRef>(), rhs.as<WireRef>());
+    if (lhs.is<ConstantRef>() && rhs.is<ConstantRef>()) {
+      if (lhs.as<ConstantRef>().getIs4S() != rhs.as<ConstantRef>().getIs4S())
+        return lhs.as<ConstantRef>().getIs4S();
+      // 2 state compare on possible 4 state values. fine since we only want
+      // canonical ordering.
+      return BigInt::icmpOp(lhs.as<ConstantRef>(), rhs.as<ConstantRef>(),
+                            BigInt::ICMP_ULT);
+    }
+    return lhs.is<WireRef>();
+  }
   template <typename Ref>
   static bool addressGenTermOperandOrder(Ref lhs, Ref rhs) {
     if (!lhs.getMax() && rhs.getMax())
@@ -1737,7 +1750,7 @@ public:
     }
 
     Range{cases}.sort([](auto &lhs, auto &rhs) {
-      return commutativeOpOperandOrder(lhs.second, rhs.second);
+      return onehotMuxOperandOrder(lhs.second, rhs.second);
     });
 
     auto ib = buildInstrRaw(HW_ONEHOT_MUX, 1 + cases.size() * 2);
@@ -1762,7 +1775,7 @@ public:
     }
 
     templ.others().pairwise().sort([](auto lhs, auto rhs) {
-      return commutativeOpOperandOrder(lhs.second, rhs.second);
+      return onehotMuxOperandOrder(lhs.second, rhs.second);
     });
 
     insertInstr(templ.build(HW_ONEHOT_MUX));

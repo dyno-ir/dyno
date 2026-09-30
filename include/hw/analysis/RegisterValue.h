@@ -923,6 +923,17 @@ template <typename Frag, size_t NumInline = 4> struct GenericPartitions {
       }
     }
 
+    defragment();
+
+    unsigned cur [[maybe_unused]] = 0;
+    for (auto frag : frags) {
+      assert(frag.dstAddr == cur);
+      cur = frag.dstAddr + frag.len;
+    }
+    assert(originalTotalLen == getLen());
+  }
+
+  void defragment() {
     size_t outIdx = 0;
     for (auto &frag : frags) {
       if (frag.len != 0) {
@@ -934,13 +945,6 @@ template <typename Frag, size_t NumInline = 4> struct GenericPartitions {
       }
     }
     frags.downsize(outIdx);
-
-    unsigned cur [[maybe_unused]] = 0;
-    for (auto frag : frags) {
-      assert(frag.dstAddr == cur);
-      cur = frag.dstAddr + frag.len;
-    }
-    assert(originalTotalLen == getLen());
   }
 
   void write(GenericPartitions &src, uint32_t srcAddr, uint32_t dstAddr,

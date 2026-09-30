@@ -242,7 +242,8 @@ protected:
 
 public:
   SmallVecImpl &operator=(SmallVecImpl &&o) {
-    // todo: specialize same size POD data to memcpy (plus maybe set data nullptr)
+    // todo: specialize same size POD data to memcpy (plus maybe set data
+    // nullptr)
     if (&o == this)
       return *this;
 
@@ -253,6 +254,8 @@ public:
       this->cap = o.cap;
 
       o.arr = nullptr;
+      o.sz = 0;
+      o.cap = 0;
     } else if (this->size() >= o.size()) {
       iterator it = this->begin();
 

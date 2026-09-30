@@ -87,7 +87,9 @@ private:
       return frag;
     }
 
-    bool abstractEquals(const PortFrag &) const { return false; }
+    bool abstractEquals(const PortFrag &o) const {
+      return mapping == o.mapping;
+    }
   };
 
   class PortPartition : public GenericPartitions<PortFrag, 4> {
@@ -564,13 +566,18 @@ private:
 
       SmallVec<uint32_t, 32> worklist(IntRange(actualPorts.size()).reverse());
 
+      for (auto &part : partitions)
+        part = {};
+
       // Usually the modelWidth is mapping.repeatCount * modelPortWidth. We can
       // slightly reduce it to e.g. implement a 32-bit wide memory with 2x
       // 18-bit model memories. This is done greedily via this function.
       auto setAdjModelWidth = [&](uint32_t repIdx, uint32_t offs,
                                   uint32_t numDisable) {
-        mapping.modelRangeEnable.writeSingle(repIdx * modelPortWidth + offs,
-                                             numDisable);
+        auto globOffs = repIdx * modelPortWidth + offs;
+        mapping.modelRangeEnable.writeSingle(globOffs, numDisable);
+
+        bool fastBacktrack = true;
 
         // not enough bits -> downsize stripe count
         if (mapping.getAdjModelWidth() < mapping.tgtAdjModelWidth) {
@@ -580,6 +587,57 @@ private:
           if ((mapping.tgtAdjModelWidth * getCombinedMax(modelLoads[0])) <
               *actual.getNumBits())
             return false;
+          fastBacktrack = false;
+        }
+
+        if (fastBacktrack) {
+          // for all actual ports check if fine
+          for (auto actPortIdx : IntRange(actualPorts.size())) {
+            PortPartition &part = partitions[actPortIdx];
+            bool anyIntersect = false;
+            // for now only check if any part covered -> clear, re add to
+            // worklist
+
+            for (PortFrag &frag : part.frags) {
+              // undef or unmapped -> ignore
+              if (!frag.mapping || *frag.mapping == usedModelPort.size())
+                continue;
+              uint32_t globIdx = *frag.mapping;
+              uint32_t modStIdx = globIdx % modelPorts.size();
+              uint32_t repIdx = globIdx / modelPorts.size();
+              auto &modSt = modelPorts[modStIdx];
+
+              uint32_t unadjBaseAddr = repIdx * modelPortWidth + modSt.base();
+              uint32_t unadjBaseLen = modSt.getLen();
+
+              if (unadjBaseAddr < globOffs + numDisable &&
+                  globOffs < unadjBaseAddr + unadjBaseLen) {
+                auto boundPortsIt = mapping.boundPorts.find(
+                    modSt.addr().template as<PointerRef>());
+                if (boundPortsIt && repIdx < boundPortsIt.val().size())
+                  boundPortsIt.val()[repIdx] = {};
+                if (modSt.trigger()) {
+                  auto boundTriggersIt = mapping.boundTriggers.find(
+                      modSt.trigger().template as<TriggerRef>());
+                  if (repIdx < boundTriggersIt.val().size())
+                    boundTriggersIt.val()[repIdx] = nullref;
+                }
+                usedModelPort[globIdx] = 0;
+                frag.mapping = nullopt;
+                anyIntersect = true;
+              }
+            }
+            assert(!anyIntersect && "test assert to see if this ever hits. "
+                                    "logic above should handle");
+
+            part.defragment();
+            if (anyIntersect)
+              worklist.emplace_back(actPortIdx);
+
+            continue;
+          }
+          Range{worklist}.sort(std::greater{});
+          return true;
         }
 
         // restart from beginning
@@ -590,6 +648,8 @@ private:
         mapping.boundTriggers.clear();
 
         usedModelPort.clearAllBits();
+        for (auto &part : partitions)
+          part = {};
 
         return true;
       };
@@ -617,16 +677,19 @@ private:
         if (adjActPortLen < mapping.tgtAdjModelWidth) {
           adjActPortLen = mapping.tgtAdjModelWidth;
         }
-        part = PortPartition{adjActPortLen};
-        if (*actFact != actSt.getLen()) {
-          // if the port doesn't actually access the whole factor size (e.g.
-          // byte enable) mask off.
-          uint32_t undefModelInst = usedModelPort.size();
-          for (unsigned i = 0; i < (adjActPortLen / *actFact); i++) {
-            auto baseIdx = *actFact * i;
-            part.writeSingle(baseIdx + 0, actSt.base(), undefModelInst);
-            auto idx = actSt.base() + actSt.getLen();
-            part.writeSingle(baseIdx + idx, *actFact - idx, undefModelInst);
+
+        if (part.getLen() == 0) {
+          part = PortPartition{adjActPortLen};
+          if (*actFact != actSt.getLen()) {
+            // if the port doesn't actually access the whole factor size (e.g.
+            // byte enable) mask off.
+            uint32_t undefModelInst = usedModelPort.size();
+            for (unsigned i = 0; i < (adjActPortLen / *actFact); i++) {
+              auto baseIdx = *actFact * i;
+              part.writeSingle(baseIdx + 0, actSt.base(), undefModelInst);
+              auto idx = actSt.base() + actSt.getLen();
+              part.writeSingle(baseIdx + idx, *actFact - idx, undefModelInst);
+            }
           }
         }
 
@@ -678,6 +741,8 @@ private:
                               ((lowIdx + 1) * subPortBoundary) + 1;
 
             if (lowIdx != highIdx) {
+              // reenqueue
+              worklist.emplace_back(actStIdx);
               //  if we set adjModelWidth we need to restart from beginning
               if (!setAdjModelWidth(repIdx,
                                     adjModPortLen - overflBits + modSt.base(),

@@ -37,6 +37,7 @@
 #include "support/DenseMap.h"
 #include "support/DynBitSet.h"
 #include "support/ErrorRecovery.h"
+#include "support/MacroUtil.h"
 #include "support/Ranges.h"
 #include "support/SmallVec.h"
 #include "support/Tuple.h"
@@ -329,19 +330,7 @@ private:
     auto compare = [](auto lhs, auto rhs) {
       auto lhsV = std::get<1>(lhs);
       auto rhsV = std::get<1>(rhs);
-      if (lhsV.template is<WireRef>() && rhsV.template is<WireRef>())
-        return lhsV.getObjID() < rhsV.getObjID();
-      else if (lhsV.template is<WireRef>() || rhsV.template is<WireRef>())
-        return !lhsV.template is<WireRef>();
-      else {
-        // run 2 state compare on possibly 4 state numbers, we just want an
-        // order
-        if (lhsV.template as<ConstantRef>().getIs4S() !=
-            rhsV.template as<ConstantRef>().getIs4S())
-          return !lhsV.template as<ConstantRef>().getIs4S();
-        return BigInt::icmpUnsignedLessOp(lhsV.template as<ConstantRef>(),
-                                          rhsV.template as<ConstantRef>());
-      }
+      return HWInstrBuilder::onehotMuxOperandOrder(lhsV, rhsV);
     };
 
     HWInstrBuilder build{ctx, instr};
@@ -2165,32 +2154,31 @@ private:
   }
 
   PatBool manual(InstrRef instr) {
+#define MATCH(x)                                                               \
+  if (auto trueV = x)                                                          \
+    return trueV;
+
     if (instr.getNumDefs() == 1 && instr.def(0)->is<WireRef>())
-      if (auto trueV = knownBitsConstProp(instr))
-        return trueV;
+      MATCH(knownBitsConstProp(instr))
 
     if (instr.isOpc(HW_GEP))
-      if (auto trueV = simplifyAddressing(instr.as<GEPIRef>()))
-        return trueV;
+      MATCH(simplifyAddressing(instr.as<GEPIRef>()))
 
     switch (*instr.getDialectOpcode()) {
 #define LAMBDA(opc, ib, cb, bib) case *opc:
       FOR_HW_COMM_OPS(LAMBDA)
 #undef LAMBDA
-      if (auto trueV = simplifyAndCanonicalizeCommOps(instr))
-        return trueV;
+      MATCH(simplifyAndCanonicalizeCommOps(instr))
       break;
 
     case *HW_STORE:
     case *HW_STORE_DEFER: {
-      if (auto trueV = storeValConstProp(instr.as<StoreIRef>()))
-        return trueV;
+      MATCH(storeValConstProp(instr.as<StoreIRef>()))
       break;
     }
 
     case *HW_LOAD: {
-      if (auto trueV = nonTemporalLoadElim(instr.as<LoadIRef>()))
-        return trueV;
+      MATCH(nonTemporalLoadElim(instr.as<LoadIRef>()))
       break;
     }
 
@@ -2198,78 +2186,60 @@ private:
     case *OP_TRUNC:
     case *HW_SPLICE:
     case *HW_INSERT: {
-      if (auto trueV = simplifyBitAliases(instr))
-        return trueV;
+      MATCH(simplifyBitAliases(instr))
       break;
     }
 
     case *OP_YIELD: {
       auto parent = HWInstrRef{instr}.parentBlock(ctx).defI();
       if (parent.isOpc(OP_IF)) {
-        if (auto trueV = simplifyYieldValues(instr.as<IfInstrRef>()))
-          return trueV;
+        MATCH(simplifyYieldValues(instr.as<IfInstrRef>()))
       } else if (parent.isOpc(OP_CASE, OP_CASE_DEFAULT, HW_CASE_Z, HW_CASE_X)) {
         auto swInstr =
             HWInstrRef{parent}.parentBlock(ctx).defI().as<SwitchInstrRef>();
         assert(swInstr.isOpc(OP_SWITCH));
-        if (auto trueV = simplifyYieldValues(swInstr))
-          return trueV;
+        MATCH(simplifyYieldValues(swInstr))
       }
       break;
     }
 
     case *OP_IF: {
-      if (auto trueV = simplifyIfStmt(instr.as<IfInstrRef>()))
-        return trueV;
-      if (auto trueV = simplifyYieldValues(instr.as<IfInstrRef>()))
-        return trueV;
+      MATCH(simplifyIfStmt(instr.as<IfInstrRef>()))
+      MATCH(simplifyYieldValues(instr.as<IfInstrRef>()))
       break;
     }
 
     case *OP_SWITCH: {
-      if (auto trueV = simplifySwitchStmt(instr.as<SwitchInstrRef>()))
-        return trueV;
-      if (auto trueV = simplifyYieldValues(instr.as<SwitchInstrRef>()))
-        return trueV;
+      MATCH(simplifySwitchStmt(instr.as<SwitchInstrRef>()))
+      MATCH(simplifyYieldValues(instr.as<SwitchInstrRef>()))
       break;
     }
 
     case *HW_MUX: {
-      if (auto trueV = liftMUX(instr))
-        return trueV;
+      MATCH(liftMUX(instr))
       break;
     }
 
     case *HW_ONEHOT_MUX: {
-      if (auto trueV = mergeOneHotMux(instr))
-        return trueV;
-      if (auto trueV = optimizeOneHotMux(instr))
-        return trueV;
-      if (auto trueV = optimizeOneHotMuxUndef(instr))
-        return trueV;
-      if (auto trueV = liftOneHotMUX(instr))
-        return trueV;
+      MATCH(mergeOneHotMux(instr))
+      MATCH(optimizeOneHotMux(instr))
+      MATCH(optimizeOneHotMuxUndef(instr))
+      MATCH(liftOneHotMUX(instr))
       break;
     }
 
     case *HW_ASSUME: {
-      if (auto trueV = simplifyAssume(instr))
-        return trueV;
+      MATCH(simplifyAssume(instr))
       break;
     }
 
     case *HW_FLIP_FLOP:
     case *HW_FLIP_FLOP_SRST: {
-      if (auto trueV = simplifyFlipFlopCtrl(instr))
-        return trueV;
-      if (auto trueV = simplifyFlipFlopEnable(instr))
-        return trueV;
-      if (auto trueV = simplifyFlipFlopResets(instr))
-        return trueV;
-      if (auto trueV = findFlipFlopEnables(instr))
-        return trueV;
-      if (auto trueV = findFlipFlopSyncResets(instr))
-        return trueV;
+      MATCH(simplifyFlipFlopCtrl(instr))
+      MATCH(simplifyFlipFlopEnable(instr))
+      MATCH(simplifyFlipFlopResets(instr))
+      MATCH(findFlipFlopEnables(instr))
+      MATCH(findFlipFlopSyncResets(instr))
       break;
     }
 
@@ -2278,17 +2248,14 @@ private:
     }
 
     if (instr.isOpc(OP_ADD, OP_MUL, OP_AND, OP_OR, OP_XOR)) {
-      if (auto trueV = reduceBitWidth(instr))
-        return trueV;
+      MATCH(reduceBitWidth(instr))
     }
 
     if (instr.isOpc(OP_AND, OP_OR)) {
-      if (auto trueV = simplifyDeMorgan(instr))
-        return trueV;
+      MATCH(simplifyDeMorgan(instr))
 
       if (instr.def(0)->as<WireRef>().getNumBits() == 1)
-        if (auto trueV = boolExprSimplify(instr))
-          return trueV;
+        MATCH(boolExprSimplify(instr))
     }
 
     if (instr.isOpc(OP_ICMP_EQ, OP_ICMP_NE, /*OP_ICMP_CEQ, OP_ICMP_CNE,
@@ -2296,24 +2263,19 @@ private:
                     OP_ICMP_CXEQ, OP_ICMP_CXNE,*/
                     OP_ICMP_ULT, OP_ICMP_SLT, OP_ICMP_ULE, OP_ICMP_SLE,
                     OP_ICMP_UGT, OP_ICMP_SGT, OP_ICMP_UGE, OP_ICMP_SGE)) {
-      if (auto trueV = reduceBitWidthICMP(instr))
-        return trueV;
+      MATCH(reduceBitWidthICMP(instr))
     }
 
     if (instr.isOpc(HW_CONCAT))
-      if (auto trueV = coalesceConcatOfLoads(instr))
-        return trueV;
+      MATCH(coalesceConcatOfLoads(instr))
 
     if (instr.isOpc(HW_CONCAT)) {
-      if (auto trueV = sinkMUX(instr))
-        return trueV;
-      if (auto trueV = sinkOneHotMUX(instr))
-        return trueV;
+      MATCH(sinkMUX(instr))
+      MATCH(sinkOneHotMUX(instr))
     }
 
     if (instr.isOpc(HW_INSERT))
-      if (auto trueV = fuseInserts(instr.as<InsertIRef>()))
-        return trueV;
+      MATCH(fuseInserts(instr.as<InsertIRef>()))
 
     return false;
   }
@@ -2335,11 +2297,12 @@ private:
       }
     }
 
-    if (auto trueV = manual(instr))
-      return trueV;
+    MATCH(manual(instr))
 
     currentMatched.clear();
     currentReplaced.clear();
+
+#undef MATCH
 
     return PAT_BOOL(
         generated(ctx, config, currentMatched, currentReplaced, instr));

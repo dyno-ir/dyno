@@ -177,7 +177,6 @@ class FlipFlopMappingPass : public Pass<FlipFlopMappingPass> {
     HWValue dWire = instr.d();
     OperandVec<HWValue> qConcat(ctx, 1, bits);
     qConcat.emplace_back(instr.q());
-    instr.q().getDef().replace(FatDynObjRef{nullref});
 
     wires.clk = instr.clk();
     wires.en = instr.hasClkEn() ? instr.clkEn() : nullref;
@@ -243,9 +242,10 @@ class FlipFlopMappingPass : public Pass<FlipFlopMappingPass> {
         }
       }
 
-      buildSingleFF(abstr, wires);
+      buildSingleFF(instr, abstr, wires);
     }
 
+    instr.q().getDef().replace(FatDynObjRef{nullref});
     qConcat.others().do_reverse();
     auto qVal = build.buildConcat(std::move(qConcat));
     assert(qVal);
@@ -329,7 +329,7 @@ class FlipFlopMappingPass : public Pass<FlipFlopMappingPass> {
     }
   }
 
-  void buildSingleFF(AbstractFF abstr, FFWires wires) {
+  void buildSingleFF(InstrRef instr, AbstractFF abstr, FFWires wires) {
     while (1) {
       auto cmd = ffMap[abstr.getRaw()];
       if (auto optPtr = cmd.dyn_as<StdCellFF *>()) {
@@ -419,7 +419,7 @@ class FlipFlopMappingPass : public Pass<FlipFlopMappingPass> {
 
         case FixupType::INVERT_OUTPUT:
         case FixupType::FAIL:
-          report_fatal_error("unsupported flip flop type");
+          report_fatal_error(ctx, instr, "unsupported flip flop type");
         }
       }
     }

@@ -1517,3 +1517,26 @@ TEST_SCRIPT :string("early-share-extract"), :block {
     "num": "2")
   meta.RANDOM_EQUIVALENCE_CHECK_PASS map("cycles": "100", "clockMode": "CLOCK")
 }
+
+TEST_SCRIPT :string("test-rom"), :block {
+  PARSE_VERILOG_PASS map("code":[{
+    module Test (
+      input logic clk,
+      input logic[3:0] addr,
+      output logic[1:0] out
+    );
+
+      logic[1:0] rom[16];
+      initial begin
+        for (int i = 0; i < 16; i++)
+          rom[i] = i % 3;
+      end
+
+      assign out = rom[addr];
+
+    endmodule
+  }])
+  CALL %memoryTestSynth
+  CALL %memoryTestLift
+  meta.RANDOM_EQUIVALENCE_CHECK_PASS map("cycles": "100", "clockMode": "CLOCK")
+}

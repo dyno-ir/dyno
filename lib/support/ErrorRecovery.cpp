@@ -74,8 +74,9 @@ __attribute__((noreturn)) void report_fatal_error(dyno::Context &ctx,
   //  - best effort print source file if exists
 
   std::print(str, "{}error:{} {}\n", stderrRed(), stderrWhite(), reason);
-  for (auto loc : locs.drop_front())
-    print_note("additional source location", loc);
+  if (!locs.empty())
+    for (auto loc : locs.drop_front())
+      print_note("additional source location", loc);
   std::print(str, "{}", stderrReset());
 
   std::cerr << std::move(str).str();
