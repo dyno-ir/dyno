@@ -15,10 +15,6 @@ namespace dyno {
 
 class LibertyLexer : public Lexer<false, true> {
 public:
-  constexpr static std::array<const char *, 0> Keywords;
-
-  constexpr static auto Operators =
-      std::to_array({":", "(", ")", "{", "}", ",", ";", "\\"});
   enum OperatorEnum {
     _op_start = Lexer::TOK_OPS_START - 1,
     op_colon,
@@ -27,8 +23,14 @@ public:
     op_cbropen,
     op_cbrclose,
     op_comma,
-    op_semicolon
+    op_semicolon,
+
+    _op_end,
+    _op_size = _op_end - _op_start - 1,
   };
+  constexpr static std::array<StringRef, 0> Keywords;
+  constexpr static std::array<StringRef, _op_size> Operators = {
+      ":", "(", ")", "{", "}", ",", ";"};
 
   LibertyLexer(ArrayRef<char> src, std::string &&srcPath)
       : Lexer(src, std::move(srcPath), Operators, Keywords) {

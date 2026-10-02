@@ -10,12 +10,6 @@ namespace dyno {
 
 class DSLLexer : public Lexer<true, false, true, false> {
 public:
-  constexpr static auto Keywords =
-      std::array{"let", "if", "else", "for", "struct", "enum", "fn", "while"};
-  constexpr static auto Operators =
-      std::array{".",  ":",  ",",  "[",  "]", "?", "#",  "(", ")", "{",
-                 "}",  ";",  "->", "==", "+", "-", "*",  "&", "|", "<<",
-                 ">>", "<=", ">=", "<",  ">", "=", "!=", "!"};
   enum OperatorEnum {
     _op_start = Lexer::TOK_OPS_START - 1,
     op_dot,
@@ -45,11 +39,14 @@ public:
     op_gt,
     op_eq,
     op_neq,
-    op_exmark
+    op_exmark,
+
+    _op_end,
+    _op_size = _op_end - _op_start - 1
   };
 
   enum KeywordEnum {
-    _kw_start = Lexer::TOK_OPS_START + Operators.size() - 1,
+    _kw_start = Lexer::TOK_OPS_START + (_op_size)-1,
     kw_let,
     kw_if,
     kw_else,
@@ -58,7 +55,17 @@ public:
     kw_enum,
     kw_fn,
     kw_while,
+
+    _kw_end,
+    _kw_size = _kw_end - _kw_start - 1
   };
+
+  constexpr static std::array<StringRef, _kw_size> Keywords = {
+      "let", "if", "else", "for", "struct", "enum", "fn", "while"};
+  constexpr static std::array<StringRef, _op_size> Operators = {
+      ".",  ":",  ",",  "[",  "]", "?", "#",  "(", ")", "{",
+      "}",  ";",  "->", "==", "+", "-", "*",  "&", "|", "<<",
+      ">>", "<=", ">=", "<",  ">", "=", "!=", "!"};
 
   DSLLexer(ArrayRef<char> src, std::string &&fileName)
       : Lexer(src, std::move(fileName), Operators, Keywords) {

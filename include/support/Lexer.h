@@ -1,6 +1,7 @@
 #pragma once
 #include "ANSITerminal.h"
 #include "ErrorRecovery.h"
+#include "SIMD.h"
 #include "StringRef.h"
 #include "dyno/Constant.h"
 #include "support/ANSITerminal.h"
@@ -10,22 +11,15 @@
 #include "support/Format.h"
 #include "support/Ranges.h"
 #include "support/Result.h"
+#include "support/SIMD.h"
 #include "support/SlabAllocator.h"
 #include "support/TwoLevelSet.h"
-#include <algorithm>
 #include <array>
 #include <cassert>
-#include <cctype>
 #include <cstdio>
-#include <initializer_list>
-#include <iostream>
 #include <memory>
 #include <optional>
 #include <string>
-#include <string_view>
-#include <type_traits>
-#include <unordered_map>
-#include <utility>
 
 struct Token {
   enum BaseType {
@@ -178,8 +172,8 @@ struct Lexer {
 
   SlabAllocator<dyno::BigInt> bigIntLiterals;
 
-  ArrayRef<const char *> operators;
-  ArrayRef<const char *> keywords;
+  ArrayRef<StringRef> operators;
+  ArrayRef<StringRef> keywords;
 
   static constexpr size_t TOK_OPS_START = Token::SPECIAL_END;
   size_t TOK_KW_START = TOK_OPS_START + operators.size();
@@ -200,15 +194,84 @@ private:
   const size_t NUM_KEYWORDS = strings.size();
 
 public:
-  // Lexer(const std::string &src, std::string &&srcPath,
-  //       ArrayRef<const char *> operators, ArrayRef<const char *> keywords)
-  //     : path(srcPath), src(src.c_str(), src.size()), operators(operators),
-  //       keywords(keywords) {}
-  //
-
   Lexer(ArrayRef<char> src, std::string &&srcPath,
-        ArrayRef<const char *> operators, ArrayRef<const char *> keywords)
-      : path(srcPath), src(src), operators(operators), keywords(keywords) {}
+        ArrayRef<StringRef> operators, ArrayRef<StringRef> keywords)
+      : path(srcPath), src(src), operators(operators), keywords(keywords) {
+    fillPunctChars();
+  }
+
+#define DYNO_PARSER_SIMD
+#ifdef DYNO_PARSER_SIMD
+  constexpr static size_t maxPunctChars = 3;
+  SmallVec<std::array<std::array<uint8_t, SIMD_WIDTH>, maxPunctChars>, 2>
+      punctChars;
+
+  void fillPunctChars() {
+    // build SIMD layout for punctuation
+    punctChars.resize(round_up_div(operators.size(), SIMD_WIDTH));
+
+    for (auto &slot : punctChars)
+      memset(reinterpret_cast<char *>(slot.data()), 0xFF, sizeof(slot));
+
+    for (auto [i, op] : Range{operators}.enumerate()) {
+      assert(op.size() < maxPunctChars && "bump maxPunctChars");
+      for (size_t j = 0; j < maxPunctChars; j++)
+        punctChars[i / SIMD_WIDTH][j][i % SIMD_WIDTH] =
+            ((j < op.size()) ? op[j] : 0);
+    }
+  }
+
+  std::optional<Token> lexNextPunct() {
+    size_t srcLen = src.size();
+    const char *srcC = src.data();
+    auto &srcOffs = state.i;
+
+    using char_vec_t = uint8_t __attribute__((ext_vector_type(SIMD_WIDTH)));
+    using mask_unsigned = vec_mask_unsigned_t<char_vec_t>;
+
+    for (size_t i = 0; i < punctChars.size(); i++) {
+      mask_unsigned matchAcc = ~mask_unsigned(0);
+      for (size_t j = 0; j < maxPunctChars; j++) {
+        auto srcIdx = srcOffs + j;
+        char_vec_t charSplat =
+            (char_vec_t)(srcIdx >= srcLen ? 0xFF : srcC[j + srcIdx]);
+        auto punctCharVec = std::bit_cast<char_vec_t>(punctChars[i][j]);
+        auto matchVec =
+            (punctCharVec == charSplat) | (punctCharVec == char_vec_t(0));
+        auto match = vec_to_bitmask(matchVec);
+        matchAcc &= match;
+      }
+      if (matchAcc == 0)
+        continue;
+      unsigned matchIdx = std::countr_zero(matchAcc);
+
+      srcOffs += operators[matchIdx].size();
+      return Token::makePlain(TOK_OPS_START + matchIdx);
+    }
+    return std::nullopt;
+  }
+#else
+  void fillPunctChars() {}
+  std::optional<Token> lexNextPunct() {
+    const char *srcC = src.data();
+    size_t len = src.size();
+    auto &i = state.i;
+
+    for (auto [j, op] : Range{operators}.enumerate()) {
+      size_t k = 0;
+      while (k < op.size() && i + k < len) {
+        if (op[k] != srcC[i + k])
+          break;
+        k++;
+      }
+      if (k == op.size()) {
+        i += k;
+        return Token::makePlain(TOK_OPS_START + j);
+      }
+    }
+    return std::nullopt;
+  }
+#endif
 
   Token lexNext() {
     auto &i = state.i;
@@ -302,20 +365,8 @@ public:
       return t;
     }
 
-    { // Try lexing operator
-      for (auto [j, op] : Range{operators}.enumerate()) {
-        size_t k = 0;
-        while (op[k] && srcC[i + k]) {
-          if (op[k] != srcC[i + k])
-            break;
-          k++;
-        }
-        if (!op[k]) {
-          i += k;
-          return Token::makePlain(TOK_OPS_START + j);
-        }
-      }
-    }
+    if (auto punct = lexNextPunct())
+      return *punct;
 
     // Try lexing keywords or tokens
     if (isalpha(srcC[i]) || srcC[i] == '_' ||
@@ -499,11 +550,11 @@ public:
       return Token::baseTypeNames[type];
     type -= TOK_OPS_START;
     if (type < operators.size()) {
-      return operators[type];
+      return operators[type].data();
     }
     type -= operators.size();
     if (type < keywords.size()) {
-      return keywords[type];
+      return keywords[type].data();
     }
     type -= keywords.size();
     return rvStrings[type].data();

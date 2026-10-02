@@ -4,6 +4,7 @@
 #include "support/DenseMapInfo.h"
 #include "support/InlineStorage.h"
 #include "support/Ranges.h"
+#include "support/SIMD.h"
 #include "support/TemplateUtil.h"
 #include "support/Utility.h"
 #include <array>
@@ -537,19 +538,12 @@ public:
 template <typename K, typename size_type = uint32_t> struct DenseSetBucket {
 #define SIMD_DENSE_MAP 1
 #if defined(__clang__) && SIMD_DENSE_MAP
-#ifdef __AVX512F__
-  static constexpr size_type simdWidth = 64;
-#elifdef __AVX__
-  static constexpr size_type simdWidth = 32;
-#else
-  static constexpr size_type simdWidth = 16;
-#endif
   static constexpr size_type entriesPerBucket =
-      std::max(simdWidth / size_type(sizeof(K)), size_type(1));
+      std::max<size_type>(SIMD_WIDTH / size_type(sizeof(K)), size_type(1));
 
-  static constexpr size_t vector_len =
-      std::min(std::max(simdWidth / size_type(sizeof(K)), size_type(1)),
-               entriesPerBucket);
+  static constexpr size_t vector_len = std::min(
+      std::max<size_type>(SIMD_WIDTH / size_type(sizeof(K)), size_type(1)),
+      entriesPerBucket);
 
   // buckets are searched linearly
   // keys are contiguous for SIMD compare
@@ -569,13 +563,10 @@ template <typename K, typename size_type = uint32_t> struct DenseSetBucket {
     cur++;
     for (size_t i = cur / vector_len; i < entriesPerBucket / vector_len; i++) {
 #if __has_feature(ext_vector_type_boolean) && (defined(__x86_64__) || defined(_M_X64))
-      typedef bool bool_vec __attribute__((ext_vector_type(vector_len)));
-      using mask_unsigned = uint_of_size<sizeof(bool_vec)>::type;
-      bool_vec mask =
-          (__builtin_convertvector(
-               (keys_arr[i] == ((key_vec)std::bit_cast<key_unsigned>(k))),
-               bool_vec) |
-           ...);
+      using mask_unsigned = vec_mask_unsigned_t<key_vec>;
+      auto mask = (vec_to_maskreg(keys_arr[i] ==
+                                  ((key_vec)std::bit_cast<key_unsigned>(k))) |
+                   ...);
       if constexpr (Inverse)
         mask = ~mask;
       mask_unsigned uns = std::bit_cast<mask_unsigned>(mask);
