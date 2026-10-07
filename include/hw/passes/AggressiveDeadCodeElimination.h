@@ -54,6 +54,7 @@ private:
     if (regInitValues.inRange(reg.oref()) && regInitValues[reg.oref()]) {
       visitHWValue(ctx.resolve(regInitValues[reg.oref()]));
     }
+    // todo: visit type info (enum values)
 
     for (auto use : reg.oref().uses()) {
       auto instr = use.instr();

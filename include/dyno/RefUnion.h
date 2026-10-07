@@ -38,4 +38,34 @@ public:
   }
 };
 
+template <IsAnyObjRef... Types> class ThinRefUnion : public DynObjRef {
+public:
+  ThinRefUnion(nullref_t) : DynObjRef(nullref) {}
+  ThinRefUnion() = default;
+  ThinRefUnion(DynObjRef ref) : DynObjRef(ref) {}
+
+  template <typename T> static bool is_impl(const T &ref) {
+    return (Types::is_impl(ref) || ...);
+  }
+
+  template <IsFatDynObjRef T> ThinRefUnion(T ref) : DynObjRef(ref) {
+    assert(is_impl(ref));
+  }
+
+  template <IsFatObjRef T> ThinRefUnion(T ref) : DynObjRef(ref) {
+    assert(is_impl(ref));
+  }
+
+  template <IsFatDynObjRef T> ThinRefUnion &operator=(const T &val) {
+    assert(is_impl(val));
+    *static_cast<FatDynObjRef<> *>(this) = val;
+    return *this;
+  }
+  template <IsFatObjRef T> ThinRefUnion &operator=(const T &val) {
+    assert(is_impl(val));
+    *static_cast<FatDynObjRef<> *>(this) = val;
+    return *this;
+  }
+};
+
 }; // namespace dyno

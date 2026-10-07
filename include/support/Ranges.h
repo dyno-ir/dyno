@@ -1356,6 +1356,9 @@ public:
     return std::min_element(begin(), end(), func);
   }
   constexpr auto sum() { return std::reduce(begin(), end()); }
+  template <typename T> constexpr T sum_t() {
+    return std::reduce(begin(), end(), T{});
+  }
   constexpr auto lcm() {
     if (empty())
       return typename It::value_type(0);

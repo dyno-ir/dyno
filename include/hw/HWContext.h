@@ -45,8 +45,6 @@ public:
   TypeDebugInfo<Register> regTypeInfo;
   ObjMapVec<Register, Init<DynObjRef, []() { return nullref; }>> regResetValue;
 
-  static constexpr DynObjRef t = DynObjRef{};
-
   template <typename T> T &get() { return stores.get<T>(); }
 
   template <typename T> StoreType_t<T> &getStore() {

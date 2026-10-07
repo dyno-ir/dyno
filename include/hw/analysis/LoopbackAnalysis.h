@@ -304,7 +304,17 @@ public:
         }
 
         assert(acc.getLen() == asInsert.val()->as<HWValue>().getNumBits());
-        retVal.write(acc, 0, asInsert.getBase(), acc.getLen());
+
+        // can't use retVal.write semantics, we want to replace the region, not
+        // accumulate loopbacks like in onehot mux. todo: fix this in new
+        // GenericPartition
+        auto highOffs = asInsert.getBase() + acc.getLen();
+        auto high = retVal.getRange(highOffs, retVal.getLen() - highOffs);
+        retVal = retVal.getRange(0, asInsert.getBase());
+        retVal.append(acc);
+        retVal.append(high);
+        assert(retVal.getLen() == asInsert.getMemoryLen());
+
         for (auto frag : retVal.frags) {
           if (frag.instr)
             assert(frag.srcAddr + frag.len <= *ctx.resolve(frag.instr)

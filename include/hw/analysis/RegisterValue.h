@@ -775,6 +775,22 @@ struct GenericFragment {
   }
 };
 
+struct BoolFragment {
+  uint32_t dstAddr;
+  uint32_t len;
+  bool active;
+
+  bool overwrites(BoolFragment &other) { return true; }
+  bool fuses(BoolFragment &other) { return false; }
+  bool intersects(BoolFragment &other) { return false; }
+
+  BoolFragment intersect(BoolFragment &other) { return BoolFragment{}; }
+
+  bool abstractEquals(const BoolFragment &) const { return false; }
+
+  explicit operator bool() const { return active; }
+};
+
 template <typename Frag, size_t NumInline = 4> struct GenericPartitions {
   SmallVec<Frag, NumInline> frags;
 

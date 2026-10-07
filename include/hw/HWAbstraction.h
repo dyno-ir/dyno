@@ -126,7 +126,9 @@ public:
   template <IsFatDynObjRef T> HWValue build(MutInstr<T> &&mut) {
     auto rv = mut.build();
     insertInstr(rv);
-    return rv.def()->template as<HWValue>();
+    if (rv.defs().size() == 1 && rv.def().template is<HWValue>())
+      return rv.def()->template as<HWValue>();
+    return nullref;
   }
 
   // does not place in CFG

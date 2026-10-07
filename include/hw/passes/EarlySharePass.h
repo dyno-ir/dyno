@@ -358,6 +358,9 @@ private:
     RegisterRef valueReg;
     if constexpr (requires { base.val(); }) {
       valueReg = regBuild.buildRegister(base.getLen());
+      build.buildStore(
+          valueReg,
+          ConstantBuilder{ctx.getStore<Constant>()}.undef(base.getLen()).get());
     }
 
     RegisterRef resultReg = regBuild.buildRegister(resultBits);

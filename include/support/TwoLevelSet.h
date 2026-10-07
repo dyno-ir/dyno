@@ -68,9 +68,8 @@ public:
 
   template <typename T>
   TwoLevelSet(Range<T> range)
-      : map(range.transform(
-            [](size_t,
-               auto &&val) -> std::pair<KeyT, typename Range<T>::value_type> {
+      : map(range.tf(
+            [](auto &&val) -> std::pair<KeyT, typename Range<T>::value_type> {
               return {HashFunc(val), val};
             })) {};
 };
@@ -113,6 +112,9 @@ public:
     using value_type = std::pair<const K, T>;
     using reference = value_type &;
     using pointer = value_type *;
+
+    using Base::operator bool;
+
     // prefer key()/val() for plain DenseMap compat
     std::pair<const K, T> &operator*() const { return this->Base::val(); }
     std::pair<const K, T> *operator->() const { return &(this->Base::val()); }
@@ -169,9 +171,18 @@ public:
   iterator begin() { return iterator(map.begin()); }
   iterator end() { return iterator(map.end()); }
 
-  auto erase(iterator it) { return map.erase(it.base); }
+  auto erase(iterator it) { return map.erase(it); }
 
   auto size() const { return map.size(); }
   bool empty() const { return size() == 0; }
   void clear() { map.clear(); }
+
+  TwoLevelMap() = default;
+
+  template <typename U>
+  TwoLevelMap(Range<U> range)
+      : map(range.tf(
+            [](auto &&val) -> std::pair<KeyT, typename Range<T>::value_type> {
+              return {HashFunc(val), val};
+            })) {};
 };

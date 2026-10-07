@@ -20,7 +20,7 @@ class LiftStdCellsPass : public Pass<LiftStdCellsPass> {
   void runOnInstance(InstrRef instr) {
     auto cell = instr.other(0)->as<ModuleRef>().iref();
     MutInstr<FatDynObjRef<>> modInst(ctx, HW_INSTANCE,
-                                     cell.mod()->ports.size());
+                                     1 + cell.mod()->ports.size());
     modInst.emplace_back(cell.mod());
 
     auto inputs = instr.other_begin() + 1;

@@ -3096,11 +3096,9 @@ template <> struct ObjTraits<Constant> {
 
 class ConstantRef : public FatObjRef<Constant>,
                     public BigIntMixin<ConstantRef> {
-protected:
+public:
   using Custom =
       FatObjRef::CustomField<BigIntCustomBits, 16 - BigIntCustomBits>;
-
-public:
   using IsInline = FatObjRef::CustomField<1, 0>;
   using ExtPattern = FatObjRef::CustomField<BigIntExtendBits, 1>;
   using NBits = FatObjRef::CustomField<15 - BigIntExtendBits - BigIntCustomBits,
@@ -3176,6 +3174,40 @@ public:
     assert(isInline());
     return obj.num;
   }
+};
+
+// Constant can only be stored as ObjRef<Constant> when out of line,
+// this is for general case.
+class ThinConstantRef : public DynObjRef {
+public:
+  ThinConstantRef() = default;
+  constexpr ThinConstantRef(DynObjRef ref) : DynObjRef(ref) {
+    assert(ref.getType() == CORE_CONSTANT);
+  }
+  constexpr ThinConstantRef(nullref_t) : DynObjRef(nullref) {}
+
+  bool isInline() const { return customField<ConstantRef::IsInline>(); }
+
+  Optional<uint32_t> getNumBits() const {
+    if (!isInline())
+      return nullopt;
+    auto raw = customField<ConstantRef::NBits>();
+    return customField<ConstantRef::Custom>() ? (raw / 2) : raw;
+  }
+  std::optional<uint32_t> getExactVal() const {
+    if (!isInline())
+      return std::nullopt;
+    return obj.num;
+  }
+  uint32_t operator*() const { return *getExactVal(); }
+  explicit operator bool() const {
+    return DynObjRef::operator bool() && isInline();
+  }
+
+  static bool is_impl(ObjRef<Constant>) { return true; }
+  static bool is_impl(ConstantRef) { return true; }
+  template <typename T> static bool is_impl(ObjRef<T>) { return false; }
+  static bool is_impl(DynObjRef ref) { return ref.getType() == CORE_CONSTANT; }
 };
 
 class ConstantStore {

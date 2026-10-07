@@ -6,10 +6,13 @@
 #include "dyno/Pass.h"
 #include "hw/AutoDebugInfo.h"
 #include "hw/HWAbstraction.h"
+#include "hw/HWContext.h"
 #include "hw/HWInstr.h"
 #include "hw/HWValue.h"
 #include "hw/IDs.h"
 #include "hw/Register.h"
+#include "hw/analysis/RegisterValue.h"
+#include "support/ErrorRecovery.h"
 #include "support/TempBind.h"
 
 namespace dyno {
@@ -24,12 +27,56 @@ public:
 
   using TaggedRegRef = CustomInstrRef<RegisterIRef, uint64_t>;
 
+  auto findAccessedFrags(ProcessIRef storeProc, RegisterIRef reg) {
+    GenericPartitions<BoolFragment, 4> frags(*reg.getNumBits(), false);
+    SmallVec<InstrRef, 16> users;
+    for (auto &use : reg.oref().uses()) {
+      auto proc = HWInstrRef{use.instr()}.parentProc(ctx);
+      if (storeProc != proc)
+        continue;
+      auto instr = use.instr();
+      if (auto asStore = instr.dyn_as<StoreIRef>()) {
+        auto [addr, len] = asStore.getConstAccessRange();
+        frags.writeSingle(addr, len, true);
+      }
+      users.emplace_back(instr);
+    }
+    frags.defragment();
+    return std::make_pair(frags, users);
+  }
+
+  void
+  handleNonBlockingStores(ProcessIRef storeProc, RegisterRef stateReg,
+                          RegisterRef combReg, ArrayRef<InstrRef> procAccesses,
+                          GenericPartitions<BoolFragment, 4> &accessFrags) {
+    HWInstrBuilder build{ctx, storeProc.block().begin()};
+    for (auto frag : Range{accessFrags.frags}.filter([](auto &f) { return f; }))
+      build.buildStore(combReg,
+                       build.buildLoad(stateReg, frag.len, frag.dstAddr), false,
+                       nullref, frag.dstAddr);
+
+    for (auto access : procAccesses) {
+      if (access.isOpc(HW_STORE_DEFER))
+        report_fatal_error(
+            ctx, stateReg.iref(),
+            "blocking and non-blocking stores to same register ranges");
+      assert(access.isOpc(HW_LOAD, HW_STORE));
+      access.operand(1).replace(combReg);
+    }
+
+    build.setInsertPoint(storeProc.block().end());
+    for (auto frag : Range{accessFrags.frags}.filter([](auto &f) { return f; }))
+      build.buildStore(stateReg,
+                       build.buildLoad(combReg, frag.len, frag.dstAddr), true,
+                       nullref, frag.dstAddr);
+  }
+
   void runOnProc(ModuleIRef mod, ProcessIRef proc) {
     if (!proc.isOpc(HW_SEQ_PROCESS_DEF))
       return;
 
     auto trigger = proc.other(0)->as<TriggerRef>().iref();
-    ObjMapVec<Instr, bool> handled;
+    ObjMapVec<Register, bool> handled;
     handled.resize(ctx.getStore<Instr>().numIDs());
     HWInstrBuilder build{ctx};
     std::optional<BlockRef_iterator<true>> regs_end;
@@ -44,34 +91,35 @@ public:
         // add a last value loopback FF (i.e. LOAD at front, STORE_DEFER at
         // end of proc)
         auto store = instr.as<StoreIRef>();
-        auto reg = instr.operand(1)->as<RegisterRef>();
+        auto reg = store.reg();
+
         // check if already handled
-        if (handled[instr])
+        if (handled[reg])
           continue;
-        handled[instr] = 1;
+        handled[reg] = 1;
 
         if (!regs_end)
           regs_end = mod.regs_end();
 
-        auto [accessAddr, accessLen] = store.getConstAccessRange();
-
         build.setInsertPoint(*regs_end);
-        auto qReg = build.buildRegister(accessLen);
+        auto combReg = build.buildRegister(reg.getNumBits());
+        ctx.getCtx<HWDialectContext>().regTypeInfo.copyType(reg, combReg);
+        for (auto nm : ctx.getCtx<HWDialectContext>().regNameInfo.getNames(reg))
+          ctx.getCtx<HWDialectContext>().regNameInfo.addName(
+              combReg, nm + std::string("__s2c_comb"));
 
-        // at start of proc put qReg value into reg as default (stateful) value.
-        build.setInsertPoint(proc.block().begin());
-        build.buildStore(reg, build.buildLoad(qReg), false, nullref,
-                         accessAddr);
-
-        // at end of proc, store defer reg value into qreg
-        build.setInsertPoint(proc.block().end());
-        auto finalV = build.buildLoad(reg, accessLen, accessAddr);
-        build.buildStore(qReg, finalV, true, trigger);
+        auto [frags, users] = findAccessedFrags(proc, reg.iref());
+        handleNonBlockingStores(proc, reg, combReg, users, frags);
         break;
       }
       case *HW_STORE_DEFER: {
-        auto tok = autoDbgInfo->addWithToken(instr);
         auto store = instr.as<StoreIRef>();
+        if (store.hasTrigger()) {
+          assert(store.trigger() == trigger &&
+                 "store already has different trigger than proc it's in?");
+          break;
+        }
+        auto tok = autoDbgInfo->addWithToken(instr);
         build.setInsertPoint(instr);
 
         build.buildStore(store.reg(), store.value(), true, trigger,
