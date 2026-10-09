@@ -5,27 +5,61 @@
 #include "dyno/Obj.h"
 #include "hw/IDs.h"
 #include "support/Optional.h"
+#include "support/Utility.h"
 
 namespace dyno {
+
+class Register;
+
+class OptionalU32OrReg {
+  enum Kind { EMPTY, VALUE, PARAM };
+  Kind kind;
+  union {
+    uint32_t val;
+    ObjRef<Register> ref;
+  };
+
+public:
+  OptionalU32OrReg(uint32_t val) : kind(VALUE), val(val) {}
+  OptionalU32OrReg(Optional<uint32_t> val)
+      : kind(val ? VALUE : EMPTY), val(val.value_or(0)) {}
+  OptionalU32OrReg(nullopt_t) : kind(EMPTY) {}
+  OptionalU32OrReg() : kind(EMPTY) {}
+  OptionalU32OrReg(ObjRef<Register> param) : kind(PARAM), ref(param) {}
+  uint32_t operator*() const {
+    switch (kind) {
+    case VALUE:
+      return val;
+    default:
+      dyno_unreachable("value not defined");
+    }
+  }
+  explicit operator bool() const { return kind == VALUE; }
+  explicit operator uint32_t() const { return **this; }
+  operator Optional<uint32_t>() const {
+    return (*this) ? Optional<uint32_t>(**this) : nullopt;
+  }
+  bool operator==(uint32_t o) const { return Optional<uint32_t>(*this) == o; }
+
+  bool isReg() const { return kind == PARAM; }
+  ObjRef<Register> getReg() const {
+    assert(isReg());
+    return ref;
+  }
+  ObjRef<Register> reg() { return isReg() ? ref : nullref; }
+  uint32_t value_or(uint32_t alt) const { return (*this) ? (**this) : alt; }
+};
 
 class Register {
   friend class RegisterRef;
   friend class ModuleIRef;
 
 public:
-  // enum PortType : uint8_t {
-  //   PORT_NONE,
-  //   PORT_IN,
-  //   PORT_OUT,
-  //   PORT_INOUT,
-  //   PORT_REF,
-  //   PORT_PARAM_IN
-  // };
   InstrDefUse defUse;
-  Optional<uint32_t> numBits;
+  // todo: split into separate type
+  OptionalU32OrReg numBits;
 
-  Register(DynObjRef, Optional<uint32_t> numBits = nullopt)
-      : numBits(numBits) {}
+  Register(DynObjRef, OptionalU32OrReg numBits = nullopt) : numBits(numBits) {}
   // todo: pass context into copier s.t. we can copy reg name and init value
   // (side tables) as well
   Register(DynObjRef, FatObjRef<Register> other) : numBits(other->numBits) {}

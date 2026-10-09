@@ -30,7 +30,7 @@ protected:
 
 public:
   TempBindVal<DynoLexer> lexer;
-  using obj_parse_fn = CallableRef<FatDynObjRef<>(
+  using obj_parse_fn = CallableRef<Result<FatDynObjRef<>, ParseError>(
       DialectType type, ArrayRef<char> name, bool isDef)>;
   Interfaces<NUM_DIALECTS, obj_parse_fn> interfaces;
   Context &ctx;
@@ -48,16 +48,15 @@ public:
 protected:
   Result<FatDynObjRef<>, ParseError> parseObject(ArrayRef<char> name,
                                                  bool isDef) {
-    auto state = lexer->getState();
+    // auto state = lexer->getState();
     DYNO_EXPECT(type, lexer->popType());
     auto fn = interfaces.template getVal<obj_parse_fn>(type.getDialectID());
     assert(fn);
-    auto ref = fn(type, std::string_view{name}, isDef);
-    if (!ref) {
-      lexer->restoreState(state);
-      return lexer->makeErrorOnNextToken("failed to parse object");
-    }
-    return ref;
+    auto res = fn(type, std::string_view{name}, isDef);
+    // nullref as quick not implemented so we don't dupe the string everywhere
+    if (res && !*res)
+      return lexer->makeErrorOnPeekToken("parsing object not implemented");
+    return res;
   }
 
   Result<ParseOperand, ParseError> parseConstantOperand() {
@@ -134,6 +133,14 @@ public:
         "invalid operand (expected constant or identifier)");
   }
 
+  Result<FatDynObjRef<>, ParseError> parseUseOperand() {
+    auto state = lexer->getState();
+    DYNO_EXPECT(operand, parseOperand());
+    if (operand.isDef)
+      lexer->makeErrorStartingAtToLast(state, "expected use operand");
+    return operand.ref;
+  }
+
   Result<void, ParseError> parseBlockContents(BlockRef block) {
     DYNO_EXPECT(lexer->popExpect(DynoLexer::op_cbropen));
 
@@ -157,7 +164,8 @@ protected:
     lineNums.push_back_range(
         Range{linesSplit}.transform([&bad](size_t, std::string_view view) {
           uint32_t val;
-          auto res = std::from_chars(view.data(), view.data() + view.size(), val);
+          auto res =
+              std::from_chars(view.data(), view.data() + view.size(), val);
           if (res.ec != std::errc())
             bad = true;
           return val;
@@ -311,7 +319,7 @@ public:
 };
 
 // Example parser wrapper. Derives from ParserBase and instantiates all dialect
-// parser types. Dialect parser constructors register handlers in base parser.
+// parser types. Dialect parser constructors register han(dlers in base parser.
 // Same pattern used for printer.
 template <typename... Parsers> class Parser : public ParserBase {
 public:
@@ -336,7 +344,8 @@ public:
         CallableRef{this, BindMethod<&CoreDialectParser::parseCore>::fv});
   }
 
-  FatDynObjRef<> parseCore(DialectType type, ArrayRef<char> name, bool isDef) {
+  Result<FatDynObjRef<>, ParseError>
+  parseCore(DialectType type, ArrayRef<char> name, bool isDef) {
     assert(type.dialect == DIALECT_CORE);
     switch (type.type) {
     case CORE_BLOCK.type: {
@@ -352,20 +361,21 @@ public:
           if (auto t = base.lexer->popType())
             type = *t;
           else
-            report_fatal_error("invalid type");
+            return base.lexer->makeErrorOnPeekToken("expected dyno type");
         }
         base.lexer->popEnsure(DynoLexer::op_rbrclose);
       }
       auto symb = base.ctx.getStore<Symbol>().findOrInsert(nm);
       if (type != nullopt) {
         if (symb->type && symb->type != type)
-          report_fatal_error("symbol type mismatch");
+          return base.lexer->makeErrorOnPeekToken("symbol type mismatch");
         else
           symb->type = type;
       }
       if (isDef) {
         if (symb->defCtx && symb->defCtx != &base.ctx)
-          report_fatal_error("symbol defined in multiple contexts");
+          return base.lexer->makeErrorOnPeekToken(
+              "symbol defined in multiple contexts");
         symb->defCtx = &base.ctx;
       }
 

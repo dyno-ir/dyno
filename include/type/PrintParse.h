@@ -166,18 +166,19 @@ class TypeDialectParser {
   uint32_t enumKW;
   VectorLUT<BaseTypeRef> baseTypeKWs;
 
-  FatTypeRef parseStructType() {
+  Result<FatTypeRef, ParseError> parseStructType() {
     auto *lexer = &*base.lexer;
     auto *ctx = &base.ctx;
 
-    lexer->popEnsure(DynoLexer::op_rbropen);
+    DYNO_EXPECT(lexer->popExpect(DynoLexer::op_rbropen));
     SmallVec<StructTypeObj::StructElem, 16> elems;
 
     while (!lexer->peekIs(DynoLexer::op_rbrclose)) {
-      auto ident = lexer->popEnsure(Token::STRING_LITERAL).strLit.value;
-      lexer->popEnsure(DynoLexer::op_colon);
+      DYNO_EXPECT(identTok, lexer->popExpect(Token::STRING_LITERAL));
+      auto ident = identTok.strLit.value;
+      DYNO_EXPECT(lexer->popExpect(DynoLexer::op_colon));
 
-      auto fieldType = parseTypeDyn();
+      DYNO_EXPECT(fieldType, parseTypeDyn());
       auto identIdx =
           ctx->getCtx<TypeDialectContext>().strings.getCanonicalIdx(ident);
       elems.emplace_back(StructTypeObj::StructElem{
@@ -186,94 +187,81 @@ class TypeDialectParser {
         break;
     }
 
-    lexer->popEnsure(DynoLexer::op_rbrclose);
+    DYNO_EXPECT(lexer->popExpect(DynoLexer::op_rbrclose));
     auto &store = ctx->getStore<StructTypeObj>();
     StructTypeObj obj{std::move(elems)};
     return store.create(obj);
   }
 
-  FatTypeRef parseEnumType() {
+  Result<FatTypeRef, ParseError> parseEnumType() {
     auto *lexer = &*base.lexer;
     auto *ctx = &base.ctx;
 
     EnumTypeObj enumObj;
-    lexer->popEnsure(DynoLexer::op_rbropen);
+    DYNO_EXPECT(lexer->popExpect(DynoLexer::op_rbropen));
 
-    enumObj.underlying = parseTypeDyn();
+    DYNO_EXPECT(underlying, parseTypeDyn());
+    enumObj.underlying = underlying;
 
     if (lexer->popIf(DynoLexer::op_comma))
       while (!lexer->peekIs(DynoLexer::op_rbrclose)) {
-        auto ident = lexer->popEnsure(Token::STRING_LITERAL).strLit.value;
+        DYNO_EXPECT(identTok, lexer->popExpect(Token::STRING_LITERAL));
+        auto ident = identTok.strLit.value;
         auto identIdx =
             ctx->getCtx<TypeDialectContext>().strings.getCanonicalIdx(ident);
-        lexer->popEnsure(DynoLexer::op_colon);
+        DYNO_EXPECT(lexer->popExpect(DynoLexer::op_colon));
 
-        auto operand = base.parseOperand();
-        if (!operand) {
-          lexer->printError(operand.error());
-          report_fatal_error("lexer error");
-        }
-        if (operand->isDef)
-          report_fatal_error("expected use");
-
-        enumObj.elemns.emplace_back(operand->ref, identIdx);
+        DYNO_EXPECT(operand, base.parseUseOperand());
+        enumObj.elemns.emplace_back(operand, identIdx);
 
         if (!lexer->popIf(DynoLexer::op_comma))
           break;
       }
 
-    lexer->popEnsure(DynoLexer::op_rbrclose);
+    DYNO_EXPECT(lexer->popExpect(DynoLexer::op_rbrclose));
     auto &store = ctx->getStore<EnumTypeObj>();
     return store.create(enumObj);
   }
 
-  FatTypeRef parseArrayTypeImpl(FatTypeRef elemType) {
+  Result<FatTypeRef, ParseError> parseArrayTypeImpl(FatTypeRef elemType) {
     auto *lexer = &*base.lexer;
     auto *ctx = &base.ctx;
 
-    lexer->popEnsure(DynoLexer::op_abropen);
-    auto startOperand = base.parseOperand();
-    if (!startOperand) {
-      lexer->printError(startOperand.error());
-      report_fatal_error("lexer error");
-    }
-    if (startOperand->isDef)
-      report_fatal_error("expected use");
+    DYNO_EXPECT(lexer->popExpect(DynoLexer::op_abropen));
+    DYNO_EXPECT(startOperand, base.parseOperand());
 
     DynObjRef start = nullref;
-    DynObjRef len = startOperand->ref;
+    DynObjRef len = startOperand.ref;
 
     if (lexer->popIf(DynoLexer::op_pluscolon)) {
-      start = startOperand->ref;
-      auto lenOperand = base.parseOperand();
-      if (!lenOperand) {
-        lexer->printError(lenOperand.error());
-        report_fatal_error("lexer error");
-      }
-      if (lenOperand->isDef)
-        report_fatal_error("expected use");
-      len = lenOperand->ref;
+      start = startOperand.ref;
+      DYNO_EXPECT(lenOperand, base.parseOperand());
+      len = lenOperand.ref;
     }
 
-    lexer->popEnsure(DynoLexer::op_abrclose);
+    DYNO_EXPECT(lexer->popExpect(DynoLexer::op_abrclose));
     auto &store = ctx->getStore<ArrayTypeObj>();
     ArrayTypeObj obj{start, len, elemType.as<TypeRef>()};
     return store.create(obj);
   }
 
-  FatTypeRef parseArrayType() {
-    auto arrType = parseTypeDyn();
+  Result<FatTypeRef, ParseError> parseArrayType() {
+    auto state = base.lexer->getState();
+    DYNO_EXPECT(arrType, parseTypeDyn());
     if (!arrType.is<ArrayTypeRef>())
-      report_fatal_error("expected array type");
+      return base.lexer->makeErrorStartingAtToLast(state,
+                                                   "expected array type");
     return arrType;
   }
 
-  FatTypeRef parseBaseType() {
+  Result<FatTypeRef, ParseError> parseBaseType() {
     auto &lexer = *base.lexer;
-    auto ident = lexer.popEnsure(Token::IDENTIFIER).ident.idx;
-    auto it = baseTypeKWs.find(ident);
+    DYNO_EXPECT(identTok, lexer.peekExpect(Token::IDENTIFIER));
+    auto it = baseTypeKWs.find(identTok.ident.idx);
     if (!it)
-      report_fatal_error("invalid base type: {}", lexer.GetIdent(ident));
+      return lexer.makeErrorOnPeekToken("invalid base type: {}",
+                                        lexer.GetIdent(identTok.ident.idx));
+    lexer.Pop();
     return *it;
   }
 
@@ -307,32 +295,37 @@ public:
     }
   }
 
-  FatDynObjRef<> parseType(DialectType type, ArrayRef<char> name, bool isDef) {
+  Result<FatDynObjRef<>, ParseError>
+  parseType(DialectType type, ArrayRef<char> name, bool isDef) {
     // todo: efficient method
     registerKWs();
 
     switch (type.type) {
-    case TYPE_STRUCT.type:
-      return parseStructType();
-    case TYPE_ENUM.type:
-      return parseEnumType();
+    case TYPE_STRUCT.type: {
+      DYNO_EXPECT(rv, parseStructType());
+      return rv;
+    }
+    case TYPE_ENUM.type: {
+      DYNO_EXPECT(rv, parseEnumType());
+      return rv;
+    }
     case TYPE_ARRAY.type: {
-      base.lexer->popEnsure(DynoLexer::op_rbropen);
-      auto rv = parseArrayType();
-      base.lexer->popEnsure(DynoLexer::op_rbrclose);
+      DYNO_EXPECT(base.lexer->popExpect(DynoLexer::op_rbropen));
+      DYNO_EXPECT(rv, parseArrayType());
+      DYNO_EXPECT(base.lexer->popExpect(DynoLexer::op_rbrclose));
       return rv;
     }
     case TYPE_BASE.type: {
-      base.lexer->popEnsure(DynoLexer::op_rbropen);
-      auto rv = parseBaseType();
-      base.lexer->popEnsure(DynoLexer::op_rbrclose);
+      DYNO_EXPECT(base.lexer->popExpect(DynoLexer::op_rbropen));
+      DYNO_EXPECT(rv, parseBaseType());
+      DYNO_EXPECT(base.lexer->popExpect(DynoLexer::op_rbrclose));
       return rv;
     }
     default:
       return nullref;
     }
   }
-  FatTypeRef parseTypeDyn() {
+  Result<FatTypeRef, ParseError> parseTypeDyn() {
     auto &lex = *base.lexer;
 
     // named, go back up to root parser
@@ -345,8 +338,10 @@ public:
       if (!rv.value().ref.is<FatTypeRef>())
         base.lexer->printErrorOnPeekToken("expected type");
       auto ref = rv.value().ref.as<FatTypeRef>();
-      while (lex.peekIs(DynoLexer::op_abropen))
-        ref = parseArrayTypeImpl(ref);
+      while (lex.peekIs(DynoLexer::op_abropen)) {
+        DYNO_EXPECT(next, parseArrayTypeImpl(ref));
+        ref = next;
+      }
       return ref;
     }
 
@@ -358,11 +353,13 @@ public:
         return parseEnumType();
       }
     }
-    auto base = parseBaseType();
-    while (lex.peekIs(DynoLexer::op_abropen))
-      base = parseArrayTypeImpl(base);
-
-    return base;
+    DYNO_EXPECT(base, parseBaseType());
+    FatTypeRef iter = base;
+    while (lex.peekIs(DynoLexer::op_abropen)) {
+      DYNO_EXPECT(next, parseArrayTypeImpl(iter));
+      iter = next;
+    }
+    return iter;
   }
 };
 }; // namespace dyno

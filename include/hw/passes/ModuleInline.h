@@ -53,6 +53,9 @@ class ModuleInlinePass : public Pass<ModuleInlinePass> {
     StableBlockIterator regsIt{ctx.getCFG(), *parentMod.regs_end().pred()};
 
     unsigned portIndex = 0;
+    // fixme: hack for lambda recursion
+    CallableRef<bool(DeepCopier *, InstrRef, BlockRef_iterator<true>)>
+        inlineHookF;
     auto inlineHook = [&](DeepCopier *self, InstrRef src,
                           BlockRef_iterator<true> dstIt) {
       if (src.isOpc(HW_PARAM_REGISTER_DEF, HW_INPUT_REGISTER_DEF,
@@ -70,16 +73,22 @@ class ModuleInlinePass : public Pass<ModuleInlinePass> {
       }
       if (src.isOpc(HW_REGISTER_DEF)) {
         HWInstrBuilder build{ctx};
+        auto srcReg = src.as<RegisterIRef>().oref();
         build.setInsertPoint(std::next(regsIt).getBlockIter());
-        auto reg =
-            build.buildRegister(src.as<RegisterIRef>().oref().getNumBits());
+        auto reg = build.buildRegister(srcReg.getNumBits());
         regsIt = StableBlockIterator{ctx.getCFG(), reg.iref()};
         self->oldToNewMap.insert(src.def(0)->fat(), reg);
 
-        addNames(src.as<RegisterIRef>().oref(), reg);
-        addResetValue(src.as<RegisterIRef>().oref(), reg);
-        regTypeInfo.copyType(src.as<RegisterIRef>().oref(), reg);
+        addNames(srcReg, reg);
+        addResetValue(srcReg, reg);
+        regTypeInfo.copyType(srcReg, reg);
         sourceLocInfo.copyDebugInfo(src, reg.iref());
+        if (srcReg->numBits.isReg()) {
+          if (auto it = self->oldToNewMap.find(srcReg->numBits.getReg()))
+            reg->numBits = it.val().as<RegisterRef>();
+          else
+            reg->numBits = nullopt;
+        }
         return true;
       }
       if (src.isOpc(HW_TRIGGER_DEF)) {
@@ -96,12 +105,22 @@ class ModuleInlinePass : public Pass<ModuleInlinePass> {
         return true;
       }
 
-      return false;
+      auto instr = copier.copyInstr(src, dstIt, inlineHookF);
+      for (auto def : instr.defs()) {
+        if (!def->is<WireRef>())
+          continue;
+        if (auto reg = def->as<WireRef>()->numBits.reg())
+          if (auto it = self->oldToNewMap.find(reg))
+            def->as<WireRef>()->numBits = it.val().as<RegisterRef>();
+      }
+
+      return true;
     };
+    inlineHookF = inlineHook;
 
     // todo: move
     copier.deepCopyInstrs(modToInline.block().begin(), instance.iter(ctx),
-                          inlineHook);
+                          inlineHookF);
     HWInstrBuilder{ctx}.destroyInstr(instance);
   }
 

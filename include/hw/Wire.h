@@ -1,5 +1,6 @@
 #pragma once
 
+#include "hw/Register.h"
 #include "support/Optional.h"
 #include <dyno/Instr.h>
 #include <dyno/InstrMixin.h>
@@ -10,8 +11,8 @@ namespace dyno {
 class Wire {
 public:
   InstrDefUse defUse;
-  Optional<uint32_t> numBits;
-  Wire(DynObjRef, Optional<uint32_t> numBits = nullopt) : numBits(numBits) {}
+  OptionalU32OrReg numBits;
+  Wire(DynObjRef, OptionalU32OrReg numBits = nullopt) : numBits(numBits) {}
   Wire(DynObjRef, FatObjRef<Wire> other) : numBits(other->numBits) {}
 
   static bool isInitialized(const Wire *wire) {
@@ -29,7 +30,7 @@ public:
   using FatObjRef<Wire>::FatObjRef;
   WireRef(FatObjRef<Wire> ref) : FatObjRef<Wire>(ref) {}
 
-  Optional<uint32_t> getNumBits() const { return ptr->numBits; }
+  auto &getNumBits() const { return ptr->numBits; }
 
   auto getDefI() { return getDef().instr(); }
 };

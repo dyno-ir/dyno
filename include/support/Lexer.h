@@ -504,6 +504,7 @@ public:
   void printError(const ParseError &error) {
     auto line = extractEnclosingLine(StringRef{src}, error.start);
     unsigned col = &src[error.start] - line.begin() + 1;
+    // todo: handle end going over line bounds
 
     fprintf(stderr, "%s%s:%u:%u: %serror: %s", stderrBold(), path.c_str(),
             error.lineNumber, col, stderrRed(), stderrWhite());
@@ -543,6 +544,13 @@ public:
       Peek();
     return ParseError{Format{error, std::forward<decltype(args)>(args)...},
                       lastState.i, state.i, state.lineNumber};
+  }
+
+  ParseError makeErrorStartingAtToLast(const State &startState,
+                                       const char *error, auto &&...args) {
+    return ParseError{Format{error, std::forward<decltype(args)>(args)...},
+                      startState.i, !!peekToken ? lastState.i : state.i,
+                      startState.lineNumber};
   }
 
   const char *getTokenTypeString(uint32_t type) {

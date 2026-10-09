@@ -10,6 +10,7 @@
 #include "hw/IDs.h"
 #include "hw/MemoryPort.h"
 #include "hw/Module.h"
+#include "hw/Register.h"
 #include "hw/StdCellInfo.h"
 #include "support/CallableRef.h"
 #include "support/ErrorRecovery.h"
@@ -57,7 +58,11 @@ public:
     case HW_WIRE.type: {
       WireRef asWire = ref.as<WireRef>();
       str << "wire";
-      if (asWire->numBits)
+      if (asWire->numBits.isReg() && base->ctx) {
+        str << "(";
+        base->printRefOrUse(base->ctx->resolve(asWire->numBits.getReg()));
+        str << ")";
+      } else if (asWire->numBits)
         str << "(" << *asWire->numBits << ")";
       break;
     }
@@ -85,9 +90,11 @@ public:
           initVal = regResetValue[asReg];
       }
 
-      if (asReg->numBits || type || names || initVal)
+      if (asReg->numBits.isReg() || asReg->numBits || type || names || initVal)
         str << "(";
-      if (asReg->numBits) {
+      if (asReg->numBits.isReg() && base->ctx) {
+        base->printRefOrUse(base->ctx->resolve(asReg->numBits.getReg()));
+      } else if (asReg->numBits) {
         str << *asReg->numBits;
 
         if (names || type || initVal)
@@ -198,13 +205,14 @@ public:
     case HW_MODULE.type:
       return ref.as<ModuleRef>()->name.c_str();
     case HW_REGISTER.type: {
-      if (!regNames)
-        return IntroducedName{ref.getObjID(), {'r', '\0'}};
-      auto range = regNames->getNames(ref.as<RegisterRef>());
-      if (range.begin() == range.end())
-        return IntroducedName{ref.getObjID(), {'r', '\0'}};
-      // todo: what about multiple and collisions?
-      return *range.begin();
+      return IntroducedName{ref.getObjID(), {'r', '\0'}};
+      // if (!regNames)
+      //   return IntroducedName{ref.getObjID(), {'r', '\0'}};
+      // auto range = regNames->getNames(ref.as<RegisterRef>());
+      // if (range.begin() == range.end())
+      //   return IntroducedName{ref.getObjID(), {'r', '\0'}};
+      // // todo: what about multiple and collisions?
+      // return *range.begin();
     }
     case HW_WIRE.type: {
       return IntroducedName{ref.getObjID(), {'w', '\0'}};
@@ -228,44 +236,53 @@ public:
         CallableRef{this, BindMethod<&HWDialectParser::parseHW>::fv});
   }
 
-  FatDynObjRef<> parseHW(DialectType type, ArrayRef<char> name, bool isDef) {
+  Result<FatDynObjRef<>, ParseError> parseHW(DialectType type,
+                                             ArrayRef<char> name, bool isDef) {
     auto *lexer = &*base.lexer;
     auto *ctx = &base.ctx;
     switch (*type) {
     case *HW_MODULE: {
-      lexer->popEnsure(DynoLexer::op_rbropen);
-      auto str = lexer->popEnsure(Token::STRING_LITERAL);
-      lexer->popEnsure(DynoLexer::op_rbrclose);
+      DYNO_EXPECT(lexer->popExpect(DynoLexer::op_rbropen));
+      DYNO_EXPECT(str, lexer->popExpect(Token::STRING_LITERAL));
+      DYNO_EXPECT(lexer->popExpect(DynoLexer::op_rbrclose));
       return ctx->getStore<Module>().create(std::string(str.strLit.value));
     }
     case *HW_REGISTER: {
-      lexer->popEnsure(DynoLexer::op_rbropen);
-      auto bits = lexer->popEnsure(Token::INT_LITERAL);
-      auto reg = ctx->getStore<Register>().create(bits.intLit.value);
+      DYNO_EXPECT(lexer->popExpect(DynoLexer::op_rbropen));
+      auto reg = ctx->getStore<Register>().create();
       auto &regNameInfo = ctx->getCtx<HWDialectContext>().regNameInfo;
 
-      while (lexer->popIf(DynoLexer::op_comma)) {
-        if (lexer->peekIs(Token::STRING_LITERAL)) {
+      // can't have init val without numBits
+      bool seenNumBits = false;
+
+      while (!lexer->peekIs(DynoLexer::op_cbrclose)) {
+        if (lexer->peekIs(Token::INT_LITERAL)) {
+          reg->numBits = lexer->popEnsure(Token::INT_LITERAL).intLit.value;
+          seenNumBits = true;
+        } else if (lexer->peekIs(Token::STRING_LITERAL)) {
           auto name = lexer->Pop().strLit.value;
           regNameInfo.addName(reg, std::string_view{name});
         } else {
-          auto type = base.parseOperand();
-          if (!type) {
-            base.lexer->printError(type.error());
-            report_fatal_error();
-          }
-          if (type->ref.is<FatTypeRef>())
+          auto state = base.lexer->getState();
+          DYNO_EXPECT(type, base.parseUseOperand());
+          if (type.is<FatTypeRef>())
             base.ctx.getCtx<HWDialectContext>().regTypeInfo.setType(
-                reg, type->ref.as<FatTypeRef>());
-          else if (type->ref.getType() == Any{CORE_CONSTANT, HW_REGISTER}) {
+                reg, type.as<FatTypeRef>());
+          else if (!seenNumBits && type.getType() == HW_REGISTER) {
+            reg->numBits = type.as<RegisterRef>();
+            seenNumBits = true;
+          } else if (seenNumBits &&
+                     type.getType() == Any{CORE_CONSTANT, HW_REGISTER}) {
             base.ctx.getCtx<HWDialectContext>().regResetValue.get_ensure(reg) =
-                type->ref;
+                type;
           } else
-            base.lexer->printErrorOnPeekToken(
-                "expected type or initval (constant/register)");
+            return base.lexer->makeErrorStartingAtToLast(
+                state, "expected type or init val (constant/register)");
         }
+        if (!lexer->popIf(DynoLexer::op_comma))
+          break;
       }
-      lexer->popEnsure(DynoLexer::op_rbrclose);
+      DYNO_EXPECT(lexer->popExpect(DynoLexer::op_rbrclose));
 
       // only add ident name if no names listed
       if (regNameInfo.getNames(reg).empty() && !name.empty() &&
@@ -276,20 +293,30 @@ public:
       return reg;
     }
     case *HW_WIRE: {
-      lexer->popEnsure(DynoLexer::op_rbropen);
-      auto bits = lexer->popEnsure(Token::INT_LITERAL);
-      lexer->popEnsure(DynoLexer::op_rbrclose);
-      return ctx->getStore<Wire>().create(bits.intLit.value);
+      DYNO_EXPECT(lexer->popExpect(DynoLexer::op_rbropen));
+      OptionalU32OrReg bits;
+      if (lexer->peekIs(Token::INT_LITERAL)) {
+        bits = lexer->Pop().intLit.value;
+      } else {
+        auto state = base.lexer->getState();
+        DYNO_EXPECT(op, base.parseUseOperand())
+        if (op.getType() != HW_REGISTER)
+          return base.lexer->makeErrorStartingAtToLast(
+              state, "expected integer or register");
+
+        bits = op.as<RegisterRef>();
+      }
+      DYNO_EXPECT(lexer->popExpect(DynoLexer::op_rbrclose));
+      return ctx->getStore<Wire>().create(bits);
     }
     case *HW_PROCESS: {
       return ctx->getStore<Process>().create();
     }
     case *HW_TRIGGER: {
-      lexer->popEnsure(DynoLexer::op_rbropen);
+      DYNO_EXPECT(lexer->popExpect(DynoLexer::op_rbropen));
       auto trigger = ctx->getStore<Trigger>().create();
       while (lexer->peekIs(Token::IDENTIFIER)) {
-        auto ident =
-            lexer->GetIdent(lexer->popEnsure(Token::IDENTIFIER).ident.idx);
+        auto ident = lexer->GetIdent(lexer->Peek().ident.idx);
         if (ident == "pos")
           trigger->addMode(SensMode::POSEDGE);
         else if (ident == "neg")
@@ -301,31 +328,33 @@ public:
         else if (ident == "iffn")
           trigger->addMode(SensMode::IFFN);
         else
-          abort();
+          return lexer->makeErrorOnPeekToken("invalid sensitivity mode: \"{}\"",
+                                             ident);
+        lexer->Pop();
         if (!lexer->popIf(DynoLexer::op_comma))
           break;
       }
-      lexer->popEnsure(DynoLexer::op_rbrclose);
+      DYNO_EXPECT(lexer->popExpect(DynoLexer::op_rbrclose));
       return trigger;
     }
     case *HW_MEM_PORT: {
       auto ref = ctx->getStore<MemoryPort>().create();
-      lexer->popEnsure(DynoLexer::op_rbropen);
+      DYNO_EXPECT(lexer->popExpect(DynoLexer::op_rbropen));
       ref->delay = lexer->popEnsure(Token::INT_LITERAL).intLit.value;
       if (lexer->popIf(DynoLexer::op_comma)) {
         while (!lexer->peekIs(DynoLexer::op_rbrclose)) {
-          lexer->popEnsure(DynoLexer::op_rbropen);
-          auto a = lexer->popEnsure(Token::INT_LITERAL).intLit.value;
-          lexer->popEnsure(DynoLexer::op_comma);
-          auto b = lexer->popEnsure(Token::INT_LITERAL).intLit.value;
-          lexer->popEnsure(DynoLexer::op_rbrclose);
-          ref->writeForwardMeta.emplace_back(a, b);
+          DYNO_EXPECT(lexer->popExpect(DynoLexer::op_rbropen));
+          DYNO_EXPECT(a, lexer->popExpect(Token::INT_LITERAL));
+          DYNO_EXPECT(lexer->popExpect(DynoLexer::op_comma));
+          DYNO_EXPECT(b, lexer->popExpect(Token::INT_LITERAL));
+          DYNO_EXPECT(lexer->popExpect(DynoLexer::op_rbrclose));
+          ref->writeForwardMeta.emplace_back(a.intLit.value, b.intLit.value);
 
           if (!lexer->popIf(DynoLexer::op_comma))
             break;
         }
       }
-      lexer->popEnsure(DynoLexer::op_rbrclose);
+      DYNO_EXPECT(lexer->popExpect(DynoLexer::op_rbrclose));
       return ref;
     }
     case *HW_POINTER: {
@@ -333,18 +362,18 @@ public:
     }
     case *HW_STDCELL_INFO: {
       auto asInfo = ctx->getStore<StdCellInfo>().create();
-      lexer->popEnsure(DynoLexer::op_rbropen);
+      DYNO_EXPECT(lexer->popExpect(DynoLexer::op_rbropen));
 
       auto list = mk_tuple(FOR_STDCELL_INFO_ELEMENTS(EXPAND_MEMBERS));
       auto names = std::to_array({FOR_STDCELL_INFO_ELEMENTS(EXPAND_NAMES)});
 
       while (lexer->peekIs(Token::STRING_LITERAL)) {
-        auto tok = lexer->popEnsure(Token::STRING_LITERAL).strLit.value;
+        DYNO_EXPECT(tok, lexer->popExpect(Token::STRING_LITERAL));
+        DYNO_EXPECT(lexer->popExpect(DynoLexer::op_colon));
         auto res = list.apply([&](auto &...args) {
           unsigned i = 0;
           return ([&] {
-            if (names[i++] == tok) {
-              lexer->popEnsure(DynoLexer::op_colon);
+            if (names[i++] == tok.strLit.value) {
               // todo: non int
               args = lexer->popEnsure(Token::INT_LITERAL).intLit.value;
               return true;
@@ -353,11 +382,11 @@ public:
           }() || ...);
         });
         if (!res)
-          return nullref;
+          return lexer->makeErrorOnPeekToken("invalid stdcell_info key");
         if (!lexer->popIf(DynoLexer::op_comma))
           break;
       }
-      lexer->popEnsure(DynoLexer::op_rbrclose);
+      DYNO_EXPECT(lexer->popExpect(DynoLexer::op_rbrclose));
       return asInfo;
     }
     }

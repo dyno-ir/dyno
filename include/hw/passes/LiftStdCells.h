@@ -29,15 +29,19 @@ class LiftStdCellsPass : public Pass<LiftStdCellsPass> {
     HWInstrBuilder lbuild{ctx, instr};
 
     for (auto port : cell.ports()) {
-      auto reg = build.buildRegister(port.getNumBits());
+      auto reg = build.buildRegister(Optional<uint32_t>(port.getNumBits()));
       if (port.isOpc(HW_INPUT_REGISTER_DEF, HW_PARAM_REGISTER_DEF)) {
         modInst.emplace_back(reg);
         lbuild.buildStore(reg, inputs->as<HWValue>());
+        if (!reg->numBits)
+          reg->numBits = inputs->as<HWValue>().getNumBits();
         ++inputs;
       } else if (port.isOpc(HW_OUTPUT_REGISTER_DEF)) {
         modInst.emplace_back(reg);
         auto newV = lbuild.buildLoad(reg);
         outputs->as<WireRef>().replaceAllUsesWith(newV);
+        if (!reg->numBits)
+          reg->numBits = outputs->as<HWValue>().getNumBits();
         ++outputs;
       } else
         report_fatal_error(ctx, port, "invalid std cell port dir");

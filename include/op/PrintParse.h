@@ -67,38 +67,40 @@ public:
         dialect, CallableRef{this, BindMethod<&OpDialectParser::parseObj>::fv});
   }
 
-  FatDynObjRef<> parseObj(DialectType type, ArrayRef<char> name, bool isDef) {
+  Result<FatDynObjRef<>, ParseError> parseObj(DialectType type,
+                                              ArrayRef<char> name, bool isDef) {
     DynoLexer &lexer = *base->lexer;
 
     switch (type.type) {
     case OP_MAP.type: {
-      lexer.popEnsure(DynoLexer::op_rbropen);
+      DYNO_EXPECT(lexer.popExpect(DynoLexer::op_rbropen));
       std::map<std::string, std::string> map;
       while (lexer.peekIs(Token::STRING_LITERAL)) {
         auto key = lexer.Pop().strLit.value;
-        lexer.popEnsure(DynoLexer::op_colon);
-        auto val =
-            lexer.popEnsure(Token::STRING_LITERAL, Token::INLINE_CODE_LITERAL)
-                .strLit.value;
-        map.insert(std::make_pair(key, val));
+        DYNO_EXPECT(lexer.popExpect(DynoLexer::op_colon));
+        DYNO_EXPECT(valTok, lexer.popExpect(Token::STRING_LITERAL,
+                                            Token::INLINE_CODE_LITERAL));
+        map.insert(std::make_pair(key, valTok.strLit.value));
         if (!lexer.popIf(DynoLexer::op_comma))
           break;
       }
-      lexer.popEnsure(DynoLexer::op_rbrclose);
+      DYNO_EXPECT(lexer.popExpect(DynoLexer::op_rbrclose));
       return base->ctx.getStore<MapObj>().create(std::move(map));
     }
 
     case OP_STRING.type: {
-      lexer.popEnsure(DynoLexer::op_rbropen);
-      std::string val{lexer.popEnsure(Token::STRING_LITERAL).strLit.value};
-      lexer.popEnsure(DynoLexer::op_rbrclose);
+      DYNO_EXPECT(lexer.popExpect(DynoLexer::op_rbropen));
+      DYNO_EXPECT(strTok, lexer.popExpect(Token::STRING_LITERAL));
+      std::string val{strTok.strLit.value};
+      DYNO_EXPECT(lexer.popExpect(DynoLexer::op_rbrclose));
       return base->ctx.getStore<StringObj>().create(std::move(val));
     }
 
     case OP_FUNC.type: {
       if (lexer.popIf(DynoLexer::op_rbropen)) {
-        name = lexer.popEnsure(Token::STRING_LITERAL).strLit.value;
-        lexer.popEnsure(DynoLexer::op_rbrclose);
+        DYNO_EXPECT(strTok, lexer.popExpect(Token::STRING_LITERAL));
+        name = strTok.strLit.value;
+        DYNO_EXPECT(lexer.popExpect(DynoLexer::op_rbrclose));
       }
       return base->ctx.getStore<Function>().create(name, &base->ctx);
     }
