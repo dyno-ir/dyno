@@ -533,21 +533,24 @@ public:
         makeErrorOnPeekToken(error, std::forward<decltype(args)>(args)...));
     report_fatal_error();
   }
-  ParseError makeErrorOnPeekToken(const char *error, auto &&...args) {
+  [[nodiscard]] ParseError makeErrorOnPeekToken(const char *error,
+                                                auto &&...args) {
     assert(peekToken);
     return ParseError{Format{error, std::forward<decltype(args)>(args)...},
                       lastState.i, state.i, state.lineNumber};
   }
 
-  ParseError makeErrorOnNextToken(const char *error, auto &&...args) {
+  [[nodiscard]] ParseError makeErrorOnNextToken(const char *error,
+                                                auto &&...args) {
     if (!peekToken)
       Peek();
     return ParseError{Format{error, std::forward<decltype(args)>(args)...},
                       lastState.i, state.i, state.lineNumber};
   }
 
-  ParseError makeErrorStartingAtToLast(const State &startState,
-                                       const char *error, auto &&...args) {
+  [[nodiscard]] ParseError makeErrorStartingAtToLast(const State &startState,
+                                                     const char *error,
+                                                     auto &&...args) {
     return ParseError{Format{error, std::forward<decltype(args)>(args)...},
                       startState.i, !!peekToken ? lastState.i : state.i,
                       startState.lineNumber};

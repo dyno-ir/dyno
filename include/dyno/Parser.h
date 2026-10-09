@@ -137,7 +137,7 @@ public:
     auto state = lexer->getState();
     DYNO_EXPECT(operand, parseOperand());
     if (operand.isDef)
-      lexer->makeErrorStartingAtToLast(state, "expected use operand");
+      return lexer->makeErrorStartingAtToLast(state, "expected use operand");
     return operand.ref;
   }
 
