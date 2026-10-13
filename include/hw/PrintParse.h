@@ -264,17 +264,17 @@ public:
           regNameInfo.addName(reg, std::string_view{name});
         } else {
           auto state = base.lexer->getState();
-          DYNO_EXPECT(type, base.parseUseOperand());
-          if (type.is<FatTypeRef>())
+          DYNO_EXPECT(type, base.parseOperand());
+          if (type.ref.is<FatTypeRef>())
             base.ctx.getCtx<HWDialectContext>().regTypeInfo.setType(
-                reg, type.as<FatTypeRef>());
-          else if (!seenNumBits && type.getType() == HW_REGISTER) {
-            reg->numBits = type.as<RegisterRef>();
+                reg, type.ref.as<FatTypeRef>());
+          else if (!seenNumBits && type.ref.getType() == HW_REGISTER) {
+            reg->numBits = type.ref.as<RegisterRef>();
             seenNumBits = true;
           } else if (seenNumBits &&
-                     type.getType() == Any{CORE_CONSTANT, HW_REGISTER}) {
+                     type.ref.getType() == Any{CORE_CONSTANT, HW_REGISTER}) {
             base.ctx.getCtx<HWDialectContext>().regResetValue.get_ensure(reg) =
-                type;
+                type.ref;
           } else
             return base.lexer->makeErrorStartingAtToLast(
                 state, "expected type or init val (constant/register)");
@@ -299,12 +299,12 @@ public:
         bits = lexer->Pop().intLit.value;
       } else {
         auto state = base.lexer->getState();
-        DYNO_EXPECT(op, base.parseUseOperand())
-        if (op.getType() != HW_REGISTER)
+        DYNO_EXPECT(op, base.parseOperand())
+        if (op.ref.getType() != HW_REGISTER)
           return base.lexer->makeErrorStartingAtToLast(
               state, "expected integer or register");
 
-        bits = op.as<RegisterRef>();
+        bits = op.ref.as<RegisterRef>();
       }
       DYNO_EXPECT(lexer->popExpect(DynoLexer::op_rbrclose));
       return ctx->getStore<Wire>().create(bits);

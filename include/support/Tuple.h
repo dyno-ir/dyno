@@ -1,5 +1,6 @@
 #pragma once
 
+#include <type_traits>
 #include <utility>
 template <std::size_t I, typename T> struct TupleElem {
   T value;
@@ -56,8 +57,11 @@ struct TupleBase<std::index_sequence<Is...>, Ts...> : TupleElem<Is, Ts>... {
     return detail::extract_leaf<I>(std::move(*this));
   }
 
-  template <typename T> constexpr T &get() noexcept {
-    T *t;
+  template <typename T>
+  constexpr T &get() noexcept
+    requires(std::is_same_v<T, Ts> || ...)
+  {
+    T *t = nullptr;
     (
         [&] {
           if constexpr (std::is_same_v<Ts, T>)
@@ -77,6 +81,10 @@ struct TupleBase<std::index_sequence<Is...>, Ts...> : TupleElem<Is, Ts>... {
   }
 
   static constexpr std::size_t size = sizeof...(Is);
+
+  constexpr bool operator==(const TupleBase &o) const {
+    return ((this->get<Is>() == o.get<Is>()) && ...);
+  }
 
   // TupleBase &operator=(const TupleBase &o) {
   //   ((this->get<Is>() = o.get<Is>()), ...);

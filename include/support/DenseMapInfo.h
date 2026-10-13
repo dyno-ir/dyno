@@ -1,4 +1,6 @@
 #pragma once
+#include "support/Bits.h"
+#include "support/Tuple.h"
 #include <cstdint>
 #include <functional>
 #include <limits>
@@ -53,5 +55,26 @@ template <std::integral T> struct DenseMapInfo<Unhashed<T>> {
   }
   // no hashing
   static unsigned getHashValue(const T &k) { return k; }
+  static bool isEqual(const T &lhs, const T &rhs) { return lhs == rhs; }
+};
+
+template <typename First, typename... Rest>
+struct DenseMapInfo<Tuple<First, Rest...>> {
+  using T = Tuple<First, Rest...>;
+  // rest doesn't need empty/tombstone defined
+  static T getEmptyKey() {
+    return {DenseMapInfo<First>::getEmptyKey(), Rest{}...};
+  }
+  static T getTombstoneKey() {
+    return {DenseMapInfo<First>::getTombstoneKey(), Rest{}...};
+  }
+  static unsigned getHashValue(const T &k) {
+    return k.apply([](const auto &first, const auto &...rest) {
+      unsigned hash = DenseMapInfo<First>::getHashValue(first);
+      ((hash = hash_combine(hash, DenseMapInfo<Rest>::getHashValue(rest))),
+       ...);
+      return hash;
+    });
+  }
   static bool isEqual(const T &lhs, const T &rhs) { return lhs == rhs; }
 };

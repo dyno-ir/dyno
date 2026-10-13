@@ -960,27 +960,39 @@ private:
 
     SmallVec<uint32_t, 4> idxs(terms.size() - 1);
 
+    auto getImpliedMax = [&](size_t i) {
+      uint32_t max = round_up_div(*insert.in()->as<HWValue>().getNumBits(),
+                                  terms[i].getFact());
+      if (terms[i].getMax())
+        max = *terms[i].getMax();
+      return max;
+    };
+
+    SmallVec<uint32_t, 4> impliedMax(terms.size() - 1);
+    SmallVec<HWValue, 4> termDecoders(terms.size() - 1);
+    for (auto [i, term] : Range{terms}.drop_back().enumerate()) {
+      uint32_t max = getImpliedMax(i);
+      impliedMax[i] = max;
+      termDecoders[i] = (max <= 1) ? ConstantRef::fromBool(1)
+                                   : buildDecoder(terms[i].getIdx(), max);
+    }
+
     HWValue cur = insert.in()->as<HWValue>();
     while (true) {
       HWValue enable = ConstantRef::fromBool(1);
       uint32_t offset = insert.getBase();
       for (auto [i, idx] : Range{idxs}.enumerate()) {
-        enable = build.buildAnd(enable,
-                                build.buildSplice(terms[i].getIdx(), 1, idx));
+        auto match = build.buildSplice(termDecoders[i], 1, idx);
+        enable = build.buildAnd(enable, match);
         offset += idx * terms[i].getFact();
       }
       cur = lowerSimpleInsert(cur, insert.val()->as<HWValue>(), offset,
                               terms.back().getIdx(), terms.back().getFact(),
-                              insert.getLen(), terms.back().getMax());
+                              insert.getLen(), terms.back().getMax(), enable);
 
       for (size_t i = 0; i < idxs.size(); i++) {
         idxs[i]++;
-        uint32_t max = round_up_div(*insert.in()->as<HWValue>().getNumBits(),
-                                    terms[i].getFact());
-        if (terms[i].getMax())
-          max = *terms[i].getMax();
-
-        if (idxs[i] == max) {
+        if (idxs[i] == impliedMax[i]) {
           idxs[i] = 0;
           continue;
         }

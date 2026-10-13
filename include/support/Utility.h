@@ -13,3 +13,5 @@
 template <typename...> inline constexpr bool dependent_false_v = false;
 
 struct none_t {};
+
+#define DYNO_FWD(pack) std::forward<decltype(pack)>(pack)...

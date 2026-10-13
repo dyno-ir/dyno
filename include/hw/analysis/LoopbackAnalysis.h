@@ -11,6 +11,7 @@
 #include "hw/analysis/RegisterValue.h"
 #include "op/IDs.h"
 #include "support/Bits.h"
+#include "support/Debug.h"
 #include "support/DenseMap.h"
 #include "support/DynBitSet.h"
 #include "support/RTTI.h"
@@ -18,6 +19,7 @@
 #include "support/SmallVec.h"
 #include "support/Utility.h"
 #include <limits>
+#include <type_traits>
 namespace dyno {
 
 class LoopbackFrag {
@@ -155,7 +157,7 @@ public:
 
   LoopbackPartition get(HWValue value, HWValue loopback) {
     stack.emplace_back(value, 0);
-    SmallDenseMap<ObjRef<Wire>, LoopbackPartition> map;
+    SmallDenseMap<Tuple<ObjRef<Wire>, uint32_t>, LoopbackPartition> map;
     retVal = {};
 
     int64_t addr = 0;
@@ -165,6 +167,8 @@ public:
     uint32_t uses = 1;
 
     while (!stack.empty()) {
+      assert(addr <= std::numeric_limits<uint32_t>::max());
+
       auto &[val, idx, acc] = stack.back();
       uint32_t curUses = 1;
 
@@ -175,14 +179,15 @@ public:
           // return always-on loopback
           FRAME_RET(nullref, true);
 
-        if (auto loopbackConst = loopback.dyn_as<ConstantRef>()) {
-          BigInt out;
-          BigInt::rangeSelectOp4S(out, loopbackConst, addr,
-                                  asConst.getNumBits());
+        if (addr >= 0)
+          if (auto loopbackConst = loopback.dyn_as<ConstantRef>()) {
+            BigInt out;
+            BigInt::rangeSelectOp4S(out, loopbackConst, addr,
+                                    asConst.getNumBits());
 
-          if (out == asConst) // return always-on loopback
-            FRAME_RET(nullref, true);
-        }
+            if (out == asConst) // return always-on loopback
+              FRAME_RET(nullref, true);
+          }
         FRAME_RET();
       }
 
@@ -212,10 +217,13 @@ public:
         std::print(dbgs(), "rv:\n");
       });
 
-      if (auto it = map.find(wire); it != map.end()) {
-        retVal = it.val();
-        stack.pop_back();
-        continue;
+      if (idx == 0) {
+        auto it = map.find({wire, uint32_t(addr)});
+        if (it != map.end()) {
+          retVal = it.val();
+          stack.pop_back();
+          continue;
+        }
       }
 
       // Track uses
@@ -383,7 +391,7 @@ public:
       }
 
       uses /= curUses;
-      map.insert(wire, retVal);
+      map.insert({wire, uint32_t(addr)}, retVal);
     }
 
     assert(addr == 0);

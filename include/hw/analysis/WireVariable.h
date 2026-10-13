@@ -185,6 +185,12 @@ public:
     }
     return true;
   }
+
+  static std::pair<HWValue, bool> getSignalWithPolarity(HWValue raw) {
+    if (auto w = raw.dyn_as<WireRef>(); w && w.getDefI().isOpc(OP_NOT))
+      return {w.getDefI().other(0)->as<HWValue>(), false};
+    return {raw, true};
+  }
 };
 
 }; // namespace dyno
