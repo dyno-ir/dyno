@@ -3,6 +3,7 @@
 #include "ErrorRecovery.h"
 #include "SIMD.h"
 #include "StringRef.h"
+#include "Tokenizer.h"
 #include "dyno/Constant.h"
 #include "support/ANSITerminal.h"
 #include "support/ArrayRef.h"
@@ -17,8 +18,10 @@
 #include <array>
 #include <cassert>
 #include <cstdio>
+#include <format>
 #include <memory>
 #include <optional>
+#include <ostream>
 #include <string>
 
 struct Token {
@@ -466,13 +469,14 @@ public:
 
   StringRef GetIdent(unsigned identIdx) { return rvStrings[identIdx]; }
 
-  static StringRef extractEnclosingLine(StringRef input, size_t i) {
-    const char *start = input.begin() + i;
-    while (start != input.begin() && *start != '\n')
+  StringRef extractEnclosingLine(StringRef input) {
+    assert(input.begin() >= src.begin() && input.end() <= src.end());
+    const char *start = input.begin();
+    while (start != src.begin() && *start != '\n')
       --start;
 
-    const char *end = input.begin() + i;
-    while (end != input.end() && *end != '\n')
+    const char *end = input.end();
+    while (end != src.end() && *end != '\n')
       ++end;
 
     if (start != end && start != input.begin())
@@ -501,31 +505,51 @@ public:
     }
   }
 
-  void printError(const ParseError &error) {
-    auto line = extractEnclosingLine(StringRef{src}, error.start);
-    unsigned col = &src[error.start] - line.begin() + 1;
-    // todo: handle end going over line bounds
+  void printError(std::ostream &os, const ParseError &error) const {
+    StringRef errorLinesStr =
+        StringRef{src.begin() + error.start, error.end - error.start};
+    errorLinesStr = extractEnclosingLine(errorLinesStr);
 
-    fprintf(stderr, "%s%s:%u:%u: %serror: %s", stderrBold(), path.c_str(),
-            error.lineNumber, col, stderrRed(), stderrWhite());
-    error.message.toStream(std::cerr);
-    fprintf(stderr, "%s\n", stderrReset());
-    unsigned pos;
-    fprintf(stderr, "  %u |%n", error.lineNumber, &pos);
-    std::cerr << std::string_view(line) << "\n";
-    for (unsigned i = 0; i < pos - 1; i++)
-      putc(' ', stderr);
-    putc('|', stderr);
-    pos = &src[error.start] - line.begin();
-    for (unsigned i = 0; i < pos; i++)
-      putc(' ', stderr);
-    fprintf(stderr, "%s%s", stderrBold(), stderrGreen());
-    putc('^', stderr);
-    if (error.start != error.end)
-      for (size_t i = error.start; i < error.end - 1; i++)
-        putc('~', stderr);
-    fprintf(stderr, "%s", stderrReset());
-    putc('\n', stderr);
+    Tokenizer linesTok{errorLinesStr, "\n"};
+    SmallVec<StringRef, 16> lines(Range{linesTok});
+
+    unsigned col = &src[error.start] - errorLinesStr.begin() + 1;
+    std::print(os, "{}{}:{}:{}: {}error: {}", stderrBold(), path.c_str(),
+               error.lineNumber, col, stderrRed(), stderrWhite());
+    error.message.toStream(os);
+    std::print(os, "{}\n", stderrReset());
+
+    unsigned indent =
+        std::formatted_size("{}", error.lineNumber + lines.size() - 1);
+
+    for (auto [i, line] : Range{lines}.enumerate()) {
+      std::print(os, "  {:<{}} |{}\n", error.lineNumber + i, indent, line);
+      auto num = std::min(line.end(), src.begin() + error.end) - line.begin();
+      num -= error.start - (line.begin() - src.begin()) + 1;
+      if (i == 0)
+        std::print(os, "{:>{}}{}{:>{}}{:~>{}}{}\n", "|", indent + 4,
+                   stderrGreen(), "^", col - indent + 2, "", num,
+                   stderrReset());
+      else {
+        auto stripped = line.strip();
+        auto start = stripped.begin() - line.begin();
+        auto num = std::min(stripped.end(), src.begin() + error.end) -
+                   stripped.begin() + 1;
+        std::print(os, "{:>{}}{:>{}}{}{:~>{}}{}\n", "|", indent + 4, "", start,
+                   stderrGreen(), "", num, stderrReset());
+      }
+    }
+  }
+  void printError(const ParseError &error) const {
+    printError(std::cerr, error);
+  }
+  std::string errorToString(const ParseError &error) const {
+    std::stringstream str;
+    printError(str, error);
+    return std::move(str).str();
+  }
+  LazyFormat errorToPrintable(const ParseError &error) const {
+    return LazyFormat{[&](std::ostream &os) { printError(os, error); }};
   }
 
   [[noreturn]] void printErrorOnPeekToken(const char *error, auto &&...args) {

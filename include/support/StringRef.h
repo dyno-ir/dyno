@@ -3,6 +3,7 @@
 #include "support/Bits.h"
 #include "support/DenseMapInfo.h"
 #include "support/Ranges.h"
+#include <cctype>
 #include <cstring>
 #include <format>
 #include <limits>
@@ -36,6 +37,20 @@ public:
   }
   constexpr Derived substr(size_t pos) const {
     return substr(pos, cself().size() - pos);
+  }
+  constexpr Derived strip() const {
+    auto beginIt = cself().begin();
+    while (beginIt != cself().end() && std::isspace(*beginIt))
+      ++beginIt;
+
+    if (beginIt == cself().end())
+      return Derived(beginIt, uint32_t(0));
+
+    auto endIt = cself().end() - 1;
+    while (endIt > beginIt && std::isspace(*endIt))
+      --endIt;
+
+    return Derived(beginIt, endIt);
   }
 
   bool deepEquals(const Derived &other) const {
