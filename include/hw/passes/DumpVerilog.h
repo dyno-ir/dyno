@@ -42,7 +42,8 @@ class DumpVerilogPass : public Pass<DumpVerilogPass> {
 public:
 #define CONFIG_STRUCT_LAMBDA(FIELD, ENUM)                                      \
   FIELD(bool, dumpWiresLast, false)                                            \
-  FIELD(std::string, fileName, "dump.v")
+  FIELD(std::string, fileName, "dump.v")                                       \
+  FIELD(bool, useObjIDsAsNames, false)
   CONFIG_STRUCT(CONFIG_STRUCT_LAMBDA)
 #undef CONFIG_STRUCT_LAMBDA
   Config config;
@@ -52,7 +53,7 @@ private:
     auto &regNameInfo = ctx.getCtx<HWDialectContext>().regNameInfo;
     auto names = regNameInfo.getNames(reg);
     if (names.empty())
-      return "_r" + std::to_string(reg.getObjID().num) + "_";
+      return " _r" + std::to_string(reg.getObjID().num) + "_";
     return std::string(" \\") + names.front() + std::string(" ");
   }
 
@@ -80,14 +81,19 @@ private:
   }
 
   void dumpNetlistProcess(ProcessIRef proc) {
-    ObjMapVec<Wire, Optional<uint32_t>> wireMap;
-    wireMap.resize(ctx.getStore<Wire>().numIDs());
+    std::optional<ObjMapVec<Wire, Optional<uint32_t>>> wireMap;
+    if (config.useObjIDsAsNames) {
+      wireMap.emplace();
+      wireMap->resize(ctx.getStore<Wire>().numIDs());
+    }
     uint32_t wireIdCnt = 0;
     auto wireToID = [&](WireRef wire) {
-      auto &entry = wireMap[wire];
+      if (config.useObjIDsAsNames)
+        return wire.getObjID().num;
+      auto &entry = (*wireMap)[wire];
       if (entry)
         return *entry;
-      wireMap[wire] = wireIdCnt;
+      (*wireMap)[wire] = wireIdCnt;
       return wireIdCnt++;
     };
     auto dumpValue = [&](HWValue val) {
@@ -216,7 +222,7 @@ private:
                    wireToID(asLUT.def()->as<WireRef>()));
         for (unsigned i = 0; i < asLUT.numInputs(); i++) {
           std::print(os, ", .I{}(_w{}_)", i,
-                     wireToID(asLUT.inputs()[i].as<WireRef>()));
+                     wireToID(asLUT.inputs().reverse()[i].as<WireRef>()));
         }
         std::print(os, ");\n");
         break;
