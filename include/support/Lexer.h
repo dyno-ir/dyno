@@ -469,7 +469,7 @@ public:
 
   StringRef GetIdent(unsigned identIdx) { return rvStrings[identIdx]; }
 
-  StringRef extractEnclosingLine(StringRef input) {
+  StringRef extractEnclosingLine(StringRef input) const {
     assert(input.begin() >= src.begin() && input.end() <= src.end());
     const char *start = input.begin();
     while (start != src.begin() && *start != '\n')

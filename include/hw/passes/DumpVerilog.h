@@ -82,7 +82,7 @@ private:
 
   void dumpNetlistProcess(ProcessIRef proc) {
     std::optional<ObjMapVec<Wire, Optional<uint32_t>>> wireMap;
-    if (config.useObjIDsAsNames) {
+    if (!config.useObjIDsAsNames) {
       wireMap.emplace();
       wireMap->resize(ctx.getStore<Wire>().numIDs());
     }
