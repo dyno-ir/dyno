@@ -129,13 +129,14 @@ public:
         // check if already handled
         if (handled[reg])
           continue;
-        handled[reg] = 1;
 
         if (!regs_end)
           regs_end = mod.regs_end();
 
         build.setInsertPoint(*regs_end);
         auto combReg = build.buildRegister(reg.getNumBits());
+        handled[combReg] = 1;
+
         ctx.getCtx<HWDialectContext>().regTypeInfo.copyType(reg, combReg);
         for (auto nm : ctx.getCtx<HWDialectContext>().regNameInfo.getNames(reg))
           ctx.getCtx<HWDialectContext>().regNameInfo.addName(

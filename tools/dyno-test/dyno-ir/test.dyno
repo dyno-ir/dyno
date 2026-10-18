@@ -540,7 +540,6 @@ TEST_CASE :string("instcombine-mux-lift"), :block, :block, :block {
   meta.INST_COMBINE_PASS
 }
 
-
 TEST_EQUIVALENCE :string("test-arith-lower"), :block, :block {
   MODULE_DEF :module("mod"), :block {
     INPUT_REGISTER_DEF %clk:register(1)
@@ -1573,8 +1572,9 @@ TEST_SCRIPT :string("test-stack-comb-fwd-blocking"), :block {
     endmodule
   }])
   CALL symbol("flow_earlyCanonFlow")
-  meta.INACTIVE_COPY_PASS
   CALL symbol("flow_synthCanonicalize")
+  // need to run past canonicalize to get full SSA
+  meta.INACTIVE_COPY_PASS
   CALL symbol("flow_synthEarlyOpt")
   CALL symbol("flow_synthLowerControlFlow")
   CALL symbol("flow_synthMemoryFFMuxHandling")
