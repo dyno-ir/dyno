@@ -47,6 +47,7 @@
 #include "hw/passes/SelectModules.h"
 #include "hw/passes/SeqToComb.h"
 #include "hw/passes/SimpleMemoryInference.h"
+#include "hw/passes/TemplateLower.h"
 #include "hw/passes/TriggerDedupe.h"
 #include "meta/MetaPassManager.h"
 
@@ -182,5 +183,7 @@ inline void registerDialectPasses<DIALECT_HW>(PassRegistry &passRegistry) {
   passRegistry.registerPass<EvalInitProcsPass>(DIALECT_HW);
   // Pass to explicitly remove RTL-level side effects like prints
   passRegistry.registerPass<RemoveSideEffectInstrsPass>(DIALECT_HW);
+  // lower ops by instantiating target-specific dyno-ir templates
+  passRegistry.registerPass<TemplateLowerPass>(DIALECT_HW);
 }
 }; // namespace dyno
