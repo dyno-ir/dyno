@@ -33,7 +33,8 @@ public:
   DynBitSet<SmallVec<uint64_t, 1>> polarity;
   // specific offset in operand of instr that creates loopback
   ObjRef<Instr> instr = nullref;
-  uint32_t operandIdx = 0;
+  uint16_t operandIdx = 0;
+  bool isUsedElsewhere = false;
   uint32_t srcAddr = 0;
   uint32_t operandBitOffs = 0;
 
@@ -75,6 +76,9 @@ public:
       return false;
     if (!other)
       return true;
+    // non-shared prioritized
+    if (isUsedElsewhere != other.isUsedElsewhere)
+      return isUsedElsewhere;
     // fewer terms prioritized
     return (*this).size() < other.size();
   }
@@ -91,7 +95,8 @@ public:
   LoopbackPartition(GenericPartitions &&o) : GenericPartitions(std::move(o)) {}
   LoopbackPartition(const GenericPartitions &o) : GenericPartitions(o) {}
 
-  bool addConditionToLoopbackFrags(OperandRef val, bool polarity) {
+  bool addConditionToLoopbackFrags(OperandRef val, bool polarity,
+                                   bool multiUse) {
     assert(getLen() == *val.instr().def()->as<WireRef>().getNumBits());
     if (val.is<ConstantRef>() && val.as<ConstantRef>().valueEquals(0))
       return false;
@@ -106,6 +111,7 @@ public:
           frag.operandBitOffs = frag.dstAddr;
           frag.operandIdx = val.getNum();
           frag.instr = val.instr();
+          frag.isUsedElsewhere = multiUse;
           assert(frag.srcAddr + frag.len <=
                  *val.instr().def()->as<WireRef>().getNumBits());
         }
@@ -154,6 +160,11 @@ class LoopbackAnalysis {
 public:
   static constexpr const char *debugName = "LoopbackPartitionAnalysis";
   static constexpr uint32_t debugID = 130; // todo: analysis debug ID assignment
+
+  struct Config {
+    bool considerMultiUsed = false;
+  };
+  Config config;
 
   LoopbackPartition get(HWValue value, HWValue loopback) {
     stack.emplace_back(value, 0);
@@ -336,7 +347,7 @@ public:
 
       case *HW_ONEHOT_MUX: {
         // we don't want to duplicate logic, bail on multi used mux
-        if (uses != 1)
+        if (uses != 1 && !config.considerMultiUsed)
           FRAME_RET();
         if (idx == 0) // reset acc unconditionally
           acc = {*val.getNumBits()};
@@ -362,7 +373,7 @@ public:
               continue;
             }
           }
-          retVal.addConditionToLoopbackFrags(cond, true);
+          retVal.addConditionToLoopbackFrags(cond, true, uses != 1);
           acc.write(retVal, 0, 0, acc.getLen());
           for (auto frag : retVal.frags) {
             if (frag.instr) {

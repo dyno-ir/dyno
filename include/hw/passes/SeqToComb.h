@@ -22,6 +22,11 @@ class SeqToCombPass : public Pass<SeqToCombPass> {
   TempBindVal<AutoCopyDebugInfoStack> autoDbgInfo;
 
 public:
+#define CONFIG_STRUCT_LAMBDA(FIELD, ENUM)                                      \
+  FIELD(bool, latchCombAssignDeferToRegular, true)
+  CONFIG_STRUCT(CONFIG_STRUCT_LAMBDA)
+#undef CONFIG_STRUCT_LAMBDA
+  Config config;
   auto make(Context &ctx) { return SeqToCombPass(ctx); }
   explicit SeqToCombPass(Context &ctx) : ctx(ctx) {}
 
@@ -69,6 +74,34 @@ public:
       build.buildStore(stateReg,
                        build.buildLoad(combReg, frag.len, frag.dstAddr), true,
                        nullref, frag.dstAddr);
+  }
+
+  void runOnCombOrLatchProc(ProcessIRef proc) {
+    if (!proc.isOpc(HW_COMB_PROCESS_DEF, HW_LATCH_PROCESS_DEF))
+      return;
+    if (!config.latchCombAssignDeferToRegular)
+      return;
+    SmallVec<InstrRef, 16> destroyList;
+    auto range = HierBlockRange{proc.block()};
+    HWInstrBuilder build{ctx, proc.block().end()};
+    for (auto instr : range) {
+      switch (*instr.getDialectOpcode()) {
+      case *HW_STORE_DEFER: {
+        auto store = instr.as<StoreIRef>();
+        assert(!store.hasTrigger());
+        auto tok = autoDbgInfo->addWithToken(instr);
+        build.buildStore(store.reg(), store.value(), false, nullref,
+                         store.getBase(), store.terms());
+        destroyList.emplace_back(instr);
+        break;
+      }
+      default:
+        break;
+      }
+    }
+
+    for (auto instr : destroyList)
+      build.destroyInstr(instr);
   }
 
   void runOnProc(ModuleIRef mod, ProcessIRef proc) {
@@ -151,27 +184,20 @@ public:
   }
 
   void runOnModule(ModuleIRef module) {
-    for (auto proc : module.procs()) {
-      runOnProc(module, proc);
-    }
-
     HWInstrBuilder build{ctx};
 
     SmallVec<ProcessIRef, 32> destroyList;
     for (auto proc : module.procs()) {
       if (proc.isOpc(HW_SEQ_PROCESS_DEF)) {
-        auto newProc = ctx.getStore<Instr>().create(2, HW_COMB_PROCESS_DEF);
-        InstrBuilder ibuild{newProc};
-        ibuild.addRef(proc.operand(0)->fat());
-        proc.operand(0).replace(FatDynObjRef<>{nullref});
-
-        ibuild.addRef(proc.operand(1)->fat());
-        proc.operand(1).replace(FatDynObjRef<>{nullref});
-
-        build.setInsertPoint(ctx.getCtx<CoreDialectContext>().cfg[proc]);
-        build.insertInstr(newProc);
-
+        runOnProc(module, proc);
+        build.changeProcessType(HW_COMB_PROCESS_DEF, proc);
         destroyList.emplace_back(proc);
+      } else if (proc.isOpc(HW_LATCH_PROCESS_DEF, HW_COMB_PROCESS_DEF)) {
+        runOnCombOrLatchProc(proc);
+        if (proc.isOpc(HW_LATCH_PROCESS_DEF)) {
+          build.changeProcessType(HW_COMB_PROCESS_DEF, proc);
+          destroyList.emplace_back(proc);
+        }
       }
     }
 

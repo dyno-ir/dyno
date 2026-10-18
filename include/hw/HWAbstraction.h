@@ -1222,6 +1222,21 @@ public:
     return defW;
   }
 
+  template <typename T>
+  WireRef buildLatch(HWValue d, HWValue en = ConstantRef::fromBool(1),
+                     Range<T> resets = Range<T>::emptyRange(),
+                     HWValue initValue = nullref) {
+    auto defW = ctx.getStore<Wire>().create(d.getNumBits());
+    auto ib = buildInstrRaw(HW_LATCH, 3 + 2 * resets.size() + !!initValue);
+    ib.addRef(defW).other().addRef(d).addRef(en);
+    for (auto [rst, rstval] : resets) {
+      ib.addRef(rst).addRef(rstval);
+    }
+    if (initValue)
+      ib.addRef(initValue);
+    return defW;
+  }
+
   RegisterRef buildRegister(Optional<uint32_t> bitSize = nullopt) {
     auto regRef = RegisterRef{ctx.getStore<Register>().create(bitSize)};
     auto regInstr = InstrRef{ctx.getStore<Instr>().create(1, HW_REGISTER_DEF)};
@@ -1307,23 +1322,6 @@ public:
     ctx.getCFG()[proc].replace(ib.instr());
     return ib.instr();
   }
-
-  // HWInstrRef buildEventDelay(RegisterRef dReg, RegisterRef qReg,
-  //                            const SensList &sens) {
-  //   auto instrRef = ProcessIRef{
-  //       ctx.getStore<Instr>().create(3 + sens.signals.size(),
-  //       HW_TRIGGER_DEF)};
-  //   insertInstr(instrRef);
-  //   InstrBuilder build{instrRef};
-  //   build.other().addRef(dReg).addRef(qReg).addRef(
-  //       SensModesRef::fromSensList(sens));
-
-  //   for (size_t i = 0; i < sens.signals.size(); i++) {
-  //     build.addRef(sens.signals[i].first);
-  //   }
-
-  //   return instrRef;
-  // }
 
   TriggerIRef buildTrigger(const SensList &list) {
     if (list.signals.empty())

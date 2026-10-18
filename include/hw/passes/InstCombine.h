@@ -93,7 +93,8 @@ public:
   FIELD(bool, muxToOneHotMux, false)                                           \
   FIELD(bool, inferMuxs, false)                                                \
   FIELD(bool, muxToBitwise, false)                                             \
-  FIELD(bool, simplifyYieldValues, true)
+  FIELD(bool, simplifyYieldValues, true)                                       \
+  FIELD(bool, inferLatches, false)
   CONFIG_STRUCT(CONFIG_STRUCT_LAMBDA)
 #undef CONFIG_STRUCT_LAMBDA
   Config config;
@@ -200,6 +201,8 @@ private:
     if (!store.isFullReg())
       return false;
     auto load = store.reg().iref().getSingleLoad();
+    // todo: relax full reg. means w can only run this once on fragmented en
+    // flip flops (no longer true after running)
     if (!load || !load.as<LoadIRef>().isFullReg())
       return false;
 
@@ -219,6 +222,12 @@ private:
           instr.initValue()
               ? build.buildSplice(instr.initValue(), frag.len, frag.dstAddr)
               : nullref;
+      auto fragRsts =
+          instr.rsts().tf([&](auto pair) -> std::pair<HWValue, HWValue> {
+            auto [en, val] = pair;
+            val = build.buildSplice(val, frag.len, frag.dstAddr);
+            return {en, val};
+          });
 
       HWValue d = build.buildSplice(instr.d(), frag.len, frag.dstAddr);
       HWValue en = instr.clkEnRaw();
@@ -238,7 +247,7 @@ private:
         }
       }
 
-      auto val = build.buildFlipFlop(instr.clk(), d, en, instr.rsts(),
+      auto val = build.buildFlipFlop(instr.clk(), d, en, fragRsts,
                                      instr.isOpc(HW_FLIP_FLOP_SRST), fragInit);
       concat.emplace_back(val);
     }
@@ -257,7 +266,7 @@ private:
     if (!config.findFlipFlopSyncResets)
       return PAT_FALSE;
     // fixme, to avoid looping. To relax this we need to prove an inferred reset
-    // actually optimizes out the reset logic via assume.
+    // actually optimizes out the reset logic via assume. (todo: relax)
     if (!instr.rsts().empty())
       return PAT_FALSE;
     // already has async resets
@@ -323,6 +332,121 @@ private:
     else
       build.buildConcat(std::move(concat));
 
+    return PAT_TRUE;
+  }
+
+  PatBool inferLatch(InstrRef instr) {
+    if (!config.inferLatches)
+      return false;
+
+    // runs either on store (infer latch) or existing latch (refine en)
+    StoreIRef store = nullref;
+    LatchIRef latch = nullref;
+    HWValue enVal = nullref;
+    HWValue dVal;
+    if (instr.is<StoreIRef>()) {
+      store = instr.as<StoreIRef>();
+      dVal = store.value();
+    } else if (instr.is<LatchIRef>()) {
+      latch = instr.as<LatchIRef>();
+      auto defW = latch.def()->as<WireRef>();
+      if (defW.getNumUses() != 1)
+        return false;
+      store = defW.getSingleUse()->instr().as<StoreIRef>();
+      if (!store)
+        return false;
+      dVal = latch.d();
+      enVal = latch.en();
+    } else
+      dyno_unreachable("expected store or latch");
+
+    if (store.reg().getNumUses() != 2)
+      return false;
+
+    auto loadInstr = store.reg().iref().getSingleLoad();
+    if (!loadInstr)
+      return false;
+    auto load = loadInstr.as<LoadIRef>();
+    if (load.parentProc(ctx) != store.parentProc(ctx))
+      return false;
+
+    Defer _{[old = loopbackAnalysis.config, this] {
+      loopbackAnalysis.config = old;
+    }};
+    loopbackAnalysis.config.considerMultiUsed = true;
+
+    auto part = loopbackAnalysis.get(dVal, load.value());
+    if (Range{part.frags}.all(
+            [](auto frag) { return !frag || frag.size() == 0; }))
+      return false;
+
+    HWInstrBuilder build{ctx, instr};
+    OtherVec<HWValue> concat(ctx, 1, part.frags.size());
+
+    auto regInitValPtr =
+        ctx.getCtx<HWDialectContext>().regResetValue.find(store.reg());
+    HWValue initVal =
+        regInitValPtr ? ctx.resolve(*regInitValPtr).as<HWValue>() : nullref;
+
+    for (auto &frag : part.frags) {
+      HWValue fragInit =
+          initVal ? build.buildSplice(initVal, frag.len, frag.dstAddr)
+                  : nullref;
+      SmallVec<std::pair<HWValue, HWValue>, 4> fragRsts;
+      if (latch) {
+        fragRsts =
+            latch.rsts().tf([&](auto pair) -> std::pair<HWValue, HWValue> {
+              auto [en, val] = pair;
+              val = build.buildSplice(val, frag.len, frag.dstAddr);
+              return {en, val};
+            });
+      }
+
+      HWValue d = build.buildSplice(dVal, frag.len, frag.dstAddr);
+      HWValue q;
+
+      // no loopback
+      if (!frag) {
+        if (instr.is<StoreIRef>()) {
+          q = d; // no loopback -> no latch for this frag (would be an always
+                 // en=1 latch)
+        } else {
+          // no new loopback, just keep existing en
+          d = build.buildLatch(d, enVal, Range{fragRsts}, fragInit);
+        }
+      }
+      // always on loopback
+      else if (frag.size() == 0) {
+        if (instr.is<StoreIRef>()) {
+          q = d; // the value equals itself. todo: skip the store?
+        } else {
+          // never enabled but can set/rst via init and rst vals
+          d = build.buildLatch(d, ConstantRef::fromBool(0), Range{fragRsts},
+                               fragInit);
+        }
+      } else {
+        auto newEn = build.buildOr(Range{frag}.tf([&](auto pair) {
+          auto ref = ctx.resolve(pair.first);
+          return pair.second ? build.buildNot(ref) : ref;
+        }));
+        if (enVal)
+          newEn = build.buildAnd(enVal, newEn);
+        if (!frag.isUsedElsewhere)
+          makeLoopbackUseDontCare(frag);
+        d = build.buildLatch(d, newEn, Range{fragRsts}, fragInit);
+      }
+
+      concat.emplace_back(d);
+    }
+    concat.others().do_reverse();
+
+    if (instr.is<StoreIRef>()) {
+      replaceUse(store.other(0), build.buildConcat(std::move(concat)));
+    } else {
+      replaceUses(latch.def()->as<WireRef>(),
+                  build.buildConcat(std::move(concat)));
+      deleteMatchedInstr(latch);
+    }
     return PAT_TRUE;
   }
 
@@ -2174,6 +2298,7 @@ private:
     case *HW_STORE:
     case *HW_STORE_DEFER: {
       MATCH(storeValConstProp(instr.as<StoreIRef>()))
+      MATCH(inferLatch(instr.as<StoreIRef>()))
       break;
     }
 
@@ -2240,6 +2365,11 @@ private:
       MATCH(simplifyFlipFlopResets(instr))
       MATCH(findFlipFlopEnables(instr))
       MATCH(findFlipFlopSyncResets(instr))
+      break;
+    }
+
+    case *HW_LATCH: {
+      MATCH(inferLatch(instr.as<LatchIRef>()))
       break;
     }
 
