@@ -107,10 +107,10 @@ private:
   PatBool knownBitsConstProp(InstrRef instr) {
     auto wire = instr.def(0)->as<WireRef>();
     auto known = knownBits.getKnownBits(wire);
-    if (known.getIs4S())
+    if (KnownBitsAnalysis::hasKBUnknownBits(known))
       return false;
     assert(known.getNumBits() == wire.getNumBits());
-    replaceUses(wire, cbuild.val(known).get());
+    replaceUses(wire, ctx.getStore<Constant>().findOrInsert(known));
     deleteMatchedInstr(instr);
     return PAT_TRUE;
   }
@@ -300,7 +300,8 @@ private:
         auto loopbackVal = getLoopbackVal(frag);
         auto rstVal = knownBits.getKnownBits(loopbackVal->as<HWValue>());
         BigInt::rangeSelectOp4S(rstVal, rstVal, frag.srcAddr, frag.len);
-        assert(!rstVal.getIs4S() && "find reset logic bug");
+        assert(!KnownBitsAnalysis::hasKBUnknownBits(rstVal) &&
+               "find reset logic bug");
 
         rsts.emplace_back(
             frag.size() == 0
@@ -902,9 +903,21 @@ private:
     bool reduceViaOutputs = numNonDemanded != 0;
     bool reduceViaInputs = true;
 
-    auto combineLeading = [&](BigInt &known) {
+    auto dontCareBitsToZero = [](BigInt &val) {
+      auto mask =
+          BigInt::bitsExactEqual4S(val, PatBigInt::undef(val.getNumBits()));
+      val &= ~mask;
+    };
+    auto dontCareBitsToOne = [](BigInt &val) {
+      auto mask =
+          BigInt::bitsExactEqual4S(val, PatBigInt::undef(val.getNumBits()));
+      val |= mask;
+    };
+
+    auto combineLeading = [&](BigInt known) {
       switch (*instr.getDialectOpcode()) {
       case *OP_ADD: {
+        dontCareBitsToZero(known);
         auto newLeading = BigInt::leadingZeros4SExact(known);
         if (newLeading <= 1)
           return false;
@@ -914,6 +927,7 @@ private:
       }
 
       case *OP_MUL: {
+        dontCareBitsToZero(known);
         auto newLeading = BigInt::leadingZeros4SExact(known);
         if (newLeading <= 1)
           return false;
@@ -928,10 +942,13 @@ private:
       case *OP_OR:
       case *OP_XOR: {
         uint32_t newAbsorbed = 0;
-        if (instr.isOpc(OP_AND))
+        if (instr.isOpc(OP_AND)) {
+          dontCareBitsToZero(known);
           newAbsorbed = BigInt::leadingBits4SExact(known, FourState::S0);
-        else if (instr.isOpc(OP_OR))
+        } else if (instr.isOpc(OP_OR)) {
+          dontCareBitsToOne(known);
           newAbsorbed = BigInt::leadingBits4SExact(known, FourState::S1);
+        }
 
         absorbedLeading = std::max(absorbedLeading, newAbsorbed);
         auto newLeading = BigInt::leadingNonUnk(known);

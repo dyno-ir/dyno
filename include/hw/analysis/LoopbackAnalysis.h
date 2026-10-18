@@ -186,7 +186,10 @@ public:
       if (auto asConst = val.dyn_as<ConstantRef>()) {
         // use loopback=nullref as wildcard for any constant (used for finding
         // reset values).
-        if (loopback == nullref && !asConst.getIs4S())
+        if (loopback == nullref &&
+            // X is considered a valid constant loopback, Z isn't (mostly to
+            // support known bits encoding)
+            BigInt::countBits4SExact(asConst, FourState::SZ) == 0)
           // return always-on loopback
           FRAME_RET(nullref, true);
 

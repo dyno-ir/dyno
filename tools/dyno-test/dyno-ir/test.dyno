@@ -1099,8 +1099,11 @@ TEST_SCRIPT :string("test-ff-arst-clken"), :block {
     );
 
     always_ff@(posedge clk or posedge rst) begin
-      if (rst)
+      if (rst) begin
         q <= '0;
+        q[0] <= 'x; // don't reset this bit
+        q[23] <= rst ^ 1'bx + en; // nor this one, make sure x props thru nonsense ops
+      end
       else if (en)
         q <= d;
     end
@@ -1109,11 +1112,14 @@ TEST_SCRIPT :string("test-ff-arst-clken"), :block {
   }])
   CALL %memoryTestSynth
   meta.ASSERT_EXISTS_PASS map("regex":
+    "STDCELL_INSTANCE %[_a-zA-Z0-9]+:wire\(1\), %sky130_fd_sc_hd__edfxtp_1",
+    "num": "2")
+  meta.ASSERT_EXISTS_PASS map("regex":
     "STDCELL_INSTANCE %[_a-zA-Z0-9]+:wire\(1\), %sky130_fd_sc_hd__dfrtp_1",
-    "num": "32")
+    "num": "30")
   CALL %memoryTestLift
   // run as comb to cover async rst
-  meta.RANDOM_EQUIVALENCE_CHECK_PASS map("cycles": "10000", "clockMode": "COMB")
+  meta.RANDOM_EQUIVALENCE_CHECK_PASS map("cycles": "10000", "clockMode": "COMB", "relaxXZ": "1")
 }
 
 TEST_SCRIPT :string("test-memory-basic-sync-read"), :block {
@@ -1540,4 +1546,39 @@ TEST_SCRIPT :string("test-rom"), :block {
   CALL %memoryTestSynth
   CALL %memoryTestLift
   meta.RANDOM_EQUIVALENCE_CHECK_PASS map("cycles": "100", "clockMode": "CLOCK")
+}
+
+TEST_SCRIPT :string("test-stack-comb-fwd-blocking"), :block {
+  PARSE_VERILOG_PASS map("code":[{
+    module Test (
+      input logic clk,
+
+      input logic IN_valid,
+      input logic[7:0] IN_data,
+
+      input logic OUT_pop,
+      output logic[7:0] OUT_data
+    );
+
+    logic[3:0] ptr = 0;
+    logic[7:0] mem[15:0];
+
+    always_ff@(posedge clk) begin
+      if (IN_valid && ptr != '1)
+        mem[++ptr] = IN_data;
+      if (OUT_pop && ptr != 0)
+        OUT_data <= mem[ptr--];
+    end
+
+    endmodule
+  }])
+  CALL symbol("flow_earlyCanonFlow")
+  meta.INACTIVE_COPY_PASS
+  CALL symbol("flow_synthCanonicalize")
+  CALL symbol("flow_synthEarlyOpt")
+  CALL symbol("flow_synthLowerControlFlow")
+  CALL symbol("flow_synthMemoryFFMuxHandling")
+
+  CALL %memoryTestLift
+  meta.RANDOM_EQUIVALENCE_CHECK_PASS map("cycles": "1000", "clockMode": "CLOCK", "relaxXZ": "1")
 }

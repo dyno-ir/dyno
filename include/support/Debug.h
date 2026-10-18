@@ -2,6 +2,7 @@
 #include "support/MacroUtil.h"
 #include "support/Ranges.h"
 #include "support/SmallVec.h"
+#include <algorithm>
 #include <cstring>
 #include <iostream>
 #include <ostream>
@@ -80,7 +81,6 @@ inline std::ostream &dbgs() {
 
 } // namespace dyno
 template <typename It> std::ostream &operator<<(std::ostream &os, Range<It> r) {
-  os << '[';
   bool first = true;
   for (auto &&val : r) {
     if (!first) {
@@ -89,7 +89,6 @@ template <typename It> std::ostream &operator<<(std::ostream &os, Range<It> r) {
     first = false;
     os << val;
   }
-  os << ']';
   return os;
 }
 template <typename T>
@@ -100,3 +99,38 @@ template <typename T, size_t N>
 inline std::ostream &operator<<(std::ostream &os, const std::array<T, N> &vec) {
   return os << Range{vec};
 }
+
+template <typename It> struct std::formatter<Range<It>> {
+  std::string sep = ", ";
+  std::string deco = "";
+
+  template <typename _Out>
+  constexpr typename basic_format_context<_Out, char>::iterator
+  format(const Range<It> &u, basic_format_context<_Out, char> &fc) const {
+    auto out = fc.out();
+    for (auto [back, elem] : u.mark_back())
+      out = std::format_to(out, "{}{}{}{}", deco, elem, deco, back ? "" : sep);
+    return out;
+  }
+  // {:<sep>:<deco>}
+  template <typename _In>
+  constexpr typename basic_format_parse_context<_In>::iterator
+  parse(basic_format_parse_context<_In> &ctx) {
+    auto sectStart = ctx.begin();
+    auto end = Range{ctx}.find('}');
+    uint32_t i = 0;
+    auto strings = std::to_array({&sep, &deco});
+    while (true) {
+      auto sectEnd = Range{sectStart, end}.find(':');
+
+      if (sectEnd != sectStart)
+        *strings.at(i) = {sectStart, sectEnd};
+
+      if (sectEnd == end)
+        break;
+      sectStart = std::next(sectEnd);
+      ++i;
+    }
+    return end;
+  }
+};

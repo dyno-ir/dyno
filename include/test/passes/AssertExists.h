@@ -58,19 +58,25 @@ public:
   }
 
 public:
-  void runWrapper(auto &&runFunc) { runFunc(); }
+  void runWrapper(auto &&runFunc) {
+    num = 0;
+    runFunc();
+    printer.reset();
+  }
 
   bool runInstr(InstrRef instr) {
-    runOnInstr(instr);
+    runWrapper([&] { runOnInstr(instr); });
     return passOrFail();
   }
 
   bool run() {
-    for (auto instr : ctx.getStore<Instr>()) {
-      if (!ctx.getCFG().contains(instr)) {
-        runOnInstr(instr);
+    runWrapper([&] {
+      for (auto instr : ctx.getStore<Instr>()) {
+        if (!ctx.getCFG().contains(instr)) {
+          runOnInstr(instr);
+        }
       }
-    }
+    });
     return passOrFail();
   }
 

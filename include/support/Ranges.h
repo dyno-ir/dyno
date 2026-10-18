@@ -1229,11 +1229,11 @@ public:
     return rv;
   }
 
-  constexpr auto mark_front() {
+  constexpr auto mark_front() const {
     return ::Range{mark_front_iterator{beginIt, true},
                    mark_front_iterator{endIt, false}};
   }
-  constexpr auto mark_back() {
+  constexpr auto mark_back() const {
     return ::Range{mark_back_iterator{beginIt, endIt},
                    mark_back_iterator{endIt, endIt}};
   }

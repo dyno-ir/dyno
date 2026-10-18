@@ -13,6 +13,7 @@
 #include "hw/analysis/KnownBits.h"
 #include "hw/analysis/MuxTree.h"
 #include "hw/passes/MuxTreeOptimization.h"
+#include "support/Debug.h"
 #include "support/ErrorRecovery.h"
 
 namespace dyno {
@@ -85,10 +86,9 @@ class FlipFlopInferencePass : public Pass<FlipFlopInferencePass> {
       }
 
       auto val = knownBits.getKnownBitsWith(store.value(), assignments);
-
-      if (!val.getIs4S())
-        return std::make_pair(
-            ConstantBuilder{ctx.getStore<Constant>()}.val(val).get(), i);
+      if (!KnownBitsAnalysis::hasKBUnknownBits(val)) {
+        return std::make_pair(ctx.getStore<Constant>().findOrInsert(val), i);
+      }
     }
     return std::make_pair(nullref, 0);
   }
@@ -176,21 +176,26 @@ private:
 
     build.setInsertPoint(module.regs_end());
 
+    auto &regNameInfo = ctx.getCtx<HWDialectContext>().regNameInfo;
+    auto names = regNameInfo.getNames(reg.oref());
+
+#define FOR_VAR " for variable {: aka :\"}", names
+
     // assume ranges lowered
     if (!storeI.isFullReg())
-      report_fatal_error(ctx, storeI, "store range not lowered?");
+      report_fatal_error(ctx, storeI, "store range not lowered" FOR_VAR);
     if (!storeI.hasTrigger())
       report_fatal_error(ctx, storeI,
-                         "store has no trigger, did seqtocomb run?");
+                         "store has no trigger, did seqtocomb run" FOR_VAR);
     auto trigger = storeI.trigger().oref();
     if (trigger->size() > 3)
-      report_fatal_error(ctx, storeI, "too many sensitivities on flip flop");
+      report_fatal_error(ctx, storeI, "too many sensitivities" FOR_VAR);
     bool hasReset = trigger->size() != 1;
     bool hasIFF =
         trigger->size() == 3 && (trigger->getMode(1) == SensMode::IFF ||
                                  trigger->getMode(1) == SensMode::IFFN);
     if (!hasIFF && trigger->size() == 3)
-      report_fatal_error(ctx, trigger.iref(), "too many sensitivities!");
+      report_fatal_error(ctx, trigger.iref(), "too many sensitivities" FOR_VAR);
 
     std::pair<RegisterRef, bool> clkReg;
     std::pair<RegisterRef, bool> rstReg;
@@ -219,8 +224,8 @@ private:
       unsigned resetIndex = 0;
       std::tie(resetValue, resetIndex) = findReset2(storeI, resetCandidates);
       if (!resetValue)
-        report_fatal_error(ctx, storeI,
-                           "reset sensitivity but no reset value found");
+        report_fatal_error(
+            ctx, storeI, "reset sensitivity but no reset value found" FOR_VAR);
       rstReg = resetCandidates[resetIndex];
       clkReg = hasIFF ? resetCandidates[0] : (resetCandidates[1 - resetIndex]);
 
@@ -259,6 +264,7 @@ private:
 
     build.popInsertPoint();
     return true;
+#undef FOR_VAR
   }
 
   void runOnModule(ModuleIRef module) {

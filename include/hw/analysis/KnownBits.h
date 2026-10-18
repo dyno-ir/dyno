@@ -17,31 +17,112 @@
 #include "support/Debug.h"
 #include "support/Utility.h"
 #include <concepts>
+#include <type_traits>
 namespace dyno {
 
 class KnownBitsAnalysis : public CacheInvalidation<KnownBitsAnalysis> {
 
+  // known-bits specific four state, z (never an output in Verilog semantics)
+  // is repurposed for known don't care values.
+  struct KBFourState : FourState {
+    constexpr KBFourState() = default;
+    constexpr KBFourState(uint8_t v) : FourState(v) {}
+    constexpr KBFourState(FourState v) : FourState(v.val) {}
+
+    // !x is x, !z is z
+    constexpr KBFourState operator!() {
+      return isUnk() ? *this : KBFourState{uint8_t{!val}};
+    }
+
+    constexpr friend KBFourState operator&(KBFourState lhs, KBFourState rhs) {
+      return KBFourState{uint8_t(and_4state_kb(lhs.val, rhs.val))};
+    }
+    constexpr friend KBFourState operator|(KBFourState lhs, KBFourState rhs) {
+      return KBFourState{uint8_t(or_4state_kb(lhs.val, rhs.val))};
+    }
+    constexpr friend KBFourState operator^(KBFourState lhs, KBFourState rhs) {
+      return KBFourState{uint8_t(xor_4state_kb(lhs.val, rhs.val))};
+    }
+  };
+
+  static void bigInt_adapter_4s(BigInt &out, auto func, const BigInt &lhs,
+                                const BigInt &rhs) {
+    if constexpr (requires { func(out, lhs, rhs); })
+      func(out, lhs, rhs);
+    else
+      out = func(lhs, rhs);
+  }
+  static void bigInt_arith_kb4s(DialectOpcode opc, BigInt &out,
+                                const BigInt &lhs, const BigInt &rhs) {
+    switch (*opc) {
+    // special implementations w/ known bits arith semantics, produce Z for
+    // known don't cares
+    case *OP_ADD:
+      BigInt::addSubOp4S<false, BigInt, BigInt, KBFourState>(out, lhs, rhs);
+      break;
+    case *OP_SUB:
+      BigInt::addSubOp4S<true, BigInt, BigInt, KBFourState>(out, lhs, rhs);
+      break;
+    case *OP_AND:
+      BigInt::bitwiseOp4S<and_4state_kb, BigInt::andOp<BigInt, BigInt>>(
+          out, lhs, rhs);
+      break;
+    case *OP_OR:
+      BigInt::bitwiseOp4S<or_4state_kb, BigInt::orOp<BigInt, BigInt>>(out, lhs,
+                                                                      rhs);
+      break;
+    case *OP_XOR:
+      BigInt::bitwiseOp4S<xor_4state_kb, BigInt::xorOp<BigInt, BigInt>>(
+          out, lhs, rhs);
+      break;
+    default: {
+      // fallbacks regular implementations.
+      switch (*opc) {
+#define LAMBDA(opc, buildF, cbuildF, bigIntF)                                  \
+  case *opc:                                                                   \
+    bigInt_adapter_4s(out, bigIntF<BigInt, BigInt>, lhs, rhs);                 \
+    break;
+        FOR_HW_SIMPLE_OPS(LAMBDA)
+#undef LAMBDA
+      }
+    }
+    }
+  }
+
+  static void bigInt_not_kb4s(BigInt &out, const BigInt &in) {
+    BigInt::bitwiseOp4S<xnor_4state_kb, BigInt::xnorOp<BigInt, PatBigInt>>(
+        out, in, PatBigInt::fromFourState(FourState::S0, in.getNumBits()));
+  }
+
+private:
+  template <BigIntAPI T, BigIntAPI U>
+  static void swapKnownBitsEncoding(T &out, const U &val) {
+    if constexpr (std::is_same_v<T, U>)
+      assert(&out != &val);
+    if (!val.getIs4S()) {
+      out = val;
+      return;
+    }
+    BigInt::andOp(out, val, PatBigInt{val.getRawNumBits(), 0b10});
+    BigInt::lshrOp(out, out, 1);
+    BigInt::xorOp(out, out, val);
+    out.setCustom(1);
+  }
+
+public:
+  // ONLY for use outside known bits. Uses Verilog/API encoding, not internal
+  // known bits encoding
+  static bool hasKBUnknownBits(const BigInt &val) {
+    return BigInt::countBits4SExact(val, FourState::SZ) != 0;
+  }
+
   struct KnownBitsVal {
     BigInt val;
-    // BigInt unknown;
-    // void prop() {
-    //   if (!val.getIs4S()) {
-    //     unknown = PatBigInt::fromFourState(FourState::S0, val.getNumBits());
-    //     return;
-    //   }
-    //   BigInt out = PatBigInt::fromFourState(FourState::SX, val.getNumBits());
-    //   BigInt::bitsExactEqual4S(out, out, val);
-    //   unknown &= out;
-    // }
 
     void
     merge(const KnownBitsVal &other,
           std::invocable<BigInt &, const BigInt &, const BigInt &> auto func) {
       func(val, val, other.val);
-    }
-    void merge(const KnownBitsVal &other,
-               std::invocable<const BigInt &, const BigInt &> auto func) {
-      val = func(val, other.val);
     }
 
     bool operator==(const KnownBitsVal &other) const {
@@ -82,14 +163,16 @@ private:
     }
   }
 
-  template <typename T>
-  void getArithKnownBits(Frame &frame, InstrRef instr, T func) {
+  void getArithKnownBits(Frame &frame, InstrRef instr) {
     if (frame.idx == 0)
       ;
     else if (frame.idx == 1)
       frame.acc = retVal;
     else
-      frame.acc.merge(retVal, func);
+      frame.acc.merge(
+          retVal, [&](BigInt &out, const BigInt &lhs, const BigInt &rhs) {
+            bigInt_arith_kb4s(instr.getDialectOpcode(), out, lhs, rhs);
+          });
     pushNextOrReturn(frame, instr);
   }
 
@@ -133,7 +216,9 @@ public:
 
       auto &frame = stack.back();
       if (auto asConst = frame.value.dyn_as<ConstantRef>()) {
-        retVal = KnownBitsVal{asConst};
+        // swap x/z, z's in netlist are pessimized, x's are handled.
+        // todo: option to map both x and z to z instead?
+        swapKnownBitsEncoding(retVal.val, asConst);
         stack.pop_back();
         continue;
       }
@@ -161,12 +246,11 @@ public:
 
       switch (*instr.getDialectOpcode()) {
 
-#define LAMBDA(opc, buildF, cbuildF, bigIntF)                                  \
-  case *opc:                                                                   \
-    getArithKnownBits(frame, instr, bigIntF<BigInt, BigInt>);                  \
-    break;
+#define LAMBDA(opc, buildF, cbuildF, bigIntF) case *opc:
         FOR_HW_SIMPLE_OPS(LAMBDA)
 #undef LAMBDA
+        getArithKnownBits(frame, instr);
+        break;
 #define LAMBDA(opc, pred)                                                      \
   case *opc:                                                                   \
     getICMPKnownBits(frame, instr, pred);                                      \
@@ -197,7 +281,7 @@ public:
           frame.idx++;
           stack.emplace_back(instr.other(0)->as<HWValue>(), 0);
         } else {
-          BigInt::notOp4S(retVal.val, retVal.val);
+          bigInt_not_kb4s(retVal.val, retVal.val);
           assert(retVal.val.getNumBits() == wire.getNumBits());
           cache.insert(wire, retVal.val);
           stack.pop_back();
@@ -217,6 +301,8 @@ public:
         }
         break;
       }
+
+      case *OP_ANYEXT:
       case *OP_SEXT:
       case *OP_ZEXT: {
         if (frame.idx == 0) {
@@ -225,9 +311,16 @@ public:
         } else {
           assert(*wire.getNumBits() >= retVal.val.getNumBits());
           unsigned delta = *wire.getNumBits() - retVal.val.getNumBits();
-          PatBigInt lhs = instr.isOpc(OP_ZEXT)
-                              ? PatBigInt::fromFourState(FourState::S0, delta)
-                              : PatBigInt::fromSign(retVal.val, delta);
+
+          PatBigInt lhs = [&] {
+            if (instr.isOpc(OP_SEXT))
+              return PatBigInt::fromSign(retVal.val, delta);
+            else if (instr.isOpc(OP_ANYEXT))
+              return PatBigInt::fromFourState(FourState::SZ, delta);
+            else
+              return PatBigInt::fromFourState(FourState::S0, delta);
+          }();
+
           BigInt::concatOp4S(retVal.val, lhs, retVal.val);
           assert(retVal.val.getNumBits() == wire.getNumBits());
           cache.insert(wire, retVal.val);
@@ -410,7 +503,9 @@ public:
       }
     }
 
-    return retVal.val;
+    BigInt rv;
+    swapKnownBitsEncoding(rv, retVal.val);
+    return rv;
   }
 
   auto get(HWValue root) { return getKnownBits(root); }

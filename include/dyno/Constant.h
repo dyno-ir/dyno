@@ -253,11 +253,6 @@ public:
     return false;
   }
 
-  // ext:11 0000 0001 bits: 1
-
-  // ext:11 ffff ffff bits: 64
-  // ext:00 ffff ffff bits: 64
-
   template <BigIntAPI T> constexpr bool valueEquals(const T &other) const {
     if (other.getNumWords() != self().getNumWords())
       return false;
@@ -1940,7 +1935,8 @@ public:
     return out;
   }
 
-  template <bool sub, BigIntAPI T0, BigIntAPI T1>
+  template <bool sub, BigIntAPI T0, BigIntAPI T1,
+            typename FourStateT = FourState>
   constexpr static void addSubOp4S(BigIntBase &out, const T0 &lhs,
                                    const T1 &rhs) {
     if (!lhs.getIs4S() && !rhs.getIs4S()) {
@@ -1950,11 +1946,14 @@ public:
         addOp(out, lhs, rhs);
       return;
     }
-    if (lhs.allBitsUndef() || rhs.allBitsUndef()) {
-      out.setRepeating(EXTX_MASK,
-                       2 * std::max(lhs.getNumBits(), rhs.getNumBits()), 1);
-      return;
-    }
+
+    // valid with default four state semantics
+    if constexpr (std::is_same_v<FourStateT, FourState>)
+      if (lhs.allBitsUndef() || rhs.allBitsUndef()) {
+        out.setRepeating(EXTX_MASK,
+                         2 * std::max(lhs.getNumBits(), rhs.getNumBits()), 1);
+        return;
+      }
 
     // if aliased with 2 state number first convert to 4 state
     // (else we overwrite bits faster than we read)
@@ -1971,14 +1970,14 @@ public:
     out.numBits = 2 * std::max(lhs.getNumBits(), rhs.getNumBits());
     out.expand();
 
-    FourState carry = sub;
+    FourStateT carry = sub;
     for (uint32_t i = 0; i < bits; i++) {
-      auto lhsB = lhs.getBit(i);
-      auto rhsB = rhs.getBit(i);
+      FourStateT lhsB = lhs.getBit(i);
+      FourStateT rhsB = rhs.getBit(i);
       if (sub)
         rhsB = !rhsB;
 
-      FourState sum = lhsB ^ rhsB ^ carry;
+      FourStateT sum = lhsB ^ rhsB ^ carry;
       carry = (lhsB & rhsB) | (lhsB & carry) | (carry & rhsB);
 
       uint32_t wordIdx = (2 * i) / WordBits;
