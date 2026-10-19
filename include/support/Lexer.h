@@ -237,7 +237,7 @@ public:
       for (size_t j = 0; j < maxPunctChars; j++) {
         auto srcIdx = srcOffs + j;
         char_vec_t charSplat =
-            (char_vec_t)(srcIdx >= srcLen ? 0xFF : srcC[j + srcIdx]);
+            (char_vec_t)(srcIdx >= srcLen ? 0xFF : srcC[srcIdx]);
         auto punctCharVec = std::bit_cast<char_vec_t>(punctChars[i][j]);
         auto matchVec =
             (punctCharVec == charSplat) | (punctCharVec == char_vec_t(0));
@@ -246,7 +246,7 @@ public:
       }
       if (matchAcc == 0)
         continue;
-      unsigned matchIdx = std::countr_zero(matchAcc);
+      size_t matchIdx = i * SIMD_WIDTH + std::countr_zero(matchAcc);
 
       srcOffs += operators[matchIdx].size();
       return Token::makePlain(TOK_OPS_START + matchIdx);

@@ -9,10 +9,10 @@
 namespace dyno {
 
 inline InstrRef getBlockYield(BlockRef block) {
-  if (!block || block.empty())
+  if (!block)
     return nullref;
-  auto instr = *block.end().pred();
-  if (!instr.isOpc(OP_YIELD))
+  InstrRef instr = block.getTerminator();
+  if (!instr || !instr.isOpc(OP_YIELD))
     return nullref;
   return instr;
 }
@@ -61,13 +61,7 @@ public:
     assert(getNumYieldValues() != 0 && "no yield values");
     return Range{this->begin(), this->begin() + 1 + hasFalseBlock()}.transform(
         [](size_t, OperandRef op) -> InstrRef {
-          auto bl = op->as<BlockRef>();
-          if (bl.empty())
-            return nullref;
-          auto last = *std::prev(bl.end());
-          if (!last.isOpc(OP_YIELD))
-            return nullref;
-          return last;
+          return getBlockYield(op->as<BlockRef>());
         });
   }
   auto caseBlocks() {

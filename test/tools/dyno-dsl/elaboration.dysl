@@ -1,0 +1,67 @@
+let integer = 42;
+let byte = 8'd7;
+let truth = true;
+let text = "hello";
+let unit = ();
+let pair = integer, truth;
+let nested = (integer, truth), (text, unit);
+
+let sum = integer + 3 * 2;
+let difference = sum - 4 - 1;
+let negative = -difference;
+let less = negative < integer;
+let equal = integer == 42;
+let unequal = truth != false;
+let inverted = !truth;
+let bits = byte & 8'd3 | 8'd8;
+let shifted = byte << 32'd1;
+let shiftedBack = negative >> 32'd2;
+let greeting = text + " world";
+
+let increment = x -> x + 1;
+let incremented = increment(integer);
+let alias = increment;
+let incrementedAgain = alias incremented;
+
+// Functions currently have one monomorphic signature across all their uses.
+let identity = x -> x;
+let firstIdentity = identity(3);
+let secondIdentity = identity(4);
+
+let add = x -> y -> x + y;
+let curried = add 3 (4);
+let addThree = add(3);
+let partiallyApplied = addThree(5);
+
+let apply = f -> x -> f(x);
+let higherOrder = apply increment 10;
+
+let captured = 10;
+let offset = x -> x + captured;
+let withCapture = offset(5);
+let localScope = () -> {
+    let captured = captured + 1;
+    let doubled = captured * 2;
+    doubled
+};
+let withShadowing = localScope();
+
+let explicitReturn = x -> { return x + 2; };
+let returned = explicitReturn(3);
+let unitFunction = () -> { return; };
+let returnedUnit = unitFunction();
+let implicitUnitFunction = () -> { let local = true; };
+let implicitUnit = implicitUnitFunction();
+
+let forward = x -> later(x);
+let later = x -> x * 2;
+let forwardResult = forward(6);
+
+let integerType = int32;
+let byteType = uint8;
+let boolType = bool;
+let stringType = string;
+let metatype = typename;
+
+let recursive = x -> { recursive(x); x + 1 };
+let recursiveResult = recursive(1);

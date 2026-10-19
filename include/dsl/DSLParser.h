@@ -3,6 +3,7 @@
 #include "dsl/DSLBuilder.h"
 #include "dyno/Instr.h"
 #include "dyno/Obj.h"
+#include "hw/AutoDebugInfo.h"
 #include "support/MacroUtil.h"
 #include <support/Lexer.h>
 
@@ -55,17 +56,40 @@ public:
     kw_enum,
     kw_fn,
     kw_while,
+    kw_return,
+    kw_int,
+    kw_uint,
+    kw_int8,
+    kw_int16,
+    kw_int32,
+    kw_int64,
+    kw_uint8,
+    kw_uint16,
+    kw_uint32,
+    kw_uint64,
+    kw_bool,
+    kw_string,
+    kw_typename,
+    kw_true,
+    kw_false,
 
     _kw_end,
     _kw_size = _kw_end - _kw_start - 1
   };
 
   constexpr static std::array<StringRef, _kw_size> Keywords = {
-      "let", "if", "else", "for", "struct", "enum", "fn", "while"};
+      "let",    "if",    "else",   "for",      "struct", "enum",
+      "fn",     "while", "return", "int",      "uint",   "int8",
+      "int16",  "int32", "int64",  "uint8",    "uint16", "uint32",
+      "uint64", "bool",  "string", "typename", "true",   "false"};
   constexpr static std::array<StringRef, _op_size> Operators = {
       ".",  ":",  ",",  "[",  "]", "?", "#",  "(", ")", "{",
       "}",  ";",  "->", "==", "+", "-", "*",  "&", "|", "<<",
       ">>", "<=", ">=", "<",  ">", "=", "!=", "!"};
+
+  static constexpr bool isBuiltinVal(uint32_t kind) {
+    return kind >= kw_int && kind <= kw_false;
+  }
 
   DSLLexer(ArrayRef<char> src, std::string &&fileName)
       : Lexer(src, std::move(fileName), Operators, Keywords) {
@@ -81,7 +105,6 @@ public:
     PREC_ASSIGN,
     PREC_FUNC,
     PREC_TUPLE,
-    PREC_TERNARY,
     PREC_LOG_OR,
     PREC_LOG_AND,
     PREC_BIT_OR,
@@ -92,51 +115,47 @@ public:
     PREC_SHIFT,
     PREC_ADD,
     PREC_MUL,
+    PREC_APPLY,
     PREC_ACCESS
   };
 
-  constexpr Precedence getPrecedence(DialectOpcode opc);
-  constexpr DialectOpcode getUnaryOpc(const Token &tok);
-  constexpr DialectOpcode getBinaryOpc(const Token &tok);
-  constexpr bool isRightAssoc(Precedence prec);
+  static constexpr Precedence getPrecedence(DialectOpcode opc);
+  static constexpr DialectOpcode getUnaryOpc(const Token &tok);
+  static constexpr DialectOpcode getBinaryOpc(const Token &tok);
+  static constexpr bool isRightAssoc(Precedence prec);
 
   Context &ctx;
   DSLLexer &lex;
   BuilderStack<DSLBuilder> build;
+  AutoDebugInfoStack debugInfo;
+  Vec<size_t> lineStarts{0};
 
-  DSLParser(Context &ctx, DSLLexer &lex) : ctx(ctx), lex(lex), build(ctx) {}
+  DSLParser(Context &ctx, DSLLexer &lex)
+      : ctx(ctx), lex(lex), build(ctx), debugInfo(ctx) {
+    for (size_t i = 0; i < lex.src.size(); ++i)
+      if (lex.src[i] == '\n')
+        lineStarts.push_back(i + 1);
+  }
 
+  SimpleDebugInfo peekSource();
+  AutoDebugInfoStack::ScopeToken sourceScope(SimpleDebugInfo loc) {
+    return debugInfo.addWithToken(loc.name, loc.beginLine, loc.beginCol,
+                                  loc.endLine, loc.endCol);
+  }
+  ParseResult parseAtom();
+  ParseResult parseFunction(DSLValue pattern, Precedence prec);
+
+  enum class ExprContext { Normal, ControlHeader };
+
+  static bool startsArg(const Token &tok);
   ParseResult parseUnary();
-  ParseResult parsePostfix(DSLValue val);
-  ParseResult parseExpr(Precedence prec = PREC_NONE);
+  ParseResult parseTightPostfix(DSLValue value);
+  ParseResult parseExpr(Precedence prec = PREC_NONE,
+                        ExprContext context = ExprContext::Normal);
 
-  ParseResult parseStmt() {
-    bool isLet = false;
-    if (lex.popIf(DSLLexer::kw_let))
-      isLet = true;
-    DYNO_EXPECT(expr, parseExpr());
-    if (expr.is<DSLNullRef>())
-      return dsl_nullref;
-    DYNO_EXPECT(lex.popExpect(DSLLexer::op_semicolon));
-    isLet ? build.buildLet(expr) : build.buildDef(expr);
-    return dsl_nullref;
-  }
-
-  ParseResult parseStmts() {
-    auto blk = build.cfg.createBlock();
-    auto _ = build.changeInsertIt(blk);
-    while (!lex.peekIs(Token::NONE, DSLLexer::op_cbrclose)) {
-      DYNO_EXPECT(parseStmt());
-    }
-    return blk;
-  }
-
-  ParseResult parseBlock() {
-    DYNO_EXPECT(lex.popExpect(DSLLexer::op_cbropen));
-    DYNO_EXPECT(res, parseStmts());
-    DYNO_EXPECT(lex.popExpect(DSLLexer::op_cbrclose));
-    return res;
-  }
+  ParseResult parseStmt();
+  ParseResult parseStmts();
+  ParseResult parseBlock();
 
   ParseResult parse() { return parseStmts(); }
 

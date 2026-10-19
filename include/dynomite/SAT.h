@@ -18,6 +18,13 @@
 
 namespace dyno {
 
+class SATVar {};
+
+template <> struct ObjTraits<SATVar> {
+  static constexpr DialectType ty{DMT_SAT_VAR};
+  using FatRefT = FatObjRef<SATVar>;
+};
+
 class SATLit {
   uint32_t num;
   static constexpr uint32_t invalid = ~0;
@@ -166,7 +173,7 @@ public:
 // };
 
 using SATClauseStore = NewDeleteObjStore<SATClause>;
-using SATVarStore = IDObjStore;
+using SATVarStore = IDObjStore<SATVar>;
 
 template <> struct ObjTraits<SATClause> {
   static constexpr DialectType ty{DMT_SAT_CLAUSE};
@@ -191,7 +198,7 @@ public:
   Vec<uint32_t> watches;
   Vec<SATLit> trail;
 
-  SATLit addVar() { return SATLit{vars.create(), false}; }
+  SATLit addVar() { return SATLit{vars.create().getObjID(), false}; }
 
   void addClause(std::initializer_list<SATLit> lits) {
     auto ref = clauses.create(lits.size());

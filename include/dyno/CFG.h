@@ -243,10 +243,16 @@ public:
   using FatObjRef::FatObjRef;
   BlockRef(FatObjRef<Block> ref) : FatObjRef<Block>(ref) {}
 
-  size_t size() { return ptr->instrs.size() - 1; }
+  size_t size() const { return ptr->instrs.size() - 1; }
 
   iterator begin() const { return {*this, ptr->instrs[0].next}; }
   iterator end() const { return {*this, 0}; }
+
+  InstrRef getTerminator() const {
+    if (empty())
+      return nullref;
+    return *end().pred();
+  }
 
   iterator_unordered begin_unordered() { return {*this, 1}; }
   iterator_unordered end_unordered() {
@@ -260,7 +266,7 @@ public:
   auto def() { return ptr->defUse.getSingleDef(); }
   auto defI() { return ptr->defUse.getSingleDef()->instr(); }
 
-  bool empty() { return size() == 0; }
+  bool empty() const { return size() == 0; }
 
   void clear_unsafe() {
     ptr->instrs.clear();

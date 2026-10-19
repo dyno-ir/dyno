@@ -13,7 +13,14 @@ using DSLOpcode = SpecificDialectOpcode<DialectID{DIALECT_DSL}>;
 // clang-format off
 #define TYPES(x) \
   x("val",      DSL_VAL,      0 | TY_DEF_USE_START) \
-  x("null",      DSL_NULL,      1)
+  x("ty",       DSL_TY,       1 | TY_DEF_USE_START) \
+  x("unit",     DSL_UNIT,     2) \
+  x("int",      DSL_INT,      3) \
+  x("uint",     DSL_UINT,     4) \
+  x("tyvar",    DSL_TYVAR,    5) \
+  x("bool",     DSL_BOOL,     6) \
+  x("string",   DSL_STRING,   7) \
+  x("typename", DSL_TYPENAME, 8)
 // clang-format on
 
 #define ENUM_EXPAND(name, ident, idx) ident = idx,

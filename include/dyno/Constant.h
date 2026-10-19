@@ -2504,7 +2504,8 @@ public:
       BigIntBase init = parseDec(ptr);
 
       if (*ptr != '\'') {
-        // treat as unsigned 32 bit.
+        // Treat as unsigned 32 bit.
+        // FIXME: Why? Verilog plain decimal literals are signed
         BigIntBase::resizeOp(init, init, 32, 0);
         return ParseResult(init, false, ParseResult::SIMPLE);
       }

@@ -265,7 +265,9 @@ public:
     return *this;
   }
 
-  difference_type operator-(const integral_iterator &o) const { return it - o.it; }
+  difference_type operator-(const integral_iterator &o) const {
+    return it - o.it;
+  }
 
   friend auto operator==(const integral_iterator &a,
                          const integral_iterator &b) {

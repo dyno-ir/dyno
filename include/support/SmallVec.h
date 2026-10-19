@@ -375,6 +375,7 @@ public:
   bool isSmall() { return arr == getInlineArrPtr(); }
 
   size_type size() const { return sz; }
+  size_type capacity() const { return cap; }
   bool empty() const { return !sz; }
 
   T &back() {

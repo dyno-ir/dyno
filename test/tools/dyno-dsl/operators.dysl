@@ -1,0 +1,9 @@
+let shifted = 1 << 2;
+let shiftedBack = 8 >> 1;
+let lessOrEqual = 1 <= 2;
+let unequal = 1 != 2;
+let equal = 1 == 1;
+let function = x -> x;
+let subtraction = 8 - 3 - 1;
+let shiftChain = 16 >> 1 >> 2;
+let sum = 1 + 2 + 3;

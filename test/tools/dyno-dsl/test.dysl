@@ -11,26 +11,26 @@ let config = a -> b -> struct {
   b  = x;
 };
 
-let val = 3 * 6 + 7;
+let val = 3 * 6 + 7 * 5;
 
 let core = struct {
   Dialect = struct {};
   Type = struct {};
   Instr = struct {};
-}
+};
 
 let hw = core.Dialect {
   let wire = core.Type {
-  }
+  };
   let ADD = core.Instr {
-  }
+  };
 };
 
 let opt = core.Instr.pat {
-  // match {
+  match {
 
-  // }
+  };
   // if {
 
   // }
-}
+};

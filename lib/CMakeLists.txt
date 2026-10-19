@@ -11,6 +11,8 @@ add_library(core STATIC
     support/TruthTable.cpp
     support/ANSITerminal.cpp
     dsl/DSLParser.cpp
+    dsl/DSLPrinter.cpp
+    dsl/passes/Elaborate.cpp
 )
 
 add_library(hw STATIC

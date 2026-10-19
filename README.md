@@ -8,10 +8,10 @@ For the core ideas behind Dyno-IR, see the [IR design doc](docs/IRDesign.md).
 git clone --recursive git@github.com:dyno-ir/dyno.git
 # Debug configuration
 cmake --preset debug
-cmake --build build/debug
+cmake --build build.debug
 # Release configuration
 cmake --preset release
-cmake --build build/release
+cmake --build build.release
 ```
 We currently only test with `clang` + `libc++`, errors might occur with other toolchains.
 

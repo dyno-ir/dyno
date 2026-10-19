@@ -1,0 +1,7 @@
+let combine = x -> left(x) + right(x);
+let left = x -> x + 1;
+let right = x -> {
+    let delayed = y -> y * 2;
+    delayed(x)
+};
+let result = combine 3;
