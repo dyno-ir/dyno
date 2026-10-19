@@ -536,7 +536,7 @@ class SimpleMemoryInferencePass : public Pass<SimpleMemoryInferencePass> {
             build.buildGEP(asSplice.getBase(), asSplice.terms()),
             Range{rd.fwdWrites}.transform([&](size_t, unsigned i) {
               return MemoryWriteForward{
-                  memory.writes[i].instr.as<MemStoreIRef>().port(), 0, 0};
+                  memory.writes[i].instr.as<MemStoreIRef>().port(), {0, 0}};
             }));
         asSplice.def()->as<WireRef>().replaceAllUsesWith(val);
       } else

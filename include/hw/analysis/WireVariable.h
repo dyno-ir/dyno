@@ -191,6 +191,20 @@ public:
       return {w.getDefI().other(0)->as<HWValue>(), false};
     return {raw, true};
   }
+
+  struct OOBAccess {
+    uint32_t len, addr, lowPad, highPad;
+    bool inRange() { return !lowPad && !highPad; }
+  };
+
+  static OOBAccess clipAccess(int64_t addr, uint32_t len, uint32_t memLen) {
+    auto lo = std::max<int64_t>(addr, 0);
+    auto hi = std::min<int64_t>(addr + len, memLen);
+    if (lo >= hi)
+      return {0, 0, len, 0};
+    return {uint32_t(hi - lo), uint32_t(lo), uint32_t(lo - addr),
+            uint32_t(addr + len - hi)};
+  }
 };
 
 }; // namespace dyno

@@ -2121,17 +2121,16 @@ private:
     HWInstrBuilder build{ctx, instr};
 
     bool change = false;
+    bool oob = false;
 
-    auto checkedMul = [](auto lhs, auto rhs) {
-      return checked_mul(lhs, rhs, "address does not fit into 32 bits");
-    };
-
-    uint32_t baseOffs = instr.getBase();
+    uint64_t baseOffs = instr.getBase();
     SmallVec<AddressGenTerm, 4> terms;
     for (auto term : instr.terms()) {
       if (auto asConst = term.getIdx().template dyn_as<ConstantRef>();
           asConst && !asConst.getIs4S()) {
-        baseOffs += checkedMul(asConst.getExactVal(), term.getFact());
+        baseOffs += asConst.getExactVal() * term.getFact();
+        if (term.getMax())
+          oob |= asConst.getExactVal() >= *term.getMax();
         change = true;
         continue;
       }
@@ -2152,8 +2151,7 @@ private:
         if (max)
           *max = round_up_div(*max, constant.getExactVal());
         terms.emplace_back(mul.other(0)->template as<HWValue>(),
-                           checkedMul(term.getFact(), constant.getExactVal()),
-                           max);
+                           term.getFact() * constant.getExactVal(), max);
         change = true;
         continue;
       }
@@ -2165,7 +2163,7 @@ private:
         BigInt::resizeOp4S(known, known, numKnown);
         assert(!known.getIs4S());
 
-        baseOffs += checkedMul(known.getExactVal(), term.getFact());
+        baseOffs += known.getExactVal() * term.getFact();
 
         auto newIdx = build.buildZExt(
             32, build.buildSplice(asWire, *asWire.getNumBits() - numKnown,
@@ -2174,12 +2172,27 @@ private:
         auto max = term.getMax();
         if (max)
           *max = round_up_div(*max, fact);
-        terms.emplace_back(newIdx, checkedMul(term.getFact(), fact), max);
+        terms.emplace_back(newIdx, term.getFact() * fact, max);
         change = true;
         continue;
       }
 
       terms.emplace_back(term);
+    }
+
+    (void)oob;
+    // todo: uncomment. need to handle poison semantics everywhere or prioritize
+    // in instcombine?
+    // if (oob) {
+    //   replaceUses(instr.def()->as<PointerRef>(), ConstantRef::undef32());
+    //   deleteMatchedInstr(instr);
+    //   return PAT_TRUE;
+    // }
+
+    if (baseOffs != uint32_t(baseOffs)) {
+      report_fatal_error(ctx, instr,
+                         "pointer out of 32-bit bounds (address 0x{:x})",
+                         baseOffs);
     }
 
     if (terms.empty()) {

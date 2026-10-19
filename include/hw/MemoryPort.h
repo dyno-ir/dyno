@@ -30,8 +30,7 @@ template <> struct ObjTraits<MemoryPort> {
 
 struct MemoryWriteForward {
   MemoryPortRef port;
-  uint32_t oldTime;
-  uint32_t unkTime;
+  MemoryPort::WriteForwardMeta meta;
 };
 
 } // namespace dyno

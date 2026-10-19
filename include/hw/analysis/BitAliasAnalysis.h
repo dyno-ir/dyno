@@ -14,6 +14,7 @@
 #include "hw/Wire.h"
 #include "hw/analysis/CacheInvalidation.h"
 #include "hw/analysis/RegisterValue.h"
+#include "hw/analysis/WireVariable.h"
 #include "op/IDs.h"
 #include "support/Debug.h"
 #include <optional>
@@ -80,28 +81,28 @@ class BitAliasAnalysis : public CacheInvalidation<BitAliasAnalysis> {
 
       if (first)
         break;
-      auto addr = asSplice.getBase();
+      int64_t addr = int32_t(asSplice.getBase());
       auto len = asSplice.getLen();
       assert(retVal.frags.empty() || retVal.frags.front().dstAddr == 0);
 
       // support unsimplified constant addresses here to avoid explosion
       // in instcombine for long insert/splice sequences. (todo: better fix?)
       asSplice.terms().for_each([&](auto term) {
-        addr += term.getIdx().template as<ConstantRef>().getExactVal() *
-                term.getFact();
+        // constant term indexes use the same wrapped u32 convention.
+        auto idx = term.getIdx().template as<ConstantRef>().getExactVal();
+        addr += int64_t(int32_t(idx)) * int64_t(term.getFact());
       });
 
-      int64_t oobLen = int64_t(addr + len) - retVal.getLen();
-      if (addr >= retVal.getLen()) {
+      auto oob = WireVariable::clipAccess(addr, len, retVal.getLen());
+      if (oob.inRange()) {
+        frame.acc = retVal.getRange(uint32_t(addr), len);
+      } else {
         frame.acc =
             BitAliasAcc{ConstantBuilder{ctx.getStore<Constant>()}.undef(len)};
-      } else if (oobLen > 0) {
-        frame.acc = retVal.getRange(addr, len - oobLen);
-        frame.acc.frags.emplace_back(
-            ConstantBuilder{ctx.getStore<Constant>()}.undef(oobLen).get(), 0,
-            len - oobLen, oobLen, false, nullopt);
-      } else {
-        frame.acc = retVal.getRange(addr, len);
+        if (oob.len) {
+          auto inRange = retVal.getRange(oob.addr, oob.len);
+          frame.acc.overwriteNoMaterialize(inRange, 0, oob.lowPad, oob.len);
+        }
       }
       assert(frame.acc.getLen() == asSplice.getLen());
       return std::nullopt;
@@ -187,17 +188,20 @@ class BitAliasAnalysis : public CacheInvalidation<BitAliasAnalysis> {
         frame.acc = std::move(retVal);
         ++frame.ref;
       } else {
-        auto addr = asInsert.getBase();
+        int64_t addr = int32_t(asInsert.getBase());
         auto len = asInsert.getLen();
 
         // support unsimplified constant addresses here to avoid explosion
         // in instcombine for long insert/splice sequences. (todo: better fix?)
         asInsert.terms().for_each([&](auto term) {
-          addr += term.getIdx().template as<ConstantRef>().getExactVal() *
-                  term.getFact();
+          auto idx = term.getIdx().template as<ConstantRef>().getExactVal();
+          addr += int64_t(int32_t(idx)) * int64_t(term.getFact());
         });
 
-        frame.acc.overwriteNoMaterialize(retVal, 0, addr, len);
+        auto oob = WireVariable::clipAccess(addr, len, asInsert.getMemoryLen());
+        if (oob.len)
+          frame.acc.overwriteNoMaterialize(retVal, oob.lowPad, oob.addr,
+                                           oob.len);
 
         assert(frame.acc.getLen() == asInsert.getMemoryLen());
         return std::nullopt;

@@ -258,14 +258,14 @@ public:
   integral_iterator() = default;
   integral_iterator(T it) : it(it) {}
 
-  value_type operator*() { return it; }
+  value_type operator*() const { return it; }
 
   integral_iterator &operator+=(difference_type n) {
     it += n;
     return *this;
   }
 
-  difference_type operator-(const integral_iterator &o) { return it - o.it; }
+  difference_type operator-(const integral_iterator &o) const { return it - o.it; }
 
   friend auto operator==(const integral_iterator &a,
                          const integral_iterator &b) {
@@ -343,7 +343,7 @@ public:
     return *this;
   }
 
-  difference_type operator-(const transform_iterator &o)
+  difference_type operator-(const transform_iterator &o) const
     requires(isRandom)
   {
     return it - o.it;
@@ -423,7 +423,7 @@ public:
     return *this;
   }
 
-  difference_type operator-(const transform_iterator_noindex &o)
+  difference_type operator-(const transform_iterator_noindex &o) const
     requires(isRandom)
   {
     return it - o.it;
@@ -482,10 +482,29 @@ public:
 
 template <typename T, typename U> class zip_iterator {
   T it{};
-  U it2;
+  U it2{};
+
+  using Tcat = std::iterator_traits<T>::iterator_category;
+  using Ucat = std::iterator_traits<U>::iterator_category;
 
 public:
-  using iterator_category = std::forward_iterator_tag;
+  // clang-format off
+  using iterator_category =
+      std::conditional_t<std::is_same_v<Tcat, std::forward_iterator_tag> ||
+                         std::is_same_v<Ucat, std::forward_iterator_tag>, std::forward_iterator_tag,
+      std::conditional_t<std::is_same_v<Tcat, std::bidirectional_iterator_tag> ||
+                         std::is_same_v<Ucat, std::bidirectional_iterator_tag>, std::bidirectional_iterator_tag,
+      std::random_access_iterator_tag>>;
+  // clang-format on
+
+private:
+  static constexpr bool isRandom =
+      std::is_same_v<iterator_category, std::random_access_iterator_tag>;
+  static constexpr bool isBidir =
+      std::is_same_v<iterator_category, std::bidirectional_iterator_tag> ||
+      isRandom;
+
+public:
   using value_type = std::pair<decltype(*it), decltype(*it2)>;
   using pointer = value_type *;
   using reference = value_type &;
@@ -510,6 +529,54 @@ public:
   constexpr zip_iterator operator++(int) {
     zip_iterator tmp(*this);
     ++(*this);
+    return tmp;
+  }
+
+  constexpr zip_iterator &operator--()
+    requires(isBidir)
+  {
+    --it;
+    --it2;
+    return *this;
+  }
+
+  constexpr zip_iterator operator--(int)
+    requires(isBidir)
+  {
+    zip_iterator tmp(*this);
+    --(*this);
+    return tmp;
+  }
+
+  constexpr zip_iterator &operator+=(difference_type d)
+    requires(isRandom)
+  {
+    it += d;
+    it2 += d;
+    return *this;
+  }
+  constexpr zip_iterator &operator-=(difference_type d)
+    requires(isRandom)
+  {
+    return (*this) += -d;
+  }
+
+  constexpr difference_type operator-(const zip_iterator &o) const {
+    difference_type diff = it - o.it;
+    return diff;
+  }
+  constexpr zip_iterator operator+(difference_type d) const
+    requires(isRandom)
+  {
+    zip_iterator tmp(*this);
+    tmp += d;
+    return tmp;
+  }
+  constexpr zip_iterator operator-(difference_type d) const
+    requires(isRandom)
+  {
+    zip_iterator tmp(*this);
+    tmp -= d;
     return tmp;
   }
 

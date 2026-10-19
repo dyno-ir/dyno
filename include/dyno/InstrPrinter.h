@@ -362,24 +362,30 @@ public:
       str << '\n';
   }
 
-  std::string toString(InstrRef instr) {
+  void toStream(std::ostream &os, InstrRef instr) {
     auto backup = str;
-    std::stringstream stringstr;
-    indentPrint.str = stringstr;
-    str = stringstr;
+    indentPrint.str = os;
+    str = os;
     printInstr(instr, false);
     indentPrint.str = backup;
     str = backup;
-    return std::move(stringstr).str();
   }
-  std::string toString(DialectOpcode opc) {
+  void toStream(std::ostream &os, DialectOpcode opc) {
     auto backup = str;
-    std::stringstream stringstr;
-    indentPrint.str = stringstr;
-    str = stringstr;
+    indentPrint.str = os;
+    str = os;
     printOpcodeDefault(opc);
     indentPrint.str = backup;
     str = backup;
+  }
+  std::string toString(InstrRef instr) {
+    std::stringstream stringstr;
+    toStream(stringstr, instr);
+    return std::move(stringstr).str();
+  }
+  std::string toString(DialectOpcode opc) {
+    std::stringstream stringstr;
+    toStream(stringstr, opc);
     return std::move(stringstr).str();
   }
 };

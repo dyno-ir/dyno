@@ -598,6 +598,7 @@ public:
   constexpr iterator end() { return arr.data() + sz; }
   constexpr const_iterator begin() const { return arr.data(); }
   constexpr const_iterator end() const { return arr.data() + sz; }
+  constexpr const_iterator data() const { return arr.data(); }
 
   constexpr T &back() {
     assert(!empty());

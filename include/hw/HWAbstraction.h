@@ -1088,9 +1088,9 @@ public:
       ib.addRef(addr);
     if (!!trigger)
       ib.addRef(trigger.oref());
-    for (auto &&forward : forwards) {
-      ib.addRef(forward.port);
-      port->writeForwardMeta.emplace_back(forward.oldTime, forward.unkTime);
+    for (auto [port, meta] : Range{forwards}) {
+      ib.addRef(port);
+      port->writeForwardMeta.emplace_back(meta.oldTime, meta.unkTime);
     }
     insertInstr(instr);
     return wire;

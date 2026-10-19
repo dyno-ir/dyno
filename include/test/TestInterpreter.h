@@ -6,6 +6,7 @@
 #include "dyno/Instr.h"
 #include "dyno/Obj.h"
 #include "meta/PassPipelineInterpreter.h"
+#include "support/ANSITerminal.h"
 #include "support/Any.h"
 #include "support/ErrorRecovery.h"
 #include "support/Format.h"
@@ -23,8 +24,32 @@ class TestInterpreter {
   PrinterBase &print;
   std::ostream &os;
 
+  void passed(StringRef name) {
+    std::print(os, "{}{}passed: {}\"{}\"{}\n", stdoutBold(), stdoutGreen(),
+               stdoutWhite(), name, stdoutReset());
+  }
+  void failed(StringRef name) {
+    std::print(os, "{}{}failed: {}\"{}\"{}\n", stdoutBold(), stdoutRed(),
+               stdoutWhite(), name, stdoutReset());
+  }
+
 public:
-  bool execTestCase(InstrRef instr, bool verbose) {
+  Format diffFormat(std::pair<InstrRef, InstrRef> diff) {
+    return Format("actual  : {}\nexpected: {}\n\n",
+                  LazyFormat{[&](std::ostream &os) {
+                    if (diff.first)
+                      os << "<none>";
+                    else
+                      print.toStream(os, diff.first);
+                  }},
+                  LazyFormat{[&](std::ostream &os) {
+                    if (diff.first)
+                      os << "<none>";
+                    else
+                      print.toStream(os, diff.second);
+                  }});
+  }
+  Result<void, Format> execTestCase(InstrRef instr, bool verbose) {
     StringRef name = instr.def(0)->as<StringObjRef>()->data;
     auto pre = instr.def(1)->as<BlockRef>();
     auto post = instr.def(2)->as<BlockRef>();
@@ -45,18 +70,10 @@ public:
 
     BlockCompare compare{};
     if (auto diff = compare.compareBlocks(pre, post)) {
-      std::print(os, "failed test: \"{}\"\n", name);
-      std::print(os, "actual  : {}\n",
-                 diff->first ? print.toString(diff->first) : "<none>");
-      print.reset();
-      std::print(os, "expected: {}\n\n",
-                 diff->second ? print.toString(diff->second) : "<none>");
-
-      return false;
+      return diffFormat(*diff);
     }
 
-    std::print(os, "passed test: \"{}\"\n", name);
-    return true;
+    return {};
   }
 
   Result<void, Format> execTestEquiv(InstrRef instr, bool verbose) {
@@ -74,7 +91,6 @@ public:
     if (verbose)
       print.printInstr(instr);
 
-    std::print(os, "passed test: \"{}\"\n", name);
     return {};
   }
 
@@ -116,13 +132,7 @@ public:
       auto otherI = otherDef->instr();
 
       if (auto diff = BlockCompare{}.compareInstrs(expectedI, otherI)) {
-        std::stringstream str;
-        std::print(str, "failed test: \"{}\"\n", name);
-        std::print(str, "actual  : {}\n",
-                   diff->first ? print.toString(diff->first) : "<none>");
-        std::print(str, "expected: {}\n\n",
-                   diff->second ? print.toString(diff->second) : "<none>");
-        return Format("{}", std::move(str).str());
+        return diffFormat(*diff);
       }
     }
 
@@ -130,28 +140,35 @@ public:
       print.printInstr(instr);
 
     printFailed.clear();
-    std::print(os, "passed test: \"{}\"\n", name);
     return {};
   }
 
   bool exec(InstrRef instr, bool verbose) {
+    StringRef name = instr.def(0)->as<StringObjRef>()->data;
     switch (*instr.getDialectOpcode()) {
     case *TEST_TEST_CASE: {
-      return execTestCase(instr, verbose);
+      if (auto rv = execTestCase(instr, verbose); !rv) {
+        failed(name);
+        os << rv.error() << "\n";
+        return false;
+      }
+      break;
     }
     case *TEST_TEST_EQUIVALENCE: {
       if (auto rv = execTestEquiv(instr, verbose); !rv) {
-        os << "test equiv failed: " << rv.error() << "\n";
+        failed(name);
+        os << rv.error() << "\n";
         return false;
       }
-      return true;
+      break;
     }
     case *TEST_TEST_SCRIPT: {
       if (auto rv = execTestScript(instr, verbose); !rv) {
-        os << "test script failed: " << rv.error() << "\n";
+        failed(name);
+        os << rv.error() << "\n";
         return false;
       }
-      return true;
+      break;
     }
 
     default: {
@@ -159,6 +176,8 @@ public:
                          print.toString(instr.getDialectOpcode()));
     }
     }
+    passed(name);
+    return true;
   }
 
   bool execBlock(BlockRef block, Context &sandbox, TwoLevelSet<StringRef> &only,

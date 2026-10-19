@@ -431,8 +431,9 @@ public:
   bool hasAddr() const { return !!addr(); }
 
   auto writeForwards() {
-    return Range{other_begin() + forwardsIndex(), other_end()}.zip(
-        port()->writeForwardMeta);
+    return Range{other_begin() + forwardsIndex(), other_end()}
+        .as<MemoryPortRef>()
+        .zip(port()->writeForwardMeta);
   }
 
   bool isFullReg() { return getLen() == reg().getNumBits() && !addr(); }

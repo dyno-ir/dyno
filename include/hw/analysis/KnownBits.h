@@ -13,6 +13,7 @@
 #include "hw/LoadStore.h"
 #include "hw/Wire.h"
 #include "hw/analysis/CacheInvalidation.h"
+#include "hw/analysis/WireVariable.h"
 #include "op/IDs.h"
 #include "support/Debug.h"
 #include "support/Utility.h"
@@ -341,18 +342,18 @@ public:
           stack.emplace_back(instr.other(0)->as<HWValue>(), 0);
         } else {
           auto len = asSplice.getLen();
-          int64_t oobLen = int64_t(asSplice.getLen() + asSplice.getBase()) -
-                           retVal.val.getNumBits();
-          if (asSplice.getBase() >= retVal.val.getNumBits()) {
+          auto oob = WireVariable::clipAccess(int32_t(asSplice.getBase()), len,
+                                              retVal.val.getNumBits());
+          if (!oob.len) {
             retVal.val = PatBigInt::undef(len);
-          } else if (oobLen > 0) {
-            BigInt::rangeSelectOp4S(retVal.val, retVal.val, asSplice.getBase(),
-                                    len - oobLen);
-            BigInt::concatOp4S(retVal.val, PatBigInt::undef(oobLen),
-                               retVal.val);
           } else {
-            BigInt::rangeSelectOp4S(retVal.val, retVal.val, asSplice.getBase(),
-                                    len);
+            BigInt::rangeSelectOp4S(retVal.val, retVal.val, oob.addr, oob.len);
+            if (oob.highPad)
+              BigInt::concatOp4S(retVal.val, PatBigInt::undef(oob.highPad),
+                                 retVal.val);
+            if (oob.lowPad)
+              BigInt::concatOp4S(retVal.val, retVal.val,
+                                 PatBigInt::undef(oob.lowPad));
           }
           assert(retVal.val.getNumBits() == wire.getNumBits());
           cache.insert(wire, retVal.val);
@@ -376,14 +377,17 @@ public:
           frame.idx++;
           stack.emplace_back(asInsert.val()->as<HWValue>(), 0);
         } else {
-          if (asInsert.getBase() < asInsert.getMemoryLen()) {
-            int64_t oobLen = int64_t(asInsert.getBase() + asInsert.getLen()) -
-                             asInsert.getMemoryLen();
-            if (oobLen > 0)
-              BigInt::resizeOp4S(retVal.val, retVal.val,
-                                 asInsert.getLen() - oobLen);
+          auto oob = WireVariable::clipAccess(int32_t(asInsert.getBase()),
+                                              asInsert.getLen(),
+                                              asInsert.getMemoryLen());
+          if (oob.len) {
+            if (oob.lowPad)
+              BigInt::rangeSelectOp4S(retVal.val, retVal.val, oob.lowPad,
+                                      oob.len);
+            else if (oob.highPad)
+              BigInt::resizeOp4S(retVal.val, retVal.val, oob.len);
             BigInt::insertOp4S(frame.acc.val, frame.acc.val, retVal.val,
-                               asInsert.getBase());
+                               oob.addr);
           }
 
           retVal = std::move(frame.acc);
@@ -450,22 +454,31 @@ public:
           // todo: for small number of discrete offsets maybe combine?
           goto ret_unknown;
         auto reg = asLoad.reg();
+        auto oob = WireVariable::clipAccess(
+            int32_t(asLoad.getBase()), asLoad.getLen(), asLoad.getMemoryLen());
         auto initValPtr =
             ctx.getCtx<HWDialectContext>().regResetValue.find(reg);
         auto initVal = (initValPtr && initValPtr->getType() == CORE_CONSTANT)
                            ? ctx.getStore<Constant>().resolve(*initValPtr)
                            : nullref;
-        if (initVal)
-          BigInt::rangeSelectOp4S(retVal.val, initVal, asLoad.getBase(),
-                                  asLoad.getLen());
-        else
+        if (!initVal || !oob.len)
           retVal.val = PatBigInt::undef(asLoad.getLen());
+        else {
+          BigInt::rangeSelectOp4S(retVal.val, initVal, oob.addr, oob.len);
+          if (oob.highPad)
+            BigInt::concatOp4S(retVal.val, PatBigInt::undef(oob.highPad),
+                               retVal.val);
+          if (oob.lowPad)
+            BigInt::concatOp4S(retVal.val, retVal.val,
+                               PatBigInt::undef(oob.lowPad));
+        }
+
         assert(retVal.val.getNumBits() == asLoad.getLen());
 
         auto setRegion = [&](uint32_t globOffs, uint32_t globLen) {
-          int64_t offs = globOffs - (int64_t)asLoad.getBase();
+          int64_t offs = int32_t(globOffs) - int32_t(asLoad.getBase());
           int64_t len = globLen;
-          if (offs >= asLoad.getLen())
+          if (offs >= int64_t(asLoad.getLen()))
             return;
           if (offs < 0) {
             len += offs;
@@ -473,7 +486,7 @@ public:
               return;
             offs = 0;
           }
-          len = std::min<int64_t>(len, asLoad.getLen());
+          len = std::min<int64_t>(len, int64_t(asLoad.getLen()) - offs);
           BigInt::insertOp4S(retVal.val, retVal.val, PatBigInt::undef(len),
                              offs);
           assert(retVal.val.getNumBits() == asLoad.getLen());
