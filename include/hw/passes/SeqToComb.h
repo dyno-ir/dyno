@@ -88,7 +88,8 @@ public:
       switch (*instr.getDialectOpcode()) {
       case *HW_STORE_DEFER: {
         auto store = instr.as<StoreIRef>();
-        assert(!store.hasTrigger());
+        if (store.hasTrigger())
+          break;
         auto tok = autoDbgInfo->addWithToken(instr);
         build.buildStore(store.reg(), store.value(), false, nullref,
                          store.getBase(), store.terms());

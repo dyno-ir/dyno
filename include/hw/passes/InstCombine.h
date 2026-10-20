@@ -914,7 +914,7 @@ private:
       val |= mask;
     };
 
-    auto combineLeading = [&](BigInt known) {
+    auto combineLeading = [&](BigInt &known) {
       switch (*instr.getDialectOpcode()) {
       case *OP_ADD: {
         dontCareBitsToZero(known);

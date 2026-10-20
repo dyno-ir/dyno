@@ -373,6 +373,7 @@ public:
               }
               // else skip, move on to next
               ++idx;
+              uses /= curUses;
               continue;
             }
           }
