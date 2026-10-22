@@ -22,6 +22,7 @@
 namespace dyno {
 
 class KnownBitsAnalysis : public CacheInvalidation<KnownBitsAnalysis> {
+  friend class CacheInvalidation<KnownBitsAnalysis>;
 
   // known-bits specific four state, z (never an output in Verilog semantics)
   // is repurposed for known don't care values.
@@ -210,7 +211,9 @@ public:
   KnownBitsAnalysis(Context &ctx) : ctx(ctx) {}
   AnalysisCache<ObjRef<Wire>, BigInt> cache;
 
-  BigInt getKnownBits(HWValue rootVal) {
+protected:
+  // return internal knownBits encoding
+  BigInt get(HWValue rootVal) {
     retVal.val = BigInt{};
     stack.emplace_back(rootVal, 0);
     while (!stack.empty()) {
@@ -516,12 +519,16 @@ public:
       }
     }
 
-    BigInt rv;
-    swapKnownBitsEncoding(rv, retVal.val);
-    return rv;
+    return std::move(retVal).val;
   }
 
-  auto get(HWValue root) { return getKnownBits(root); }
+public:
+  BigInt getKnownBits(HWValue root) {
+    // this is the external facing API function, returns swapped encoding
+    BigInt rv;
+    swapKnownBitsEncoding(rv, get(root));
+    return rv;
+  }
 
   auto getKnownBitsWith(HWValue val,
                         ArrayRef<std::pair<ObjRef<Wire>, BigInt>> assignments) {

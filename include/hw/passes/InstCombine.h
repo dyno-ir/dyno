@@ -43,6 +43,7 @@
 #include "support/Tuple.h"
 #include "support/Utility.h"
 #include <algorithm>
+#include <concepts>
 #include <iterator>
 #include <type_traits>
 #include <variant>
@@ -50,7 +51,68 @@ namespace dyno {
 
 class InstCombinePass : public Pass<InstCombinePass> {
   Context &ctx;
-  SmallVec<InstrRef, 128> worklist;
+
+  struct Worklist {
+    DenseMap<ObjRef<Instr>, uint32_t> idxs;
+    Vec<InstrRef> list;
+
+    void push(InstrRef instr) {
+      auto [found, it] = idxs.findOrInsert(instr, list.size());
+      if (found)
+        return;
+      list.emplace_back(instr);
+    }
+    void emplace_back(InstrRef instr) { return push(instr); }
+
+    InstrRef pop() {
+      auto instr = list.pop_back_val();
+      idxs.erase(idxs.find(instr));
+      return instr;
+    }
+    InstrRef pop_back_val() { return pop(); }
+
+    void erase(ObjRef<Instr> ref) {
+      auto it = idxs.find(ref);
+      if (!it)
+        return;
+      auto idx = it.val();
+      idxs.erase(it);
+      auto listIt = list.begin() + idx;
+      if (list.erase_unordered(listIt)) {
+        idxs.find(*listIt).val() = idx;
+      }
+    }
+
+    InstrRef &operator[](uint32_t i) { return list[i]; }
+    const InstrRef &operator[](uint32_t i) const { return list[i]; }
+    auto begin() { return list.begin(); }
+    auto end() { return list.end(); }
+    auto begin() const { return list.begin(); }
+    auto end() const { return list.end(); }
+    uint32_t size() const { return list.size(); };
+    bool empty() const { return list.empty(); }
+    void clear() {
+      list.clear();
+      idxs.clear();
+    }
+
+    Worklist() = default;
+    // expects unique instrs
+    template <typename It> Worklist(Range<It> arr) {
+      if constexpr (requires { arr.size(); })
+        list.reserve(arr.size());
+      for (auto [i, elem] : Range{arr}.enumerate()) {
+        list.emplace_back(elem);
+        idxs.insert(elem, i);
+      }
+    }
+    // expects unique instrs
+    Worklist(SmallVecImpl<InstrRef> &&arr) : list(std::move(arr)) {
+      for (auto [i, elem] : Range{list}.enumerate())
+        idxs.insert(elem, i);
+    }
+  };
+  Worklist worklist;
   SmallVec<InstrRef, 8> currentMatched;
   SmallVec<OperandRef, 4> currentReplaced;
   ConstantBuilder cbuild;
@@ -94,15 +156,15 @@ public:
   FIELD(bool, inferMuxs, false)                                                \
   FIELD(bool, muxToBitwise, false)                                             \
   FIELD(bool, simplifyYieldValues, true)                                       \
-  FIELD(bool, inferLatches, false)
+  FIELD(bool, inferLatches, false)                                             \
+  /* should never have an effect on output IR. debugging only */               \
+  FIELD(bool, debugClearCaches, false)
   CONFIG_STRUCT(CONFIG_STRUCT_LAMBDA)
 #undef CONFIG_STRUCT_LAMBDA
   Config config;
 
 private:
-  static bool generated(Context &ctx, Config &config,
-                        SmallVecImpl<InstrRef> &matched,
-                        SmallVecImpl<OperandRef> &replaced, HWInstrRef);
+  bool generated(HWInstrRef);
 
   PatBool knownBitsConstProp(InstrRef instr) {
     auto wire = instr.def(0)->as<WireRef>();
@@ -120,7 +182,19 @@ private:
     currentMatched.emplace_back(instr);
   }
 
+  void recomputeAnalysesAtDef(FatDynObjRef<> ref) {
+    knownBits.recomputeAt(ref);
+    bitAlias.recomputeAt(ref);
+  }
+  void recomputeAnalysesAtDefs(InstrRef instr) {
+    for (auto def : instr.defs())
+      recomputeAnalysesAtDef(def->fat());
+  }
+
   void replaceUses(WireRef wire, HWValue newVal) {
+    // todo: if we always defer this until new instr is done we can possibly
+    // just recomputeAnalysesForDef(wire) rather than all replaced. same for
+    // pointer version below
     assert(newVal.getNumBits() == wire.getNumBits());
     knownBits.replaceAt(wire, newVal);
     bitAlias.replaceAt(wire, newVal);
@@ -129,15 +203,8 @@ private:
     wire.replaceAllUsesWith(
         newVal, [&](OperandRef ref) { currentReplaced.emplace_back(ref); });
 
-    for (size_t i = pos; i < currentReplaced.size(); i++) {
-      auto instr = currentReplaced[i].instr();
-      for (auto def : instr.defs()) {
-        if (!def->is<HWValue>())
-          continue;
-        knownBits.recomputeAt(def->as<HWValue>());
-        bitAlias.recomputeAt(def->as<HWValue>());
-      }
-    }
+    for (size_t i = pos; i < currentReplaced.size(); i++)
+      recomputeAnalysesAtDefs(currentReplaced[i].instr());
   }
   void replaceUses(RegisterRef oldR, RegisterRef newR) {
     auto &regNameInfo = ctx.getCtx<HWDialectContext>().regNameInfo;
@@ -145,8 +212,11 @@ private:
     oldR.replaceAllUsesWith(newR);
   }
   void replaceUses(PointerRef pointer, HWAddress newVal) {
+    size_t pos = currentReplaced.size();
     pointer.replaceAllUsesWith(
         newVal, [&](OperandRef ref) { currentReplaced.emplace_back(ref); });
+    for (size_t i = pos; i < currentReplaced.size(); i++)
+      recomputeAnalysesAtDefs(currentReplaced[i].instr());
   }
 #define replaceAllUsesWith static_assert(0, "use this->replaceUses")
 
@@ -160,13 +230,7 @@ private:
     ref.replace(newVal);
     currentReplaced.emplace_back(ref);
 
-    auto instr = ref.instr();
-    for (auto def : instr.defs()) {
-      if (!def->is<HWValue>())
-        continue;
-      knownBits.recomputeAt(def->as<HWValue>());
-      bitAlias.recomputeAt(def->as<HWValue>());
-    }
+    recomputeAnalysesAtDefs(ref.instr());
   }
 
   OperandRef getLoopbackVal(LoopbackFrag &frag) {
@@ -610,7 +674,7 @@ private:
 
       bool singleUse = wire.getNumUses() == 1;
 
-      auto known = deriveBits.knownBits.get(wire);
+      auto known = deriveBits.knownBits.getKnownBits(wire);
       assert(known.getNumBits() == wire.getNumBits());
       if (!known.getIs4S()) {
         DYNO_DBG({
@@ -2272,8 +2336,8 @@ private:
         auto val =
             build.buildMux(instr.getCondValue()->as<HWValue>(), trueV, falseV);
         replaceUses(outW, val);
-        deleteMatchedInstr(instr);
       }
+      deleteMatchedInstr(instr);
       return PAT_TRUE;
     }
 
@@ -2441,9 +2505,11 @@ private:
   }
 
   PatBool matchPatternsOnInstr(InstrRef instr) {
-    knownBits.clearCache();
+    if (config.debugClearCaches) {
+      knownBits.clearCache();
+      bitAlias.clearCache();
+    }
     deriveBits.clearCache();
-    bitAlias.clearCache();
 
     currentMatched.clear();
     currentReplaced.clear();
@@ -2464,23 +2530,18 @@ private:
 
 #undef MATCH
 
-    return PAT_BOOL(
-        generated(ctx, config, currentMatched, currentReplaced, instr));
-  }
-
-  void recomputeAnalysesAtDefWire(WireRef wire) {
-    knownBits.recomputeAt(wire);
-    bitAlias.recomputeAt(wire);
+    return PAT_BOOL(generated(instr));
   }
 
   void newInstrHook(InstrRef ref) {
     for (auto def : ref.defs()) {
       switch (*def->fat().getType()) {
-      case *HW_WIRE: {
-        auto asWire = def->as<WireRef>();
-        assert(asWire.getNumDefs() == 1);
-        recomputeAnalysesAtDefWire(asWire);
-        for (auto use : asWire.uses())
+      case *HW_WIRE:
+      case *HW_POINTER: {
+        auto asDefUseObj = def->as<FatDynObjRef<InstrDefUse>>();
+        assert(asDefUseObj->getNumDefs() == 1);
+        recomputeAnalysesAtDef(asDefUseObj);
+        for (auto use : asDefUseObj->uses())
           worklist.emplace_back(use.instr());
         break;
       }
@@ -2494,19 +2555,19 @@ private:
         assert(wire.getNumDefs() == 1);
   }
 
-  void oldInstrHook(InstrRef old, ArrayRef<InstrRef> newInstrs) {
+  void oldInstrHook(InstrRef old, ArrayRef<ObjRef<Instr>> newInstrs) {
     for (auto newInstr : newInstrs)
       ctx.getCtx<CoreDialectContext>().instrSourceLocInfo.copyDebugInfo(
           old, newInstr);
+    HWInstrBuilder build{ctx};
     if (TaggedIRef{old}.get()) {
       for (auto op : old) {
 
         // delete nested instructions
         if (auto asBlock = op->dyn_as<BlockRef>()) {
-          for (auto instr : asBlock) {
-            TaggedIRef{instr}.get() = 1;
+          auto range = StableHierBlockRange{asBlock};
+          for (auto instr : Range{range}.earlyincr())
             oldInstrHook(instr, {});
-          }
         }
 
         // propagate unused values up the chain
@@ -2532,6 +2593,7 @@ private:
         } else
           op.replace(FatDynObjRef<>{nullref});
       }
+      build.destroyInstr(old);
     } else {
       // if not explicitly ok to delete, re-inspect
       worklist.emplace_back(old);
@@ -2584,16 +2646,21 @@ private:
       dbgs() << "\n";
     })
 
-    auto newInstrs =
-        ArrayRef<InstrRef>{worklist.begin() + lastWorklistSize, worklist.end()};
+    SmallVec<ObjRef<Instr>, 16> newInstrsV(
+        Range{worklist.begin() + lastWorklistSize, worklist.end()});
+
     for (size_t i = 0; i < currentMatched.size(); i++) {
-      oldInstrHook(currentMatched[i], newInstrs);
+      assert(ctx.getStore<Instr>().exists(currentMatched[i]));
+      oldInstrHook(currentMatched[i], newInstrsV);
     }
     for (auto operand : currentReplaced) {
-      replacedUseHook(operand);
+      if (ctx.getStore<Instr>().exists(operand.instr()))
+        replacedUseHook(operand);
     }
-    for (size_t i = lastWorklistSize, sz = worklist.size(); i < sz; i++)
-      newInstrHook(worklist[i]);
+    for (auto newInstr : newInstrsV) {
+      if (ctx.getStore<Instr>().exists(newInstr))
+        newInstrHook(ctx.getStore<Instr>().resolve(newInstr));
+    }
   }
 
   void runOnProcess(ProcessIRef proc) {
@@ -2623,7 +2690,7 @@ private:
   }
 
   void runOnModule(ModuleIRef mod) {
-    for (auto proc : mod.procs())
+    for (auto proc : mod.procs<StableBlockIterator>().earlyincr())
       runOnProcess(proc);
   }
 
@@ -2631,7 +2698,7 @@ private:
     HWInstrBuilder build{ctx};
     for (auto instr : ctx.getStore<Instr>()) {
       if (TaggedIRef{instr}.get())
-        build.destroyInstr(instr);
+        assert(0);
     }
   }
 
@@ -2657,10 +2724,21 @@ public:
       TaggedIRef{ref}.get() = 0;
       worklist.emplace_back(ref);
     });
+    ctx.getStore<Instr>().destroyHooks.emplace_back([&](InstrRef ref) {
+      worklist.erase(ref);
+
+      for (auto def : ref.defs()) {
+        if (auto asWire = def->dyn_as<WireRef>()) {
+          knownBits.replaceAt(asWire, nullref);
+          bitAlias.replaceAt(asWire, nullref);
+        }
+      }
+    });
 
     runFunc();
 
     ctx.getStore<Instr>().createHooks.pop_back();
+    ctx.getStore<Instr>().destroyHooks.pop_back();
     destroyMarkedInstrs();
   }
 

@@ -36,14 +36,14 @@ class TestInterpreter {
 public:
   Format diffFormat(std::pair<InstrRef, InstrRef> diff) {
     return Format("actual  : {}\nexpected: {}\n\n",
-                  LazyFormat{[&](std::ostream &os) {
-                    if (diff.first)
+                  LazyFormat{[=, this](std::ostream &os) {
+                    if (!diff.first)
                       os << "<none>";
                     else
                       print.toStream(os, diff.first);
                   }},
-                  LazyFormat{[&](std::ostream &os) {
-                    if (diff.first)
+                  LazyFormat{[=, this](std::ostream &os) {
+                    if (!diff.second)
                       os << "<none>";
                     else
                       print.toStream(os, diff.second);

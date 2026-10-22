@@ -54,30 +54,16 @@ static void deleteIfSingleUse(SmallVecImpl<InstrRef> &matched, Context &ctx,
   // for now simply ignore, will be re-inspected.
 }
 
-static void replaceAllUses(SmallVecImpl<OperandRef> &replaced,
-                           InstrRef::iterator oldOp, InstrRef::iterator newOp) {
-  (*oldOp)->as<WireRef>()->defUse.replaceAllUsesWith(
-      (*newOp)->fat(), [&replaced](OperandRef r) { replaced.emplace_back(r); });
-}
+bool dyno::InstCombinePass::generated(HWInstrRef r0) {
 
-static void replaceAllUses(SmallVecImpl<OperandRef> &replaced,
-                           InstrRef::iterator oldOp, FatDynObjRef<> *newOp) {
-  (*oldOp)->as<WireRef>()->defUse.replaceAllUsesWith(
-      *newOp, [&replaced](OperandRef r) { replaced.emplace_back(r); });
-}
+  auto &matched = currentMatched;
+  auto &replaced = currentReplaced;
 
-static void replaceAllUses(SmallVecImpl<OperandRef> &replaced,
-                           InstrRef::iterator oldOp, ConstantRef newOp) {
-  (*oldOp)->as<WireRef>()->defUse.replaceAllUsesWith(
-      newOp, [&replaced](OperandRef r) { replaced.emplace_back(r); });
-}
-
-bool dyno::InstCombinePass::generated(Context &ctx,
-                                      InstCombinePass::Config &config
-                                      [[maybe_unused]],
-                                      SmallVecImpl<InstrRef> &matched,
-                                      SmallVecImpl<OperandRef> &replaced,
-                                      HWInstrRef r0) {
+  auto replaceAllUses = [this](SmallVecImpl<OperandRef> & /*unused*/,
+                               InstrRef::iterator oldOp, auto newOp) {
+    replaceUses((*oldOp)->as<WireRef>(),
+                (*newOp).template as<FatDynObjRef<>>());
+  };
 
   HWInstrBuilder build{ctx};
   build.setInsertPoint(r0.iter(ctx));

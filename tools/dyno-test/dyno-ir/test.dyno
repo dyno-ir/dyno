@@ -648,28 +648,28 @@ TEST_CASE :string("test-extract"), :block, :block, :block {
     }
   }
 }{
-  hw.MODULE_DEF %Test:module("Test"), %4:core.block {
+  hw.MODULE_DEF %Test:module("Test"), %b1:core.block {
     hw.INPUT_REGISTER_DEF %r0:register(2)
     hw.INPUT_REGISTER_DEF %r1:register(4)
     hw.OUTPUT_REGISTER_DEF %r2:register(1)
-    hw.COMB_PROCESS_DEF %5:process, %6:core.block {
+    hw.COMB_PROCESS_DEF %1:process, %b2:core.block {
       hw.LOAD %w0:wire(2), %r0
       hw.LOAD %w2:wire(4), %r1
-      op.TRUNC %w8:wire(1), %w2
-      hw.SPLICE %w9:wire(1), %w2, #32'd1
-      hw.SPLICE %w10:wire(1), %w2, #32'd2
-      hw.SPLICE %w11:wire(1), %w2, #32'd3
-      op.TRUNC %w12:wire(1), %w0
-      hw.SPLICE %w25:wire(1), %w0, #32'd1
-      op.AND %w3:wire(1), %w12, %w25
-      op.NOT %w17:wire(1), %w12
-      op.AND %w18:wire(1), %w17, %w25
-      op.NOT %w19:wire(1), %w25
-      op.AND %w20:wire(1), %w12, %w19
-      op.OR %w21:wire(1), %w12, %w25
-      op.NOT %w24:wire(1), %w21
-      hw.ONEHOT_MUX %w23:wire(1), %w24, %w8, %w20, %w9, %w18, %w10, %w3, %w11
-      hw.STORE %w23, %r2
+      op.TRUNC %w20:wire(1), %w2
+      hw.SPLICE %w21:wire(1), %w2, #32'd1
+      hw.SPLICE %w22:wire(1), %w2, #32'd2
+      hw.SPLICE %w23:wire(1), %w2, #32'd3
+      op.TRUNC %w24:wire(1), %w0
+      hw.SPLICE %w27:wire(1), %w0, #32'd1
+      op.AND %w3:wire(1), %w24, %w27
+      op.NOT %w29:wire(1), %w24
+      op.AND %w30:wire(1), %w27, %w29
+      op.NOT %w31:wire(1), %w27
+      op.AND %w32:wire(1), %w24, %w31
+      op.OR %w25:wire(1), %w24, %w27
+      op.NOT %w26:wire(1), %w25
+      hw.ONEHOT_MUX %w35:wire(1), %w26, %w20, %w32, %w21, %w30, %w22, %w3, %w23
+      hw.STORE %w35, %r2
     }
   }
 }{
@@ -820,32 +820,32 @@ TEST_CASE :string("test-reg-split"), :block, :block, :block {
       hw.SPLICE %w65:wire(1), %w0, #32'd2
       hw.SPLICE %w66:wire(1), %w0, #32'd3
       op.TRUNC %w67:wire(1), %w1
-      op.NOT %w80:wire(1), %w67
-      hw.SPLICE %w79:wire(1), %w1, #32'd1
-      op.NOT %w78:wire(1), %w79
-      op.AND %w81:wire(1), %w67, %w79
-      op.AND %w82:wire(1), %w79, %w80
-      op.AND %w85:wire(1), %w67, %w78
-      op.OR %w88:wire(1), %w67, %w79
-      op.NOT %w89:wire(1), %w88
-      hw.ONEHOT_MUX %w87:wire(1), %w89, %w63, %w85, %w64, %w82, %w65, %w81, %w66
-      hw.STORE %w87, %r3
+      op.NOT %w5:wire(1), %w67
+      hw.SPLICE %w70:wire(1), %w1, #32'd1
+      op.NOT %w49:wire(1), %w70
+      op.AND %w6:wire(1), %w67, %w70
+      op.AND %w72:wire(1), %w5, %w70
+      op.AND %w69:wire(1), %w49, %w67
+      op.OR %w73:wire(1), %w67, %w70
+      op.NOT %w68:wire(1), %w73
+      hw.ONEHOT_MUX %w75:wire(1), %w68, %w63, %w69, %w64, %w72, %w65, %w6, %w66
+      hw.STORE %w75, %r3
       hw.LOAD %w4:wire(1), %r2
-      op.OR %w76:wire(1), %w4, %w87
-      op.NOT %w77:wire(1), %w76
+      op.OR %w51:wire(1), %w4, %w75
+      op.NOT %w3:wire(1), %w51
       op.NOT %w40:wire(32), %w2
       op.TRUNC %w42:wire(1), %w40
       hw.SPLICE %w44:wire(1), %w40, #32'd1
-      op.AND %w46:wire(1), %w42, %w79
+      op.AND %w46:wire(1), %w42, %w70
       op.AND %w47:wire(1), %w44, %w67
       op.AND %w48:wire(1), %w42, %w44
-      hw.LOAD %w74:wire(1), %r0
-      hw.FLIP_FLOP %w54:wire(1), %w74, %w77, %w48
-      hw.FLIP_FLOP %w50:wire(1), %w74, %w77, %w47
-      hw.FLIP_FLOP %w45:wire(1), %w74, %w77, %w46
-      hw.FLIP_FLOP %w41:wire(1), %w74, %w77, %w81
-      hw.CONCAT %w60:wire(4), %w41, %w45, %w50, %w54
-      hw.STORE %w60, %r4
+      hw.LOAD %w60:wire(1), %r0
+      hw.FLIP_FLOP %w50:wire(1), %w60, %w3, %w48
+      hw.FLIP_FLOP %w43:wire(1), %w60, %w3, %w47
+      hw.FLIP_FLOP %w45:wire(1), %w60, %w3, %w46
+      hw.FLIP_FLOP %w41:wire(1), %w60, %w3, %w6
+      hw.CONCAT %w57:wire(4), %w41, %w45, %w43, %w50
+      hw.STORE %w57, %r4
     }
   }
 }{

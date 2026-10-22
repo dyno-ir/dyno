@@ -132,12 +132,13 @@ public:
     return Range{ports_end(), regs_end()}.as<RegisterIRef>();
   }
 
+  template<typename It = BlockRef_iterator<true>>
   auto procs() {
-    return Range{regs_end(), block().end()}
+    return Range<It>{regs_end(), block().end()}
         .filter([](InstrRef instr) {
           return instr.getNumDefs() > 0 && instr.def(0)->is<ProcessRef>();
         })
-        .as<ProcessIRef>();
+        .template as<ProcessIRef>();
   }
   auto comb_procs() {
     return Range{regs_end(), block().end()}

@@ -1,7 +1,8 @@
 #pragma once
 
-#include "hw/HWPrinter.h"
 #include "hw/HWValue.h"
+#include "hw/IDs.h"
+#include "hw/Pointer.h"
 #include "hw/Wire.h"
 namespace dyno {
 
@@ -11,30 +12,34 @@ template <typename Derived> class CacheInvalidation {
 
 public:
   void clearCache() { cache().clearAll(); }
-  void recomputeAt(HWValue root) {
-    if (!root.is<WireRef>())
-      return;
-    SmallVec<WireRef, 32> stack{root.as<WireRef>()};
+  void recomputeAt(FatDynObjRef<> root) {
+    SmallVec<FatDynObjRef<>, 32> stack{root};
+
+    auto pushUsesOfDef = [&](FatDynObjRef<InstrDefUse> obj) {
+      for (auto use : obj->uses())
+        for (auto def : use.instr().defs())
+          // we only care about wire and pointer dataflow in HW dialect
+          if (def->fat().getType() == Any{HW_WIRE, HW_POINTER})
+            stack.emplace_back(def->fat());
+    };
 
     while (!stack.empty()) {
-      WireRef wire = stack.pop_back_val();
-      auto it = cache().raw().find(wire);
-      if (it == cache().raw().end())
-        continue;
-      auto val = std::move(it.val());
-      cache().raw().erase(it);
+      FatDynObjRef<> ref = stack.pop_back_val();
+      if (auto wire = ref.dyn_as<WireRef>()) {
+        auto it = cache().raw().find(wire);
+        if (it == cache().raw().end())
+          continue;
+        auto val = std::move(it.val());
+        cache().raw().erase(it);
 
-      auto result = self().get(wire);
-      if (val == result)
-        continue;
+        auto result = self().get(wire);
+        if (val == result)
+          continue;
 
-      for (auto use : wire.uses()) {
-        auto instr = use.instr();
-        for (auto def : instr.defs()) {
-          if (!def->is<WireRef>())
-            continue;
-          stack.emplace_back(def->as<WireRef>());
-        }
+        pushUsesOfDef(wire);
+      } else if (auto ptr = ref.dyn_as<PointerRef>()) {
+        // pointer is never cached itself but uses of it may be
+        pushUsesOfDef(ptr);
       }
     }
   }
