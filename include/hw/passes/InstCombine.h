@@ -960,6 +960,8 @@ private:
     uint32_t originalBits = *outWire.getNumBits();
 
     SmallVec<BigInt, 4> bigInts;
+    BigInt addBound =
+        BigInt::fromU32(0, originalBits + clog2(instr.getNumOthers()));
 
     auto demanded = demandedBits.getDemandedBits(instr.def(0)->as<WireRef>());
     assert(demanded.getNumBits() == originalBits);
@@ -982,12 +984,16 @@ private:
       switch (*instr.getDialectOpcode()) {
       case *OP_ADD: {
         dontCareBitsToZero(known);
-        auto newLeading = BigInt::leadingZeros4SExact(known);
-        if (newLeading <= 1)
-          return false;
-        newLeading--;
-        minLeading = std::min(minLeading, newLeading);
-        break;
+        uint32_t activeBits = originalBits - BigInt::leadingZeros4SExact(known);
+
+        BigInt operandBound;
+        BigInt::resizeOp(operandBound, PatBigInt(activeBits, 0b11),
+                         addBound.getNumBits());
+        BigInt::addOp(addBound, addBound, operandBound);
+        uint32_t sumWidth =
+            addBound.getNumBits() - BigInt::leadingZeros(addBound);
+        minLeading = originalBits - std::clamp(sumWidth, 1u, originalBits);
+        return minLeading != 0;
       }
 
       case *OP_MUL: {
