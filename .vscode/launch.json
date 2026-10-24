@@ -102,8 +102,6 @@
         "test",
         "${workspaceFolder}/tools/dyno-opt/dyno-ir/flow.dyno",
         "${workspaceFolder}/tools/dyno-test/dyno-ir/test.dyno",
-        "--only=test-script",
-        "--debug"
       ],
     },
     {

@@ -3,7 +3,6 @@
 #include "aig/AIGContext.h"
 #include "dyno/CFG.h"
 #include "dyno/Context.h"
-#include "dyno/DeepCopy.h"
 #include "dyno/DialectInfo.h"
 #include "dyno/FatContext.h"
 #include "dyno/Parser.h"
@@ -12,23 +11,23 @@
 #include "dyno/passes/ResolveImports.h"
 #include "hw/HWContext.h"
 #include "hw/HWPrinter.h"
+#include "hw/HWTypeIDs.h"
 #include "hw/passes/DumpVerilog.h"
 #include "hw/passes/HWDialectPasses.h"
 #include "meta/IDs.h"
 #include "meta/MetaContext.h"
-#include "meta/MetaParser.h"
 #include "meta/PassPipelineInterpreter.h"
 #include "op/OpContext.h"
 #include "support/CmdLineArgs.h"
 #include "support/Debug.h"
 #include "support/ErrorRecovery.h"
+#include "support/MMap.h"
 #include "support/SubCommand.h"
 #include "support/TwoLevelSet.h"
 #include "test/IDs.h"
 #include "test/TestInterpreter.h"
 #include "test/passes/AssertExists.h"
 #include "type/TypeContext.h"
-#include <iterator>
 #include <optional>
 
 using namespace dyno;

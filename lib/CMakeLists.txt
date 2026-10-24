@@ -7,6 +7,10 @@ target_include_directories(coreSupport INTERFACE
 add_library(core STATIC
     hw/HWPrinter.cpp
     hw/passes/InstCombine.cpp
+    hw/passes/HWDialectPasses_0.cpp
+    hw/passes/HWDialectPasses_1.cpp
+    hw/passes/HWDialectPasses_2.cpp
+    hw/passes/HWDialectPasses_3.cpp
     support/ErrorRecovery.cpp
     support/TruthTable.cpp
     support/ANSITerminal.cpp

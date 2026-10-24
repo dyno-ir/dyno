@@ -1,7 +1,6 @@
 #pragma once
 
 #include "dyno/DialectInfo.h"
-#include "dyno/Interface.h"
 #include "dyno/Lexer.h"
 #include "dyno/Opcode.h"
 #include "support/Debug.h"
