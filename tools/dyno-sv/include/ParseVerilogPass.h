@@ -22,6 +22,7 @@ public:
   static constexpr size_t NumArgs = 16;
 #define CONFIG_STRUCT_LAMBDA(FIELD, ENUM)                                      \
   FIELD(bool, strictXZ, true)                                                  \
+  FIELD(bool, ignoreSimOnly, false)                                            \
   FIELD(StringRef, path, "")                                                   \
   FIELD(StringRef, code, "")                                                   \
   FIELD(StringRef, arg0, "")                                                   \
@@ -101,6 +102,7 @@ public:
 
     VisitorAST visitor{ctx, driver.sourceManager};
     visitor.strictXZ = config.strictXZ;
+    visitor.ignoreSimOnly = config.ignoreSimOnly;
     compilation->getRoot().visit(visitor);
     visitor.handle_modules();
 

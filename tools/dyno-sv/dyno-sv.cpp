@@ -12,7 +12,6 @@
 #include "dyno/passes/ResolveImports.h"
 #include "hw/HWContext.h"
 #include "hw/HWPrinter.h"
-#include "hw/PassPipeline.h"
 #include "hw/passes/DumpVerilog.h"
 #include "hw/passes/HWDialectPasses.h"
 #include "meta/IDs.h"
@@ -55,7 +54,14 @@ CmdLineArg<Vec<StringRef>>
 
 CmdLineArg<Vec<StringRef>> argFlowScript{
     's', "script", "Dyno-IR flow script file name.",
-    CmdLineArgFlags::VALUE_REQUIRED | CmdLineArgFlags::MULTIPLE};
+    CmdLineArgFlags::VALUE_REQUIRED | CmdLineArgFlags::MULTIPLE |
+        CmdLineArgFlags::MANDATORY};
+
+CmdLineArg<bool> argIgnoreSimOnly{
+    std::nullopt, "ignore-sim-only",
+    "Ignore unsupported simulation only constructs in "
+    "frontend rather than erroring.",
+    0, false};
 
 // Flow/Test Args
 CmdLineArg<Vec<StringRef>> argScriptFileName{
@@ -112,34 +118,18 @@ void synth(Context &ctx) {
   {
     ParseVerilogPass parse{ctx};
     auto args = *argSlangArgs;
+    parse.config.ignoreSimOnly = *argIgnoreSimOnly;
     args.push_back_range(Range{*argInputFiles});
     auto res = parse.parse(args);
     if (!res)
       report_fatal_error("{}", res.error());
   }
 
-  if (argFlowScript->empty()) {
-    PassPipeline pipeline{ctx};
-    pipeline.printAfterAll = *argPrintAfterAll;
-    pipeline.setLibertyPath(*argLibertyFile);
-    pipeline.printAfterAll = false;
-    pipeline.checkAfterAll = true;
-    pipeline.dumpAfterAll = true;
-
-    pipeline.runOptPipeline();
-    pipeline.runLoweringPipeline();
-    pipeline.dumpVerilog(*argOutFile);
-
-    std::ofstream of{"dump.dyno"};
-    pipeline.dumpDyno(of);
-
-  } else {
-    runScript(ctx, *argFlowScript);
-    if (!argOutFile->empty()) {
-      DumpVerilogPass dumpVlog{ctx};
-      dumpVlog.config.fileName = *argOutFile;
-      dumpVlog.run();
-    }
+  runScript(ctx, *argFlowScript);
+  if (!argOutFile->empty()) {
+    DumpVerilogPass dumpVlog{ctx};
+    dumpVlog.config.fileName = *argOutFile;
+    dumpVlog.run();
   }
 }
 
