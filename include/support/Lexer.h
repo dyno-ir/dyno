@@ -528,8 +528,7 @@ public:
       num -= error.start - (line.begin() - src.begin()) + 1;
       if (i == 0)
         std::print(os, "{:>{}}{}{:>{}}{:~>{}}{}\n", "|", indent + 4,
-                   stderrGreen(), "^", col - indent + 1, "", num,
-                   stderrReset());
+                   stderrGreen(), "^", col, "", num, stderrReset());
       else {
         auto stripped = line.strip();
         auto start = stripped.begin() - line.begin();
