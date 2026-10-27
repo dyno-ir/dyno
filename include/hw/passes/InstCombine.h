@@ -259,20 +259,44 @@ private:
     if (!config.findFlipFlopEnables)
       return false;
     auto use = instr.q().getSingleUse();
-    if (!use || !use->instr().isOpc(HW_STORE))
-      return false;
-    auto store = use->instr().as<StoreIRef>();
-    if (!store.isFullReg())
-      return false;
-    auto load = store.reg().iref().getSingleLoad();
-    // todo: relax full reg. means w can only run this once on fragmented en
-    // flip flops (no longer true after running)
-    if (!load || !load.as<LoadIRef>().isFullReg())
-      return false;
 
-    auto part = loopbackAnalysis.get(
-        instr.d(),
-        load.as<LoadIRef>().value()); // todo: look thru assume on value
+    HWValue qVal;
+    int64_t qOffs = 0;
+    while (1) {
+      if (!use)
+        return false;
+      auto useInstr = use->instr();
+      switch (*useInstr.getDialectOpcode()) {
+      case *HW_STORE: {
+        auto store = useInstr.as<StoreIRef>();
+        if (!store.isConstantOffs())
+          return false;
+        qOffs += store.getBase();
+
+        auto load = store.reg().iref().getSingleLoad();
+        if (!load || !load.as<LoadIRef>().isConstantOffs())
+          return false;
+        qVal = load.as<LoadIRef>().value();
+        qOffs -= load.as<LoadIRef>().getBase();
+        break;
+      }
+      case *HW_CONCAT: {
+        qOffs += Range{*use + 1, *use->instr().end()}
+                     .as<HWValue>()
+                     .tf([](HWValue val) { return *val.getNumBits(); })
+                     .sum();
+        use = useInstr.def()->as<WireRef>().getSingleUse();
+        continue;
+      }
+
+      default:
+        // todo: for netlists, run with ff.q() directly
+        return false;
+      }
+      break;
+    }
+
+    auto part = loopbackAnalysis.get(instr.d(), qVal, qOffs);
     if (Range{part.frags}.all(
             [](auto frag) { return !frag || frag.size() == 0; }))
       return false;
@@ -332,6 +356,11 @@ private:
     // fixme, to avoid looping. To relax this we need to prove an inferred reset
     // actually optimizes out the reset logic via assume. (todo: relax)
     if (!instr.rsts().empty())
+      return PAT_FALSE;
+    // if there's a clock en already we'd have to add `en &&` to any newly
+    // inferred rst x. doable but better not create more logic, instead run rst
+    // inference first.
+    if (instr.hasClkEn())
       return PAT_FALSE;
     // already has async resets
     if (instr.isOpc(HW_FLIP_FLOP) && !instr.rsts().empty())
@@ -517,8 +546,8 @@ private:
 
   PatBool simplifyFlipFlopResets(FlipFlopIRef instr) {
     auto compare = [](auto lhs, auto rhs) {
-      auto lhsV = std::get<1>(lhs);
-      auto rhsV = std::get<1>(rhs);
+      auto lhsV = std::get<0>(lhs);
+      auto rhsV = std::get<0>(rhs);
       return HWInstrBuilder::onehotMuxOperandOrder(lhsV, rhsV);
     };
 
@@ -1155,11 +1184,6 @@ private:
       assert(len != 0);
       handle(last, len);
       last = seam;
-      // auto fragV = build.buildMux(
-      //     selV, trueRepr.get(build, diff.addr(), diff.len(), false),
-      //     falseRepr.get(build, diff.addr(), diff.len(), false));
-      // outFrags.emplace_back(fragV);
-      // last = diff.addr() + diff.len();
     }
     if (auto len = bits - last)
       handle(last, len);
@@ -1210,11 +1234,6 @@ private:
       assert(len != 0);
       handle(last, len);
       last = seam;
-      // auto fragV = build.buildMux(
-      //     selV, trueRepr.get(build, diff.addr(), diff.len(), false),
-      //     falseRepr.get(build, diff.addr(), diff.len(), false));
-      // outFrags.emplace_back(fragV);
-      // last = diff.addr() + diff.len();
     }
     if (auto len = bits - last)
       handle(last, len);
@@ -1372,7 +1391,7 @@ private:
       OtherVec<HWValue> muxOperands{ctx, 1, headMux.getNumOthers()};
 
       for (unsigned i = 0; i < headMux.getNumOthers() / 2; i++) {
-        OtherVec<HWValue> concatOperands{ctx, 1, range.second - range.first};
+        OtherVec<HWValue> concatOperands{ctx, 1, range.second};
         for (auto op : ops) {
           auto subMux = op->as<WireRef>().getDefI();
           concatOperands.emplace_back(subMux.other(2 * i + 1)->as<HWValue>());
@@ -2461,10 +2480,10 @@ private:
     case *HW_FLIP_FLOP:
     case *HW_FLIP_FLOP_SRST: {
       MATCH(simplifyFlipFlopCtrl(instr))
-      MATCH(simplifyFlipFlopEnable(instr))
       MATCH(simplifyFlipFlopResets(instr))
-      MATCH(findFlipFlopEnables(instr))
       MATCH(findFlipFlopSyncResets(instr))
+      MATCH(simplifyFlipFlopEnable(instr))
+      MATCH(findFlipFlopEnables(instr))
       break;
     }
 

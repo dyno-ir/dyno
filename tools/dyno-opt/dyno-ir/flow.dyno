@@ -115,7 +115,8 @@ FUNCTION_DEF %synthEarlyOpt:func, :block {
 
 FUNCTION_DEF %synthLowerControlFlow:func, :block {
   // flatten all remaining control flow
-  meta.LINEARIZE_CONTROL_FLOW_PASS map("flattenLoops": "1", "flattenMultiway": "1")
+  meta.REMOVE_SIDE_EFFECT_INSTRS_PASS
+  meta.LINEARIZE_CONTROL_FLOW_PASS map("flattenLoops": "1", "flattenMultiway": "1", "errorOnNonLinearizable": "1")
   meta.CHECK_PASS
   meta.SSA_CONSTRUCT_PASS
   meta.LOAD_COALESCE_PASS
@@ -193,7 +194,8 @@ FUNCTION_DEF %synthMemoryFFMuxHandling:func, :block {
   meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS
   meta.INST_COMBINE_PASS map("muxToOneHotMux": "1")
   meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS
-  meta.INST_COMBINE_PASS map("muxToOneHotMux": "1", "findFlipFlopEnables": "1", "findFlipFlopSyncResets": "1")
+  meta.INST_COMBINE_PASS map("muxToOneHotMux": "1", "findFlipFlopEnables": "0", "findFlipFlopSyncResets": "1", /*"inferLatches": "1"*/)
+  meta.AGGRESSIVE_DEAD_CODE_ELIMINATION_PASS
 }
 
 FUNCTION_DEF %synthLowerMemoryFF:func, :block {
@@ -228,9 +230,11 @@ FUNCTION_DEF %synthLowerMemoryFF:func, :block {
     "lowerOneHotMux"         : "0",
   )
   meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS
-  // and map flip flops
-  meta.INST_COMBINE_PASS map("muxToOneHotMux": "1", "findFlipFlopEnables": "1", "findFlipFlopSyncResets": "1")
+  // and map flip flops. Canon to lifted MUXs temporarily to aid ff inference,
+  // easier to see MUX loopback path is only used by MUX itself that wayz
+  meta.INST_COMBINE_PASS map("muxToOneHotMux": "1", "liftMUX": "1")
   meta.FLIP_FLOP_INFERENCE_PASS
+  meta.INST_COMBINE_PASS map("muxToOneHotMux": "1", "findFlipFlopEnables": "1", "findFlipFlopSyncResets": "1", "liftMUX": "1")
 
   meta.CHECK_PASS
 
@@ -290,15 +294,7 @@ FUNCTION_DEF %synthTechmap:func, :block {
   // AIG opt & techmap
   meta.AIG_CONSTRUCT_PASS
   meta.AGGRESSIVE_DEAD_CODE_ELIMINATION_PASS map("keepRegs": "NAMED")
-
-  meta.ABC_PASS map("abcCmd":
-    [{read_blif aig.blif; strash; &get -n; &fraig -x;
-      &put; scorr; dc2;
-      dretime; strash;
-      dch -f; if; mfs2; lutpack;
-      print_stats; write_blif
-      mapped.blif}],
-    "path": "sky130_fd_sc_hd__tt_025C_1v80.lib")
+  meta.ABC_PASS map("path": "sky130_fd_sc_hd__tt_025C_1v80.lib")
 
 
   meta.AGGRESSIVE_DEAD_CODE_ELIMINATION_PASS map("keepRegs": "NAMED")

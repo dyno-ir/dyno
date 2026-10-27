@@ -22,7 +22,6 @@
 #include "hw/SensList.h"
 #include "op/OpContext.h"
 #include "support/Any.h"
-#include "support/BoolExpr.h"
 #include "support/DynBitSet.h"
 #include "support/ErrorRecovery.h"
 #include "support/Format.h"
@@ -36,262 +35,18 @@ class SimpleMemoryInferencePass : public Pass<SimpleMemoryInferencePass> {
     StoreIRef store;
     LoadIRef load;
   };
-  struct ReadPort {
-    InstrRef splice;
-    std::optional<InputRegister> addrReg;
-    std::optional<InputRegister> dataReg;
-  };
-  struct WritePort {
-    InsertIRef insert;
-    HWValue enable;
-    bool enablePolarity;
-  };
 
   Context &ctx;
   SmallDenseSet<ObjRef<Instr>, 2> coveredUses;
 
-  bool findReadPorts(SmallVecImpl<ReadPort> &out, RegisterIRef reg) {
-    for (auto use : reg.oref().uses()) {
-      auto instr = use.instr();
-      if (instr.isOpc(HW_STORE_DEFER))
-        continue;
-
-      // previously checked in findWritePorts
-      assert(!instr.isOpc(HW_STORE, HW_TRIGGER_DEF, HW_INSTANCE));
-
-      if (!walkReadTree(out, instr.as<LoadIRef>()))
-        return false;
-    }
-    return true;
-  }
-
-  bool findWritePorts(SmallVecImpl<WritePort> &out, RegisterIRef reg) {
-    for (auto use : reg.oref().uses()) {
-      auto instr = use.instr();
-      if (instr.isOpc(HW_LOAD))
-        continue;
-
-      // todo: support non-deferred (ie async) writes
-      if (instr.isOpc(HW_STORE))
-        return false;
-
-      // don't infer memories for these
-      if (instr.isOpc(HW_TRIGGER_DEF, HW_INSTANCE))
-        return false;
-
-      assert(instr.isOpc(HW_STORE_DEFER));
-
-      if (!walkWriteTree2(out, instr.as<StoreIRef>()))
-        return false;
-    }
-
-    return true;
-  }
-
-  bool walkReadTree(SmallVecImpl<ReadPort> &out, LoadIRef load) {
-    for (auto use : load.value().uses()) {
-      auto instr = use.instr();
-      if (coveredUses.contains(instr))
-        continue;
-      if (!instr.isOpc(HW_SPLICE, OP_TRUNC))
-        return false;
-
-      out.emplace_back(instr);
-    }
-
-    return true;
-  }
-
-  // Walk MUX/INSERT network to find all write ports and their associated
-  // enables.
-  // bool walkWriteTree(SmallVecImpl<WritePort> &out, StoreIRef store) {
-  //   struct Frame {
-  //     WireRef wire;
-  //     unsigned idx;
-  //   };
-  //   if (!store.value().is<WireRef>())
-  //     return false;
-  //   SmallVec<Frame, 4> stack{Frame{store.value().as<WireRef>(), 0}};
-  //   WritePort prefix;
-
-  //   while (!stack.empty()) {
-  //     auto &frame = stack.back();
-  //     auto instr = frame.wire.getDefI();
-  //     coveredUses.findOrInsert(instr);
-
-  //     switch (*instr.getDialectOpcode()) {
-  //     case *HW_MUX: {
-  //       auto sel = instr.other(0)->as<WireRef>();
-  //       if (frame.idx == 0) {
-  //         prefix.enablesValues.emplace_back(sel.as<WireRef>());
-  //         prefix.enablePolarities.push_back(1);
-  //       } else if (frame.idx == 1) {
-  //         prefix.enablePolarities.back() = 0;
-  //       } else if (frame.idx == 2) {
-  //         prefix.enablesValues.pop_back();
-  //         prefix.enablePolarities.pop_back();
-  //         stack.pop_back();
-  //         break;
-  //       }
-  //       auto val = instr.other(frame.idx + 1)->dyn_as<WireRef>();
-  //       if (!val)
-  //         return false;
-  //       frame.idx++;
-  //       stack.emplace_back(val, 0);
-  //       break;
-  //     }
-  //     case *HW_INSERT: {
-  //       auto asInsert = instr.as<InsertIRef>();
-  //       auto &copy = out.emplace_back(prefix);
-  //       copy.insert = asInsert;
-
-  //       auto pad = asInsert.in()->dyn_as<WireRef>();
-  //       if (!pad)
-  //         return false;
-
-  //       stack.pop_back();
-  //       stack.emplace_back(pad, 0);
-  //       break;
-  //     }
-
-  //     case *HW_LOAD: {
-  //       auto asLoad = instr.as<LoadIRef>();
-  //       // todo: support partial loads.
-  //       if (!asLoad.isFullReg())
-  //         return false;
-  //       if (asLoad.reg() != store.reg())
-  //         return false;
-
-  //       stack.pop_back();
-  //       break;
-  //     }
-
-  //     default:
-  //       return false;
-  //     }
-  //   }
-
-  //   return true;
-  // }
-
-  bool walkWriteTree2(SmallVecImpl<WritePort> &out, StoreIRef store) {
-    HWValue cur = store.value();
-
-    while (true) {
-      auto wire = cur.dyn_as<WireRef>();
-      if (!wire)
-        return false;
-      auto instr = wire.getDefI();
-
-      HWValue enable = ConstantRef::fromBool(false);
-      bool enablePolarity = false;
-
-      if (instr.isOpc(HW_MUX)) {
-        enable = instr.other(0)->as<WireRef>();
-        auto trueV = instr.other(1)->dyn_as<WireRef>();
-        auto falseV = instr.other(2)->dyn_as<WireRef>();
-        if (!trueV || !falseV)
-          return false;
-
-        coveredUses.insert(instr);
-
-        if (auto ins = trueV.getDefI().dyn_as<InsertIRef>();
-            ins && ins.in()->as<HWValue>() == falseV) {
-          cur = trueV;
-          wire = trueV;
-          instr = wire.getDefI();
-          enablePolarity = true;
-        } else if (auto ins = falseV.getDefI().dyn_as<InsertIRef>();
-                   ins && ins.in()->as<HWValue>() == trueV) {
-          cur = falseV;
-          wire = falseV;
-          instr = wire.getDefI();
-          enablePolarity = false;
-        }
-      } else if (instr.isOpc(HW_LOAD)) {
-        auto asLoad = instr.as<LoadIRef>();
-        if (asLoad.reg() != store.reg())
-          return false;
-        if (!asLoad.isFullReg())
-          return false;
-        return true;
-      } else
-        return false;
-
-      if (instr.isOpc(HW_INSERT)) {
-        auto insert = instr.as<InsertIRef>();
-        out.emplace_back(insert, enable, enablePolarity);
-        cur = insert.in()->as<HWValue>();
-        coveredUses.insert(insert);
-      } else
-        return false;
-    }
-  }
-
-  //   HWValue cur = store.value();
-  // Memory memory;
-
-  // while (true) {
-  //   auto wire = cur.dyn_as<WireRef>();
-  //   if (!wire)
-  //     return std::unexpected("non-wire value");
-  //   auto instr = wire.getDefI();
-
-  //   HWValue enable = ConstantRef::fromBool(false);
-  //   bool enablePolarity = false;
-
-  //   if (instr.isOpc(HW_MUX)) {
-  //     enable = instr.other(0)->as<WireRef>();
-  //     auto trueV = instr.other(1)->dyn_as<WireRef>();
-  //     auto falseV = instr.other(2)->dyn_as<WireRef>();
-  //     if (!trueV || !falseV)
-  //       return std::unexpected("mux on non-wire value");
-
-  //     coveredUses.insert(instr);
-
-  //     if (auto ins = trueV.getDefI().dyn_as<InsertIRef>();
-  //         ins && ins.in()->as<HWValue>() == falseV) {
-  //       cur = trueV;
-  //       wire = trueV;
-  //       instr = wire.getDefI();
-  //       enablePolarity = true;
-  //     } else if (auto ins = falseV.getDefI().dyn_as<InsertIRef>();
-  //                ins && ins.in()->as<HWValue>() == trueV) {
-  //       cur = falseV;
-  //       wire = falseV;
-  //       instr = wire.getDefI();
-  //       enablePolarity = false;
-  //     }
-  //   } else if (instr.isOpc(HW_LOAD)) {
-  //     auto asLoad = instr.as<LoadIRef>();
-  //     if (asLoad.reg() != store.reg())
-  //       return std::unexpected("load reg different");
-  //     if (!asLoad.isFullReg())
-  //       return std::unexpected("load not full reg");
-  //     return memory;
-  //   } else
-  //     return std::unexpected("expected mux or load instr");
-
-  //   if (instr.isOpc(HW_INSERT)) {
-  //     auto insert = instr.as<InsertIRef>();
-  //     memory.writes.emplace_back(
-  //         insert,
-  //         SmallVec<std::pair<HWValue, bool>, 2>{{enable, enablePolarity}});
-  //     cur = insert.in()->as<HWValue>();
-  //     coveredUses.insert(insert);
-  //   } else
-  //     return std::unexpected("expected insert");
-  // }
-  using BoolExpr = TypedSmallBoolExprDNF<HWValue>;
-
-  struct WritePort2 {
+  struct WritePort {
     InstrRef instr; // insert/concat
     HWValue enables;
     uint32_t dly;
     TriggerIRef trigger;
   };
 
-  struct ReadPort2 {
+  struct ReadPort {
     InstrRef instr; // splice/trunc
     SmallVec<unsigned, 4> fwdWrites;
     uint32_t dly;
@@ -299,11 +54,11 @@ class SimpleMemoryInferencePass : public Pass<SimpleMemoryInferencePass> {
 
   struct Memory {
     RegisterIRef reg;
-    SmallVec<ReadPort2, 2> reads;
-    SmallVec<WritePort2, 4> writes;
+    SmallVec<ReadPort, 2> reads;
+    SmallVec<WritePort, 4> writes;
   };
 
-  Result<Memory, Format> walkTree3(LoadIRef load) {
+  Result<Memory, Format> walkTree(LoadIRef load) {
 
     auto stores = load.reg().iref().storeOrStoreDefers();
     StoreIRef store = stores.empty() ? nullref : stores.front();
@@ -366,8 +121,8 @@ class SimpleMemoryInferencePass : public Pass<SimpleMemoryInferencePass> {
         if (wire.getDefI().isOpc(HW_INSERT)) {
           unaccountedInserts--;
           memory.writes.emplace_back(
-              WritePort2{wire.getDefI(), rv, store && store.trigger(),
-                         store ? store.trigger() : nullref});
+              WritePort{wire.getDefI(), rv, store && store.trigger(),
+                        store ? store.trigger() : nullref});
         } else if (wire.getDefI().isOpc(HW_MUX)) {
           muxMemo.findOrInsert(wire.getDefI(), rv);
           auto use = ctx.resolve(stack.back().ref).uses()[stack.back().idx - 1];
@@ -409,10 +164,10 @@ class SimpleMemoryInferencePass : public Pass<SimpleMemoryInferencePass> {
         if (stack.size() != 1)
           return Format{"not implemented: store forwarding load (todo)"};
         memory.reads.emplace_back(
-            ReadPort2{instr,
-                      {}, //{Range{memory.writes}.transform([](size_t
-                          // i, auto) { return i; })},
-                      0});
+            ReadPort{instr,
+                     {}, //{Range{memory.writes}.transform([](size_t
+                         // i, auto) { return i; })},
+                     0});
         break;
       }
       case *HW_ASSUME: {
@@ -507,10 +262,11 @@ class SimpleMemoryInferencePass : public Pass<SimpleMemoryInferencePass> {
     return InputRegister{store, load};
   }
 
-  void buildMemory2(ModuleIRef mod, RegisterIRef reg, Memory &&memory) {
+  void buildMemory(ModuleIRef mod, RegisterIRef reg, Memory &&memory) {
     HWInstrBuilder build{ctx, mod.regs_end()};
-    auto newReg = build.buildRegister(reg.getNumBits());
-    ctx.getCtx<HWDialectContext>().copyRegisterInfo(reg.oref(), newReg);
+
+    build.destroyInstr(reg.getSingleLoad());
+    build.destroyInstr(reg.getSingleStore());
 
     for (auto &wr : memory.writes) {
       build.setInsertPoint(wr.instr);
@@ -520,7 +276,7 @@ class SimpleMemoryInferencePass : public Pass<SimpleMemoryInferencePass> {
       auto asInsert = wr.instr.as<InsertIRef>();
       HWValue en = wr.enables;
       auto ref = build.buildMemStore(
-          newReg, asInsert.val()->as<HWValue>(), en, wr.dly, wr.trigger,
+          reg.oref(), asInsert.val()->as<HWValue>(), en, wr.dly, wr.trigger,
           build.buildGEP(asInsert.getBase(), asInsert.terms()));
       wr.instr = ref;
     }
@@ -532,7 +288,7 @@ class SimpleMemoryInferencePass : public Pass<SimpleMemoryInferencePass> {
         auto tok = autoDbgInfo.addWithToken(rd.instr);
 
         auto val = build.buildMemLoad(
-            newReg, asSplice.getLen(), nullref, 0, nullref,
+            reg.oref(), asSplice.getLen(), nullref, 0, nullref,
             build.buildGEP(asSplice.getBase(), asSplice.terms()),
             Range{rd.fwdWrites}.transform([&](size_t, unsigned i) {
               return MemoryWriteForward{
@@ -552,7 +308,7 @@ class SimpleMemoryInferencePass : public Pass<SimpleMemoryInferencePass> {
     if (!ld)
       return;
 
-    auto res = walkTree3(ld);
+    auto res = walkTree(ld);
 
     DYNO_DBG({
       dbgs() << "memory ";
@@ -577,7 +333,7 @@ class SimpleMemoryInferencePass : public Pass<SimpleMemoryInferencePass> {
     })
 
     if (res)
-      buildMemory2(HWInstrRef{reg}.parentMod(ctx), reg, std::move(*res));
+      buildMemory(HWInstrRef{reg}.parentMod(ctx), reg, std::move(*res));
   }
 
   void runOnModule(ModuleIRef mod) {

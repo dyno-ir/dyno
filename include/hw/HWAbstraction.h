@@ -275,6 +275,7 @@ public:
   }
 
   static bool commutativeOpWireOrder(WireRef lhs, WireRef rhs) {
+    // todo: use wire obj id instead?
     return lhs.getSingleDef()->instr().getObjID() <
            rhs.getSingleDef()->instr().getObjID();
   }
@@ -1750,7 +1751,7 @@ public:
     }
 
     Range{cases}.sort([](auto &lhs, auto &rhs) {
-      return onehotMuxOperandOrder(lhs.second, rhs.second);
+      return onehotMuxOperandOrder(lhs.first, rhs.first);
     });
 
     auto ib = buildInstrRaw(HW_ONEHOT_MUX, 1 + cases.size() * 2);
@@ -1775,7 +1776,7 @@ public:
     }
 
     templ.others().pairwise().sort([](auto lhs, auto rhs) {
-      return onehotMuxOperandOrder(lhs.second, rhs.second);
+      return onehotMuxOperandOrder(lhs.first, rhs.first);
     });
 
     insertInstr(templ.build(HW_ONEHOT_MUX));

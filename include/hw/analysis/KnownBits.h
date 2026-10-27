@@ -510,6 +510,27 @@ protected:
         break;
       }
 
+      case *HW_ASSUME: {
+        if (frame.idx == 0) {
+          frame.idx++;
+          stack.emplace_back(instr.other(1)->as<HWValue>(), 0);
+        } else if (frame.idx == 1) {
+          frame.idx++;
+          assert(retVal.val.getNumBits() == 1);
+          if (retVal.val == "1'b0"_bv || retVal.val == "1'bz"_bv) {
+            retVal = KnownBitsVal{PatBigInt::undef2(*wire.getNumBits())};
+            stack.pop_back();
+          } else {
+            stack.emplace_back(instr.other(0)->as<HWValue>(), 0);
+          }
+        } else {
+          // retVal = retVal;
+          cache.insert(wire, retVal.val);
+          stack.pop_back();
+        }
+        break;
+      }
+
       ret_unknown:
       default:
         retVal = KnownBitsVal{PatBigInt::undef(*wire.getNumBits())};

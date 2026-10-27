@@ -137,6 +137,7 @@ class LoopbackAnalysis {
 
 #define FRAME_RET(...)                                                         \
   {                                                                            \
+    assert(uses % curUses == 0);                                               \
     uses /= curUses;                                                           \
     retVal = {*val.getNumBits(), __VA_ARGS__};                                 \
     stack.pop_back();                                                          \
@@ -149,16 +150,8 @@ class LoopbackAnalysis {
     continue;                                                                  \
   }
 
-#define FRAME_RET_ACC                                                          \
-  {                                                                            \
-    uses /= curUses;                                                           \
-    retVal = std::move(acc);                                                   \
-    stack.pop_back();                                                          \
-    break;                                                                     \
-  }
-
 public:
-  static constexpr const char *debugName = "LoopbackPartitionAnalysis";
+  static constexpr const char *debugName = "LoopbackAnalysis";
   static constexpr uint32_t debugID = 130; // todo: analysis debug ID assignment
 
   struct Config {
@@ -166,30 +159,28 @@ public:
   };
   Config config;
 
-  LoopbackPartition get(HWValue value, HWValue loopback) {
+  LoopbackPartition get(HWValue value, HWValue loopback, int64_t addr = 0) {
     stack.emplace_back(value, 0);
     SmallDenseMap<Tuple<ObjRef<Wire>, uint32_t>, LoopbackPartition> map;
     retVal = {};
 
-    int64_t addr = 0;
+    int64_t addrArg = addr;
+
     // we have to explicity track uses: multiple uses for bit addressing
     // instrs are OK, but not for computational (MUX), else we duplicate
     // real logic.
-    uint32_t uses = 1;
+    uint64_t uses = 1;
 
     while (!stack.empty()) {
       assert(addr <= std::numeric_limits<uint32_t>::max());
 
       auto &[val, idx, acc] = stack.back();
-      uint32_t curUses = 1;
+      uint64_t curUses = 1;
 
       if (auto asConst = val.dyn_as<ConstantRef>()) {
         // use loopback=nullref as wildcard for any constant (used for finding
         // reset values).
-        if (loopback == nullref &&
-            // X is considered a valid constant loopback, Z isn't (mostly to
-            // support known bits encoding)
-            BigInt::countBits4SExact(asConst, FourState::SZ) == 0)
+        if (loopback == nullref && !asConst.getIs4S())
           // return always-on loopback
           FRAME_RET(nullref, true);
 
@@ -208,6 +199,18 @@ public:
       auto wire = val.as<WireRef>();
       auto instr = wire.getDefI();
 
+      // Track uses
+      curUses = wire.getNumUses();
+      if (idx == 0) {
+        if (auto product = mul_overflow<uint64_t>(uses, curUses)) {
+          assert(*product / curUses == uses);
+          uses = *product;
+        } else {
+          curUses = 1;
+          FRAME_RET();
+        }
+      }
+
       DYNO_DBG({
         // print last return value first.
         auto dumpVal = [](LoopbackPartition &val) {
@@ -224,7 +227,8 @@ public:
         };
         dumpVal(retVal);
 
-        std::print(dbgs(), "({}): ", addr);
+        std::print(dbgs(), "(uses={} curUses={} addr={}): ", uses, curUses,
+                   addr);
         dumpInstr(instr, ctx, true, false);
         std::print(dbgs(), "acc:\n");
         dumpVal(stack.back().acc);
@@ -234,22 +238,22 @@ public:
       if (idx == 0) {
         auto it = map.find({wire, uint32_t(addr)});
         if (it != map.end()) {
+          uses /= curUses;
           retVal = it.val();
           stack.pop_back();
           continue;
         }
       }
 
-      // Track uses
-      curUses = wire.getNumUses();
-      if (idx == 0) {
-        if (auto product = mul_overflow<uint64_t>(uses, curUses))
-          uses = *product;
-        else
-          FRAME_RET();
-      }
-
       switch (*instr.getDialectOpcode()) {
+      case *HW_ASSUME: {
+        if (idx == 0) {
+          idx++;
+          FRAME_CALL(instr.other(0)->as<HWValue>());
+        }
+        stack.pop_back();
+        break;
+      }
       case *HW_SPLICE: {
         auto asSplice = instr.as<SpliceIRef>();
         if (idx == 0) {
@@ -373,25 +377,30 @@ public:
               }
               // else skip, move on to next
               ++idx;
-              uses /= curUses;
               continue;
             }
           }
           retVal.addConditionToLoopbackFrags(cond, true, uses != 1);
           acc.write(retVal, 0, 0, acc.getLen());
-          for (auto frag : retVal.frags) {
-            if (frag.instr) {
-              auto finstr = ctx.resolve(frag.instr);
-              assert(frag.srcAddr + frag.len <=
-                     *finstr.operand(frag.operandIdx + 1)
-                          ->as<HWValue>()
-                          .getNumBits());
+          DYNO_DBG_RUN({
+            for (auto frag : retVal.frags) {
+              if (frag.instr) {
+                auto finstr = ctx.resolve(frag.instr);
+                assert(frag.srcAddr + frag.len <=
+                       *finstr.operand(frag.operandIdx + 1)
+                            ->as<HWValue>()
+                            .getNumBits());
+              }
             }
-          }
+          })
         }
 
-        if (idx == instr.getNumOthers() / 2)
-          FRAME_RET_ACC;
+        if (idx == instr.getNumOthers() / 2) {
+          // last, return
+          retVal = std::move(acc);
+          stack.pop_back();
+          break;
+        }
 
         auto nextVal = instr.other(2 * idx + 1)->as<HWValue>();
         ++idx;
@@ -405,11 +414,12 @@ public:
       }
       }
 
+      assert(uses % curUses == 0);
       uses /= curUses;
       map.insert({wire, uint32_t(addr)}, retVal);
     }
 
-    assert(addr == 0);
+    assert(addr == addrArg);
     assert(uses == 1);
     return retVal;
   }
