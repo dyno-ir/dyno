@@ -55,7 +55,10 @@ public:
   // }
 
   template <typename... Ts> void error(InstrRef instr, Ts... ts) {
-    dumpInstr(HWInstrRef{instr}.parentBlock(ctx).defI(), ctx, true, false);
+    // todo: proper instr in block/few lines of context error printer. probably
+    // just in report_fatal_error.
+    if (auto block = HWInstrRef{instr}.parentBlock(ctx))
+      dumpInstr(block.defI(), ctx, true, false);
     dumpInstr(instr, ctx, true, false);
     dbgs() << "error: ";
     ((dbgs() << ts), ...);

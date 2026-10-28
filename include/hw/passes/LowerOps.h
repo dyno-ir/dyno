@@ -1020,7 +1020,9 @@ private:
       orOperands.emplace_back(gated);
     }
 
-    build.buildOr(std::move(orOperands));
+    auto val = build.buildOr(std::move(orOperands));
+    if (val != defW)
+      defW.replaceAllUsesWith(val);
     instr.def().replace(FatDynObjRef{nullref});
     destroyMap[instr] = 1;
   }

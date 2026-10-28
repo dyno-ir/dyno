@@ -42,14 +42,14 @@ public:
     op_cbrclose,
     op_semicolon,
     op_equals,
-    op_plus,
     op_pluscolon,
+    op_plus,
     _op_end,
     _op_size = _op_end - _op_start - 1
   };
   constexpr static std::array<StringRef, _op_size> Operators = {
       ".", ":", ",", "[", "]", "?", "#", "(",
-      ")", "{", "}", ";", "=", "+", "+:"};
+      ")", "{", "}", ";", "=", "+:", "+"};
 
   DialectInfos &infos;
 
