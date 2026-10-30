@@ -37,6 +37,10 @@ CmdLineArg<std::string_view> argOutFile('o', "", "Output Dyno-IR file path.",
                                         CmdLineArgFlags::VALUE_REQUIRED,
                                         "out.dyno");
 
+CmdLineArg<bool> argDebug{
+    'd', "debug", "Run in debug mode (only has effect for debug builds).", 0,
+    false};
+
 int main(int argc, char **argv) {
   Context ctx;
   HWDialectContext hwContext;
@@ -55,7 +59,13 @@ int main(int argc, char **argv) {
   cmdLineArgHandler.registerArg(argFileName);
   cmdLineArgHandler.registerArg(argFlowFileName);
   cmdLineArgHandler.registerArg(argOutFile);
+  cmdLineArgHandler.registerArg(argDebug);
   cmdLineArgHandler.parse(argc, argv);
+
+#ifdef DYNO_ENABLE_DEBUG
+  if (*argDebug)
+    dbg_enable_all();
+#endif
 
   ParseLibertyPass parseLiberty{ctx};
   parseLiberty.config.path = *argFileName;
@@ -82,6 +92,10 @@ int main(int argc, char **argv) {
     OrderInstrsPass orderInstrs{ctx};
     InstCombinePass instCombine{ctx};
     CommonSubexpressionEliminationPass cse{ctx};
+    instCombine.config.removeAssumes = true;
+    instCombine.config.findFlipFlopEnables = true;
+    instCombine.config.findFlipFlopSyncResets = true;
+    instCombine.config.inferMuxs = true;
 
     cse.run();
     aggressiveDCE.run();
@@ -89,7 +103,6 @@ int main(int argc, char **argv) {
     orderInstrs.run();
     instCombine.run();
     aggressiveDCE.run();
-    instCombine.config.removeAssumes = true;
   }
 
   std::ofstream str{std::string(*argOutFile)};

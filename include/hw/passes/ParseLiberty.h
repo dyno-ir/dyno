@@ -8,7 +8,9 @@
 #include "support/Lexer.h"
 #include "support/MMap.h"
 #include "support/SlabAllocator.h"
+#include "support/SmallVec.h"
 #include "support/StringRef.h"
+#include <type_traits>
 #include <variant>
 
 namespace dyno {
@@ -223,54 +225,145 @@ class LibertyToDyno {
   Context &ctx;
   LibertyLexer &lexer;
 
+#define ATTRS_RSTVAL(x) x(clear_preset_var1) x(clear_preset_var2)
+#define ATTRS_FF_BEXPR(x)                                                      \
+  x(clear) x(clocked_on) x(clocked_on_also) x(next_state) x(preset)
+#define ATTRS_FF(x) ATTRS_FF_BEXPR(x) ATTRS_RSTVAL(x)
+#define ATTRS_LATCH_BEXPR(x) x(clear) x(data_in) x(enable) x(preset)
+#define ATTRS_LATCH(x) ATTRS_LATCH_BEXPR(x) ATTRS_RSTVAL(x)
+
+  struct AbstractFF {
+#define LAMBDA(x) HWValue val_##x = nullref;
+    ATTRS_FF_BEXPR(LAMBDA)
+#undef LAMBDA
+#define LAMBDA(x) char val_##x = 0;
+    ATTRS_RSTVAL(LAMBDA)
+#undef LAMBDA
+  };
+
+  struct AbstractLatch {
+#define LAMBDA(x) HWValue val_##x = nullref;
+    ATTRS_LATCH_BEXPR(LAMBDA)
+#undef LAMBDA
+#define LAMBDA(x) char val_##x = 0;
+    ATTRS_RSTVAL(LAMBDA)
+#undef LAMBDA
+  };
+
   void err() { report_fatal_error("liberty format error"); };
 
-  void handleFF(LibertyParser::Block *block, HWInstrBuilderStack &build,
-                HWInstrBuilder &regBuild, ArrayRef<RegisterRef> outs) {
+  void handleRstval(char &out, Token val) {
+    std::string_view str;
+    if (val.type == Token::IDENTIFIER)
+      str = lexer.GetIdent(val.ident.idx);
+    else if (val.type == Token::STRING_LITERAL)
+      str = val.strLit.value;
+    else
+      err();
 
-#define ATTRS_RSTVAL(x) x(clear_preset_var1) x(clear_preset_var2)
-#define ATTRS_BEXPR(x)                                                         \
-  x(clear) x(clocked_on) x(clocked_on_also) x(next_state) x(preset)
-#define ATTRS(x) ATTRS_BEXPR(x) ATTRS_RSTVAL(x)
+    if (str.size() != 1 || (str[0] != 'L' && str[0] != 'H' && str[0] != 'N' &&
+                            str[0] != 'T' && str[0] != 'X'))
+      err();
+
+    out = str[0];
+  }
+
+  void handleExpr(HWValue &out, Token val, HWInstrBuilder &build) {
+    if (val.type != Token::STRING_LITERAL)
+      err();
+    out = parseExpr(val.strLit.value, build);
+  }
+
+  void emitInvertedOutput(HWInstrBuilderStack &build,
+                          ArrayRef<RegisterRef> outs) {
+    if (outs.size() != 2)
+      return;
+
+    build.pushInsertPoint(build.buildProcess().block().end());
+    build.buildStore(outs[1], build.buildNot(build.buildLoad(outs[0])));
+    build.popInsertPoint();
+  }
+
+  template <typename SeqT>
+  void handleFFLatch(HWInstrBuilderStack &build, ArrayRef<RegisterRef> outs,
+                     SeqT &&seq) {
+    using Seq = std::remove_reference_t<SeqT>;
+    constexpr bool isLatch = std::is_same_v<Seq, AbstractLatch>;
+
+    HWValue data;
+    HWValue clk;
+    if constexpr (isLatch) {
+      data = seq.val_data_in;
+      clk = seq.val_enable;
+    } else {
+      data = seq.val_next_state;
+      clk = seq.val_clocked_on;
+    }
+
+    bool clearPrio = false;
+    if (seq.val_clear && seq.val_preset) {
+      char other;
+      if (seq.val_clear_preset_var1 == 'L') {
+        clearPrio = true;
+        other = 'H';
+      } else if (seq.val_clear_preset_var1 == 'H') {
+        clearPrio = false;
+        other = 'L';
+      } else
+        report_fatal_error("liberty parse: unsupported val_clear_preset_var1");
+
+      if (outs.size() == 2)
+        if (seq.val_clear_preset_var2 != other)
+          report_fatal_error(
+              "liberty parse: unsupported val_clear_preset_var2");
+    }
+
+    auto opc = isLatch ? HW_LATCH : HW_FLIP_FLOP;
+    auto ib = build.buildInstrRaw(opc, (isLatch ? 3 : 4) + 2 * !!seq.val_clear +
+                                           2 * !!seq.val_preset);
+    auto qWire = ctx.getStore<Wire>().create(data.getNumBits());
+    ib.addRef(qWire).other();
+
+    if constexpr (isLatch) {
+      ib.addRef(data).addRef(clk);
+    } else {
+      ib.addRef(clk)
+          .addRef(data)
+          // clk en is always 1, possible en mux fused by instcombine later
+          .addRef(ConstantRef::fromBool(1));
+    }
+
+    auto addClear = [&]() {
+      if (seq.val_clear)
+        ib.addRef(seq.val_clear).addRef(ConstantRef::fromBool(0));
+    };
+    auto addPreset = [&]() {
+      if (seq.val_preset)
+        ib.addRef(seq.val_preset).addRef(ConstantRef::fromBool(1));
+    };
+
+    if (clearPrio) {
+      addClear();
+      addPreset();
+    } else {
+      addPreset();
+      addClear();
+    }
+
+    build.buildStore(outs[0], qWire);
+  }
+
+  void handleFF(LibertyParser::Block *block, HWInstrBuilderStack &build,
+                ArrayRef<RegisterRef> outs) {
+
 #define LAMBDA(x) const uint32_t kw_##x = lexer.GetIdentIdx(#x);
-    ATTRS(LAMBDA)
+    ATTRS_FF(LAMBDA)
 #undef LAMBDA
 
     auto proc = build.buildProcess();
     build.pushInsertPoint(proc.block().end());
 
-    struct AbstractFF {
-#define LAMBDA(x) HWValue val_##x = nullref;
-      ATTRS_BEXPR(LAMBDA)
-#undef LAMBDA
-#define LAMBDA(x) char val_##x = 0;
-      ATTRS_RSTVAL(LAMBDA)
-#undef LAMBDA
-    };
-
     AbstractFF ff;
-    auto handleRstval = [&](char &out, Token val) {
-      std::string_view str;
-      if (val.type == Token::IDENTIFIER)
-        str = lexer.GetIdent(val.ident.idx);
-      else if (val.type == Token::STRING_LITERAL)
-        str = val.strLit.value;
-      else
-        err();
-
-      if (str.size() != 1 || (str[0] != 'L' && str[0] != 'H' && str[0] != 'N' &&
-                              str[0] != 'T' && str[0] != 'X'))
-        err();
-
-      out = str[0];
-    };
-
-    auto handleExpr = [&](HWValue &out, Token val) {
-      if (val.type != Token::STRING_LITERAL)
-        err();
-      out = parseExpr(val.strLit.value, build);
-    };
-
     for (auto var : block->vars) {
       if (var.name.type != Token::IDENTIFIER)
         err();
@@ -283,78 +376,70 @@ class LibertyToDyno {
 #undef LAMBDA
 #define LAMBDA(x)                                                              \
   if (var.name.ident.idx == kw_##x) {                                          \
-    handleExpr(ff.val_##x, var.val);                                           \
+    handleExpr(ff.val_##x, var.val, build);                                    \
   }
-      ATTRS_BEXPR(LAMBDA)
+      ATTRS_FF_BEXPR(LAMBDA)
 #undef LAMBDA
     }
 
     if (!ff.val_next_state)
       err();
-    HWValue val = ff.val_next_state;
-
     if (!ff.val_clocked_on)
       err();
-
     if (ff.val_clocked_on_also)
       report_fatal_error("liberty format: clocked_on_also unsupported");
 
-    bool clearPrio = false;
-    if (ff.val_clear && ff.val_preset) {
-      char other;
-      if (ff.val_clear_preset_var1 == 'L') {
-        clearPrio = true;
-        other = 'H';
-      } else if (ff.val_clear_preset_var1 == 'H') {
-        clearPrio = false;
-        other = 'L';
-      } else
-        report_fatal_error("liberty parse: unsupported val_clear_preset_var1");
-
-      if (outs.size() == 2)
-        if (ff.val_clear_preset_var2 != other)
-          report_fatal_error(
-              "liberty parse: unsupported val_clear_preset_var2");
-    }
-
-    auto ib = build.buildInstrRaw(HW_FLIP_FLOP,
-                                  4 + 2 * !!ff.val_clear + 2 * !!ff.val_preset);
-    auto qWire = ctx.getStore<Wire>().create(val.getNumBits());
-    ib.addRef(qWire)
-        .other()
-        .addRef(ff.val_clocked_on)
-        .addRef(ff.val_next_state)
-        // clk en is always 1, possible en mux fused by instcombine later
-        .addRef(ConstantRef::fromBool(1));
-
-    auto addClear = [&]() {
-      if (ff.val_clear) {
-        ib.addRef(ff.val_clear).addRef(ConstantRef::fromBool(0));
-      }
-    };
-    auto addPreset = [&]() {
-      if (ff.val_preset) {
-        ib.addRef(ff.val_preset).addRef(ConstantRef::fromBool(1));
-      }
-    };
-
-    if (clearPrio) {
-      addClear();
-      addPreset();
-    } else {
-      addPreset();
-      addClear();
-    }
-
-    build.buildStore(outs[0], qWire);
+    handleFFLatch(build, outs, ff);
 
     build.popInsertPoint();
-    if (outs.size() == 2) {
-      build.pushInsertPoint(build.buildProcess().block().end());
-      build.buildStore(outs[1], build.buildNot(build.buildLoad(outs[0])));
-      build.popInsertPoint();
-    }
+    emitInvertedOutput(build, outs);
   }
+
+  void handleLatch(LibertyParser::Block *block, HWInstrBuilderStack &build,
+                   ArrayRef<RegisterRef> outs) {
+
+#define LAMBDA(x) const uint32_t kw_##x = lexer.GetIdentIdx(#x);
+    ATTRS_LATCH(LAMBDA)
+#undef LAMBDA
+
+    auto proc = build.buildProcess();
+    build.pushInsertPoint(proc.block().end());
+
+    AbstractLatch latch;
+    for (auto var : block->vars) {
+      if (var.name.type != Token::IDENTIFIER)
+        err();
+
+#define LAMBDA(x)                                                              \
+  if (var.name.ident.idx == kw_##x) {                                          \
+    handleRstval(latch.val_##x, var.val);                                      \
+  }
+      ATTRS_RSTVAL(LAMBDA)
+#undef LAMBDA
+#define LAMBDA(x)                                                              \
+  if (var.name.ident.idx == kw_##x) {                                          \
+    handleExpr(latch.val_##x, var.val, build);                                 \
+  }
+      ATTRS_LATCH_BEXPR(LAMBDA)
+#undef LAMBDA
+    }
+
+    if (!latch.val_data_in)
+      err();
+    if (!latch.val_enable)
+      err();
+
+    handleFFLatch(build, outs, latch);
+
+    build.popInsertPoint();
+    emitInvertedOutput(build, outs);
+  }
+
+#undef ATTRS_RSTVAL
+#undef ATTRS_FF_BEXPR
+#undef ATTRS_FF
+#undef ATTRS_LATCH_BEXPR
+#undef ATTRS_LATCH
 
   TwoLevelMap<SSOStringRef, RegisterRef> portNameMap;
   HWValue parseExpr(std::string_view expr, HWInstrBuilder &build) {
@@ -388,8 +473,10 @@ public:
 
     SmallVec<std::pair<RegisterRef, Token>, 16> funcList;
 
-    SmallVec<Tuple<RegisterRef, RegisterRef, LibertyParser::Block *>, 16>
+    SmallVec<Tuple<StaticVec<RegisterRef, 2>, LibertyParser::Block *>, 16>
         ffList;
+    SmallVec<Tuple<StaticVec<RegisterRef, 2>, LibertyParser::Block *>, 16>
+        latchList;
 
     for (auto *object : block->blocks) {
       if (object->name != kwCell)
@@ -417,9 +504,11 @@ public:
 
       for (auto sub : object->blocks) {
         if (sub->name == kwFF || sub->name == kwLatch) {
-          SmallVec<RegisterRef, 2> outs;
+          StaticVec<RegisterRef, 2> outs;
           for (auto param : sub->params) {
             if (param.type != Token::STRING_LITERAL)
+              err();
+            if (outs.size() >= 2)
               err();
             auto reg = build.buildRegister(1);
             ctx.getCtx<HWDialectContext>().regNameInfo.addName(
@@ -428,13 +517,12 @@ public:
             outs.emplace_back(reg);
           }
 
-          if (sub->name == kwLatch)
-            continue;
-
           if (outs.size() == 0)
             err();
-          ffList.emplace_back(outs[0], outs.size() == 1 ? nullref : outs[1],
-                              sub);
+          if (sub->name == kwLatch)
+            latchList.emplace_back(outs, sub);
+          else
+            ffList.emplace_back(outs, sub);
           continue;
         }
 
@@ -494,12 +582,16 @@ public:
       }
 
       while (!ffList.empty()) {
-        // fixme: is assuming all outputs are flop flop q's
+        // fixme: is assuming all outputs are ff q's
         info->isFlipFlop = true;
-        auto [out0, out1, block] = ffList.pop_back_val();
-        HWInstrBuilder regBuild{ctx};
-        regBuild.setInsertPoint(mod.regs_end());
-        handleFF(block, build, regBuild, std::to_array({out0, out1}));
+        auto [outs, block] = ffList.pop_back_val();
+        handleFF(block, build, outs);
+      }
+
+      while (!latchList.empty()) {
+        // fixme: is assuming all outputs are latch q's
+        auto [outs, block] = latchList.pop_back_val();
+        handleLatch(block, build, outs);
       }
     }
   }
@@ -512,9 +604,9 @@ class ParseLibertyPass : public Pass<ParseLibertyPass> {
   Context &ctx;
 
 public:
-  struct Config {
-    std::string path;
-  };
+#define CONFIG_STRUCT_LAMBDA(FIELD, ENUM) FIELD(std::string, path, "")
+  CONFIG_STRUCT(CONFIG_STRUCT_LAMBDA)
+#undef CONFIG_STRUCT_LAMBDA
   Config config;
 
   void run() {

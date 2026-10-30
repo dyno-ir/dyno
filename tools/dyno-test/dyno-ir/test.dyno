@@ -1634,3 +1634,35 @@ TEST_SCRIPT :string("test-stack-comb-fwd-blocking"), :block {
   CALL %memoryTestLift
   meta.RANDOM_EQUIVALENCE_CHECK_PASS map("cycles": "1000", "clockMode": "CLOCK", "relaxXZ": "1")
 }
+
+TEST_SCRIPT :string("test-latch"), :block {
+  PARSE_VERILOG_PASS map("strictXZ": "0", "code":[{
+    module Test (
+      input logic en,
+      input logic en2,
+      input logic [3:0] a,
+      input logic [3:0] b,
+      output logic [3:0] x
+    );
+
+      always@* begin
+        if (en)
+          x = a + b;
+        if (en2)
+          x = '1;
+      end
+    endmodule
+  }])
+  CALL symbol("flow_earlyCanonFlow")
+  meta.INACTIVE_COPY_PASS
+  CALL symbol("flow_synthCanonicalize")
+  CALL symbol("flow_synthEarlyOpt")
+  CALL symbol("flow_synthLowerControlFlow")
+  CALL symbol("flow_synthMemoryFFMuxHandling")
+  CALL symbol("flow_synthLowerMemoryFF")
+  ASSERT_EXISTS_PASS map("regex":
+    "STDCELL_INSTANCE %[_a-zA-Z0-9]+:wire\(1\), %sky130_fd_sc_hd__dlxtp_1",
+    "num": "4")
+  // todo: latch simulation
+}
+

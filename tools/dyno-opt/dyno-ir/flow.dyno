@@ -194,7 +194,7 @@ FUNCTION_DEF %synthMemoryFFMuxHandling:func, :block {
   meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS
   meta.INST_COMBINE_PASS map("muxToOneHotMux": "1")
   meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS
-  meta.INST_COMBINE_PASS map("muxToOneHotMux": "1", "findFlipFlopEnables": "0", "findFlipFlopSyncResets": "1", /*"inferLatches": "1"*/)
+  meta.INST_COMBINE_PASS map("muxToOneHotMux": "1", "findFlipFlopEnables": "0", "findFlipFlopSyncResets": "1", "inferLatches": "1")
   meta.AGGRESSIVE_DEAD_CODE_ELIMINATION_PASS
 }
 
@@ -246,6 +246,7 @@ FUNCTION_DEF %synthLowerMemoryFF:func, :block {
 
   // map flip flops
   meta.FLIP_FLOP_MAPPING_PASS
+  meta.FLIP_FLOP_MAPPING_PASS map("mapLatches": "1")
 
   meta.MUX_TREE_FLATTEN_PASS // todo: instead gen one hot mux in flip flop mapping?
   meta.TRIGGER_DEDUPE_PASS

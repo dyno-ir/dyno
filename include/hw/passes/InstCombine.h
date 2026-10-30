@@ -350,26 +350,28 @@ private:
     return PAT_TRUE;
   }
 
-  PatBool findFlipFlopSyncResets(FlipFlopIRef instr) {
+  template <typename RefT> PatBool findFFLatchResets(RefT instr) {
     if (!config.findFlipFlopSyncResets)
       return PAT_FALSE;
     // fixme, to avoid looping. To relax this we need to prove an inferred reset
     // actually optimizes out the reset logic via assume. (todo: relax)
     if (!instr.rsts().empty())
       return PAT_FALSE;
-    // if there's a clock en already we'd have to add `en &&` to any newly
-    // inferred rst x. doable but better not create more logic, instead run rst
-    // inference first.
-    if (instr.hasClkEn())
-      return PAT_FALSE;
-    // already has async resets
-    if (instr.isOpc(HW_FLIP_FLOP) && !instr.rsts().empty())
-      return PAT_FALSE;
+    if constexpr (std::is_same_v<RefT, FlipFlopIRef>) {
+      // if there's a clock en already we'd have to add `en &&` to any newly
+      // inferred rst x. doable but better not create more logic, instead run
+      // rst inference first.
+      if (instr.hasClkEn())
+        return PAT_FALSE;
+      // already has async resets
+      if (instr.isOpc(HW_FLIP_FLOP) && !instr.rsts().empty())
+        return PAT_FALSE;
+    }
 
     auto part = loopbackAnalysis.get(instr.d(), nullref);
 
-    assert(!instr.d().is<WireRef>() ||
-           instr.d().as<WireRef>().getNumDefs() == 1);
+    assert(!instr.d().template is<WireRef>() ||
+           instr.d().template as<WireRef>().getNumDefs() == 1);
 
     if (Range{part.frags}.all(
             [](auto frag) { return !frag || frag.size() == 0; }))
@@ -387,16 +389,17 @@ private:
               : nullref;
 
       HWValue d = build.buildSplice(instr.d(), frag.len, frag.dstAddr);
-      SmallVec<std::tuple<HWValue, HWValue>, 4> rsts(instr.rsts());
+      SmallVec<std::pair<HWValue, HWValue>, 4> rsts(instr.rsts());
 
       if (frag && frag.size() != 0 /*todo: allow empty*/) {
         auto loopbackVal = getLoopbackVal(frag);
-        auto rstVal = knownBits.getKnownBits(loopbackVal->as<HWValue>());
+        auto rstVal =
+            knownBits.getKnownBits(loopbackVal->template as<HWValue>());
         BigInt::rangeSelectOp4S(rstVal, rstVal, frag.srcAddr, frag.len);
         assert(!KnownBitsAnalysis::hasKBUnknownBits(rstVal) &&
                "find reset logic bug");
 
-        rsts.emplace_back(
+        auto &rst = rsts.emplace_back(
             frag.size() == 0
                 ? ConstantRef::fromBool(true)
                 : build.buildAnd(Range{frag}.transform([&](size_t, auto pair) {
@@ -404,10 +407,17 @@ private:
                     return pair.second ? ref : build.buildNot(ref);
                   })),
             ctx.getStore<Constant>().findOrInsert(rstVal));
-      }
 
-      auto val = build.buildFlipFlop(instr.clk(), d, instr.clkEnRaw(),
-                                     Range{rsts}, true, fragInit);
+        if constexpr (std::is_same_v<RefT, LatchIRef>)
+          rst.first = build.buildAnd(rst.first, instr.en());
+      }
+      HWValue val;
+      if constexpr (std::is_same_v<RefT, FlipFlopIRef>)
+        val = build.buildFlipFlop(instr.clk(), d, instr.clkEnRaw(), Range{rsts},
+                                  true, fragInit);
+      else
+        val = build.buildLatch(d, instr.en(), Range{rsts}, fragInit);
+
       concat.emplace_back(val);
     }
 
@@ -661,7 +671,9 @@ private:
       }
       if (idx == range.size())
         return false;
-      auto val = mux.other(0)->as<HWValue>();
+      HWValue val = mux.other(0)->dyn_as<WireRef>();
+      if (!val)
+        return false;
       if (idx == 0)
         val = build.buildNot(val);
       rebuildWithEn(val);
@@ -682,7 +694,9 @@ private:
       }
       if (idx == range.size())
         return false;
-      auto val = mux.other(2 * idx)->as<HWValue>();
+      auto val = mux.other(2 * idx)->as<WireRef>();
+      if (!val)
+        return false;
       rebuildWithEn(build.buildNot(val));
       return PAT_TRUE;
     }
@@ -2278,7 +2292,7 @@ private:
     //   return PAT_TRUE;
     // }
 
-    if (baseOffs != uint32_t(baseOffs)) {
+    if (int64_t(baseOffs) != int32_t(baseOffs)) {
       report_fatal_error(ctx, instr,
                          "pointer out of 32-bit bounds (address 0x{:x})",
                          baseOffs);
@@ -2481,13 +2495,14 @@ private:
     case *HW_FLIP_FLOP_SRST: {
       MATCH(simplifyFlipFlopCtrl(instr))
       MATCH(simplifyFlipFlopResets(instr))
-      MATCH(findFlipFlopSyncResets(instr))
+      MATCH(findFFLatchResets<FlipFlopIRef>(instr))
       MATCH(simplifyFlipFlopEnable(instr))
       MATCH(findFlipFlopEnables(instr))
       break;
     }
 
     case *HW_LATCH: {
+      MATCH(findFFLatchResets<LatchIRef>(instr))
       MATCH(inferLatch(instr.as<LatchIRef>()))
       break;
     }

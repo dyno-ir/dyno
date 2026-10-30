@@ -33,18 +33,24 @@ namespace dyno {
 class FlipFlopMappingPass : public Pass<FlipFlopMappingPass> {
   struct AbstractFF {
     enum Indices {
+      // ff/latch.
+      // clk is EN input for latch, HAS_EN is ff only. CLK always required that
+      // way.
       CLK_POL,
-      HAS_EN,
-      EN_POL,
       HAS_RST,
       RST_POL,
-      SET_RST_SYNC,
       HAS_SET,
       SET_POL,
       HAS_INIT,
       HAS_INV_OUT,
       HAS_REGULAR_OUT,
-      NUM_INDICES
+
+      NUM_INDICES_LATCH,
+
+      SET_RST_SYNC = NUM_INDICES_LATCH,
+      HAS_EN,
+      EN_POL,
+      NUM_INDICES,
     };
 
   private:
@@ -74,7 +80,7 @@ class FlipFlopMappingPass : public Pass<FlipFlopMappingPass> {
     constexpr AbstractFF() = default;
     constexpr explicit AbstractFF(uint16_t raw) : raw(raw) {};
 
-    constexpr static bool valid(AbstractFF ff) {
+    constexpr static bool valid(AbstractFF ff, bool latch = false) {
       if (ff.enPol() && !ff.hasEn())
         return false;
       if (ff.rstPol() && !ff.hasRst())
@@ -85,12 +91,14 @@ class FlipFlopMappingPass : public Pass<FlipFlopMappingPass> {
         return false;
       if (!ff.hasRegularOut() && !ff.hasInvOut())
         return false;
+      if (latch && (ff.setRstSync() || ff.hasEn() || ff.enPol()))
+        return false;
       return true;
     }
-    constexpr static uint32_t numConfigs() {
+    constexpr static uint32_t numConfigs(bool latch = false) {
       uint32_t rv = 0;
       for (uint32_t i = 0; i < (1ull << uint32_t(NUM_INDICES)); i++) {
-        if (valid(AbstractFF{uint16_t(i)}))
+        if (valid(AbstractFF{uint16_t(i)}, latch))
           rv++;
       }
       return rv;
@@ -132,12 +140,12 @@ class FlipFlopMappingPass : public Pass<FlipFlopMappingPass> {
     TIE1_SET,
     TIE1_EN,
     TIE0_INIT,
+    INVERT_STATE,
     ADD_SYNC_RST,
     ADD_SYNC_SET,
     INVERT_RST,
     INVERT_SET,
     INVERT_EN,
-    INVERT_OUTPUT,
     ADD_EN0_MUX,
     ADD_EN1_MUX,
     INVERT_CLK,
@@ -159,7 +167,46 @@ class FlipFlopMappingPass : public Pass<FlipFlopMappingPass> {
   HWInstrBuilder build, regBuild;
   DestroyMap<Instr> destroyMap;
 
-  void runOnInstr(FlipFlopIRef instr) {
+  struct FFWires {
+    HWValue clk;
+    HWValue d;
+    HWValue q;
+    HWValue en;
+    HWValue rst;
+    HWValue set;
+    HWValue init;
+
+    RegisterRef qReg;
+    unsigned bitIdx;
+  };
+
+  void initSeqWires(FlipFlopIRef instr, AbstractFF &abstr, FFWires &wires) {
+    wires.clk = instr.clk();
+    wires.en = instr.hasClkEn() ? instr.clkEn() : nullref;
+
+    abstr.clkPol() = instr.clkPol();
+    abstr.hasEn() = instr.hasClkEn();
+    abstr.enPol() = abstr.hasEn() && instr.clkEnPolarity();
+    abstr.hasInvOut() = 0; // todo: fuse NOTs
+    abstr.hasRegularOut() = 1;
+    abstr.setRstSync() = instr.isOpc(HW_FLIP_FLOP_SRST);
+  }
+
+  void initSeqWires(LatchIRef instr, AbstractFF &abstr, FFWires &wires) {
+    auto [en, enPol] = WireVariable::getSignalWithPolarity(instr.en());
+    wires.clk = en;
+
+    abstr.clkPol() = enPol;
+    abstr.hasInvOut() = 0; // todo: fuse NOTs
+    abstr.hasRegularOut() = 1;
+
+    // ff only, meaningless
+    abstr.setRstSync() = 0;
+    abstr.hasEn() = 0;
+    abstr.enPol() = 0;
+  }
+
+  template <typename RefT> void runOnSeqInstr(RefT instr) {
     auto bits = *instr.q()->numBits;
     AbstractFF abstr;
     FFWires wires;
@@ -167,9 +214,10 @@ class FlipFlopMappingPass : public Pass<FlipFlopMappingPass> {
     if (bits >= 0xFFFE) {
       std::stringstream str;
       HWCtxPrinter{ctx, str}.printInstr(instr, false);
-      report_fatal_error(ctx, instr,
-                         "too many bits ({}) in ff, meant to infer memory?: {}",
-                         bits, std::move(str).str());
+      report_fatal_error(
+          ctx, instr,
+          "too many bits ({}) in ff/latch, meant to infer memory?: {}", bits,
+          std::move(str).str());
     }
 
     wires.qReg = regBuild.buildRegister(instr.q().getNumBits());
@@ -178,18 +226,7 @@ class FlipFlopMappingPass : public Pass<FlipFlopMappingPass> {
     OperandVec<HWValue> qConcat(ctx, 1, bits);
     qConcat.emplace_back(instr.q());
 
-    wires.clk = instr.clk();
-    wires.en = instr.hasClkEn() ? instr.clkEn() : nullref;
-
-    abstr.clkPol() = instr.clkPol();
-    abstr.hasEn() = instr.hasClkEn();
-    abstr.enPol() = abstr.hasEn() && instr.clkEnPolarity();
-
-    // todo: fuse NOTs
-    abstr.hasInvOut() = 0;
-    abstr.hasRegularOut() = 1;
-
-    abstr.setRstSync() = instr.isOpc(HW_FLIP_FLOP_SRST);
+    initSeqWires(instr, abstr, wires);
 
     SmallVec<WireRef, 2> rstWires;
     for (unsigned i = 0; i < instr.numRsts(); i++)
@@ -199,7 +236,7 @@ class FlipFlopMappingPass : public Pass<FlipFlopMappingPass> {
     for (unsigned i = 0; i < bits; i++) {
       wires.d = build.buildSplice(dWire, 1, i);
       wires.bitIdx = i;
-      qConcat.emplace_back(wires.q = ctx.getStore<Wire>().create(1));
+      wires.q = ctx.getStore<Wire>().create(1);
 
       abstr.hasRst() = 0;
       abstr.rstPol() = 0;
@@ -209,9 +246,10 @@ class FlipFlopMappingPass : public Pass<FlipFlopMappingPass> {
 
       unsigned nRst = instr.numRsts();
       for (unsigned rstIdx = 0; rstIdx < nRst; rstIdx++) {
-        auto val = instr.rstVal(rstIdx).dyn_as<ConstantRef>();
+        auto val = instr.rstVal(rstIdx).template dyn_as<ConstantRef>();
         if (!val)
-          report_fatal_error(ctx, instr, "ff with non-constant reset value");
+          report_fatal_error(ctx, instr,
+                             "ff/latch with non-constant reset value");
 
         auto bitVal = val.getBit(i);
         if (bitVal.isUnk())
@@ -233,9 +271,10 @@ class FlipFlopMappingPass : public Pass<FlipFlopMappingPass> {
       }
 
       if (auto init = instr.initValue()) {
-        auto val = init.dyn_as<ConstantRef>();
+        auto val = init.template dyn_as<ConstantRef>();
         if (!val)
-          report_fatal_error(ctx, instr, "ff with non-constant init value");
+          report_fatal_error(ctx, instr,
+                             "ff/latch with non-constant init value");
         if (auto bval = val.getBit(i); !bval.isUnk()) {
           abstr.hasInit() = 1;
           wires.init = ConstantRef::fromFourState(bval);
@@ -243,6 +282,7 @@ class FlipFlopMappingPass : public Pass<FlipFlopMappingPass> {
       }
 
       buildSingleFF(instr, abstr, wires);
+      qConcat.emplace_back(wires.q);
     }
 
     instr.q().getDef().replace(FatDynObjRef{nullref});
@@ -253,19 +293,6 @@ class FlipFlopMappingPass : public Pass<FlipFlopMappingPass> {
 
     destroyMap.mark(instr);
   }
-
-  struct FFWires {
-    HWValue clk;
-    HWValue d;
-    HWValue q;
-    HWValue en;
-    HWValue rst;
-    HWValue set;
-    HWValue init;
-
-    RegisterRef qReg;
-    unsigned bitIdx;
-  };
 
   void buildMatchingStdCellFF(const StdCellFF &ff, FFWires wires) {
     auto ib = build.buildInstrRaw(HW_STDCELL_INSTANCE, ff.ports.size() + 1);
@@ -337,9 +364,11 @@ class FlipFlopMappingPass : public Pass<FlipFlopMappingPass> {
         return;
       } else {
         auto type = cmd.as<FixupType>();
+        // action is inversed vs precomputeFixup below
         switch (type) {
         case FixupType::TIE0_RST:
         case FixupType::TIE1_RST:
+          // todo: tie to sync rst
           wires.rst = ConstantRef::fromBool(type == FixupType::TIE1_RST);
           abstr.rstPol() = (type == FixupType::TIE0_RST);
           abstr.hasRst() = 1;
@@ -347,7 +376,8 @@ class FlipFlopMappingPass : public Pass<FlipFlopMappingPass> {
 
         case FixupType::TIE0_SET:
         case FixupType::TIE1_SET:
-          wires.rst = ConstantRef::fromBool(type == FixupType::TIE1_SET);
+          // todo: tie to sync set
+          wires.set = ConstantRef::fromBool(type == FixupType::TIE1_SET);
           abstr.setPol() = (type == FixupType::TIE0_SET);
           abstr.hasSet() = 1;
           break;
@@ -417,9 +447,21 @@ class FlipFlopMappingPass : public Pass<FlipFlopMappingPass> {
           abstr.clkPol() = !abstr.clkPol();
           break;
 
-        case FixupType::INVERT_OUTPUT:
+        case FixupType::INVERT_STATE: {
+          std::swap(wires.rst, wires.set);
+          auto invQ = ctx.getStore<Wire>().create(1);
+          // todo: move not into separate invert output fixup once we have
+          // proper inv out support.
+          build.buildInstrRaw(OP_NOT, 2).addRef(wires.q).other().addRef(invQ);
+          wires.q = invQ;
+          std::swap(abstr.hasRst(), abstr.hasEn());
+          std::swap(abstr.rstPol(), abstr.setPol());
+          // std::swap(abstr.hasRegularOut(), abstr.hasInvOut());
+          break;
+        }
         case FixupType::FAIL:
-          report_fatal_error(ctx, instr, "unsupported flip flop type");
+          report_fatal_error(ctx, instr, "unsupported {} type",
+                             config.mapLatches ? "latch" : "flip flop");
         }
       }
     }
@@ -428,14 +470,24 @@ class FlipFlopMappingPass : public Pass<FlipFlopMappingPass> {
   void runOnModule(ModuleIRef mod) {
     regBuild.setInsertPoint(mod.regs_end());
     for (auto proc : mod.procs()) {
-      for (auto instr : proc.block().unordered())
-        if (instr.isOpc(HW_FLIP_FLOP, HW_FLIP_FLOP_SRST))
-          runOnInstr(instr.as<FlipFlopIRef>());
+      for (auto instr : proc.block().unordered()) {
+        if (config.mapLatches) {
+          if (instr.isOpc(HW_LATCH))
+            runOnSeqInstr(instr.as<LatchIRef>());
+        } else if (instr.isOpc(HW_FLIP_FLOP, HW_FLIP_FLOP_SRST)) {
+          runOnSeqInstr(instr.as<FlipFlopIRef>());
+        }
+      }
     }
   }
 
 public:
-  bool classifyInput(RegisterIRef port, FatFF &ff) {
+#define CONFIG_STRUCT_LAMBDA(FIELD, ENUM) FIELD(bool, mapLatches, false)
+  CONFIG_STRUCT(CONFIG_STRUCT_LAMBDA)
+#undef CONFIG_STRUCT_LAMBDA
+  Config config;
+
+  template <typename RefT> bool classifyInput(RegisterIRef port, FatFF &ff) {
     auto ld = port.getSingleLoad();
     if (!ld)
       return false;
@@ -453,48 +505,62 @@ public:
       pol = false;
     }
 
-    if (!use->instr().isOpc(HW_FLIP_FLOP, HW_FLIP_FLOP_SRST))
+    auto instr = use->instr();
+    if (!instr.is<RefT>())
       return false;
-    auto asFF = use->instr().as<FlipFlopIRef>();
+    auto asFF = instr.as<RefT>();
 
     auto useType = asFF.classifyUse(*use);
     switch (useType) {
-    case FlipFlopIRef::CLOCK:
+    case (std::is_same_v<RefT, FlipFlopIRef> ? int(FlipFlopIRef::CLOCK) : int(LatchIRef::ENABLE)):
       ff.stdcell.ports.emplace_back(FFPortType::CLK);
       ff.abstr.clkPol() = pol;
       ff.covered.set((size_t)useType);
       return true;
-    case FlipFlopIRef::D:
+
+    case RefT::D:
       if (!pol)
         return false;
       ff.stdcell.ports.emplace_back(FFPortType::D);
       ff.covered.set((size_t)useType);
       return true;
-    case FlipFlopIRef::ENABLE:
-      ff.stdcell.ports.emplace_back(FFPortType::EN);
-      ff.abstr.hasEn() = 1;
-      ff.abstr.enPol() = pol;
-      return true;
-    case FlipFlopIRef::INIT_VAL:
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wswitch"
+    case (std::is_same_v<RefT, FlipFlopIRef> ? FlipFlopIRef::ENABLE : -1): {
+        if constexpr (std::is_same_v<RefT, LatchIRef>)
+          unreachable();
+        ff.stdcell.ports.emplace_back(FFPortType::EN);
+        ff.abstr.hasEn() = 1;
+        ff.abstr.enPol() = pol;
+        return true;
+      }
+#pragma clang diagnostic pop
+    case RefT::INIT_VAL:
       ff.stdcell.ports.emplace_back(FFPortType::INIT);
       ff.abstr.hasInit() = 1;
       return true;
-    case FlipFlopIRef::RESET_0:
-    case FlipFlopIRef::RESET_1: {
-      auto val = asFF.rstVal(useType == FlipFlopIRef::RESET_1 ? 1 : 0);
-      if (val.as<ConstantRef>().valueEqualsS(0)) {
+    case RefT::RESET_0:
+    case RefT::RESET_1: {
+      auto val = asFF.rstVal(useType == RefT::RESET_1 ? 1 : 0);
+      if (val.template as<ConstantRef>().valueEqualsS(0)) {
         if (ff.abstr.hasRst())
           return false; // multiple resets?
         ff.abstr.hasRst() = 1;
         ff.abstr.rstPol() = pol;
-        ff.abstr.setRstSync() = use->instr().isOpc(HW_FLIP_FLOP_SRST);
+        if constexpr (std::is_same_v<RefT, LatchIRef>)
+          ff.abstr.setRstSync() = 0;
+        else
+          ff.abstr.setRstSync() = use->instr().isOpc(HW_FLIP_FLOP_SRST);
         ff.stdcell.ports.emplace_back(FFPortType::RST);
-      } else if (val.as<ConstantRef>().valueEqualsS(-1)) {
+      } else if (val.template as<ConstantRef>().valueEqualsS(-1)) {
         if (ff.abstr.hasSet())
           return false; // multiple sets?
         ff.abstr.hasSet() = 1;
         ff.abstr.setPol() = pol;
-        ff.abstr.setRstSync() = use->instr().isOpc(HW_FLIP_FLOP_SRST);
+        if constexpr (std::is_same_v<RefT, LatchIRef>)
+          ff.abstr.setRstSync() = 0;
+        else
+          ff.abstr.setRstSync() = use->instr().isOpc(HW_FLIP_FLOP_SRST);
         ff.stdcell.ports.emplace_back(FFPortType::SET);
       }
       return true;
@@ -504,7 +570,7 @@ public:
     return false;
   }
 
-  bool classifyOutput(RegisterIRef port, FatFF &ff) {
+  template <typename RefT> bool classifyOutput(RegisterIRef port, FatFF &ff) {
     auto st = port.getSingleStore();
     if (!st)
       return false;
@@ -514,13 +580,13 @@ public:
     auto def = wire.getSingleDef();
     if (!def)
       return false;
-    if (!def->instr().isOpc(HW_FLIP_FLOP, HW_FLIP_FLOP_SRST))
+    if (!def->instr().is<RefT>())
       return false;
 
-    auto asFF = def->instr().as<FlipFlopIRef>();
+    auto asFF = def->instr().as<RefT>();
 
     auto type = asFF.classifyUse(*def);
-    if (type == FlipFlopIRef::Q) {
+    if (type == RefT::Q) {
       ff.abstr.hasRegularOut() = 1;
       ff.stdcell.ports.emplace_back(FFPortType::Q);
       return true;
@@ -530,16 +596,27 @@ public:
   }
 
   bool classifyPorts(ModuleIRef mod, FatFF &ff) {
-    for (auto port : mod.ports()) {
-      if (port.isOpc(HW_INPUT_REGISTER_DEF, HW_PARAM_REGISTER_DEF)) {
-        if (!classifyInput(port, ff))
+    auto checkPort = [&](RegisterIRef port, DialectOpcode type) {
+      if (type.is(HW_INPUT_REGISTER_DEF, HW_PARAM_REGISTER_DEF))
+        return config.mapLatches ? classifyInput<LatchIRef>(port, ff)
+                                 : classifyInput<FlipFlopIRef>(port, ff);
+      if (type.is(HW_OUTPUT_REGISTER_DEF))
+        return config.mapLatches ? classifyOutput<LatchIRef>(port, ff)
+                                 : classifyOutput<FlipFlopIRef>(port, ff);
+      return false;
+    };
+
+    auto &cachedPorts = mod.mod()->ports;
+    if (!cachedPorts.empty()) {
+      for (auto &port : cachedPorts)
+        if (!checkPort(port.reg.iref(), port.portType))
           return false;
-      } else if (port.isOpc(HW_OUTPUT_REGISTER_DEF)) {
-        if (!classifyOutput(port, ff))
-          return false;
-      } else
-        return false;
+      return true;
     }
+
+    for (auto port : mod.ports())
+      if (!checkPort(port, port.getDialectOpcode()))
+        return false;
     return true;
   }
 
@@ -551,7 +628,8 @@ public:
         continue;
       for (auto proc : mod.procs())
         for (auto instr : proc.block())
-          if (instr.isOpc(HW_FLIP_FLOP, HW_FLIP_FLOP_SRST))
+          if (config.mapLatches ? instr.isOpc(HW_LATCH)
+                                : instr.isOpc(HW_FLIP_FLOP, HW_FLIP_FLOP_SRST))
             goto found;
       continue;
     found:
@@ -567,8 +645,9 @@ public:
       }
     }
     DYNO_DBG({
-      std::print(dbgs(), "found {} out of {} flip flop types as std cells\n",
-                 count, AbstractFF::numConfigs());
+      std::print(dbgs(), "found {} out of {} {} types as std cells\n", count,
+                 AbstractFF::numConfigs(config.mapLatches),
+                 config.mapLatches ? "latch" : "flip flop");
     });
   }
 
@@ -619,7 +698,7 @@ public:
     case FixupType::ADD_SYNC_RST: {
       if (abstr.hasRst() || (abstr.hasSet() && !abstr.setRstSync()))
         break;
-      abstr.setRstSync() = 1;
+      abstr.setRstSync() = config.mapLatches ? 0 : 1;
       abstr.hasRst() = 1;
       abstr.rstPol() = 0;
       fixupIfNone();
@@ -628,7 +707,7 @@ public:
     case FixupType::ADD_SYNC_SET: {
       if (abstr.hasSet() || (abstr.hasRst() && !abstr.setRstSync()))
         break;
-      abstr.setRstSync() = 1;
+      abstr.setRstSync() = config.mapLatches ? 0 : 1;
       abstr.hasSet() = 1;
       abstr.setPol() = 1;
       fixupIfNone();
@@ -656,10 +735,11 @@ public:
       break;
     }
 
-    case FixupType::INVERT_OUTPUT: {
-      auto t = abstr.hasInvOut();
-      abstr.hasInvOut() = abstr.hasRegularOut();
-      abstr.hasRegularOut() = t;
+    case FixupType::INVERT_STATE: {
+      std::swap(abstr.hasSet(), abstr.hasRst());
+      std::swap(abstr.setPol(), abstr.rstPol());
+      // fixup apply also adds not for output currently.
+      // std::swap(abstr.hasRegularOut(), abstr.hasInvOut());
       fixupIfNone();
       break;
     }
@@ -695,21 +775,24 @@ public:
       }
     }
 
-    unsigned missing [[maybe_unused]] = 0;
+    unsigned mapped [[maybe_unused]] = 0;
     for (auto [i, entry] : Range{ffMap}.enumerate()) {
-      if (!AbstractFF::valid(AbstractFF{uint16_t(i)}))
+      if (!AbstractFF::valid(AbstractFF{uint16_t(i)}, config.mapLatches))
         continue;
       if (auto fixup = entry.dyn_as<FixupType>();
-          fixup && *fixup == FixupType::FAIL)
-        missing++;
+          !fixup || *fixup != FixupType::FAIL)
+        mapped++;
     }
     DYNO_DBG({
-      std::print(dbgs(), "covered {} out of {} flip flop types with fixups\n",
-                 AbstractFF::numConfigs() - missing, AbstractFF::numConfigs());
+      std::print(dbgs(), "covered {} out of {} {} types with fixups\n", mapped,
+                 AbstractFF::numConfigs(config.mapLatches),
+                 config.mapLatches ? "latch" : "flip flop");
     });
   }
   void runWrapper(auto &&runFunc) {
     stdCellFFs.clear();
+    for (auto &entry : ffMap)
+      entry = FixupType::FAIL;
     findFlipFlopStdCells();
     precomputeFixups();
 

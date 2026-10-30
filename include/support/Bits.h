@@ -414,6 +414,16 @@ public:
   constexpr unsigned count() const { return std::popcount(num & mask_ones); }
 };
 
+namespace std {
+template <std::unsigned_integral NumT, std::unsigned_integral NumTO, unsigned N,
+          unsigned Pos, unsigned PosO>
+void swap(BitField<NumT, N, Pos> x, BitField<NumTO, N, PosO> y) {
+  NumT t = x;
+  x = y;
+  y = t;
+}
+}; // namespace std
+
 template <std::unsigned_integral NumT> class DynBitField {
 public:
   using num_t = NumT;
