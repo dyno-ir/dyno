@@ -19,24 +19,27 @@
 #include <type_traits>
 #include <utility>
 
-template <typename Derived, typename K, typename Bucket, typename Iterator>
+template <typename Derived, typename K, typename Bucket, typename Iterator,
+          typename CIterator>
 class DenseSetMapBase {
 public:
   using size_type = uint32_t;
   using iterator = Iterator;
+  using const_iterator = CIterator;
   using key = K;
 
   size_type cap;
   size_type sz;
 
-  Bucket *&getBuckets() const {
+  Bucket *const &getBuckets() const {
     return static_cast<const Derived *>(this)->getBuckets();
   }
+  Bucket *&getBuckets() { return static_cast<Derived *>(this)->getBuckets(); }
   Derived &self() { return *static_cast<Derived *>(this); }
 
   DenseSetMapBase(size_type cap, size_type sz) : cap(cap), sz(sz) {}
 
-  auto findImpl(const K &k) const {
+  std::pair<bool, const_iterator> findImpl(const K &k) const {
     assert(!DenseMapInfo<K>::isEqual(k, DenseMapInfo<K>::getEmptyKey()) &&
            !DenseMapInfo<K>::isEqual(k, DenseMapInfo<K>::getTombstoneKey()));
     size_type bucketIndex = DenseMapInfo<K>::getHashValue(k) & (cap - 1);
@@ -50,9 +53,9 @@ public:
     while (true) {
       if (auto entryIndex = getBuckets()[bucketIndex].find(k);
           entryIndex != Bucket::entriesPerBucket) {
-        return std::make_pair(true,
-                              iterator{&getBuckets()[bucketIndex],
-                                       cap - bucketIndex, entryIndex, offset});
+        return std::make_pair(true, const_iterator{&getBuckets()[bucketIndex],
+                                                   cap - bucketIndex,
+                                                   entryIndex, offset});
       }
       if (!sawTombstone) {
         if (auto tombstoneIndex = getBuckets()[bucketIndex].find(
@@ -69,9 +72,9 @@ public:
         // if we already saw a tombstone, break to return that.
         if (sawTombstone)
           break;
-        return std::make_pair(false,
-                              iterator{&getBuckets()[bucketIndex],
-                                       cap - bucketIndex, emptyIndex, offset});
+        return std::make_pair(false, const_iterator{&getBuckets()[bucketIndex],
+                                                    cap - bucketIndex,
+                                                    emptyIndex, offset});
       }
 
       bucketIndex = (bucketIndex + offset) & (cap - 1);
@@ -80,12 +83,17 @@ public:
         break;
     }
     assert(sawTombstone && "hash map full?");
-    return std::make_pair(false, iterator{&getBuckets()[seenTombstoneBucket],
-                                          cap - seenTombstoneBucket,
-                                          seenTombstoneIdx, offset});
+    return std::make_pair(false,
+                          const_iterator{&getBuckets()[seenTombstoneBucket],
+                                         cap - seenTombstoneBucket,
+                                         seenTombstoneIdx, offset});
+  }
+  std::pair<bool, iterator> findImpl(const K &k) {
+    auto [found, iter] = ((const DenseSetMapBase *)this)->findImpl(k);
+    return std::make_pair(found, iterator(iter, getBuckets()));
   }
 
-  iterator findEmptyImpl(const K &k, bool assertNotExist = true) const {
+  const_iterator findEmptyImpl(const K &k, bool assertNotExist = true) const {
     assert(!DenseMapInfo<K>::isEqual(k, DenseMapInfo<K>::getEmptyKey()) &&
            !DenseMapInfo<K>::isEqual(k, DenseMapInfo<K>::getTombstoneKey()));
     size_type bucketIndex = DenseMapInfo<K>::getHashValue(k) & (cap - 1);
@@ -102,13 +110,18 @@ public:
 
       if (auto emptyIndex = getBuckets()[bucketIndex].findEmptyOrTombstone();
           emptyIndex != Bucket::entriesPerBucket) {
-        return iterator{&getBuckets()[bucketIndex], cap - bucketIndex,
-                        emptyIndex, offset};
+        return const_iterator{&getBuckets()[bucketIndex], cap - bucketIndex,
+                              emptyIndex, offset};
       }
 
       bucketIndex = (bucketIndex + offset) & (cap - 1);
       offset += 1;
     }
+  }
+  iterator findEmptyImpl(const K &k, bool assertNotExist = true) {
+    return iterator(
+        ((const DenseSetMapBase *)this)->findEmptyImpl(k, assertNotExist),
+        getBuckets());
   }
 
   template <std::invocable<Bucket *, size_type> T>
@@ -144,20 +157,32 @@ public:
   }
 
 public:
-  iterator begin() const {
+  const_iterator begin() const {
     // maybe cache the ptr
     if (sz == 0)
       return end();
-    auto it = iterator{getBuckets(), cap, ~0U};
+    auto it = const_iterator{getBuckets(), cap, ~0U};
     it.next();
     return it;
   }
-  iterator end() const { return iterator{getBuckets() + cap, 0, 0}; }
+  iterator begin() {
+    return iterator(((const DenseSetMapBase *)this)->begin(), getBuckets());
+  }
+  const_iterator end() const {
+    return const_iterator{getBuckets() + cap, 0, 0};
+  }
+  iterator end() {
+    return iterator(((const DenseSetMapBase *)this)->end(), getBuckets());
+  }
 
-  iterator find(const K &k) const {
+  const_iterator find(const K &k) const {
     auto [found, iter] = findImpl(k);
     return found ? iter : end();
   }
+  iterator find(const K &k) {
+    return iterator(((const DenseSetMapBase *)this)->find(k), getBuckets());
+  }
+
   bool contains(const K &k) { return find(k) != end(); }
 
 public:
@@ -230,7 +255,6 @@ public:
   explicit operator bool() { return rem != 0; }
 
   const K &key() const { return bucket->keys[idx]; }
-  K &keyMut() { return bucket->keys[idx]; }
 };
 
 template <typename Bucket, typename K, typename V,
@@ -249,16 +273,6 @@ public:
   using Base::idx;
   using Base::rem;
 
-  // DenseMapIterator erase() {
-  //   bucket->values[idx].~V();
-  //   bucket->keys[idx].~K();
-  //   bucket->keys[idx] = DenseMapInfo<K>::getTombstoneKey();
-
-  //   DenseMapIterator rv{*this};
-  //   rv.next();
-  //   return rv;
-  // }
-
   value_type operator*() const {
     return std::pair<const K &, V &>(bucket->keys[idx], bucket->values()[idx]);
   }
@@ -266,6 +280,12 @@ public:
   auto operator->() = delete;
 
   V &val() const { return (**this).second; }
+
+  DenseMapIterator() = default;
+
+  explicit DenseMapIterator(const DenseMapIterator<const Bucket, K, const V> &o,
+                            Bucket *buckets)
+      : DenseMapIterator(buckets + (o.bucket - buckets), o.rem, o.idx) {}
 };
 
 template <typename Bucket, typename K, typename size_type = uint32_t>
@@ -283,24 +303,22 @@ public:
   using Base::idx;
   using Base::rem;
 
-  // private:
-  //   DenseSetIterator erase() {
-  //     bucket->keys[idx].~K();
-  //     bucket->keys[idx] = DenseMapInfo<K>::getTombstoneKey();
-
-  //     DenseSetIterator rv{*this};
-  //     rv.next();
-  //     return rv;
-  //   }
-
   value_type operator*() const { return bucket->keys[idx]; }
   pointer operator->() const { return &bucket->keys[idx]; };
+
+  DenseSetIterator() = default;
+
+  explicit DenseSetIterator(const DenseSetIterator<const Bucket, K> &o,
+                            Bucket *)
+      : DenseSetIterator(o) {}
 };
 
 template <typename Derived, typename K, typename V, typename Bucket,
-          typename Iterator = DenseMapIterator<Bucket, K, V>>
-class DenseMapBase : public DenseSetMapBase<Derived, K, Bucket, Iterator> {
-  using Base = DenseSetMapBase<Derived, K, Bucket, Iterator>;
+          typename Iterator = DenseMapIterator<Bucket, K, V>,
+          typename CIterator = DenseMapIterator<const Bucket, K, const V>>
+class DenseMapBase
+    : public DenseSetMapBase<Derived, K, Bucket, Iterator, CIterator> {
+  using Base = DenseSetMapBase<Derived, K, Bucket, Iterator, CIterator>;
 
   void reinsertFunc(Bucket *bucket, Base::size_type j) {
     insert(std::move(bucket->keys[j]), std::move(bucket->values()[j]));
@@ -319,7 +337,8 @@ protected:
   using Base::sz;
 
 public:
-  using iterator = Base::iterator;
+  using iterator = Iterator;
+  using const_iterator = CIterator;
   using size_type = Base::size_type;
   using bucket_type = Bucket;
   using Base::begin;
@@ -341,7 +360,7 @@ public:
     growIfOversized();
     auto iter = Base::findEmptyImpl(k);
     sz++;
-    iter.keyMut() = k;
+    const_cast<K &>(iter.key()) = k;
     std::construct_at(&(*iter).second, std::move(v));
     return iter;
   }
@@ -360,7 +379,7 @@ public:
         return insert(k, std::move(v));
 
       sz++;
-      iter.keyMut() = k;
+      const_cast<K &>(iter.key()) = k;
       std::construct_at(&(*iter).second, std::move(v));
     } else
       (*iter).second = std::move(v);
@@ -379,7 +398,7 @@ public:
       return std::make_pair(false, insert(k, func()));
 
     sz++;
-    iter.keyMut() = k;
+    const_cast<K &>(iter.key()) = k;
     std::construct_at(&(*iter).second, std::move(func()));
     return std::make_pair(false, iter);
   }
@@ -400,7 +419,7 @@ public:
         return (*this)[k];
 
       sz++;
-      it.keyMut() = k;
+      const_cast<K &>(it.key()) = k;
       std::construct_at(&(*it).second);
     }
     return (*it).second;
@@ -426,7 +445,7 @@ public:
   iterator erase(iterator it) {
     assert(it != end());
     auto rv = std::next(it);
-    it.keyMut() = DenseMapInfo<K>::getTombstoneKey();
+    const_cast<K &>(it.key()) = DenseMapInfo<K>::getTombstoneKey();
     std::destroy_at(&it.val());
     --sz;
     return rv;
@@ -447,9 +466,12 @@ protected:
 };
 
 template <typename Derived, typename K, typename Bucket>
-class DenseSetBase
-    : public DenseSetMapBase<Derived, K, Bucket, DenseSetIterator<Bucket, K>> {
-  using Base = DenseSetMapBase<Derived, K, Bucket, DenseSetIterator<Bucket, K>>;
+class DenseSetBase : public DenseSetMapBase<Derived, K, Bucket,
+                                            DenseSetIterator<const Bucket, K>,
+                                            DenseSetIterator<const Bucket, K>> {
+  using Base =
+      DenseSetMapBase<Derived, K, Bucket, DenseSetIterator<const Bucket, K>,
+                      DenseSetIterator<const Bucket, K>>;
 
 protected:
   using Base::cap;
@@ -488,7 +510,7 @@ public:
     growIfOversized();
     auto iter = Base::findEmptyImpl(k);
     sz++;
-    iter.keyMut() = k;
+    const_cast<K &>(iter.key()) = k;
     return iter;
   }
 
@@ -507,7 +529,7 @@ public:
       return std::make_pair(false, insert(k));
 
     sz++;
-    iter.keyMut() = k;
+    const_cast<K &>(iter.key()) = k;
     return std::make_pair(false, iter);
   }
 
@@ -527,7 +549,7 @@ public:
   iterator erase(iterator it) {
     assert(it != end());
     auto rv = std::next(it);
-    it.keyMut() = DenseMapInfo<K>::getTombstoneKey();
+    const_cast<K &>(it.key()) = DenseMapInfo<K>::getTombstoneKey();
     --sz;
     return rv;
   }
@@ -551,18 +573,19 @@ template <typename K, typename size_type = uint32_t> struct DenseSetBucket {
   std::array<K, entriesPerBucket> keys;
 
   template <bool Inverse, typename... Args>
-  size_type findVec(size_type cur = ~0, Args... k) {
+  size_type findVec(size_type cur = ~0, Args... k) const {
     using key_unsigned = uint_of_size<sizeof(K)>::type;
     typedef key_unsigned key_vec
         __attribute__((ext_vector_type(vector_len), aligned(alignof(K))));
-    using key_vec_ptr = key_vec *;
+    using key_vec_ptr = const key_vec *;
     key_vec_ptr keys_arr = reinterpret_cast<key_vec_ptr>(keys.data());
 
     assert(entriesPerBucket % vector_len == 0);
     assert(vector_len <= 64);
     cur++;
     for (size_t i = cur / vector_len; i < entriesPerBucket / vector_len; i++) {
-#if __has_feature(ext_vector_type_boolean) && (defined(__x86_64__) || defined(_M_X64))
+#if __has_feature(ext_vector_type_boolean) &&                                  \
+    (defined(__x86_64__) || defined(_M_X64))
       using mask_unsigned = vec_mask_unsigned_t<key_vec>;
       auto mask = (vec_to_maskreg(keys_arr[i] ==
                                   ((key_vec)std::bit_cast<key_unsigned>(k))) |
@@ -598,7 +621,7 @@ template <typename K, typename size_type = uint32_t> struct DenseSetBucket {
   std::array<K, entriesPerBucket> keys;
 #endif
 
-  size_type getNextValid(size_type cur) {
+  size_type getNextValid(size_type cur) const {
 #if defined(__clang__) && SIMD_DENSE_MAP
     return findVec<true>(cur, DenseMapInfo<K>::getEmptyKey(),
                          DenseMapInfo<K>::getTombstoneKey());
@@ -614,7 +637,7 @@ template <typename K, typename size_type = uint32_t> struct DenseSetBucket {
 #endif
   }
 
-  size_type find(const K &k, size_type cur = ~0) {
+  size_type find(const K &k, size_type cur = ~0) const {
 #if defined(__clang__) && SIMD_DENSE_MAP
     return findVec<false>(cur, k);
 #else
@@ -626,7 +649,7 @@ template <typename K, typename size_type = uint32_t> struct DenseSetBucket {
 #endif
   }
 
-  size_type findEmptyOrTombstone(size_type cur = ~0) {
+  size_type findEmptyOrTombstone(size_type cur = ~0) const {
 #if defined(__clang__) && SIMD_DENSE_MAP
     return findVec<false>(cur, DenseMapInfo<K>::getEmptyKey(),
                           DenseMapInfo<K>::getTombstoneKey());
@@ -686,6 +709,7 @@ struct DenseMapBucket : public DenseSetBucket<K, size_type> {
   using StorageT = std::array<V, Base::entriesPerBucket>;
   InlineStorage<sizeof(StorageT), alignof(StorageT)> storage;
   auto &values() { return *(storage.template as<StorageT>()); }
+  const auto &values() const { return *(storage.template as<StorageT>()); }
 };
 
 template <typename Base> class LargeSetMap : public Base {
@@ -696,7 +720,8 @@ public:
   // try to alloc buckets for 64 elements.
   static constexpr size_t initNumBuckets =
       std::max(4UL, ceil_to_pow2(64UL / Bucket::entriesPerBucket));
-  Bucket *&getBuckets() const { return const_cast<Bucket *&>(buckets); }
+  Bucket *const &getBuckets() const { return buckets; }
+  Bucket *&getBuckets() { return buckets; }
   void deleteArr(Bucket *buckets) {
     ::operator delete[](buckets, std::align_val_t(alignof(Bucket)));
   }
@@ -775,7 +800,8 @@ template <typename Base, size_t InlineElemns> class SmallSetMap : public Base {
   InlineStorageArr<Bucket, InlineBuckets> arr;
 
 public:
-  Bucket *&getBuckets() const { return const_cast<Bucket *&>(buckets); }
+  Bucket *const &getBuckets() const { return buckets; }
+  Bucket *&getBuckets() { return buckets; }
   void deleteArr(Bucket *buckets) {
     if (buckets == *arr) {
       ASAN_POISON_MEMORY_REGION(*arr, sizeof(arr));

@@ -15,14 +15,20 @@ struct DenseMultimapIterator
       : Base(bucket, rem, idx, offs), probeOffset(offs) {}
 
   DenseMultimapIterator(Base base) : Base(base) {}
+  explicit DenseMultimapIterator(
+      const DenseMultimapIterator<const Bucket, K, const V> &o, Bucket *buckets)
+      : DenseMultimapIterator(buckets + (o.bucket - buckets), o.rem, o.idx,
+                              o.probeOffset) {}
 };
 
 template <typename Derived, typename K, typename V, typename Bucket>
 class DenseMultimapBase
     : public DenseMapBase<Derived, K, V, Bucket,
-                          DenseMultimapIterator<Bucket, K, V>> {
+                          DenseMultimapIterator<Bucket, K, V>,
+                          DenseMultimapIterator<const Bucket, K, const V>> {
   using Base =
-      DenseMapBase<Derived, K, V, Bucket, DenseMultimapIterator<Bucket, K, V>>;
+      DenseMapBase<Derived, K, V, Bucket, DenseMultimapIterator<Bucket, K, V>,
+                   DenseMultimapIterator<const Bucket, K, const V>>;
   using size_type = Base::size_type;
 
 public:
@@ -35,8 +41,9 @@ protected:
   using Base::sz;
 
   bool growIfOversized() {
-    return this->DenseSetMapBase<Derived, K, Bucket,
-                                 DenseMultimapIterator<Bucket, K, V>>::
+    return this->DenseSetMapBase<
+        Derived, K, Bucket, DenseMultimapIterator<Bucket, K, V>,
+        DenseMultimapIterator<const Bucket, K, const V>>::
         growIfOversized([&](Bucket *bucket, size_type j) {
           insert(std::move(bucket->keys[j]), std::move(bucket->values()[j]));
           std::destroy_at(&bucket->values()[j]);
@@ -115,7 +122,7 @@ public:
     growIfOversized();
     auto iter = Base::findEmptyImpl(k, false);
     sz++;
-    iter.keyMut() = k;
+    const_cast<K &>(iter.key()) = k;
     std::construct_at(&(*iter).second, std::move(v));
     return iter;
   }

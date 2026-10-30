@@ -20,8 +20,8 @@ public:
     return InlineStorageRef<T>{*this};
   }
 
-  template <typename T> const InlineStorageRef<T> as() const {
-    return InlineStorageRef<T>{*const_cast<InlineStorage *>(this)};
+  template <typename T> InlineStorageRef<const T> as() const {
+    return InlineStorageRef<const T>{*const_cast<InlineStorage *>(this)};
   }
 };
 
