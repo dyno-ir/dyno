@@ -1,6 +1,7 @@
 #pragma once
 #include "dyno/Context.h"
 #include "dyno/Pass.h"
+#include "hw/AutoDebugInfo.h"
 #include "hw/FlipFlop.h"
 #include "hw/HWAbstraction.h"
 #include "hw/HWContext.h"
@@ -16,6 +17,8 @@ class LiftFlipFlopsPass : public Pass<LiftFlipFlopsPass> {
 
   void runOnInstance(FlipFlopIRef instr) {
     HWInstrBuilder pbuild{ctx};
+    AutoCopyDebugInfoStack autoDbgInfo{ctx};
+    autoDbgInfo.pushDebugInfo(instr);
 
     pbuild.setInsertPoint(instr);
 

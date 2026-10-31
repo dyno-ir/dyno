@@ -904,6 +904,11 @@ FUNCTION_DEF %memoryTestSynth:func, :block {
   CALL symbol("flow_synthEarlyOpt")
   CALL symbol("flow_synthLowerControlFlow")
   CALL symbol("flow_synthMemoryFFMuxHandling")
+
+  meta.PARSE_DYNO_PASS map("path": "tools/dyno-opt/dyno-ir/sky130_fd_sc_hd.dyno", "newModulesActive": "0")
+  meta.PARSE_DYNO_PASS map("path": "tools/dyno-opt/dyno-ir/example_memories.dyno", "newModulesActive": "0")
+  meta.POPULATE_INLINE_CACHES_PASS
+
   CALL symbol("flow_synthLowerMemoryFF")
 }
 // lift back up for sim
@@ -916,6 +921,7 @@ FUNCTION_DEF %memoryTestLift:func, :block {
 
   meta.INST_COMBINE_PASS
   meta.LIFT_FLIP_FLOPS_PASS
+  meta.LIFT_LATCHES_PASS
   meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS
   meta.INST_COMBINE_PASS
   meta.TRIGGER_DEDUPE_PASS
@@ -1659,10 +1665,41 @@ TEST_SCRIPT :string("test-latch"), :block {
   CALL symbol("flow_synthEarlyOpt")
   CALL symbol("flow_synthLowerControlFlow")
   CALL symbol("flow_synthMemoryFFMuxHandling")
+
+  meta.PARSE_DYNO_PASS map("path": "tools/dyno-opt/dyno-ir/sky130_fd_sc_hd.dyno", "newModulesActive": "0")
+  meta.POPULATE_INLINE_CACHES_PASS
+
   CALL symbol("flow_synthLowerMemoryFF")
   ASSERT_EXISTS_PASS map("regex":
     "STDCELL_INSTANCE %[_a-zA-Z0-9]+:wire\(1\), %sky130_fd_sc_hd__dlxtp_1",
     "num": "4")
-  // todo: latch simulation
+  CALL %memoryTestLift
+  meta.RANDOM_EQUIVALENCE_CHECK_PASS map("cycles": "100", "clockMode": "COMB", "relaxXZ": "1")
 }
 
+TEST_CASE :string("test-store-order"), :block, :block, :block {
+  MODULE_DEF :module("mod"), :block {
+    INPUT_REGISTER_DEF %in_a:register(1)
+    OUTPUT_REGISTER_DEF %out_a:register(1)
+    REGISTER_DEF %temp:register(1)
+    hw.COMB_PROCESS_DEF :process, :block {
+      LOAD %a:wire(1), %temp
+      STORE %a, %out_a
+      LOAD %b:wire(1), %in_a
+      STORE %b, %temp
+    }
+  }
+}{
+  hw.MODULE_DEF %mod:module("mod"), %b1:core.block {
+    hw.INPUT_REGISTER_DEF %r0:register(1)
+    hw.OUTPUT_REGISTER_DEF %r1:register(1)
+    hw.COMB_PROCESS_DEF %0:process, %b2:core.block {
+      hw.LOAD %w3:wire(1), %r0
+      hw.STORE %w3, %r1
+    }
+  }
+}{
+  ORDER_INSTRS_PASS map("moveStoresBeforeLoads": "1")
+  SSA_CONSTRUCT_PASS
+  AGGRESSIVE_DEAD_CODE_ELIMINATION_PASS
+}

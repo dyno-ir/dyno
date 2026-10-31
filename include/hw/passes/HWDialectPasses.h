@@ -65,6 +65,7 @@ void registerDialectPasses_impls0(PassRegistry &passRegistry) {
 #include "hw/passes/InactiveCopy.h"
 #include "hw/passes/InstCombine.h"
 #include "hw/passes/LiftFlipFlops.h"
+#include "hw/passes/LiftLatches.h"
 #include "hw/passes/LiftMux.h"
 #include "hw/passes/LiftStdCells.h"
 #include "hw/passes/LinearizeControlFlow.h"
@@ -80,6 +81,7 @@ void registerDialectPasses_impls1(PassRegistry &passRegistry) {
   passRegistry.registerPass<InactiveCopyPass>(DIALECT_HW);
   passRegistry.registerPass<InstCombinePass>(DIALECT_HW);
   passRegistry.registerPass<LiftFlipFlopsPass>(DIALECT_HW);
+  passRegistry.registerPass<LiftLatchesPass>(DIALECT_HW);
   passRegistry.registerPass<LiftMuxPass>(DIALECT_HW);
   passRegistry.registerPass<LiftStdCellsPass>(DIALECT_HW);
   passRegistry.registerPass<LinearizeControlFlowPass>(DIALECT_HW);

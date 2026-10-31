@@ -1,11 +1,12 @@
-EXPORT :symbol("flow_earlyCanonFlow"),           %earlyCanonFlow           :?func
-EXPORT :symbol("flow_synthCanonicalize"),        %synthCanonicalize        :?func
-EXPORT :symbol("flow_synthEarlyOpt"),            %synthEarlyOpt            :?func
-EXPORT :symbol("flow_synthLowerControlFlow"),    %synthLowerControlFlow    :?func
-EXPORT :symbol("flow_synthMemoryFFMuxHandling"), %synthMemoryFFMuxHandling :?func
-EXPORT :symbol("flow_synthLowerMemoryFF"),       %synthLowerMemoryFF       :?func
-EXPORT :symbol("flow_synthTechmap"),             %synthTechmap             :?func
-EXPORT :symbol("flow_completeFlow"),             %completeFlow             :?func
+EXPORT :symbol("flow_earlyCanonFlow"),            %earlyCanonFlow            :?func
+EXPORT :symbol("flow_synthCanonicalize"),         %synthCanonicalize         :?func
+EXPORT :symbol("flow_synthEarlyOpt"),             %synthEarlyOpt             :?func
+EXPORT :symbol("flow_synthLowerControlFlow"),     %synthLowerControlFlow     :?func
+EXPORT :symbol("flow_synthMemoryFFMuxHandling"),  %synthMemoryFFMuxHandling  :?func
+EXPORT :symbol("flow_synthLowerMemoryFF"),        %synthLowerMemoryFF        :?func
+EXPORT :symbol("flow_synthTechmap"),              %synthTechmap              :?func
+EXPORT :symbol("flow_completeFlow_generic"),      %completeFlow_generic      :?func
+EXPORT :symbol("flow_completeFlow_tgt_specific"), %completeFlow_tgt_specific :?func
 
 FUNCTION_DEF %earlyCanonFlow:func, :block {
   // preprocessing, inlining
@@ -199,13 +200,6 @@ FUNCTION_DEF %synthMemoryFFMuxHandling:func, :block {
 }
 
 FUNCTION_DEF %synthLowerMemoryFF:func, :block {
-  // load pre-parsed liberty
-
-  meta.PARSE_DYNO_PASS map("path": /*"xilinx/flipflops.dyno"*/"tools/dyno-opt/dyno-ir/sky130_fd_sc_hd.dyno", "newModulesActive": "0")
-  // load memories
-  meta.PARSE_DYNO_PASS map("path": /*"xilinx/memories.dyno"*/ "tools/dyno-opt/dyno-ir/example_memories.dyno", "newModulesActive": "0")
-  meta.POPULATE_INLINE_CACHES_PASS
-
   // map memories
   meta.MEMORY_MAPPING_PASS
   // fix up possible wire forward references after mem map
@@ -213,7 +207,7 @@ FUNCTION_DEF %synthLowerMemoryFF:func, :block {
 
   // lower unmapped memories back to load/store (todo: lower before en)
   meta.LOWER_MEM_ACCESS_PASS
-  // lower insert/extract
+  // // lower insert/extract
   meta.LOWER_OPS_PASS map(
     "lowerMultiInputAdd"     : "1",
     "lowerAddCompress"       : "0",
@@ -316,8 +310,7 @@ FUNCTION_DEF %synthTechmap:func, :block {
   meta.PROC_TO_NETLIST_PASS map("keepRegs": "1")
 }
 
-
-FUNCTION_DEF %completeFlow:func, :block {
+FUNCTION_DEF %completeFlow_generic:func, :block {
   CALL %earlyCanonFlow
   meta.DUMP_PASS map("path": "post_early_canon.dyno")
   CALL %synthCanonicalize
@@ -328,6 +321,9 @@ FUNCTION_DEF %completeFlow:func, :block {
   meta.DUMP_PASS map("path": "post_lower_cfg.dyno")
   CALL %synthMemoryFFMuxHandling
   meta.DUMP_PASS map("path": "post_memory_mux.dyno")
+}
+
+FUNCTION_DEF %completeFlow_tgt_specific:func, :block {
   CALL %synthLowerMemoryFF
   meta.DUMP_PASS map("path": "post_lower_memory.dyno")
   CALL %synthTechmap
