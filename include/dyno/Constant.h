@@ -1748,6 +1748,8 @@ public:
     setCustom(0);
   }
   template <BigIntAPI T> static constexpr BigIntBase unknownMask(const T &val) {
+    if (!val.getIs4S())
+      return BigIntBase::fromU32(0, val.getNumBits());
     BigIntBase copy = val;
     copy.conv4To2StateHi();
     copy.normalize();

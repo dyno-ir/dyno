@@ -2106,6 +2106,12 @@ private:
     };
 
     if (auto asRegRef = ref.dyn_as<RegisterRef>()) {
+      if (asRegRef == reg) {
+        if (inverse)
+          return false;
+        deleteMatchedInstr(instr);
+        return PAT_TRUE;
+      }
       auto &regNameInfo = ctx.getCtx<HWDialectContext>().regNameInfo;
       regNameInfo.copyNames(reg, asRegRef);
       for (auto use : uses) {
