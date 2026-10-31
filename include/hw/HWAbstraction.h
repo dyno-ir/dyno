@@ -686,11 +686,10 @@ public:
     if (sizeof...(terms) == 0 && baseAddr == 0)
       return buildTrunc(numBits, src);
 
-    if (baseAddr >= *src.as<HWValue>().getNumBits()) {
-      return ConstantBuilder{ctx.getStore<Constant>()}.undef(numBits).get();
-    }
-
     if constexpr (sizeof...(terms) == 0) {
+      if (baseAddr >= *src.as<HWValue>().getNumBits()) {
+        return ConstantBuilder{ctx.getStore<Constant>()}.undef(numBits).get();
+      }
       if (auto asConst = src.dyn_as<ConstantRef>()) {
         auto cbuild = ConstantBuilder{ctx.getStore<Constant>()};
         return cbuild.valRange(asConst, baseAddr, numBits).get();

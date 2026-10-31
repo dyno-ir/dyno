@@ -2226,7 +2226,7 @@ private:
     bool change = false;
     bool oob = false;
 
-    uint64_t baseOffs = instr.getBase();
+    uint32_t baseOffs = instr.getBase();
     SmallVec<AddressGenTerm, 4> terms;
     for (auto term : instr.terms()) {
       if (auto asConst = term.getIdx().template dyn_as<ConstantRef>();
@@ -2291,12 +2291,6 @@ private:
     //   deleteMatchedInstr(instr);
     //   return PAT_TRUE;
     // }
-
-    if (int64_t(baseOffs) != int32_t(baseOffs)) {
-      report_fatal_error(ctx, instr,
-                         "pointer out of 32-bit bounds (address 0x{:x})",
-                         baseOffs);
-    }
 
     if (terms.empty()) {
       replaceUses(instr.def()->as<PointerRef>(),
