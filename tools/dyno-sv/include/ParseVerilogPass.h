@@ -19,6 +19,7 @@ public:
 #define CONFIG_STRUCT_LAMBDA(FIELD, ENUM)                                      \
   FIELD(bool, strictXZ, true)                                                  \
   FIELD(bool, ignoreSimOnly, false)                                            \
+  FIELD(StringRef, topModules, "")                                             \
   FIELD(StringRef, path, "")                                                   \
   FIELD(StringRef, code, "")                                                   \
   FIELD(StringRef, arg0, "")                                                   \

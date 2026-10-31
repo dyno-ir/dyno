@@ -62,6 +62,11 @@ CmdLineArg<bool> argIgnoreSimOnly{
     "frontend rather than erroring.",
     0, false};
 
+CmdLineArg<StringRef> argTopModules{
+    std::nullopt, "top",
+    "Top module(s) to synthesize, comma separated if multiple.",
+    CmdLineArgFlags::VALUE_REQUIRED};
+
 // Flow/Test Args
 CmdLineArg<Vec<StringRef>> argScriptFileName{
     std::nullopt, "script file", "Dyno-IR script file name(s).",
@@ -118,6 +123,7 @@ void synth(Context &ctx) {
     ParseVerilogPass parse{ctx};
     auto args = *argSlangArgs;
     parse.config.ignoreSimOnly = *argIgnoreSimOnly;
+    parse.config.topModules = *argTopModules;
     args.push_back_range(Range{*argInputFiles});
     auto res = parse.parse(args);
     if (!res)
@@ -196,6 +202,7 @@ int main(int argc, char **argv) {
     synth.registerArg(argOutFile);
     synth.registerArg(argSlangArgs);
     synth.registerArg(argFlowScript);
+    synth.registerArg(argTopModules);
     synth.registerArg(argDebug);
     synth.registerArg(argDebugPasses);
     synth.registerArg(argPrintAfterAll);

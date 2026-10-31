@@ -3,6 +3,7 @@
 #include "slang/driver/Driver.h"
 #include "slang/text/SourceLocation.h"
 #include "slang/util/SmallVector.h"
+#include "support/Tokenizer.h"
 
 using namespace dyno;
 
@@ -25,6 +26,11 @@ ParseVerilogPass::parse(ArrayRef<StringRef> args) {
 
   if (!driver.parseCommandLine(1 + numArgs, argv.data()))
     return std::unexpected("slang: failed to parse args");
+
+  if (!config.topModules.empty()) {
+    for (auto name : Tokenizer{config.topModules, " ,;:"})
+      driver.options.topModules.emplace_back(std::string{name});
+  }
 
   // allow inluding files via config.path, config.code (verbatim) or just
   // args.
