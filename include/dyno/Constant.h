@@ -1146,22 +1146,22 @@ public:
 
     // todo: 64 and maybe 128 bit division fast paths.
 
-    size_t highWordIdx;
-    if (rhs.getExtend() == 0)
-      highWordIdx = rhs.getNumWords() - 1;
-    else
-      highWordIdx = rhs.getExtNumWords() - 1;
+    assert(!rhs.valueEquals(0) && "undefined");
+
+    size_t highWordIdx =
+        (rhs.getRawNumBits() - leadingZeros(rhs) - 1) / WordBits;
 
     // divisor is 32 bits or less.
     if (highWordIdx == 0) {
+      uint32_t divisor = rhs.getWordMasked(0);
       int32_t k = 0;
       for (ssize_t i = quot.getNumWords() - 1; i >= 0; i--) {
         // pull down one digit
         uint64_t t = (k * base + lhs.getWordMasked(i));
         // do single digit division
-        quot.words[i] = t / rhs.getWord(0);
+        quot.words[i] = t / divisor;
         // correct back
-        k = t - quot.words[i] * rhs.getWord(0);
+        k = t - quot.words[i] * divisor;
       }
       rem = fromU32(k, rhs.getRawNumBits());
 
@@ -2085,7 +2085,7 @@ public:
   }
   template <BigIntAPI T0, BigIntAPI T1>
   constexpr static auto udivmodOp4S(const T0 &lhs, const T1 &rhs) {
-    if (lhs.getIs4S() || rhs.getIs4S()) {
+    if (lhs.getIs4S() || rhs.getIs4S() || rhs.valueEquals(0)) {
       BigIntBase outA;
       BigIntBase outB;
       outA.setRepeating(EXTX_MASK, 2 * lhs.getNumBits(), 1);

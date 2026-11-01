@@ -708,6 +708,29 @@ TEST_EQUIVALENCE :string("lowerops-sub"), :block, :block {
   meta.RANDOM_EQUIVALENCE_CHECK_PASS map("cycles": "20")
 }
 
+TEST_EQUIVALENCE :string("lowerops-divmod"), :block, :block {
+  MODULE_DEF :module("mod"), :block {
+    INPUT_REGISTER_DEF %in_a:register(33)
+    INPUT_REGISTER_DEF %in_b:register(33)
+    OUTPUT_REGISTER_DEF %out_div:register(33)
+    OUTPUT_REGISTER_DEF %out_mod:register(33)
+    COMB_PROCESS_DEF :process, :block {
+      LOAD %a:wire(33), %in_a
+      LOAD %b:wire(33), %in_b
+      UDIV %div:wire(33), %a, %b
+      UMOD %mod:wire(33), %a, %b
+      STORE %div, %out_div
+      STORE %mod, %out_mod
+    }
+  }
+}{
+  INACTIVE_COPY_PASS
+  LOWER_OPS_PASS
+  COMMON_SUBEXPRESSION_ELIMINATION_PASS
+  INST_COMBINE_PASS
+  RANDOM_EQUIVALENCE_CHECK_PASS map("cycles": "10000", "relaxXZ": "1")
+}
+
 TEST_EQUIVALENCE :string("instcombine-mod"), :block, :block {
   MODULE_DEF :module("mod"), :block {
     INPUT_REGISTER_DEF %in_a:register(26)

@@ -21,6 +21,7 @@
 #include "support/Utility.h"
 #include <cstdint>
 #include <iterator>
+#include <optional>
 
 namespace dyno {
 
@@ -42,6 +43,7 @@ public:
   FIELD(bool, lowerSimpleAdd, true)                                            \
   FIELD(bool, lowerSub, true)                                                  \
   FIELD(bool, lowerMul, true)                                                  \
+  FIELD(bool, lowerDivMod, true)                                               \
   FIELD(bool, lowerMultiInputBitwise, true)                                    \
   FIELD(bool, lowerEqualityICMP, true)                                         \
   FIELD(bool, lowerOrderingICMP, true)                                         \
@@ -723,6 +725,48 @@ private:
     destroyMap[instr] = 1;
   }
 
+  void lowerDivMod(InstrRef instr, bool isMod) {
+    build.setInsertPoint(instr);
+    auto lhs = instr.other(0)->as<HWValue>();
+    auto def = instr.def(0)->as<WireRef>();
+    uint32_t bits = *def.getNumBits();
+
+    uint32_t wide = bits + 2;
+    HWValue d = build.buildZExt(wide, instr.other(1)->as<HWValue>());
+    HWValue notD = build.buildNot(d);
+    HWValue rem = cbuild.zero(wide).get();
+    std::optional<OtherVec<HWValue>> quotientBits;
+    if (!isMod)
+      quotientBits.emplace(ctx, 1, bits);
+
+    for (uint32_t i = bits; i-- > 0;) {
+      auto bit = build.buildSplice(lhs, 1, i);
+      auto sign = build.buildSplice(rem, 1, wide - 1);
+      auto nonNeg = build.buildNot(sign);
+      auto withBit =
+          build.buildConcat(build.buildSplice(rem, wide - 1, 0), bit);
+      auto addend = build.buildMux(sign, d, notD);
+      rem = build.buildAdd(withBit, addend, build.buildZExt(wide, nonNeg));
+      if (!isMod)
+        quotientBits->emplace_back(nonNeg);
+    }
+
+    auto sign = build.buildSplice(rem, 1, wide - 1);
+    HWValue out;
+    if (isMod) {
+      auto result = build.buildMux(sign, build.buildAdd(rem, d), rem);
+      out = build.buildTrunc(bits, result);
+    } else {
+      auto quotBits = build.buildConcat(std::move(*quotientBits));
+      auto quotSigned = build.buildSub(quotBits, build.buildNot(quotBits));
+      out = build.buildMux(
+          sign, build.buildSub(quotSigned, cbuild.val(bits, 1).get()),
+          quotSigned);
+    }
+    def.replaceAllUsesWith(out);
+    destroyMap[instr] = 1;
+  }
+
   void lowerMul(InstrRef instr) {
     // until we implement real multiply.
     if (instr.getNumOthers() != 2 || !instr.other(1)->is<ConstantRef>()) {
@@ -733,9 +777,17 @@ private:
     auto val = instr.other(0)->as<WireRef>();
     auto c = instr.other(1)->as<ConstantRef>();
 
+    auto ones = BigInt::countBits4SExact(c, FourState::S1);
+    if (ones == 0) {
+      auto zero =
+          cbuild.val(*instr.def(0)->as<WireRef>().getNumBits(), 0).get();
+      instr.def(0)->as<WireRef>().replaceAllUsesWith(zero);
+      destroyMap[instr] = 1;
+      return;
+    }
+
     build.setInsertPoint(instr);
-    auto add = build.buildInstrRaw(
-        OP_ADD, 1 + BigInt::countBits4SExact(c, FourState::S1));
+    auto add = build.buildInstrRaw(OP_ADD, 1 + ones);
     build.setInsertPoint(add.instr());
 
     add.addRef(instr.def(0)->as<WireRef>()).other();
@@ -1058,6 +1110,12 @@ private:
       lowerMul(instr);
       break;
 
+    case *OP_UDIV:
+    case *OP_UMOD:
+      if (config.lowerDivMod)
+        lowerDivMod(instr, instr.isOpc(OP_UMOD));
+      break;
+
     case *OP_ICMP_ULT:
     case *OP_ICMP_SLT:
     case *OP_ICMP_ULE:
@@ -1128,6 +1186,9 @@ public:
 
       if (instr.isOpc(OP_MUL))
         return config.lowerMul;
+
+      if (instr.isOpc(OP_UDIV, OP_UMOD))
+        return config.lowerDivMod;
 
       if (instr.isOpc(OP_ICMP_ULT, OP_ICMP_SLT, OP_ICMP_ULE, OP_ICMP_SLE,
                       OP_ICMP_UGT, OP_ICMP_SGT, OP_ICMP_UGE, OP_ICMP_SGE))
