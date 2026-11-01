@@ -590,6 +590,8 @@ public:
   }
 
   void handle(const slang::ast::InstanceSymbol &node) {
+    if (node.body.flags.has(slang::ast::InstanceFlags::Uninstantiated))
+      return;
     if (!(node.isModule() || node.isInterface()))
       unsupported(node.location, "instance of {}",
                   slang::ast::toString(node.body.kind));
@@ -1192,6 +1194,52 @@ public:
     }
   };
 
+  HWValue buildInsideMatch(HWValue val, const slang::ast::Type *valType,
+                           const slang::ast::Expression &expr) {
+    if (expr.kind == slang::ast::ExpressionKind::ValueRange) {
+      auto &asRange = expr.as<slang::ast::ValueRangeExpression>();
+      if (asRange.rangeKind != slang::ast::ValueRangeKind::Simple)
+        unsupported(expr.sourceRange, "open 'inside' range");
+      auto lo = handle_expr(asRange.left())->proGetValue(build);
+      auto hi = handle_expr(asRange.right())->proGetValue(build);
+      auto loSigned = valType->isSigned() && asRange.left().type->isSigned();
+      auto hiSigned = valType->isSigned() && asRange.right().type->isSigned();
+      return build.buildAnd(
+          build.buildICmp(val, lo, loSigned ? BigInt::ICMP_SGE
+                                            : BigInt::ICMP_UGE),
+          build.buildICmp(val, hi, hiSigned ? BigInt::ICMP_SLE
+                                            : BigInt::ICMP_ULE));
+    }
+
+    return build.buildICmp(val, handle_expr(expr)->proGetValue(build),
+                           BigInt::ICMP_WEQ);
+  }
+
+  HWValue buildInsideMatchAny(
+      HWValue val, const slang::ast::Type *valType,
+      ArrayRef<const slang::ast::Expression *> exprs) {
+    return build.buildOr(Range{exprs}.tf(
+        [&](auto expr) { return buildInsideMatch(val, valType, *expr); }));
+  }
+
+  void handleCaseInside(const slang::ast::CaseStatement &asCase) {
+    auto valExpr = handle_expr(asCase.expr);
+    auto val = valExpr->proGetValue(build);
+    build.pushInsertPoint(build.insert);
+    for (auto &item : asCase.items) {
+      auto ifElse = build.buildIfElse(
+          makeBoolCond(buildInsideMatchAny(val, valExpr->type,
+                                           item.expressions)));
+      build.pushInsertPoint(ifElse.getTrueBlock().end());
+      handle_stmt(*item.stmt);
+      build.popInsertPoint();
+      build.setInsertPoint(ifElse.getFalseBlock().end());
+    }
+    if (asCase.defaultCase)
+      handle_stmt(*asCase.defaultCase);
+    build.popInsertPoint();
+  }
+
   void handleConditional(
       std::span<const slang::ast::ConditionalStatement::Condition> conds,
       const slang::ast::Statement &ifTrue,
@@ -1284,6 +1332,11 @@ public:
 
     case slang::ast::StatementKind::Case: {
       auto &asCase = stmt.as<slang::ast::CaseStatement>();
+      if (asCase.condition == slang::ast::CaseStatementCondition::Inside) {
+        handleCaseInside(asCase);
+        break;
+      }
+
       auto swInstr =
           build.buildSwitch(handle_expr(asCase.expr)->proGetValue(build));
       SmallVec<HWValue, 8> labels;
@@ -1291,8 +1344,6 @@ public:
 
       DialectOpcode opc;
       switch (asCase.condition) {
-      case slang::ast::CaseStatementCondition::Inside:
-        unsupported(asCase.sourceRange, "case 'inside' condition");
       case slang::ast::CaseStatementCondition::Normal:
         opc = OP_CASE;
         break;
@@ -1302,6 +1353,8 @@ public:
       case slang::ast::CaseStatementCondition::WildcardJustZ:
         opc = HW_CASE_Z;
         break;
+      case slang::ast::CaseStatementCondition::Inside:
+        dyno_unreachable("case inside handled above");
       }
 
       for (auto &swCase : asCase.items) {
@@ -2498,29 +2551,11 @@ public:
 
     case slang::ast::ExpressionKind::Inside: {
       auto &asInside = expr.as<slang::ast::InsideExpression>();
-      auto val = handle_expr(asInside.left())->proGetValue(build);
-
-      SmallVec<HWValue, 4> checks;
-      for (auto *range : asInside.rangeList()) {
-        if (range->kind == slang::ast::ExpressionKind::ValueRange) {
-          auto &asRange = range->as<slang::ast::ValueRangeExpression>();
-          if (asRange.rangeKind != slang::ast::ValueRangeKind::Simple)
-            unsupported(range->sourceRange, "open 'inside' range");
-          auto lo = handle_expr(asRange.left())->proGetValue(build);
-          auto hi = handle_expr(asRange.right())->proGetValue(build);
-          auto ge = build.buildICmp(val, lo, BigInt::ICMP_UGE);
-          auto le = build.buildICmp(val, hi, BigInt::ICMP_ULE);
-          checks.emplace_back(build.buildAnd(ge, le));
-        } else {
-          auto other = handle_expr(*range)->proGetValue(build);
-          checks.emplace_back(build.buildICmp(val, other, BigInt::ICMP_EQ));
-        }
-      }
-
-      if (checks.empty())
-        return std::make_unique<RValue>(ConstantRef::fromBool(0), expr.type);
-
-      return std::make_unique<RValue>(build.buildOr(checks), expr.type);
+      auto left = handle_expr(asInside.left());
+      auto val = left->proGetValue(build);
+      return std::make_unique<RValue>(
+          buildInsideMatchAny(val, left->type, asInside.rangeList()),
+          expr.type);
     }
     case slang::ast::ExpressionKind::Streaming: {
       auto &asStream = expr.as<slang::ast::StreamingConcatenationExpression>();
