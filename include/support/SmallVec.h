@@ -98,13 +98,17 @@ public:
 // made.
 // Vec<T> is a large vector with many expected elements and large initial
 // alloc.
-template <typename T, uint32_t InitialAlloc = (4096 / sizeof(T))>
+template <typename T, uint32_t InitialAlloc = 0>
 class Vec : public SmallVecImpl<T> {
+  static constexpr uint32_t getInitialAllocSz() {
+    return InitialAlloc ?: (4096 / sizeof(T));
+  }
+
 public:
   Vec()
-      : SmallVecImpl<T>(
-            reinterpret_cast<T *>(::operator new[](InitialAlloc * sizeof(T))),
-            InitialAlloc) {}
+      : SmallVecImpl<T>(reinterpret_cast<T *>(
+                            ::operator new[](getInitialAllocSz() * sizeof(T))),
+                        getInitialAllocSz()) {}
   Vec(size_t size)
       : SmallVecImpl<T>(
             reinterpret_cast<T *>(::operator new[](size * sizeof(T))), size) {
@@ -137,12 +141,12 @@ public:
 
   Vec(const SmallVecImpl<T> &o)
       : SmallVecImpl<T>(reinterpret_cast<T *>(::operator new[](
-                            (o.size() ?: InitialAlloc) * sizeof(T))),
-                        o.size() ?: InitialAlloc, o) {}
-  Vec(const Vec<T> &o)
+                            (o.size() ?: getInitialAllocSz()) * sizeof(T))),
+                        o.size() ?: getInitialAllocSz(), o) {}
+  Vec(const Vec &o)
       : SmallVecImpl<T>(reinterpret_cast<T *>(::operator new[](
-                            (o.size() ?: InitialAlloc) * sizeof(T))),
-                        o.size() ?: InitialAlloc, o) {}
+                            (o.size() ?: getInitialAllocSz()) * sizeof(T))),
+                        o.size() ?: getInitialAllocSz(), o) {}
 
   Vec &operator=(const Vec &o) {
     // recover from moved-from state.
