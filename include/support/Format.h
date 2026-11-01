@@ -3,6 +3,7 @@
 #include "support/StringRef.h"
 #include <memory>
 #include <ostream>
+#include <sstream>
 #include <type_traits>
 #include <utility>
 
@@ -92,6 +93,12 @@ public:
   friend std::ostream &operator<<(std::ostream &os, const Format &fmt) {
     fmt.toStream(os);
     return os;
+  }
+
+  std::string str() const {
+    std::ostringstream buf;
+    toStream(buf);
+    return std::move(buf).str();
   }
 
   ~Format() {

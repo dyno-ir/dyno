@@ -343,7 +343,7 @@ public:
         return Token::makeNone();
       while (multiline
                  ? (srcC[i + litLen] != '}' || srcC[i + litLen + 1] != ']')
-                 : (srcC[i + litLen] != '\"')) {
+                 : (srcC[i + litLen] != '\"' || srcC[i + litLen - 1] == '\\')) {
         if (srcC[i + litLen] == '\n') {
           if (!multiline)
             return Token::makeNone();
@@ -524,12 +524,16 @@ public:
 
     for (auto [i, line] : Range{lines}.enumerate()) {
       std::print(os, "  {:<{}} |{}\n", error.lineNumber + i, indent, line);
-      auto num = std::min(line.end(), src.begin() + error.end) - line.begin();
-      num -= error.start - (line.begin() - src.begin()) + 1;
-      if (i == 0)
-        std::print(os, "{:>{}}{}{:>{}}{:~>{}}{}\n", "|", indent + 4,
-                   stderrGreen(), "^", col, "", num, stderrReset());
-      else {
+      if (i == 0) {
+        auto num = std::min(line.end(), src.begin() + error.end) - line.begin();
+        num -= error.start - (line.begin() - src.begin()) + 1;
+        if (num < 0)
+          std::print(os, "{:>{}}{}{:>{}}{}\n", "|", indent + 4, stderrGreen(),
+                     "^", col, stderrReset());
+        else
+          std::print(os, "{:>{}}{}{:>{}}{:~>{}}{}\n", "|", indent + 4,
+                     stderrGreen(), "^", col, "", num, stderrReset());
+      } else {
         auto stripped = line.strip();
         auto start = stripped.begin() - line.begin();
         auto num = std::min(stripped.end(), src.begin() + error.end) -
@@ -597,7 +601,7 @@ public:
   template <typename... Ts>
   ParseError makeExpectedTokenError(uint32_t actualType, Ts... types) {
     if constexpr (sizeof...(types) > 1) {
-      std::array typesL = {types...};
+      std::array typesL = {uint32_t(types)...};
       auto rng = Range(typesL).transform(
           [&](size_t, uint32_t t) { return getTokenTypeString(t); });
       std::array<const char *, sizeof...(types)> arr;

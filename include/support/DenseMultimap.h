@@ -19,6 +19,12 @@ struct DenseMultimapIterator
       const DenseMultimapIterator<const Bucket, K, const V> &o, Bucket *buckets)
       : DenseMultimapIterator(buckets + (o.bucket - buckets), o.rem, o.idx,
                               o.probeOffset) {}
+  template <typename Bucket2 = Bucket,
+            typename = std::enable_if_t<std::is_const_v<Bucket2>>>
+  explicit DenseMultimapIterator(
+      const DenseMultimapIterator<std::remove_const_t<Bucket2>, K,
+                                  std::remove_const_t<V>> &o)
+      : DenseMultimapIterator(o.bucket, o.rem, o.idx, o.probeOffset) {}
 };
 
 template <typename Derived, typename K, typename V, typename Bucket>
@@ -33,6 +39,7 @@ class DenseMultimapBase
 
 public:
   using iterator = Base::iterator;
+  using const_iterator = Base::const_iterator;
 
 protected:
   using Base::cap;
@@ -50,7 +57,7 @@ protected:
         });
   }
 
-  auto findNextImpl(iterator prev) const {
+  auto findNextImpl(const_iterator prev) const {
     auto k = prev.key();
     assert(!DenseMapInfo<K>::isEqual(k, DenseMapInfo<K>::getEmptyKey()) &&
            !DenseMapInfo<K>::isEqual(k, DenseMapInfo<K>::getTombstoneKey()));
@@ -69,9 +76,9 @@ protected:
     while (true) {
       if (auto entryIndex = getBuckets()[bucketIndex].find(k, start);
           entryIndex != Bucket::entriesPerBucket) {
-        return std::make_pair(true,
-                              iterator{&getBuckets()[bucketIndex],
-                                       cap - bucketIndex, entryIndex, offset});
+        return std::make_pair(true, const_iterator{&getBuckets()[bucketIndex],
+                                                   cap - bucketIndex,
+                                                   entryIndex, offset});
       }
       if (!sawTombstone) {
         if (auto tombstoneIndex = getBuckets()[bucketIndex].find(
@@ -88,9 +95,9 @@ protected:
         // if we already saw a tombstone, break to return that.
         if (sawTombstone)
           break;
-        return std::make_pair(false,
-                              iterator{&getBuckets()[bucketIndex],
-                                       cap - bucketIndex, emptyIndex, offset});
+        return std::make_pair(false, const_iterator{&getBuckets()[bucketIndex],
+                                                    cap - bucketIndex,
+                                                    emptyIndex, offset});
       }
 
       bucketIndex = (bucketIndex + offset) & (cap - 1);
@@ -100,9 +107,9 @@ protected:
         break;
     }
     assert(sawTombstone && "hash map full?");
-    return std::make_pair(false, iterator{&getBuckets()[bucketIndex],
-                                          cap - seenTombstoneBucket,
-                                          seenTombstoneIdx, offset});
+    return std::make_pair(false, const_iterator{&getBuckets()[bucketIndex],
+                                                cap - seenTombstoneBucket,
+                                                seenTombstoneIdx, offset});
   }
 
 public:
@@ -134,11 +141,14 @@ public:
     }
   }
 
-  iterator find_next(iterator prev) {
+  const_iterator find_next(const_iterator prev) const {
     auto [found, it] = findNextImpl(prev);
     if (!found)
       return end();
     return it;
+  }
+  iterator find_next(iterator prev) {
+    return iterator(find_next(const_iterator(prev)), getBuckets());
   }
 
   using Base::clear;

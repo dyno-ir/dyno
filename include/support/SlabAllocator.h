@@ -88,6 +88,8 @@ public:
     base.clear();
   }
 
+  T &back() { return (*this)[size() - 1]; }
+
   SlabAllocator() : base(sizeof(T)) {}
 };
 

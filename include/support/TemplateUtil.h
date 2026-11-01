@@ -35,6 +35,12 @@ template <> struct uint_of_size<16> {
 template <class T, class... U>
 concept any_of = std::disjunction_v<std::is_convertible<T, U>...>;
 
+template <std::size_t N, typename Func> constexpr void constexpr_for(Func &&f) {
+  [&]<std::size_t... Is>(std::index_sequence<Is...>) {
+    (f.template operator()<Is>(), ...);
+  }(std::make_index_sequence<N>{});
+}
+
 template <typename T> struct function_info;
 
 template <typename R, typename C, typename... Args>

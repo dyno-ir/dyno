@@ -26,7 +26,8 @@ bool stderrIsTerminal();
   LAMBDA(BgBlue, "\033[44m")                                                   \
   LAMBDA(BgMagenta, "\033[45m")                                                \
   LAMBDA(BgCyan, "\033[46m")                                                   \
-  LAMBDA(BgWhite, "\033[47m")
+  LAMBDA(BgWhite, "\033[47m")                                                  \
+  LAMBDA(Gray, "\033[90m")
 
 #define STDERR_COLOR(nm, str)                                                  \
   inline const char *stderr##nm() { return stderrIsTerminal() ? str : ""; }

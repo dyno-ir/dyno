@@ -13,7 +13,7 @@ template <typename K, typename KeyT = uint32_t> class TwoLevelSet {
     return rv;
   };
 
-  auto find_raw(const K &k) {
+  auto find_raw(const K &k) const {
     auto h = HashFunc(k);
     auto it = map.find(h);
     for (; it != map.end(); it = map.find_next(it)) {
@@ -24,8 +24,8 @@ template <typename K, typename KeyT = uint32_t> class TwoLevelSet {
   }
 
 public:
-  class iterator : private DenseMultimap<Unhashed<KeyT>, K>::iterator {
-    using Base = DenseMultimap<Unhashed<KeyT>, K>::iterator;
+  class iterator : private DenseMultimap<Unhashed<KeyT>, K>::const_iterator {
+    using Base = DenseMultimap<Unhashed<KeyT>, K>::const_iterator;
     friend class TwoLevelSet;
 
     using Base::Base;
@@ -47,7 +47,7 @@ public:
     iterator() = default;
   };
 
-  iterator find(const K &k) { return iterator(find_raw(k).second); }
+  iterator find(const K &k) const { return iterator(find_raw(k).second); }
   iterator insert(K &&k) {
     return iterator(map.insert(HashFunc(k), std::move(k)));
   }
@@ -55,8 +55,8 @@ public:
 
   bool contains(const K &k) { return find(k) != end(); }
 
-  iterator begin() { return iterator(map.begin()); }
-  iterator end() { return iterator(map.end()); }
+  iterator begin() const { return iterator(map.begin()); }
+  iterator end() const { return iterator(map.end()); }
 
   auto erase(iterator it) { return map.erase(it.base); }
 

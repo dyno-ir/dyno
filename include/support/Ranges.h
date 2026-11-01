@@ -713,7 +713,7 @@ public:
   mark_front_iterator() = default;
   mark_front_iterator(T it, bool first) : it(it), first(first) {}
 
-  value_type operator*() { return {first, *it}; }
+  value_type operator*() const { return {first, *it}; }
 
   mark_front_iterator &operator++() {
     first = false;
