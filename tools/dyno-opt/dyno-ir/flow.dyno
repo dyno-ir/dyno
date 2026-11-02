@@ -1,12 +1,14 @@
-EXPORT :symbol("flow_earlyCanonFlow"),            %earlyCanonFlow            :?func
-EXPORT :symbol("flow_synthCanonicalize"),         %synthCanonicalize         :?func
-EXPORT :symbol("flow_synthEarlyOpt"),             %synthEarlyOpt             :?func
-EXPORT :symbol("flow_synthLowerControlFlow"),     %synthLowerControlFlow     :?func
-EXPORT :symbol("flow_synthMemoryFFMuxHandling"),  %synthMemoryFFMuxHandling  :?func
-EXPORT :symbol("flow_synthLowerMemoryFF"),        %synthLowerMemoryFF        :?func
-EXPORT :symbol("flow_synthTechmap"),              %synthTechmap              :?func
-EXPORT :symbol("flow_completeFlow_generic"),      %completeFlow_generic      :?func
-EXPORT :symbol("flow_completeFlow_tgt_specific"), %completeFlow_tgt_specific :?func
+EXPORT :symbol("flow_earlyCanonFlow"),                %earlyCanonFlow                :?func
+EXPORT :symbol("flow_synthCanonicalize"),             %synthCanonicalize             :?func
+EXPORT :symbol("flow_synthEarlyOpt"),                 %synthEarlyOpt                 :?func
+EXPORT :symbol("flow_synthLowerControlFlow"),         %synthLowerControlFlow         :?func
+EXPORT :symbol("flow_synthMemoryFFMuxHandling"),      %synthMemoryFFMuxHandling      :?func
+EXPORT :symbol("flow_synthLowerMemoryFF"),            %synthLowerMemoryFF            :?func
+EXPORT :symbol("flow_synthTechmap"),                  %synthTechmap                  :?func
+EXPORT :symbol("flow_synthTechmapFPGA"),              %synthTechmapFPGA              :?func
+EXPORT :symbol("flow_completeFlow_generic"),          %completeFlow_generic          :?func
+EXPORT :symbol("flow_completeFlow_tgt_specific"),     %completeFlow_tgt_specific     :?func
+EXPORT :symbol("flow_completeFlowFPGA_tgt_specific"), %completeFlowFPGA_tgt_specific :?func
 
 FUNCTION_DEF %earlyCanonFlow:func, :block {
   // preprocessing, inlining
@@ -148,7 +150,6 @@ FUNCTION_DEF %synthMemoryFFMuxHandling:func, :block {
   meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS
   meta.AGGRESSIVE_DEAD_CODE_ELIMINATION_PASS map("keepRegs": "NAMED")
 
-
   // flatten MUX trees
   meta.MUX_TREE_FLATTEN_PASS
   meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS
@@ -257,26 +258,8 @@ FUNCTION_DEF %synthLowerMemoryFF:func, :block {
 }
 
 FUNCTION_DEF %synthTechmap:func, :block {
-  meta.CHECK_PASS
-
   // lower everything
-  meta.LOWER_OPS_PASS map(
-    "lowerMultiInputAdd"     : "1",
-    "lowerAddCompress"       : "1",
-    "lowerSimpleAdd"         : "1",
-    "lowerSub"               : "1",
-    "lowerMul"               : "1",
-    "lowerMultiInputBitwise" : "1",
-    "lowerEqualityICMP"      : "1",
-    "lowerOrderingICMP"      : "1",
-    "lowerWildcardCaseICMP"  : "1",
-    "lowerShift"             : "1",
-    "lowerInsert"            : "1",
-    "lowerExtract"           : "1",
-    "lowerOneHotMux"         : "1",
-  )
-
-  meta.CHECK_PASS
+  meta.LOWER_OPS_PASS
 
   meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS
   meta.INST_COMBINE_PASS
@@ -284,13 +267,10 @@ FUNCTION_DEF %synthTechmap:func, :block {
   meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS
   meta.AGGRESSIVE_DEAD_CODE_ELIMINATION_PASS map("keepRegs": "NAMED")
 
-  meta.CHECK_PASS
-
   // AIG opt & techmap
   meta.AIG_CONSTRUCT_PASS
   meta.AGGRESSIVE_DEAD_CODE_ELIMINATION_PASS map("keepRegs": "NAMED")
   meta.ABC_PASS map("path": "sky130_fd_sc_hd__tt_025C_1v80.lib")
-
 
   meta.AGGRESSIVE_DEAD_CODE_ELIMINATION_PASS map("keepRegs": "NAMED")
   meta.REMOVE_BUFFERS_PASS
@@ -303,6 +283,42 @@ FUNCTION_DEF %synthTechmap:func, :block {
     map("fuseCommutative": "0", "removeAssumes": "1", "boolExprSimplify": "0", "inferMuxs": "0", "muxToBitwise": "0")
   meta.CONSTANT_MAPPING_PASS
   meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS
+  meta.INST_COMBINE_PASS
+    map("fuseCommutative": "0", "removeAssumes": "1", "boolExprSimplify": "0", "inferMuxs": "0", "muxToBitwise": "0")
+  meta.AGGRESSIVE_DEAD_CODE_ELIMINATION_PASS map("keepRegs": "NAMED")
+
+  meta.PROC_TO_NETLIST_PASS map("keepRegs": "1")
+}
+
+FUNCTION_DEF %synthTechmapFPGA:func, :block {
+  // lower everything
+  meta.LOWER_OPS_PASS
+
+  meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS
+  meta.INST_COMBINE_PASS
+    map("fuseCommutative": "0", "removeAssumes": "1", "boolExprSimplify": "0", "inferMuxs": "0", "muxToBitwise": "0")
+  meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS
+  meta.AGGRESSIVE_DEAD_CODE_ELIMINATION_PASS map("keepRegs": "NAMED")
+
+  // AIG opt & techmap
+  meta.AIG_CONSTRUCT_PASS
+  meta.AGGRESSIVE_DEAD_CODE_ELIMINATION_PASS map("keepRegs": "NAMED")
+  meta.ABC_PASS map("abcCmd":
+    [{read_blif aig.blif; strash; &get -n; &fraig -x;
+      &put; scorr; dc2;
+      dretime; strash;
+      dch -f; if -K 6; mfs2; lutpack;
+      print_stats; write_blif
+      mapped.blif}],
+    "path": "sky130_fd_sc_hd__tt_025C_1v80.lib")
+
+  meta.AGGRESSIVE_DEAD_CODE_ELIMINATION_PASS map("keepRegs": "NAMED")
+  meta.REMOVE_BUFFERS_PASS
+  meta.COMMON_SUBEXPRESSION_ELIMINATION_PASS
+
+  meta.ORDER_INSTRS_PASS map("assertNoCircularDeps": "0")
+  meta.NETLIST_TO_PROC_PASS
+
   meta.INST_COMBINE_PASS
     map("fuseCommutative": "0", "removeAssumes": "1", "boolExprSimplify": "0", "inferMuxs": "0", "muxToBitwise": "0")
   meta.AGGRESSIVE_DEAD_CODE_ELIMINATION_PASS map("keepRegs": "NAMED")
@@ -327,5 +343,12 @@ FUNCTION_DEF %completeFlow_tgt_specific:func, :block {
   CALL %synthLowerMemoryFF
   meta.DUMP_PASS map("path": "post_lower_memory.dyno")
   CALL %synthTechmap
+  meta.DUMP_PASS map("path": "post_techmap.dyno")
+}
+
+FUNCTION_DEF %completeFlowFPGA_tgt_specific:func, :block {
+  CALL %synthLowerMemoryFF
+  meta.DUMP_PASS map("path": "post_lower_memory.dyno")
+  CALL %synthTechmapFPGA
   meta.DUMP_PASS map("path": "post_techmap.dyno")
 }
