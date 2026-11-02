@@ -477,7 +477,8 @@ private:
     Defer _{[old = loopbackAnalysis.config, this] {
       loopbackAnalysis.config = old;
     }};
-    loopbackAnalysis.config.considerMultiUsed = true;
+    if (instr.is<StoreIRef>())
+      loopbackAnalysis.config.considerMultiUsed = true;
 
     auto part = loopbackAnalysis.get(dVal, load.value());
     if (Range{part.frags}.all(
