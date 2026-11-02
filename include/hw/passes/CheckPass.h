@@ -181,21 +181,34 @@ public:
     ObjMapVec<Wire, bool> seen;
     seen.resize(ctx.getStore<Wire>().numIDs());
 
-    Range range{HierBlockRangeIter{proc.block().begin()},
-                HierBlockRangeIter{proc.block().end()}};
+    SmallVec<BlockRef_iterator<true>, 16> worklist{proc.block().begin()};
 
-    for (auto instr : range) {
+    while (!worklist.empty()) {
+      auto it = worklist.pop_back_val();
+      auto block = it.blockRef();
+
+      if (it == block.end()) {
+        for (auto instr : block)
+          for (auto def : instr.defs())
+            if (auto asWire = def->dyn_as<WireRef>())
+              seen[asWire] = false;
+        continue;
+      }
+
+      auto instr = it.instr();
+      worklist.emplace_back(it.succ());
+
       for (auto use : instr.others()) {
-        if (!use->is<WireRef>())
-          continue;
-        auto wire = use->as<WireRef>();
-        if (!seen[wire])
+        if (auto wire = use->dyn_as<WireRef>(); wire && !seen[wire])
           error(instr, "wire does not respect dominance");
       }
 
-      for (auto def : instr.defs())
-        if (auto asWire = def->dyn_as<WireRef>())
-          seen[asWire] = 1;
+      for (auto def : instr.defs()) {
+        if (auto block = def->dyn_as<BlockRef>(); block && !block.empty())
+          worklist.emplace_back(block.begin());
+        else if (auto wire = def->dyn_as<WireRef>())
+          seen[wire] = 1;
+      }
     }
   }
 
