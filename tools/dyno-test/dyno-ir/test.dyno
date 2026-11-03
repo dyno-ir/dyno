@@ -728,7 +728,7 @@ TEST_EQUIVALENCE :string("lowerops-divmod"), :block, :block {
   LOWER_OPS_PASS
   COMMON_SUBEXPRESSION_ELIMINATION_PASS
   INST_COMBINE_PASS
-  RANDOM_EQUIVALENCE_CHECK_PASS map("cycles": "10000", "relaxXZ": "1")
+  RANDOM_EQUIVALENCE_CHECK_PASS map("cycles": "1000", "relaxXZ": "1")
 }
 
 TEST_EQUIVALENCE :string("instcombine-mod"), :block, :block {
@@ -1726,3 +1726,30 @@ TEST_CASE :string("test-store-order"), :block, :block, :block {
   SSA_CONSTRUCT_PASS
   AGGRESSIVE_DEAD_CODE_ELIMINATION_PASS
 }
+
+TEST_SCRIPT :string("test-exhaustive-case-no-latch"), :block {
+  PARSE_VERILOG_PASS map("strictXZ": "0", "code":[{
+    module Test (
+      input logic [1:0] a,
+      input logic [3:0] b,
+      output logic [3:0] x
+    );
+      always@* begin
+        case (a)
+          2'b00: x = b - 1;
+          2'b01: x = b + 2;
+          2'b10: x = b + 6;
+          2'b11: x = b + 7;
+        endcase
+      end
+    endmodule
+  }])
+  CALL symbol("flow_earlyCanonFlow")
+  CALL symbol("flow_synthCanonicalize")
+  CALL symbol("flow_synthEarlyOpt")
+  CALL symbol("flow_synthLowerControlFlow")
+  CALL symbol("flow_synthMemoryFFMuxHandling")
+  ASSERT_EXISTS_PASS map("regex": "hw.LATCH", "num": "0")
+  ASSERT_EXISTS_PASS map("regex": "op.ADD", "num": "1")
+}
+

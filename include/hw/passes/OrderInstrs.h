@@ -20,8 +20,6 @@
 
 namespace dyno {
 
-// fixme: still needs mode to respect existing partial order. currently does not
-// respect order of side effect instrs.
 class OrderInstrsPass : public Pass<OrderInstrsPass> {
   Context &ctx;
   ObjMap<Instr, DynSymbSet<Vec<uint64_t>, 2>> map;

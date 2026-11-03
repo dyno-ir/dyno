@@ -2385,30 +2385,103 @@ private:
   }
 
   PatBool simplifySwitchStmt(SwitchInstrRef instr) {
-    bool allConst = instr.cond()->is<ConstantRef>();
+    if (instr.caseInstrs().empty()) {
+      assert(instr.yieldValues().empty() && "malformed switch");
+      deleteMatchedInstr(instr);
+      return PAT_TRUE;
+    }
+
+    SmallDenseSet<DynObjRef, 64> labels;
+    labels.reserve(instr.getNumCases());
+
+    auto bits = *instr.cond()->as<HWValue>().getNumBits();
+    using case_cnt_t = __uint128_t;
+    std::optional<case_cnt_t> coveredCases =
+        (bits < bit_mask_sz<case_cnt_t>) ? std::make_optional(0) : std::nullopt;
+
+    bool allConst = true;
+    bool change = false;
+
+    Optional<DialectOpcode> caseOpc{};
     CaseInstrRef defaultCase = nullref;
     for (auto caseI : instr.caseInstrs()) {
       if (caseI.isDefault()) {
         defaultCase = caseI;
         continue;
       }
-      allConst = allConst && caseI.labels().all([](auto op) {
-        return op.template is<ConstantRef>();
-      });
-      if (caseI.labels().as<HWValue>().find_idx(instr.cond()->as<HWValue>())) {
-        replaceMultiwayWithBlock(instr, caseI.block());
-        deleteMatchedInstr(instr);
-        return PAT_TRUE;
+
+      caseOpc = caseOpc.value_or(caseI.getDialectOpcode());
+      if (caseOpc != caseI.getDialectOpcode())
+        return false; // not generated currently. todo
+
+      SmallVec<HWValue, 8> uniqueLabels(reserve_tag, caseI.labels().size());
+      for (auto label : caseI.labels().as<HWValue>()) {
+        auto isConstMatch = [&]() {
+          if (!allConst || !label.is<ConstantRef>() ||
+              !instr.cond()->is<ConstantRef>())
+            return false;
+          auto opc = BigInt::ICMP_CEQ;
+          if (caseI.isOpc(HW_CASE_Z))
+            opc = BigInt::ICMP_CZEQ;
+          if (caseI.isOpc(HW_CASE_X))
+            opc = BigInt::ICMP_CXEQ;
+          return bool(BigInt::icmpOp4S(label.as<ConstantRef>(),
+                                       instr.cond()->as<ConstantRef>(), opc));
+        };
+
+        if (label == instr.cond()->as<HWValue>() || isConstMatch()) {
+          replaceMultiwayWithBlock(instr, caseI.block());
+          deleteMatchedInstr(instr);
+          return PAT_TRUE;
+        }
+
+        auto [found, it] = labels.findOrInsert(label);
+        if (!found)
+          uniqueLabels.emplace_back(label);
+
+        if (allConst &= label.is<ConstantRef>()) {
+          if (coveredCases && caseI.isOpc(OP_CASE))
+            (*coveredCases)++;
+          auto addFreeBitCases = [&](FourState bval, auto... opc) {
+            if (!caseI.isOpc(opc...) || !coveredCases)
+              return;
+            auto free = BigInt::countBits4SExact(label.as<ConstantRef>(), bval);
+            auto sum = *coveredCases + (case_cnt_t(1) << free);
+            if (free >= bit_mask_sz<case_cnt_t> || sum < coveredCases) {
+              coveredCases.reset();
+              return;
+            }
+            coveredCases = sum;
+          };
+          addFreeBitCases(FourState::SZ, HW_CASE_Z, HW_CASE_X);
+          addFreeBitCases(FourState::SX, HW_CASE_X);
+        } else
+          coveredCases.reset();
       }
+
+      if (uniqueLabels.size() == uint32_t(caseI.labels().size()))
+        continue;
+
+      HWInstrBuilder build{ctx, caseI};
+      auto ib = build.buildInstrRaw(caseI.getDialectOpcode(),
+                                    1 + uniqueLabels.size());
+      ib.addRef(caseI.block()).other().addRefs(uniqueLabels);
+      caseI.def(0).replace(FatDynObjRef<>{nullref});
+      deleteMatchedInstr(caseI);
+      change = true;
     }
 
-    if (allConst && defaultCase) {
+    if (instr.cond().is<ConstantRef>() && allConst && defaultCase) {
       replaceMultiwayWithBlock(instr, defaultCase.block());
       deleteMatchedInstr(instr);
       return PAT_TRUE;
     }
 
-    return PAT_FALSE;
+    if (!defaultCase || !coveredCases || *coveredCases != case_cnt_t(1) << bits)
+      return PAT_BOOL(change);
+
+    deleteMatchedInstr(defaultCase);
+    return PAT_TRUE;
   }
 
   PatBool manual(InstrRef instr) {

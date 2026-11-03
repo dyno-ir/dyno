@@ -180,7 +180,6 @@ private:
     build.setInsertPoint(endIter);
 
     auto token = autoDebugInfo->addWithToken(instr);
-    assert(numYieldValues == 0 || defaultIdx);
 
     size_t lastIdx = instr.block().size() - 1;
 
@@ -209,11 +208,18 @@ private:
       build.setInsertPoint(endIter);
 
       for (unsigned i = 0; i < instr.getNumYieldValues(); i++) {
-        HWValue iter = first ? yields[*defaultIdx * numYieldValues + i]
-                             : yields[lastIdx * numYieldValues + i];
+        HWValue &slot = yields[lastIdx * numYieldValues + i];
         HWValue newVal = yields[j * numYieldValues + i];
-        yields[lastIdx * numYieldValues + i] =
-            build.buildMux(selWire, newVal, iter);
+        HWValue iter = slot;
+        if (first) {
+          if (defaultIdx)
+            iter = yields[*defaultIdx * numYieldValues + i];
+          else
+            iter = ConstantBuilder{ctx.getStore<Constant>()}
+                       .undefLike(newVal)
+                       .get();
+        }
+        slot = build.buildMux(selWire, newVal, iter);
       }
 
       first = false;
@@ -245,7 +251,8 @@ private:
     auto [div, mod] = BigInt::sdivmodOp4S(diff, step);
     if (!mod.valueEquals(0)) {
       dumpInstr(forLoop, ctx);
-      report_fatal_error(ctx, forLoop, "loop never terminates (diff not divisible by step)");
+      report_fatal_error(ctx, forLoop,
+                         "loop never terminates (diff not divisible by step)");
     }
     if (!div.getLimitedVal())
       report_fatal_error(ctx, forLoop, "too many loop iterations");

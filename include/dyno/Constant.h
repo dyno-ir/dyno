@@ -3394,16 +3394,16 @@ public:
     cur.set(uint32_t(1), bits);
     return *this;
   }
-  template <typename U> ConstantBuilderBase &onesLike(U like) {
+  template <typename U> ConstantBuilderBase &onesLike(U &&like) {
     cur.set(uint32_t(~0ULL), (uint32_t)like.getNumBits());
     cur.setExtend(bit_mask_ones<uint8_t>(BigIntExtendBits));
     return *this;
   }
-  template <typename U> ConstantBuilderBase &zeroLike(U like) {
+  template <typename U> ConstantBuilderBase &zeroLike(U &&like) {
     cur.set(uint32_t(0), (uint32_t)like.getNumBits());
     return *this;
   }
-  template <typename U> ConstantBuilderBase &oneLike(U like) {
+  template <typename U> ConstantBuilderBase &oneLike(U &&like) {
     cur.set(uint32_t(1), (uint32_t)like.getNumBits());
     return *this;
   }
@@ -3419,6 +3419,9 @@ public:
   ConstantBuilderBase &undef(unsigned bits) {
     cur.setRepeating(BigInt::EXTX_MASK, 2 * bits, 1);
     return *this;
+  }
+  template <typename U> ConstantBuilderBase &undefLike(U &&like) {
+    return undef((uint32_t)like.getNumBits());
   }
   ConstantBuilderBase &fourState() {
     cur.setCustom(1);
