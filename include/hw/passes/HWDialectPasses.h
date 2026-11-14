@@ -96,6 +96,7 @@ void registerDialectPasses_impls1(PassRegistry &passRegistry) {
 #include "hw/passes/LowerOps.h"
 #include "hw/passes/MemoryMapping.h"
 #include "hw/passes/ModuleInline.h"
+#include "hw/passes/ModuleToStdCell.h"
 #include "hw/passes/MuxTreeFlatten.h"
 #include "hw/passes/NetlistToProc.h"
 #include "hw/passes/OrderInstrs.h"
@@ -111,6 +112,7 @@ void registerDialectPasses_impls2(PassRegistry &passRegistry) {
   passRegistry.registerPass<LowerOpsPass>(DIALECT_HW);
   passRegistry.registerPass<MemoryMappingPass>(DIALECT_HW);
   passRegistry.registerPass<ModuleInlinePass>(DIALECT_HW);
+  passRegistry.registerPass<ModuleToStdCellPass>(DIALECT_HW);
   passRegistry.registerPass<MuxTreeFlattenPass>(DIALECT_HW);
   passRegistry.registerPass<NetlistToProcPass>(DIALECT_HW);
   passRegistry.registerPass<OrderInstrsPass>(DIALECT_HW);
