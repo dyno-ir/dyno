@@ -1,6 +1,5 @@
-# This starter workflow is for a CMake project running on a single platform. There is a different starter workflow if you need cross-platform coverage.
-# See: https://github.com/actions/starter-workflows/blob/main/ci/cmake-multi-platform.yml
-name: CMake
+# Build dyno, run its C++ tests, and run the dyno-sv benchmark tests in one job.
+name: CMake build, test, benchmarks
 
 on:
   workflow_dispatch:
@@ -10,7 +9,6 @@ on:
     branches: [ "main" ]
 
 env:
-  # Customize the CMake build type here (Release, Debug, RelWithDebInfo, etc.)
   BUILD_TYPE: Release
   LLVM_VER: 22
   # Configure ccache environment variables
@@ -24,14 +22,19 @@ jobs:
     steps:
     - uses: actions/checkout@v6
 
-    - name: Install Clang ${{ env.LLVM_VER }}, libc++, and ccache
+    - name: Install Clang ${{ env.LLVM_VER }}, libc++, ccache, and benchmark tools
       run: |
         # Download the official LLVM repo setup script
         wget https://apt.llvm.org/llvm.sh
         chmod +x llvm.sh
         # Install Clang, then manually install the matching libc++ headers and ccache
         sudo ./llvm.sh ${{ env.LLVM_VER }}
-        sudo apt-get install -y libc++-${{ env.LLVM_VER }}-dev libc++abi-${{ env.LLVM_VER }}-dev ccache
+        sudo apt-get install -y libc++-${{ env.LLVM_VER }}-dev libc++abi-${{ env.LLVM_VER }}-dev ccache yosys binutils-riscv64-unknown-elf gcc-riscv64-unknown-elf device-tree-compiler
+        sudo ln -sf /usr/bin/riscv64-unknown-elf-as /usr/local/bin/riscv32-elf-as
+        sudo ln -sf /usr/bin/riscv64-unknown-elf-gcc /usr/local/bin/riscv32-elf-gcc
+        sudo ln -sf /usr/bin/riscv64-unknown-elf-objcopy /usr/local/bin/riscv32-elf-objcopy
+        printf '#!/bin/sh\nexec /usr/bin/riscv64-unknown-elf-ld -m elf32lriscv "$@"\n' | sudo tee /usr/local/bin/riscv32-elf-ld >/dev/null
+        sudo chmod +x /usr/local/bin/riscv32-elf-ld
 
     - name: Restore ccache
       uses: actions/cache/restore@v4
@@ -47,8 +50,18 @@ jobs:
         ccache --set-config=max_size=1G
         ccache -z
 
-    - name: Get submodules
-      run : git submodule update --init --recursive
+    - name: Clone dependencies
+      run: |
+        git config --file .gitmodules --get-regexp 'submodule\..*\.path' | while read -r key path; do
+          name=${key#submodule.}
+          name=${name%.path}
+          url=$(git config --file .gitmodules --get "submodule.$name.url")
+          hash=$(git ls-tree HEAD "$path" | awk '{print $3}')
+          rm -rf "$path"
+          git clone "$url" "$path"
+          git -C "$path" checkout "$hash"
+          git -C "$path" submodule update --init --recursive
+        done
 
     - name: Configure CMake
       env:
@@ -67,7 +80,6 @@ jobs:
         -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
 
     - name: Build
-      # Build your program with the given configuration
       run: cmake --build ${{github.workspace}}/build --config ${{env.BUILD_TYPE}} -j $(nproc)
 
     - name: Save ccache
@@ -82,14 +94,18 @@ jobs:
       run: ccache -s
 
     - name: Test
+      env:
+        CXX: clang++-${{ env.LLVM_VER }}
+        CXXFLAGS: -stdlib=libc++
+        LDFLAGS: -stdlib=libc++
       working-directory: ${{github.workspace}}/build
-      # Execute tests defined by the CMake configuration.
-      # See https://cmake.org/cmake/help/latest/manual/ctest.1.html for more detail
-      run: ctest -C ${{env.BUILD_TYPE}}
+      run: ctest -C ${{env.BUILD_TYPE}} --output-on-failure
 
-    - name: Upload LastTest.log
+    - name: Upload test artifacts
       if: always()
       uses: actions/upload-artifact@v4
       with:
-        name: LastTest-log
-        path: ${{github.workspace}}/build/Testing/Temporary/LastTest.log
+        name: test-artifacts
+        path: |
+          ${{github.workspace}}/build/bench_*.json
+          ${{github.workspace}}/build/Testing/Temporary/LastTest.log

@@ -9,7 +9,11 @@
 #include <optional>
 #include <type_traits>
 
-template <std::unsigned_integral T>
+template <typename T>
+concept unsigned_integral = (std::is_integral_v<T> && std::is_unsigned_v<T>) ||
+                           std::is_same_v<T, unsigned __int128>;
+
+template <unsigned_integral T>
 constexpr unsigned bit_mask_sz = sizeof(T) * CHAR_BIT;
 
 template <typename T> constexpr T bit_mask(unsigned pos = 0) {

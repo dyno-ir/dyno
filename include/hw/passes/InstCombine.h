@@ -2459,6 +2459,12 @@ private:
           coveredCases.reset();
       }
 
+      if (uniqueLabels.empty()) {
+        deleteMatchedInstr(caseI);
+        change = true;
+        continue;
+      }
+
       if (uniqueLabels.size() == uint32_t(caseI.labels().size()))
         continue;
 

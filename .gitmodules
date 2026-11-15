@@ -4,3 +4,8 @@
 [submodule "tools/dyno-sim/libfst"]
 	path = tools/dyno-sim/libfst
 	url = https://github.com/gtkwave/libfst
+[submodule "test/dyno-sv-test"]
+	path = test/dyno-sv-test
+	url = https://github.com/dyno-ir/dyno-sv-test.git
+	update = none
+	ignore = all
