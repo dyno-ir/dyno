@@ -1289,13 +1289,19 @@ public:
     if (lhs.getNumBits() != rhs.getNumBits())
       return false;
 
-    size_t n = std::max(lhs.getExtNumWords(), rhs.getExtNumWords());
+    uint32_t rawBits = 2 * lhs.getNumBits();
+    size_t n = (rawBits + WordBits - 1) / WordBits;
+    uint32_t lastMask = (rawBits % WordBits) ? ((1u << (rawBits % WordBits)) - 1) : ~0u;
 
     bool notEqual = 0;
 
     for (size_t i = 0; i < n; i++) {
       uint32_t lhsV = lhs.getWord4S(i);
       uint32_t rhsV = rhs.getWord4S(i);
+      if (i == n - 1) {
+        lhsV &= lastMask;
+        rhsV &= lastMask;
+      }
 
       uint32_t mask = (rhsV & REP10);
       mask |= mask >> 1;
@@ -2436,6 +2442,11 @@ public:
   }
 
   constexpr void prune() {
+    if (words.empty()) {
+      if constexpr (requires(BigIntBase b) { b.words.try_to_inline(); })
+        words.try_to_inline();
+      return;
+    }
     uint32_t extendMask = repeatExtend(extend());
 
     auto remBits = getRawNumBits() % WordBits;
@@ -2782,12 +2793,16 @@ public:
 
 private:
   constexpr void normalizeLastWord() {
+    if (words.empty())
+      return;
     if (!isExtended())
       extend() = 0;
     setLastWordBitsToPattern(extend());
   }
 
   constexpr void normalizeExtend() {
+    if (words.empty())
+      return;
     // if extended by exactly one bit the upper extend bit
     // is free. set it to last materialized word msbit, may
     // allow collapsing more.
@@ -2796,6 +2811,8 @@ private:
   }
 
   constexpr void setLastWordBitsToPattern(uint8_t pattern) {
+    if (words.empty())
+      return;
     // truncate last word and fill with extend.
     if ((words.size() == getExtNumWords() && getRawNumBits() % 32 != 0) ||
         getRawNumBits() == 0) {

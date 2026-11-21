@@ -24,4 +24,4 @@ CALL symbol("flow_synthEarlyOpt")
 CALL symbol("flow_synthLowerControlFlow")
 CALL symbol("flow_synthMemoryFFMuxHandling")
 
-meta.DUMP_PASS map("path": "xilinx/memories.dyno")
+meta.DUMP_PASS map("path": "tools/dyno-opt/dyno-ir/xilinx/memories.dyno")

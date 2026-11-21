@@ -118,7 +118,7 @@ public:
     uint32_t extNumWords = round_up_div(val.getNumBits(), dyno::WordBits);
     rv.push_back_range(Range{val.getWords()});
     for (uint32_t i = rv.size(); i < extNumWords; i++)
-      rv.emplace_back(repeatBits(val.getExtend(), 2));
+      rv.emplace_back(repeatBits<uint32_t>(val.getExtend(), 2));
 
     return rv;
   }

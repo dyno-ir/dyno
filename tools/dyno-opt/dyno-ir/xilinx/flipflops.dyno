@@ -1,0 +1,68 @@
+STDCELL_DEF %FDCE:module("FDCE"), %b2:block {
+  PARAM_REGISTER_DEF %init:register(1, "INIT")
+  INPUT_REGISTER_DEF %r2:register(1, "C", type.base(logic))
+  INPUT_REGISTER_DEF %r3:register(1, "CE", type.base(logic))
+  INPUT_REGISTER_DEF %r4:register(1, "CLR", type.base(logic))
+  INPUT_REGISTER_DEF %r5:register(1, "D", type.base(logic))
+  OUTPUT_REGISTER_DEF %r6:register(1, "Q", type.base(logic))
+  COMB_PROCESS_DEF %2:process, %b8:block {
+    LOAD %w32:wire(1), %r4  ["XilinxFF.sv:11.5-14.14"]
+    LOAD %w23:wire(1), %r3  ["XilinxFF.sv:13.10-14.14"]
+    LOAD %w22:wire(1), %r5  ["XilinxFF.sv:14:7-13"]
+    LOAD %w0:wire(1), %r2
+    LOAD %winit:wire(1), %init
+    FLIP_FLOP %w19:wire(1), %w0, %w22, %w23, %w32, #1'd0, %winit
+    STORE %w19, %r6
+  }
+}
+STDCELL_DEF %FDPE:module("FDPE"), %b3:block {
+  PARAM_REGISTER_DEF %init:register(1, "INIT")
+  INPUT_REGISTER_DEF %r7:register(1, "C", type.base(logic))
+  INPUT_REGISTER_DEF %r8:register(1, "CE", type.base(logic))
+  INPUT_REGISTER_DEF %r9:register(1, "PRE", type.base(logic))
+  INPUT_REGISTER_DEF %r10:register(1, "D", type.base(logic))
+  OUTPUT_REGISTER_DEF %r11:register(1, "Q", type.base(logic))
+  COMB_PROCESS_DEF %3:process, %b12:block {
+    LOAD %w33:wire(1), %r9  ["XilinxFF.sv:26.5-29.14"]
+    LOAD %w7:wire(1), %r8  ["XilinxFF.sv:28.10-29.14"]
+    LOAD %w16:wire(1), %r10  ["XilinxFF.sv:29:7-13"]
+    LOAD %w41:wire(1), %r7
+    LOAD %winit:wire(1), %init
+    FLIP_FLOP %w15:wire(1), %w41, %w16, %w7, %w33, #1'd1, %winit
+    STORE %w15, %r11
+  }
+}
+STDCELL_DEF %FDRE:module("FDRE"), %b4:block {
+  PARAM_REGISTER_DEF %init:register(1, "INIT")
+  INPUT_REGISTER_DEF %r12:register(1, "C", type.base(logic))
+  INPUT_REGISTER_DEF %r13:register(1, "CE", type.base(logic))
+  INPUT_REGISTER_DEF %r14:register(1, "R", type.base(logic))
+  INPUT_REGISTER_DEF %r15:register(1, "D", type.base(logic))
+  OUTPUT_REGISTER_DEF %r16:register(1, "Q", type.base(logic))
+  COMB_PROCESS_DEF %4:process, %b16:block {
+    LOAD %w20:wire(1), %r14  ["XilinxFF.sv:41.5-44.14"]
+    LOAD %w13:wire(1), %r13  ["XilinxFF.sv:43.10-44.14"]
+    LOAD %w26:wire(1), %r15  ["XilinxFF.sv:44:7-13"]
+    LOAD %w42:wire(1), %r12
+    LOAD %winit:wire(1), %init
+    FLIP_FLOP_SRST %w6:wire(1), %w42, %w26, %w13, %w20, #1'd0, %winit
+    STORE %w6, %r16
+  }
+}
+STDCELL_DEF %FDSE:module("FDSE"), %b5:block {
+  PARAM_REGISTER_DEF %init:register(1, "INIT")
+  INPUT_REGISTER_DEF %r17:register(1, "C", type.base(logic))
+  INPUT_REGISTER_DEF %r18:register(1, "CE", type.base(logic))
+  INPUT_REGISTER_DEF %r19:register(1, "S", type.base(logic))
+  INPUT_REGISTER_DEF %r20:register(1, "D", type.base(logic))
+  OUTPUT_REGISTER_DEF %r21:register(1, "Q", type.base(logic))
+  COMB_PROCESS_DEF %5:process, %b20:block {
+    LOAD %w18:wire(1), %r19  ["XilinxFF.sv:56.5-59.14"]
+    LOAD %w34:wire(1), %r18  ["XilinxFF.sv:58.10-59.14"]
+    LOAD %w29:wire(1), %r20  ["XilinxFF.sv:59:7-13"]
+    LOAD %w44:wire(1), %r17
+    LOAD %winit:wire(1), %init
+    FLIP_FLOP_SRST %w10:wire(1), %w44, %w29, %w34, %w18, #1'd1, %winit
+    STORE %w10, %r21
+  }
+}

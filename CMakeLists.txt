@@ -34,8 +34,13 @@ add_test(
 if(NOT CMAKE_BUILD_TYPE STREQUAL "Debug")
     add_test(
         NAME dyno_sv_sim_penc
-        COMMAND make CXX=${CMAKE_CXX_COMPILER} -C ${CMAKE_SOURCE_DIR}/test/tools/dyno-sv/sim/penc run
+        COMMAND make CXX=${CMAKE_CXX_COMPILER} DYNO_ROOT=${CMAKE_SOURCE_DIR} BUILD=${CMAKE_BINARY_DIR} -C ${CMAKE_SOURCE_DIR}/test/tools/dyno-sv/sim/penc run
     )
+endif()
+
+set(DYNO_SV_TEST_DIR "${CMAKE_SOURCE_DIR}/test/dyno-sv-test")
+if(EXISTS "${DYNO_SV_TEST_DIR}/CMakeLists.txt")
+    add_subdirectory("${DYNO_SV_TEST_DIR}" "${CMAKE_BINARY_DIR}/dyno-sv-test")
 endif()
 
 set_tests_properties(run_dyno_test PROPERTIES
