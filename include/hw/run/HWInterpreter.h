@@ -600,8 +600,11 @@ public:
       }
       if (!caseInstr)
         caseInstr = defaultInstr;
-      if (!caseInstr)
+      if (!caseInstr) {
+        for (auto dst : switchInstr.yieldValues().deref().as<WireRef>())
+          wireVals[dst] = PatBigInt::undef(*dst.getNumBits());
         break;
+      }
 
       evalBlock(caseInstr.block());
 
@@ -685,7 +688,7 @@ public:
       auto in = getValue(instr.other(0)->as<HWValue>());
       auto cond = getValue(instr.other(1)->as<HWValue>());
       assert(cond.getNumBits() == 1);
-      if (!cond.valueEquals(0))
+      if (cond.valueEquals(1))
         val = in;
       else
         val = PatBigInt::undef(in.getNumBits());

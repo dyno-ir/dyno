@@ -1,0 +1,10 @@
+// simply call the external symbols
+CALL symbol("flow_completeFlow_generic")
+
+// load pre-parsed liberty
+meta.PARSE_DYNO_PASS map("path": "tools/dyno-opt/dyno-ir/xilinx/flipflops.dyno", "newModulesActive": "0")
+// load memories
+meta.PARSE_DYNO_PASS map("path": "tools/dyno-opt/dyno-ir/xilinx/memories.dyno", "newModulesActive": "0")
+meta.POPULATE_INLINE_CACHES_PASS
+
+CALL symbol("flow_completeFlowFPGA_tgt_specific")
