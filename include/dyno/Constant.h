@@ -141,6 +141,12 @@ protected:
   getWord4S(uint32_t i) const {
     return getWord4S(i, self().getNumWords());
   }
+  constexpr uint32_t __attribute__((always_inline))
+  getWord4SMasked(uint32_t i) const {
+    if (self().getIs4S())
+      return getWordMasked(i);
+    return unpack_bits(getWordMasked(i / 2) >> ((i % 2) * 16));
+  }
   constexpr uint8_t getRawBit(uint32_t i) const {
     assert(i <= self().getRawNumBits());
     return !!(getWord(i / WordBits) & (1 << (i % WordBits)));
@@ -1294,8 +1300,8 @@ public:
     bool notEqual = 0;
 
     for (size_t i = 0; i < n; i++) {
-      uint32_t lhsV = lhs.getWord4S(i);
-      uint32_t rhsV = rhs.getWord4S(i);
+      uint32_t lhsV = lhs.getWord4SMasked(i);
+      uint32_t rhsV = rhs.getWord4SMasked(i);
 
       uint32_t mask = (rhsV & REP10);
       mask |= mask >> 1;

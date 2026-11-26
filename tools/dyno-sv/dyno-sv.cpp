@@ -38,11 +38,6 @@ CmdLineArg<Vec<StringRef>> argInputFiles{
     CmdLineArgFlags::VALUE_REQUIRED | CmdLineArgFlags::MULTIPLE |
         CmdLineArgFlags::POSITIONAL | CmdLineArgFlags::MANDATORY};
 
-CmdLineArg<StringRef>
-    argLibertyFile('l', "liberty", "Liberty (stdcell definitions) file path.",
-                   CmdLineArgFlags::VALUE_REQUIRED | CmdLineArgFlags::MANDATORY,
-                   "");
-
 CmdLineArg<StringRef> argOutFile('o', "", "Output Verilog netlist file path.",
                                  CmdLineArgFlags::VALUE_REQUIRED);
 
@@ -198,7 +193,6 @@ int main(int argc, char **argv) {
     SubCommand test("test", SC_TEST);
 
     synth.registerArg(argInputFiles);
-    synth.registerArg(argLibertyFile);
     synth.registerArg(argOutFile);
     synth.registerArg(argSlangArgs);
     synth.registerArg(argFlowScript);
