@@ -1,20 +1,21 @@
 #pragma once
 #include "support/ArrayRef.h"
-#include "support/Bits.h"
 #include "support/DenseMapInfo.h"
 #include "support/Ranges.h"
+#include <algorithm>
 #include <cctype>
+#include <cstdint>
 #include <cstring>
 #include <format>
 #include <limits>
 #include <ostream>
-#include <sstream>
 #include <string>
 #include <string_view>
+#include <utility>
 
 template <typename Derived> class StringRefMixin {
-  Derived &self() { return *static_cast<Derived *>(this); }
-  const Derived &cself() const { return *static_cast<const Derived *>(this); }
+  constexpr Derived &self() { return *static_cast<Derived *>(this); }
+  constexpr const Derived &cself() const { return *static_cast<const Derived *>(this); }
 
 public:
   using value_type = char;
@@ -84,45 +85,6 @@ public:
   bool contains(char c) const { return find(c) != cself().end(); }
   template <typename T> bool contains(T &&other) const {
     return find(std::forward<T>(other)) != cself().end();
-  }
-
-  void escape(std::ostream &os) const {
-    for (char c : cself()) {
-      switch (c) {
-      case '"':
-        std::print(os, "\\\"");
-        break;
-      case '\\':
-        std::print(os, "\\\\");
-        break;
-      case '\n':
-        std::print(os, "\\n");
-        break;
-      case '\r':
-        std::print(os, "\\r");
-        break;
-      case '\t':
-        std::print(os, "\\t");
-        break;
-      case '\b':
-        std::print(os, "\\b");
-        break;
-      case '\f':
-        std::print(os, "\\f");
-        break;
-      default:
-        if (static_cast<unsigned char>(c) < 0x20)
-          std::print(os, "\\u{:04x}", static_cast<unsigned>(c));
-        else
-          std::print(os, "{}", c);
-        break;
-      }
-    }
-  }
-  std::string escape() const {
-    std::stringstream str;
-    escape(str);
-    return std::move(str).str();
   }
 };
 

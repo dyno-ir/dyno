@@ -7,6 +7,7 @@
 #include "dyno/Constant.h"
 #include "support/ANSITerminal.h"
 #include "support/ArrayRef.h"
+#include "support/Bits.h"
 #include "support/Debug.h"
 #include "support/ErrorRecovery.h"
 #include "support/Format.h"
@@ -14,8 +15,11 @@
 #include "support/Result.h"
 #include "support/SIMD.h"
 #include "support/SlabAllocator.h"
+#include "support/StringHelpers.h"
+#include "support/TemplateUtil.h"
 #include "support/TwoLevelSet.h"
 #include <array>
+#include <bit>
 #include <cassert>
 #include <cstdio>
 #include <format>
@@ -195,6 +199,150 @@ private:
   }
 
   const size_t NUM_KEYWORDS = strings.size();
+  using mask_t = vec_mask_unsigned_t<vec_u8_t>;
+  using mask2x_t = uint_of_size_t<sizeof(mask_t) * 2>;
+
+  template <typename Match>
+  const char *lexUntil(const char *begin, Match matcher) {
+    size_t j = begin - src.begin();
+    size_t prevStart = j;
+    size_t prevRem = std::min<size_t>(src.size() - j, SIMD_WIDTH);
+    mask_t prevValid = bit_mask_ones<mask_t>(prevRem);
+    vec_u8_t prevData = vec_u8_t::load(
+        reinterpret_cast<const uint8_t *>(src.data() + j), prevValid, 0);
+    j += prevRem;
+
+    for (size_t curRem = 0;; j += curRem) {
+      curRem = std::min<size_t>(src.size() - j, SIMD_WIDTH);
+      mask_t curValid = bit_mask_ones<mask_t>(curRem);
+      vec_u8_t curData = vec_u8_t::load(
+          reinterpret_cast<const uint8_t *>(src.data() + j), curValid, 0);
+
+      mask2x_t match = matcher(prevData, curData, prevValid, curValid);
+      size_t endIdx = std::countr_zero(mask_t(match));
+      mask_t active = bit_mask_ones<mask_t>(endIdx);
+      mask_t matchNewline = (prevData == vec_u8_t('\n')).mask() & active;
+      state.lineNumber += std::popcount(matchNewline);
+      auto lastNl = bit_mask_sz<mask_t> - std::countl_zero(matchNewline) - 1;
+      state.columnStartI = __builtin_unpredictable(matchNewline)
+                               ? prevStart + lastNl
+                               : state.columnStartI;
+      if (endIdx < bit_mask_sz<mask_t>)
+        return &src[prevStart + endIdx];
+
+      if (!curRem)
+        return src.end();
+
+      prevStart = j;
+      prevValid = curValid;
+      prevData = curData;
+    }
+  }
+
+  const char *lexUntilDelimiter(const char *begin, StringRef delim) {
+    size_t n = delim.size();
+    assert(n > 0 && n <= SIMD_WIDTH);
+
+    return lexUntil(begin, [&](vec_u8_t prevData, vec_u8_t curData,
+                               mask_t prevValid, mask_t curValid) {
+      mask2x_t match = bit_mask_ones<mask2x_t>();
+      for (size_t k = 0; k < n; k++) {
+        auto m0 = (prevData == vec_u8_t(delim[k])).mask() & prevValid;
+        auto m1 = (curData == vec_u8_t(delim[k])).mask() & curValid;
+        mask2x_t mk = (mask2x_t(m1) << bit_mask_sz<mask_t>) | m0;
+        match &= mk >> k;
+      }
+      return match;
+    });
+  }
+
+  const char *skipWhitespace(const char *begin) {
+    return lexUntil(begin, [](vec_u8_t data, vec_u8_t, mask_t valid, mask_t) {
+      auto control = (data - vec_u8_t('\t')) <= vec_u8_t('\r' - '\t');
+      auto space = data == vec_u8_t(' ');
+      return mask2x_t(~(control | space).mask() & valid);
+    });
+  }
+
+  const char *lexSingleLineComment(const char *begin) {
+    return lexUntil(begin, [](vec_u8_t data, vec_u8_t, mask_t valid, mask_t) {
+      return mask2x_t((data == vec_u8_t('\n')).mask() & valid);
+    });
+  }
+
+  static mask_t isIdentCharMask(vec_u8_t data) {
+    vec_u8_t lower = data | vec_u8_t('a' - 'A');
+    auto letter = (lower - vec_u8_t('a')) <= vec_u8_t('z' - 'a');
+    auto digit = (data - vec_u8_t('0')) <= vec_u8_t('9' - '0');
+    auto underscore = data == vec_u8_t('_');
+    return (letter | digit | underscore).mask();
+  }
+
+  Token lexInlineCodeLiteral() {
+    auto &i = state.i;
+
+    if (i + 2 >= src.size())
+      return Token::makeNone();
+
+    auto begin = &src[i + 2];
+    constexpr StringRef delim = "}]";
+    auto end = lexUntilDelimiter(begin, delim);
+    if (end == src.end())
+      return Token::makeNone();
+    i = end - src.begin() + delim.size();
+    return Token::makeInlineCodeLit(std::string_view(begin, end));
+  }
+
+  Token lexStringLiteral() {
+    auto &i = state.i;
+    auto &lineNumber = state.lineNumber;
+    auto &columnStartI = state.columnStartI;
+
+    i++;
+    mask_t matchSlashPrev = 0;
+    size_t j;
+    for (j = i; j < src.size(); j += SIMD_WIDTH) {
+      auto rem = src.size() - j;
+      auto mask =
+          bit_mask_ones<mask_t>(std::min<unsigned>(rem, bit_mask_sz<mask_t>));
+      auto data = vec_char_t::load(&src[j], mask, 0);
+
+      auto matchSlash = (data == vec_char_t('\\')).mask();
+      auto slashWide =
+          (mask2x_t(matchSlash) << bit_mask_sz<mask_t>) | matchSlashPrev;
+      auto [even, odd] = bit_even_odd_run(slashWide);
+      even >>= bit_mask_sz<mask_t> - 1;
+      odd >>= bit_mask_sz<mask_t> - 1;
+
+      auto matchParen = (data == vec_char_t('\"')).mask();
+      matchParen &= ~odd;
+
+      size_t endIdx = std::countr_zero(matchParen);
+      auto active = bit_mask_ones<mask_t>(endIdx);
+
+      mask_t matchNewline = (data == vec_char_t('\n')).mask() & active;
+      lineNumber += std::popcount(matchNewline);
+      auto lastNl = bit_mask_sz<mask_t> - std::countl_zero(matchNewline) - 1;
+      columnStartI =
+          __builtin_unpredictable(matchNewline) ? lastNl + j : columnStartI;
+
+      matchSlashPrev = 0;
+      if (__builtin_unpredictable(even >> (bit_mask_sz<mask_t>)))
+        matchSlashPrev = bit_mask_ms_nbits<mask_t>(2);
+      if (__builtin_unpredictable(odd >> (bit_mask_sz<mask_t>)))
+        matchSlashPrev = bit_mask_msb<mask_t>();
+
+      if (endIdx != bit_mask_sz<mask_t>) {
+        j += endIdx + 1;
+        goto found_end;
+      }
+    }
+    return Token::makeNone();
+  found_end:
+    std::string_view rv{src.data() + i, (j - i) - 1};
+    i = j;
+    return Token::makeStrLit(rv);
+  }
 
 public:
   Lexer(ArrayRef<char> src, std::string &&srcPath,
@@ -213,11 +361,8 @@ public:
     // build SIMD layout for punctuation
     punctChars.resize(round_up_div(operators.size(), SIMD_WIDTH));
 
-    for (auto &slot : punctChars)
-      memset(reinterpret_cast<char *>(slot.data()), 0xFF, sizeof(slot));
-
     for (auto [i, op] : Range{operators}.enumerate()) {
-      assert(op.size() < maxPunctChars && "bump maxPunctChars");
+      assert(op.size() <= maxPunctChars && "bump maxPunctChars");
       for (size_t j = 0; j < maxPunctChars; j++)
         punctChars[i / SIMD_WIDTH][j][i % SIMD_WIDTH] =
             ((j < op.size()) ? op[j] : 0);
@@ -226,27 +371,25 @@ public:
 
   std::optional<Token> lexNextPunct() {
     size_t srcLen = src.size();
-    const char *srcC = src.data();
     auto &srcOffs = state.i;
 
-    using char_vec_t = uint8_t __attribute__((ext_vector_type(SIMD_WIDTH)));
-    using mask_unsigned = vec_mask_unsigned_t<char_vec_t>;
-
     for (size_t i = 0; i < punctChars.size(); i++) {
-      mask_unsigned matchAcc = ~mask_unsigned(0);
+      size_t base = i * SIMD_WIDTH;
+      size_t count = std::min<size_t>(operators.size() - base, SIMD_WIDTH);
+      mask_t matchAcc = bit_mask_ones<mask_t>(count);
       for (size_t j = 0; j < maxPunctChars; j++) {
         auto srcIdx = srcOffs + j;
-        char_vec_t charSplat =
-            (char_vec_t)(srcIdx >= srcLen ? 0xFF : srcC[srcIdx]);
-        auto punctCharVec = std::bit_cast<char_vec_t>(punctChars[i][j]);
+        vec_u8_t charSplat = vec_u8_t(
+            srcIdx >= srcLen ? 0xFF : static_cast<uint8_t>(src[srcIdx]));
+        auto punctCharVec = vec_u8_t::load(punctChars[i][j].data());
         auto matchVec =
-            (punctCharVec == charSplat) | (punctCharVec == char_vec_t(0));
-        auto match = vec_to_bitmask(matchVec);
-        matchAcc &= match;
+            (punctCharVec == charSplat) | (punctCharVec == vec_u8_t(0));
+        matchAcc &= matchVec.mask();
       }
       if (matchAcc == 0)
         continue;
-      size_t matchIdx = i * SIMD_WIDTH + std::countr_zero(matchAcc);
+      size_t matchIdx =
+          i * SIMD_WIDTH + static_cast<size_t>(std::countr_zero(matchAcc));
 
       srcOffs += operators[matchIdx].size();
       return Token::makePlain(TOK_OPS_START + matchIdx);
@@ -256,14 +399,14 @@ public:
 #else
   void fillPunctChars() {}
   std::optional<Token> lexNextPunct() {
-    const char *srcC = src.data();
+    const char *srcData = src.data();
     size_t len = src.size();
     auto &i = state.i;
 
     for (auto [j, op] : Range{operators}.enumerate()) {
       size_t k = 0;
       while (k < op.size() && i + k < len) {
-        if (op[k] != srcC[i + k])
+        if (op[k] != srcData[i + k])
           break;
         k++;
       }
@@ -278,111 +421,71 @@ public:
 
   Token lexNext() {
     auto &i = state.i;
-    // auto &lastI = state.lastI;
-    auto &lineNumber = state.lineNumber;
-    auto &columnStartI = state.columnStartI;
-
     size_t len = src.size();
-    const char *srcC = src.data();
     preWhitespaceState = state;
 
     while (1) {
-      // Skip whitespace
-      while (isspace(srcC[i])) {
-        if (srcC[i] == '\n') {
-          lineNumber++;
-          columnStartI = i;
-        }
-        i++;
-      }
+      if (i == len)
+        return Token::makeNone();
+      i = skipWhitespace(src.data() + i) - src.begin();
+      if (i == len)
+        return Token::makeNone();
 
-      if (CPPStyleComments) {
-        // Single Line Comment
-        if (srcC[i] == '/' && srcC[i + 1] == '/') {
-          while (i < len && srcC[i] != '\n')
-            i++;
-          continue;
-        }
-
-        /* Multi-line
-           Comment  */
-        if (srcC[i] == '/' && srcC[i + 1] == '*') {
-          i += 2;
-          while (i < len && !(srcC[i - 2] == '*' && src[i - 1] == '/')) {
-            if (srcC[i - 2] == '\n') {
-              lineNumber++;
-              columnStartI = i;
-            }
-            i++;
+      if (CPPStyleComments && i + 1 < len) {
+        if (src[i] == '/' && src[i + 1] == '/') {
+          if (i + 2 == len) {
+            i = len;
+            continue;
           }
+          i = lexSingleLineComment(src.data() + i + 2) - src.begin();
+          continue;
+        }
+
+        if (src[i] == '/' && src[i + 1] == '*') {
+          if (i + 2 == len)
+            return Token::makeNone();
+          auto begin = &src[i + 2];
+          auto end = lexUntilDelimiter(begin, "*/");
+          if (end == src.end())
+            return Token::makeNone();
+          i = end - src.begin() + 2;
           continue;
         }
       }
 
-      if (IgnoreBackslash) {
-        if (src[i] == '\\') {
-          i++;
-          continue;
-        }
+      if (IgnoreBackslash && src[i] == '\\') {
+        i++;
+        continue;
       }
 
       break;
     }
 
-    if (i == len)
-      return Token::makeNone();
-
     lastState = state;
 
     // String Literal
-    bool multiline = (srcC[i] == '[' && srcC[i + 1] == '{') && ParseInlineCode;
-    if (srcC[i] == '\"' || multiline) {
-      size_t delimLen = multiline ? 2 : 1;
-      size_t litLen = delimLen;
-      if (i + litLen >= len)
-        return Token::makeNone();
-      while (multiline
-                 ? (srcC[i + litLen] != '}' || srcC[i + litLen + 1] != ']')
-                 : (srcC[i + litLen] != '\"' || srcC[i + litLen - 1] == '\\')) {
-        if (srcC[i + litLen] == '\n') {
-          if (!multiline)
-            return Token::makeNone();
-          else {
-            lineNumber++;
-            columnStartI = i;
-          }
-        }
-        litLen++;
-        if (i + litLen >= len)
-          return Token::makeNone();
-      }
-
-      Token t = Token::makeNone();
-      if (multiline)
-        t = Token::makeInlineCodeLit(
-            std::string_view(srcC + i + delimLen, litLen - delimLen));
-      else
-        t = Token::makeStrLit(
-            std::string_view(srcC + i + delimLen, litLen - delimLen));
-      i += litLen + delimLen;
-      return t;
-    }
+    if (ParseInlineCode && i + 1 < len && src[i] == '[' && src[i + 1] == '{')
+      return lexInlineCodeLiteral();
+    if (src[i] == '\"')
+      return lexStringLiteral();
 
     if (auto punct = lexNextPunct())
       return *punct;
 
     // Try lexing keywords or tokens
-    if (isalpha(srcC[i]) || srcC[i] == '_' ||
+    if (isalpha(src[i]) || src[i] == '_' ||
         (src[i] == '%' && LeadingPercentIdent)) {
-      size_t identLen = 1;
       bool pct = src[i] == '%';
-      while (1) {
-        char c = srcC[i + identLen];
-        if (!isdigit(c) && !isalpha(c) && c != '_' && (c != '.' || !pct))
-          break;
-        identLen++;
-      }
-      std::string_view substr(srcC + i, identLen);
+      auto begin = src.data() + i;
+      auto end =
+          StringHelpers::find(begin + 1, src.end(), [pct](vec_u8_t data) {
+            mask_t valid = isIdentCharMask(data);
+            if (pct)
+              valid |= (data == vec_u8_t('.')).mask();
+            return valid;
+          });
+      size_t identLen = end - begin;
+      std::string_view substr(begin, identLen);
       i += identLen;
       auto iter = strings.find(substr);
       if (iter != strings.end()) {
@@ -399,8 +502,8 @@ public:
 
     // Int Literal
     if (config.numericParseType != Config::NumericParseType::RAW) {
-      if (isdigit(srcC[i]) || srcC[i] == '\'') {
-        const char *charPtr = &srcC[i];
+      if (isdigit(src[i]) || src[i] == '\'') {
+        auto charPtr = &src[i];
 
         auto res =
             config.numericParseType == Lexer::Config::NumericParseType::VERILOG
@@ -409,23 +512,28 @@ public:
 
         if (!res.has_value())
           return Token::makeNone();
-        i += charPtr - &srcC[i];
+        i += charPtr - &src[i];
 
         if (res->type == dyno::BigInt::ParseResult::SIMPLE)
           return Token::makeIntLit(res->bigInt.getExactVal(), res->isSigned);
 
-        auto *ptr = bigIntLiterals.allocate(std::move(res->bigInt));
-        return Token::makeBigIntLit(ptr, res->isSigned,
+        auto *bigIntPtr = bigIntLiterals.allocate(std::move(res->bigInt));
+        return Token::makeBigIntLit(bigIntPtr, res->isSigned,
                                     res->type ==
                                         dyno::BigInt::ParseResult::UNSIZED);
       }
     } else if (isdigit(src[i]) || src[i] == '.') {
-      size_t len = 0;
-      while (isalnum(src[i + len]) || src[i + len] == '_' ||
-             src[i + len] == '.' || src[i + len] == '+' || src[i + len] == '-')
-        len++;
-      i += len;
-      return Token::makeNumericLit(std::string_view{&src[i - len], len});
+      auto begin = src.data() + i;
+      auto end = StringHelpers::find(begin, src.end(), [](vec_u8_t data) {
+        mask_t valid = isIdentCharMask(data);
+        valid |= (data == vec_u8_t('.')).mask();
+        valid |= (data == vec_u8_t('+')).mask();
+        valid |= (data == vec_u8_t('-')).mask();
+        return valid;
+      });
+      i = end - src.begin();
+      return Token::makeNumericLit(
+          std::string_view{begin, static_cast<size_t>(end - begin)});
     }
 
     return Token::makeNone();

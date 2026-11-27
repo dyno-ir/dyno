@@ -1,7 +1,7 @@
 #pragma once
 #include "support/Tuple.h"
-#include <tuple>
 #include <cstdint>
+#include <tuple>
 #include <type_traits>
 #include <utility>
 
@@ -32,6 +32,8 @@ template <> struct uint_of_size<16> {
   using type = __uint128_t;
 };
 
+template <std::size_t Bytes> using uint_of_size_t = uint_of_size<Bytes>::type;
+
 template <class T, class... U>
 concept any_of = std::disjunction_v<std::is_convertible<T, U>...>;
 
@@ -39,6 +41,16 @@ template <std::size_t N, typename Func> constexpr void constexpr_for(Func &&f) {
   [&]<std::size_t... Is>(std::index_sequence<Is...>) {
     (f.template operator()<Is>(), ...);
   }(std::make_index_sequence<N>{});
+}
+
+template <typename Func, typename... Ts>
+constexpr void constexpr_for(Ts &&...ts, Func &&f) {
+  (f(ts), ...);
+}
+
+template <typename Func, typename Tuple>
+constexpr void constexpr_for(Tuple &&tuple, Func &&f) {
+  std::apply([&](auto &&...ts) { (f(ts), ...); }, tuple);
 }
 
 template <typename T> struct function_info;
@@ -120,3 +132,16 @@ struct tuple_n_helper<T, std::index_sequence<Is...>> {
 };
 template <typename T, std::size_t N>
 using tuple_n_t = typename tuple_n_helper<T, std::make_index_sequence<N>>::type;
+
+template<std::size_t N, class It, std::size_t... I>
+constexpr auto to_array_impl(It first, std::index_sequence<I...>) {
+    using T = std::iter_value_t<It>;
+    return std::array<T, N>{
+        (static_cast<void>(I), *first++)...
+    };
+}
+
+template<std::size_t N, class It>
+constexpr auto to_array(It first) {
+    return to_array_impl<N>(first, std::make_index_sequence<N>{});
+};

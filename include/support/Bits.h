@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <optional>
 #include <type_traits>
+#include <utility>
 
 template <typename T>
 concept unsigned_integral = (std::is_integral_v<T> && std::is_unsigned_v<T>) ||
@@ -106,7 +107,7 @@ template <typename T> constexpr T floor_to_pow2(T x) {
 template <typename T> constexpr T repeatBits(T x, unsigned xBits) {
   unsigned fact = xBits;
   assert(!(x & bit_mask_zeros<T>(xBits)));
-  while (fact != bit_mask_sz<T>) {
+  while (fact < bit_mask_sz<T>) {
     x |= (x << fact);
     fact <<= 1;
   }
@@ -191,6 +192,35 @@ template <typename T>
 constexpr T bit_select(T val, unsigned i, unsigned n = 1) {
   unsigned pos = i * n;
   return (bit_mask_ones<T>(n, pos) & val) >> pos;
+}
+
+// for runs, mark lowest bit, then every second going up
+template <typename T> constexpr T bit_run_parity(T x) {
+  T s = x & ~(x << 1);
+  T q = s;
+  T r = x & (x << 1);
+
+  for (unsigned k = 2; k < bit_mask_sz<T>; k <<= 1) {
+    q |= (q << k) & r;
+    r &= r << k;
+  }
+  return q;
+}
+
+// set least significant bit of odd runs of 1's
+template <typename T> constexpr T bit_odd_run(T x) {
+  T e = x & ~(x >> 1);
+  return e & bit_run_parity(x);
+}
+
+template <typename T> constexpr T bit_even_run(T x) {
+  T e = x & ~(x >> 1);
+  return e & ~bit_run_parity(x);
+}
+template <typename T> constexpr std::pair<T, T> bit_even_odd_run(T x) {
+  T e = x & ~(x >> 1);
+  T p = bit_run_parity(x);
+  return {e & ~p, e & p};
 }
 
 // 4-state logic functions, aligned pairs of real bits correspond to four state
