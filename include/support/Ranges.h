@@ -37,27 +37,27 @@ private:
       std::conditional_t<isRandom, difference_type, std::monostate>;
 
 public:
-  derived &operator++()
+  constexpr derived &operator++()
     requires(isRandom)
   {
     self() += 1;
     return self();
   }
 
-  derived operator++(int) {
+  constexpr derived operator++(int) {
     derived tmp(self());
     ++(self());
     return tmp;
   }
 
-  derived &operator--()
+  constexpr derived &operator--()
     requires(isRandom)
   {
     (self()) -= 1;
     return self();
   }
 
-  derived operator--(int)
+  constexpr derived operator--(int)
     requires(isBidir)
   {
     derived tmp(self());
@@ -65,35 +65,35 @@ public:
     return tmp;
   }
 
-  derived &operator-=(difference_type_safe n)
+  constexpr derived &operator-=(difference_type_safe n)
     requires(isRandom)
   {
     self() += -n;
     return self();
   }
 
-  friend derived operator+(derived a, difference_type_safe n)
+  constexpr friend derived operator+(derived a, difference_type_safe n)
     requires(isRandom)
   {
     a += n;
     return a;
   }
 
-  friend derived operator+(difference_type_safe n, derived a)
+  constexpr friend derived operator+(difference_type_safe n, derived a)
     requires(isRandom)
   {
     a += n;
     return a;
   }
 
-  friend derived operator-(derived a, difference_type_safe n)
+  constexpr friend derived operator-(derived a, difference_type_safe n)
     requires(isRandom)
   {
     a -= n;
     return a;
   }
 
-  decltype(auto) operator[](difference_type_safe n) const
+  constexpr decltype(auto) operator[](difference_type_safe n) const
     requires(isRandom)
   {
     derived tmp(cself());
@@ -101,7 +101,7 @@ public:
     return *tmp;
   }
 
-  friend bool operator!=(const derived &a, const derived &b) {
+  constexpr friend bool operator!=(const derived &a, const derived &b) {
     return !(a == b);
   }
 };
@@ -285,7 +285,7 @@ class transform_iterator
                            typename std::iterator_traits<T>::iterator_category,
                            typename std::iterator_traits<T>::difference_type> {
   T it{};
-  size_t i;
+  size_t i{};
   TransformT transformF;
 
 public:
@@ -303,40 +303,40 @@ private:
       isRandom;
 
 public:
-  transform_iterator()
+  constexpr transform_iterator()
     requires std::is_default_constructible_v<TransformT>
   = default;
 
-  transform_iterator(T it)
+  constexpr transform_iterator(T it)
     requires std::is_default_constructible_v<TransformT>
       : it(it) {}
 
-  transform_iterator(T it, TransformT transformF)
+  constexpr transform_iterator(T it, TransformT transformF)
       : it(it), i(0), transformF(transformF) {}
 
-  auto operator*() const { return transformF(i, *it); }
-  auto operator*() { return transformF(i, *it); }
+  constexpr auto operator*() const { return transformF(i, *it); }
+  constexpr auto operator*() { return transformF(i, *it); }
 
-  transform_iterator &operator++() {
+  constexpr transform_iterator &operator++() {
     ++it;
     ++i;
     return *this;
   }
   // for some reason the base_iterator version can't be resolved
-  transform_iterator operator++(int) {
+  constexpr transform_iterator operator++(int) {
     transform_iterator tmp(*this);
     ++(*this);
     return tmp;
   }
 
-  transform_iterator &operator--()
+  constexpr transform_iterator &operator--()
     requires(isBidir)
   {
     --it;
     --i;
     return *this;
   }
-  transform_iterator &
+  constexpr transform_iterator &
   operator+=(std::conditional_t<isRandom, difference_type, int> n)
     requires(isRandom)
   {
@@ -345,17 +345,17 @@ public:
     return *this;
   }
 
-  difference_type operator-(const transform_iterator &o) const
+  constexpr difference_type operator-(const transform_iterator &o) const
     requires(isRandom)
   {
     return it - o.it;
   }
 
-  friend bool operator==(const transform_iterator &a,
+  constexpr friend bool operator==(const transform_iterator &a,
                          const transform_iterator &b) {
     return a.it == b.it;
   }
-  friend auto operator<=>(const transform_iterator &a,
+  constexpr friend auto operator<=>(const transform_iterator &a,
                           const transform_iterator &b)
     requires(isRandom)
   {
