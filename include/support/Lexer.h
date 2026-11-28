@@ -334,14 +334,12 @@ private:
 
       if (endIdx != bit_mask_sz<mask_t>) {
         j += endIdx + 1;
-        goto found_end;
+        std::string_view rv{src.data() + i, (j - i) - 1};
+        i = j;
+        return Token::makeStrLit(rv);
       }
     }
     return Token::makeNone();
-  found_end:
-    std::string_view rv{src.data() + i, (j - i) - 1};
-    i = j;
-    return Token::makeStrLit(rv);
   }
 
 public:
@@ -522,7 +520,7 @@ public:
                                     res->type ==
                                         dyno::BigInt::ParseResult::UNSIZED);
       }
-    } else if (isdigit(src[i]) || src[i] == '.') {
+    } else if (isdigit(src[i]) || src[i] == '.' || src[i] == '-') {
       auto begin = src.data() + i;
       auto end = StringHelpers::find(begin, src.end(), [](vec_u8_t data) {
         mask_t valid = isIdentCharMask(data);

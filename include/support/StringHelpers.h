@@ -41,12 +41,12 @@ class StringHelpers {
                   bit_mask_ones<mask_t>(
                       static_cast<unsigned>(Stride * chunkSz));
 
-    vec_u8_t expanded = vec_expand(data.raw(), base);
+    vec_u8_t expanded = vec_u8_t::expand(data, base);
     auto [common, control, escChar] = findAndClassifyEscapes(expanded, base);
 
     mask_t escape = common | control;
     vec_u8_t outv = vec_u8_t::select(escape, vec_u8_t('\\'), expanded);
-    vec_u8_t second = vec_shift_right<1>(escChar.raw());
+    vec_u8_t second = escChar.shift_right<1>();
     outv = vec_u8_t::select(common << 1, second, outv);
 
     if constexpr (Stride == 6) {
@@ -60,8 +60,8 @@ class StringHelpers {
       outv = vec_u8_t::select(control << 1, vec_u8_t('u'), outv);
       outv = vec_u8_t::select(mask_t((base << 2) | (base << 3)),
                               vec_u8_t('0'), outv);
-      vec_u8_t shifted4 = vec_shift_right<4>(expanded.raw());
-      vec_u8_t shifted5 = vec_shift_right<5>(expanded.raw());
+      vec_u8_t shifted4 = expanded.shift_right<4>();
+      vec_u8_t shifted5 = expanded.shift_right<5>();
       outv = vec_u8_t::select(base << 4, hex(shifted4 >> 4), outv);
       outv = vec_u8_t::select(base << 5, hex(shifted5), outv);
     }
@@ -73,8 +73,8 @@ class StringHelpers {
     size_t n = std::popcount(valid);
     if (outSz + n > out.size()) [[unlikely]]
       out.resize(outSz + n);
-    vec_compress_store(reinterpret_cast<uint8_t *>(out.data() + outSz), valid,
-                       outv.raw());
+    outv.compress_store(reinterpret_cast<uint8_t *>(out.data() + outSz),
+                       valid);
     return n;
   }
 
@@ -136,7 +136,7 @@ public:
       mask_t starts = bit_run_parity<mask_t>(
           (chunk == vec_u8_t('\\')).mask() & low);
       if (starts == 0) {
-        vec_masked_store(out.data() + outSz, low, chunk.raw());
+        chunk.masked_store(out.data() + outSz, low);
         outSz += chunkSz;
         pos += chunkSz;
         continue;
@@ -149,9 +149,9 @@ public:
       }
 
       std::array<vec_u8_t, 5> b;
-      b[0] = vec_shift_left<1>(chunk.raw());
+      b[0] = chunk.shift_left<1>();
       for (size_t i = 1; i < b.size(); i++)
-        b[i] = vec_shift_left<1>(b[i - 1].raw());
+        b[i] = b[i - 1].shift_left<1>();
 
       auto [commonMask, commonDecoded] = commonEscape(b[0]);
       mask_t commonStart = commonMask & starts;
@@ -173,7 +173,7 @@ public:
 
       mask_t valid = low & ~(commonCons | uCons);
       size_t n = std::popcount(valid);
-      vec_compress_store(out.data() + outSz, valid, outv.raw());
+      outv.compress_store(out.data() + outSz, valid);
       outSz += n;
       pos += chunkSz;
     }
@@ -199,8 +199,8 @@ public:
       if (common == 0 && control == 0) {
         if (outSz + loaded > out.size()) [[unlikely]]
           out.resize(outSz + loaded);
-        vec_masked_store(reinterpret_cast<uint8_t *>(out.data() + outSz), low,
-                         chunk.raw());
+        chunk.masked_store(reinterpret_cast<uint8_t *>(out.data() + outSz),
+                           low);
         outSz += loaded;
         pos += loaded;
         continue;

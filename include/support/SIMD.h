@@ -7,7 +7,7 @@
 #include <utility>
 
 #ifdef __AVX512BW__
-#define SIMD_SUPPORTS_MASKED_MEM
+#define SIMD_FAST_MASKED_MEM
 #endif
 
 #ifdef __AVX512F__
@@ -44,7 +44,7 @@ template <typename T> vec_mask_t<T> inline vec_to_maskreg(T vec) {
 template <typename T>
 inline T vec_masked_load(const vec_elem_t<T> *ptr,
                          vec_mask_unsigned_t<T> mask) {
-#ifdef SIMD_SUPPORTS_MASKED_MEM
+#ifdef SIMD_FAST_MASKED_MEM
   return __builtin_masked_load(std::bit_cast<vec_mask_t<T>>(mask), ptr);
 #else
   if (mask == bit_mask_ones<vec_mask_unsigned_t<T>>())
@@ -55,7 +55,7 @@ inline T vec_masked_load(const vec_elem_t<T> *ptr,
 template <typename T>
 inline T vec_masked_load(const vec_elem_t<T> *ptr, vec_mask_unsigned_t<T> mask,
                          T fill) {
-#ifdef SIMD_SUPPORTS_MASKED_MEM
+#ifdef SIMD_FAST_MASKED_MEM
   return __builtin_masked_load(std::bit_cast<vec_mask_t<T>>(mask), ptr, fill);
 #else
   if (mask == bit_mask_ones<vec_mask_unsigned_t<T>>())
@@ -83,8 +83,7 @@ inline T vec_shift_right_impl(T v, std::index_sequence<I...>) {
   return __builtin_shufflevector(v, v, (I < Shift ? 0 : I - Shift)...);
 }
 
-template <size_t Shift, typename T>
-inline T vec_shift_right(T v) {
+template <size_t Shift, typename T> inline T vec_shift_right(T v) {
   return vec_shift_right_impl<Shift, T>(
       v, std::make_index_sequence<vector_derived<T>::width>{});
 }
@@ -96,10 +95,55 @@ inline T vec_shift_left_impl(T v, std::index_sequence<I...>) {
                                  (I + Shift < width ? I + Shift : width)...);
 }
 
-template <size_t Shift, typename T>
-inline T vec_shift_left(T v) {
+template <size_t Shift, typename T> inline T vec_shift_left(T v) {
   return vec_shift_left_impl<Shift, T>(
       v, std::make_index_sequence<vector_derived<T>::width>{});
+}
+
+template <typename T> inline void vec_store(vec_elem_t<T> *ptr, T v) {
+  __builtin_memcpy(ptr, &v, sizeof(v));
+}
+
+template <typename T>
+inline void vec_masked_store(vec_elem_t<T> *ptr, vec_mask_unsigned_t<T> mask,
+                             T v) {
+#ifdef SIMD_FAST_MASKED_MEM
+  __builtin_masked_store(std::bit_cast<vec_mask_t<T>>(mask), v, ptr);
+#else
+  if (mask == bit_mask_ones<vec_mask_unsigned_t<T>>()) [[likely]] {
+    vec_store<T>(ptr, v);
+  } else {
+    for (size_t i = 0; i < vector_derived<T>::width; i++)
+      if (mask & (vec_mask_unsigned_t<T>(1) << i))
+        ptr[i] = v[i];
+  }
+#endif
+}
+
+template <typename T>
+inline void vec_compress_store(vec_elem_t<T> *ptr, vec_mask_unsigned_t<T> mask,
+                               T v) {
+  __builtin_masked_compress_store(std::bit_cast<vec_mask_t<T>>(mask), v, ptr);
+}
+
+template <typename T>
+inline T vec_expand_load(const vec_elem_t<T> *ptr,
+                         vec_mask_unsigned_t<T> mask) {
+  vec_mask_t<T> m = std::bit_cast<vec_mask_t<T>>(mask);
+  T expanded = __builtin_masked_expand_load(m, ptr);
+  return m ? expanded : T(0);
+}
+
+template <typename T> inline T vec_compress(T v, vec_mask_unsigned_t<T> mask) {
+  vec_elem_t<T> buf[vector_derived<T>::width] = {};
+  vec_compress_store<T>(buf, mask, v);
+  return vec_load<T>(buf);
+}
+
+template <typename T> inline T vec_expand(T v, vec_mask_unsigned_t<T> mask) {
+  vec_elem_t<T> buf[vector_derived<T>::width];
+  vec_store<T>(buf, v);
+  return vec_expand_load<T>(buf, mask);
 }
 
 template <typename T> struct vec_wrapper {
@@ -110,8 +154,8 @@ template <typename T> struct vec_wrapper {
   vec_wrapper(T vec) : vec(vec) {}
 
 #define FOR_EWISE(x)                                                           \
-  x(==) x(!=) x(<) x(<=) x(>) x(>=) x(+) x(-) x(*) x(/) x(%) x(<<) x(>>)       \
-      x(&) x(|) x(^)
+  x(==) x(!=) x(<) x(<=) x(>) x(>=) x(+) x(-) x(*) x(/) x(%) x(<<) x(>>) x(&)  \
+      x(|) x(^)
 
 #define OPERATOR(op)                                                           \
   vec_wrapper operator op(const vec_wrapper &o) const {                        \
@@ -144,64 +188,38 @@ template <typename T> struct vec_wrapper {
                           vec_wrapper fill) {
     return vec_masked_load<T>(ptr, mask, fill.vec);
   }
+  static vec_wrapper expand(vec_wrapper v, vec_mask_unsigned_t<T> mask) {
+    return vec_wrapper(vec_expand<T>(v.vec, mask));
+  }
+  static vec_wrapper expand_load(const elem_t *ptr,
+                                 vec_mask_unsigned_t<T> mask) {
+    return vec_wrapper(vec_expand_load<T>(ptr, mask));
+  }
   static vec_wrapper select(vec_mask_unsigned_t<T> mask, vec_wrapper a,
                             vec_wrapper b) {
     return vec_wrapper(vec_select<T>(mask, a.vec, b.vec));
+  }
+  void store(elem_t *ptr) const { vec_store<T>(ptr, vec); }
+  void masked_store(elem_t *ptr, vec_mask_unsigned_t<T> mask) const {
+    vec_masked_store<T>(ptr, mask, vec);
+  }
+  void compress_store(elem_t *ptr, vec_mask_unsigned_t<T> mask) const {
+    vec_compress_store<T>(ptr, mask, vec);
+  }
+  vec_wrapper compress(vec_mask_unsigned_t<T> mask) const {
+    return vec_wrapper(vec_compress<T>(vec, mask));
+  }
+  template <size_t Shift> vec_wrapper shift_right() const {
+    return vec_wrapper(vec_shift_right<Shift>(vec));
+  }
+  template <size_t Shift> vec_wrapper shift_left() const {
+    return vec_wrapper(vec_shift_left<Shift>(vec));
   }
   vec_mask_unsigned_t<T> mask() const { return vec_to_bitmask(vec); }
   vec_mask_unsigned_t<T> first_nonzero_lane() const {
     return std::countr_zero(vec_to_bitmask(vec));
   }
 };
-
-template <typename T>
-inline void vec_store(vec_elem_t<T> *ptr, T v) {
-  __builtin_memcpy(ptr, &v, sizeof(v));
-}
-
-template <typename T>
-inline void vec_masked_store(vec_elem_t<T> *ptr,
-                             vec_mask_unsigned_t<T> mask, T v) {
-#ifdef SIMD_SUPPORTS_MASKED_MEM
-  __builtin_masked_store(std::bit_cast<vec_mask_t<T>>(mask), v, ptr);
-#else
-  if (mask == bit_mask_ones<vec_mask_unsigned_t<T>>()) [[likely]] {
-    vec_store<T>(ptr, v);
-  } else {
-    for (size_t i = 0; i < vector_derived<T>::width; i++)
-      if (mask & (vec_mask_unsigned_t<T>(1) << i))
-        ptr[i] = v[i];
-  }
-#endif
-}
-
-template <typename T>
-inline void vec_compress_store(vec_elem_t<T> *ptr,
-                               vec_mask_unsigned_t<T> mask, T v) {
-  __builtin_masked_compress_store(std::bit_cast<vec_mask_t<T>>(mask), v, ptr);
-}
-
-template <typename T>
-inline T vec_expand_load(const vec_elem_t<T> *ptr,
-                         vec_mask_unsigned_t<T> mask) {
-  vec_mask_t<T> m = std::bit_cast<vec_mask_t<T>>(mask);
-  T expanded = __builtin_masked_expand_load(m, ptr);
-  return m ? expanded : T(0);
-}
-
-template <typename T>
-inline T vec_compress(T v, vec_mask_unsigned_t<T> mask) {
-  vec_elem_t<T> buf[vector_derived<T>::width] = {};
-  vec_compress_store<T>(buf, mask, v);
-  return vec_load<T>(buf);
-}
-
-template <typename T>
-inline T vec_expand(T v, vec_mask_unsigned_t<T> mask) {
-  vec_elem_t<T> buf[vector_derived<T>::width];
-  vec_store<T>(buf, v);
-  return vec_expand_load<T>(buf, mask);
-}
 
 template <typename T>
 struct vector_derived<vec_wrapper<T>> : public vector_derived<T> {};
